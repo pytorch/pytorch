@@ -40,9 +40,9 @@ concept SafeConvIntegral = std::is_integral_v<T> && !std::is_same_v<T, bool>;
 // c10::checked_convert (c10/util/TypeCast.h). For intentional modular wrap, use
 // c10::unsafe_wrapping_convert.
 //
-// Usable in both host and device code: on host it throws via
-// report_narrowing_overflow; in CUDA/HIP device code (which cannot throw) it
-// traps via CUDA_KERNEL_ASSERT_PRINTF, printing name if one is provided.
+// Usable in both host and device code: on host it throws std::runtime_error
+// via report_narrowing_overflow; in CUDA/HIP device code (which cannot throw)
+// it traps via CUDA_KERNEL_ASSERT_PRINTF, printing name if one is provided.
 #if defined(__cpp_concepts)
 template <detail::SafeConvIntegral To, detail::SafeConvIntegral From>
 #else

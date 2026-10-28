@@ -7,6 +7,7 @@
 #include <ATen/native/PoolingChecks.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pooling.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -107,14 +108,14 @@ static void pool2d_template(const Tensor& input,
     TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
-  int padH = safe_downcast<int, int64_t>(padding[0]);
-  int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-  const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
-  const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+  int padH = c10::safe_conv<int, int64_t>(padding[0], "dest_t");
+  int padW = padding.size() == 1 ? padH : c10::safe_conv<int, int64_t>(padding[1], "dest_t");
+  const int kH = c10::safe_conv<int, int64_t>(kernel_size[0], "dest_t");
+  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int, int64_t>(kernel_size[1], "dest_t");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int, int64_t>(stride[0], "dest_t");
+  const int dW = stride.empty() ? kW : stride.size() == 1 ? dH : c10::safe_conv<int, int64_t>(stride[1], "dest_t");
+  const int dilationH = c10::safe_conv<int, int64_t>(dilation[0], "dest_t");
+  const int dilationW = dilation.size() == 1 ? dilationH : c10::safe_conv<int, int64_t>(dilation[1], "dest_t");
   const int64_t nbatch = ndims == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
@@ -277,7 +278,7 @@ static void pool2d_template(const Tensor& input,
 static std::vector<int32_t> copy_and_maybe_expand(IntArrayRef a, int32_t pooling_dims) {
   std::vector<int32_t> b(pooling_dims);
   for (const auto dim : c10::irange(pooling_dims)) {
-    b[dim] = safe_downcast<int32_t, int64_t>(a[a.size() == 1 ? 0 : dim]);
+    b[dim] = c10::safe_conv<int32_t, int64_t>(a[a.size() == 1 ? 0 : dim], "dest_t");
   }
   return b;
 }
@@ -422,12 +423,12 @@ static void fill_pool_size_strides(PoolingParams<5>& params,
                                    const std::optional<Tensor>& indices_opt) {
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
   for (const auto dim : c10::irange(input.dim())) {
-    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
+    params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(input.size(dim), "dest_t");
     params.input_strides[dim] = input.stride(dim);
-    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
+    params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(output.size(dim), "dest_t");
     params.output_strides[dim] = output.stride(dim);
     if (indices.defined()) {
-      params.indices_sizes[dim] = safe_downcast<int32_t, int64_t>(indices.size(dim));
+      params.indices_sizes[dim] = c10::safe_conv<int32_t, int64_t>(indices.size(dim), "dest_t");
       params.indices_strides[dim] = indices.stride(dim);
     }
   }
@@ -617,11 +618,11 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   params.pooling_dims = pooling_dims;
 
   for (const auto dim : c10::irange(dims)) {
-    params.grad_input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
-    params.grad_input_strides[dim] = safe_downcast<int32_t, int64_t>(grad_input.stride(dim));
-    params.grad_output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
-    params.grad_output_strides[dim] = safe_downcast<int32_t, int64_t>(grad_output.stride(dim));
-    params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+    params.grad_input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(grad_input.size(dim), "dest_t");
+    params.grad_input_strides[dim] = c10::safe_conv<int32_t, int64_t>(grad_input.stride(dim), "dest_t");
+    params.grad_output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(grad_output.size(dim), "dest_t");
+    params.grad_output_strides[dim] = c10::safe_conv<int32_t, int64_t>(grad_output.stride(dim), "dest_t");
+    params.indices_strides[dim] = c10::safe_conv<int32_t, int64_t>(indices.stride(dim), "dest_t");
   }
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -696,11 +697,11 @@ static void max_unpool_out_mps_template(const Tensor& input,
   params.pooling_dims = pooling_dims;
 
   for (const auto dim : c10::irange(dims)) {
-    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
-    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
-    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
-    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
-    params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+    params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(output.size(dim), "dest_t");
+    params.output_strides[dim] = c10::safe_conv<int32_t, int64_t>(output.stride(dim), "dest_t");
+    params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(input.size(dim), "dest_t");
+    params.input_strides[dim] = c10::safe_conv<int32_t, int64_t>(input.stride(dim), "dest_t");
+    params.indices_strides[dim] = c10::safe_conv<int32_t, int64_t>(indices.stride(dim), "dest_t");
   }
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -871,14 +872,14 @@ static void avg_pool_out_mps_template(const Tensor& output,
   params.count_include_pad = count_include_pad;
   params.has_divisor_override = divisor_override.has_value();
   if (divisor_override.has_value()) {
-    params.divisor_override = safe_downcast<int32_t, int64_t>(divisor_override.value());
+    params.divisor_override = c10::safe_conv<int32_t, int64_t>(divisor_override.value(), "dest_t");
   }
 
   for (const auto dim : c10::irange(dims)) {
-    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
-    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
-    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
-    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
+    params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(input.size(dim), "dest_t");
+    params.input_strides[dim] = c10::safe_conv<int32_t, int64_t>(input.stride(dim), "dest_t");
+    params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(output.size(dim), "dest_t");
+    params.output_strides[dim] = c10::safe_conv<int32_t, int64_t>(output.stride(dim), "dest_t");
   }
 
   memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
@@ -955,14 +956,14 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   params.count_include_pad = count_include_pad;
   params.has_divisor_override = divisor_override.has_value();
   if (divisor_override.has_value()) {
-    params.divisor_override = safe_downcast<int32_t, int64_t>(divisor_override.value());
+    params.divisor_override = c10::safe_conv<int32_t, int64_t>(divisor_override.value(), "dest_t");
   }
 
   for (const auto dim : c10::irange(dims)) {
-    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
-    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(grad_output.stride(dim));
-    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
-    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(grad_input.stride(dim));
+    params.output_sizes[dim] = c10::safe_conv<int32_t, int64_t>(grad_output.size(dim), "dest_t");
+    params.output_strides[dim] = c10::safe_conv<int32_t, int64_t>(grad_output.stride(dim), "dest_t");
+    params.input_sizes[dim] = c10::safe_conv<int32_t, int64_t>(grad_input.size(dim), "dest_t");
+    params.input_strides[dim] = c10::safe_conv<int32_t, int64_t>(grad_input.stride(dim), "dest_t");
   }
 
   memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));

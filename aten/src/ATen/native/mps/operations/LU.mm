@@ -8,6 +8,7 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -461,7 +462,7 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, n, n});
   const auto X = result.view({batch, n, n});
-  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const auto threads = c10::safe_conv<uint32_t>(batch, "uint32_t");
   const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
                                   .A_rstride = A_.stride(1),
                                   .A_cstride = A_.stride(2),
@@ -527,9 +528,9 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   MPSStream* stream = getCurrentMPSStream();
 
   UnpackPivotsParams params;
-  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
-  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
-  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+  params.perm_batch_stride = c10::safe_conv<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0, "dest_t");
+  params.pivots_batch_stride = c10::safe_conv<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0, "dest_t");
+  params.dim_size = c10::safe_conv<uint32_t, int64_t>(dim_size, "dest_t");
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {

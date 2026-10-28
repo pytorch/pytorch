@@ -1,12 +1,13 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Pool.h>
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <c10/util/safe_conv.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -120,10 +121,9 @@ inline std::pair<int, int> get_kernel(IntArrayRef kernel_size) {
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 2,
       "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = c10::checked_convert<int>(kernel_size[0], "int");
-  const int kW = kernel_size.size() == 1
-      ? kH
-      : c10::checked_convert<int>(kernel_size[1], "int");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "int");
   return std::make_pair(kW, kH);
 }
 
@@ -131,10 +131,10 @@ inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : c10::checked_convert<int>(stride[0], "int");
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dH : c10::checked_convert<int>(stride[1], "int");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : c10::safe_conv<int>(stride[1], "int");
   return std::make_pair(dW, dH);
 }
 
@@ -142,9 +142,9 @@ inline std::pair<int, int> get_padding(IntArrayRef padding) {
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 2,
       "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::checked_convert<int>(padding[0], "int");
+  const int padH = c10::safe_conv<int>(padding[0], "int");
   const int padW =
-      padding.size() == 1 ? padH : c10::checked_convert<int>(padding[1], "int");
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "int");
   return std::make_pair(padW, padH);
 }
 
