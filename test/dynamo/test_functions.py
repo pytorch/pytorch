@@ -6219,6 +6219,20 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_lru_cache_wrapper_attr_write_replayed(self):
+        @functools.lru_cache
+        def cached(x):
+            return x + 1
+
+        def fn(x):
+            cached.foo = 1
+            cached.__doc__ = "new"
+            return x + 1
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.zeros(1))
+        self.assertEqual(cached.foo, 1)
+        self.assertEqual(cached.__doc__, "new")
+
     def test_functools_cache_guard(self):
         class Foo:
             @functools.lru_cache  # noqa: B019
@@ -8236,6 +8250,37 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
+    def test_del_defaults_sets_none(self):
+        def h(a, b=1, *, k=1):
+            return a + b + k
+
+        def fn(x):
+            del h.__defaults__
+            del h.__kwdefaults__
+            return x + 1, h.__defaults__, h.__kwdefaults__
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, (x + 1, None, None))
+        self.assertIsNone(h.__defaults__)
+        self.assertIsNone(h.__kwdefaults__)
+
+    @parametrize("name", ["__name__", "__qualname__"])
+    def test_del_name_raises(self, name):
+        def h():
+            pass
+
+        def fn(x):
+            try:
+                delattr(h, name)
+            except TypeError:
+                return x + 1
+            return x
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x + 1)
+
     @unittest.skipIf(sys.version_info < (3, 14), "__annotate__ requires Python 3.14+")
     def test_manual_annotate(self):
         # CPython test_type_annotations.AnnotateTests.check_annotations, function case.
@@ -8346,6 +8391,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     )
     def test_bound_method_getattr_forwards_to_func(self, attr):
         # method_getattro reads anything the method type lacks off __func__.
+        if attr == "__type_params__" and sys.version_info < (3, 12):
+            self.skipTest("__type_params__ needs 3.12+")
+
         class A:
             def m(self, a: int = 3, *, k=1):
                 "doc"
@@ -8396,6 +8444,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res_h.__defaults__, ref_h.__defaults__)
         self.assertEqual(res_h.__kwdefaults__, ref_h.__kwdefaults__)
 
+    # nested_graph_breaks routes the call through a polyfill instead.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    @parametrize("nested", [False, True])
+    def test_ctx_wrapped_fn_sees_defaults_write(self, nested):
+        def outer_g(a, b=1):
+            return a + b
+
+        def fn(x):
+            def inner_g(a, b=1):
+                return a + b
+
+            g = inner_g if nested else outer_g
+            h = torch.no_grad()(g)
+            g.__defaults__ = (5,)
+            return h(x)
+
+        x = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x + 5)
+
     def test_del_doc_and_module_read_none(self):
         # __doc__/__module__ are T_OBJECT members: after del they read as None.
         def fn(x):
@@ -8412,6 +8480,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res[:3], ref[:3])
         self.assertEqual((res[3].__doc__, res[3].__module__), (None, None))
 
+    @unittest.skipIf(sys.version_info < (3, 12), "__type_params__ needs 3.12+")
     def test_type_params_invalid_write(self):
         def fn(x):
             def h(a):
@@ -8478,6 +8547,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         t = torch.zeros(1)
         res = torch.compile(fn, backend="eager", fullgraph=True)(t, a)
         A.m.__defaults__ = (1,)
+        self.assertEqual(res, fn(t, a))
+
+    def test_bound_method_read_keeps_allow_in_graph(self):
+        @torch._dynamo.allow_in_graph
+        def g(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        class A:
+            pass
+
+        A.g = g
+
+        def fn(t, a):
+            a.g
+            return g(t)
+
+        a = A()
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t, a)
         self.assertEqual(res, fn(t, a))
 
     @parametrize("wrap", [staticmethod, classmethod])
