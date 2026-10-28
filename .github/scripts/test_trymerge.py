@@ -73,7 +73,6 @@ from trymerge import (
     categorize_checks,
     check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
-    DRCI_OUTAGE_WINDOW_SECONDS,
     DRCI_RETRY_DELAYS_SECONDS,
     DRCI_TIMEOUT_SECONDS,
     ensure_mergeable_labels,
@@ -105,7 +104,6 @@ from trymerge import (
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
-    MERGE_RETRY_INTERVAL_SECONDS,
     MergeRule,
     MergeRuleFailedError,
     post_starting_merge_comment,
@@ -4389,11 +4387,6 @@ def _drci_http_error(code: int, body: bytes) -> HTTPError:
 @mock.patch("trymerge.time.sleep")
 @mock.patch("trymerge.gh_fetch_url")
 class TestDrciRetries(TestCase):
-    def setUp(self) -> None:
-        patcher = mock.patch("trymerge._drci_failed_at", None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def test_no_pause_when_hud_did_not_answer(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
@@ -4426,65 +4419,6 @@ class TestDrciRetries(TestCase):
         self.assertEqual(mock_fetch.call_count, 2)
         mock_sleep.assert_not_called()
 
-    def test_outage_window_ends_before_next_merge_loop_check(
-        self, mock_fetch: Any, mock_sleep: Any
-    ) -> None:
-        self.assertLess(DRCI_OUTAGE_WINDOW_SECONDS, MERGE_RETRY_INTERVAL_SECONDS)
-
-    @mock.patch("trymerge.time.monotonic")
-    def test_outage_window_skips_pauses(
-        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
-    ) -> None:
-        attempts = len(DRCI_RETRY_DELAYS_SECONDS) + 1
-
-        def unavailable(*args: Any, **kwargs: Any) -> Any:
-            raise _drci_http_error(503, b"")
-
-        mock_fetch.side_effect = unavailable
-        mock_clock.return_value = 1000.0
-        with mock.patch("builtins.print"):
-            self.assertIsNone(get_drci_classifications(1))
-            self.assertEqual(mock_sleep.call_count, attempts - 1)
-            # The next call in the same merge-loop iteration does not pause.
-            mock_clock.return_value = 1010.0
-            self.assertIsNone(get_drci_classifications(1))
-            self.assertEqual(mock_sleep.call_count, attempts - 1)
-            self.assertEqual(mock_fetch.call_count, 2 * attempts)
-            # The next iteration, five minutes later, pauses again.
-            mock_clock.return_value = 1310.0
-            self.assertIsNone(get_drci_classifications(1))
-            self.assertEqual(mock_sleep.call_count, 2 * (attempts - 1))
-            # A success ends the outage at once.
-            mock_clock.return_value = 1320.0
-            mock_fetch.side_effect = None
-            mock_fetch.return_value = {}
-            get_drci_classifications(1)
-            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
-            get_drci_classifications(1)
-        self.assertEqual(mock_sleep.call_count, 2 * (attempts - 1) + 1)
-
-    @mock.patch("trymerge.time.monotonic")
-    def test_outage_window_ends_mid_call(
-        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
-    ) -> None:
-        mock_fetch.side_effect = [_drci_http_error(503, b"")] * (
-            len(DRCI_RETRY_DELAYS_SECONDS) + 1
-        )
-        mock_clock.return_value = 1000.0
-        with mock.patch("builtins.print"):
-            self.assertIsNone(get_drci_classifications(1))
-        mock_sleep.reset_mock()
-        # Still inside the window before the first pause, past it before the second.
-        mock_clock.side_effect = [1119.0, 1120.0, 1120.0, 1120.0]
-        mock_fetch.side_effect = [
-            _drci_http_error(503, b""),
-            _drci_http_error(503, b""),
-            {},
-        ]
-        with mock.patch("builtins.print"):
-            self.assertEqual(get_drci_classifications(1), {})
-        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[1])
-
     def test_timeout_or_504_is_not_retried(
         self, mock_fetch: Any, mock_sleep: Any
     ) -> None:
@@ -4499,23 +4433,6 @@ class TestDrciRetries(TestCase):
                 self.assertIsNone(get_drci_classifications(1))
             self.assertEqual(mock_fetch.call_count, 1)
         mock_sleep.assert_not_called()
-
-    @mock.patch("trymerge.time.monotonic")
-    def test_call_that_is_not_retried_opens_the_outage_window(
-        self, mock_clock: Any, mock_fetch: Any, mock_sleep: Any
-    ) -> None:
-        mock_clock.return_value = 1000.0
-        mock_fetch.side_effect = [_drci_http_error(504, b"")]
-        with mock.patch("builtins.print"):
-            self.assertIsNone(get_drci_classifications(1))
-            mock_clock.return_value = 1000.0 + DRCI_OUTAGE_WINDOW_SECONDS - 1
-            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
-            self.assertEqual(get_drci_classifications(1), {})
-            mock_sleep.assert_not_called()
-            mock_clock.return_value = 1000.0 + DRCI_OUTAGE_WINDOW_SECONDS
-            mock_fetch.side_effect = [_drci_http_error(400, b""), {}]
-            self.assertEqual(get_drci_classifications(1), {})
-        mock_sleep.assert_called_once_with(DRCI_RETRY_DELAYS_SECONDS[0])
 
     def test_retries_after_a_failure_with_a_pause(
         self, mock_fetch: Any, mock_sleep: Any

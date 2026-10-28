@@ -506,13 +506,6 @@ DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
 # (maxDuration in drci.ts) and sends nothing until it finishes, so only a
 # connection that is truly stuck waits longer. A timed-out call is not retried.
 DRCI_TIMEOUT_SECONDS = 960
-# After a call fails (every attempt, or one that is not retried), calls within
-# this window retry without pausing: one merge-loop iteration calls Dr.CI
-# several times in a row, and during an outage each would otherwise pay the
-# pauses. Must stay shorter than MERGE_RETRY_INTERVAL_SECONDS, so the next
-# iteration pauses again.
-DRCI_OUTAGE_WINDOW_SECONDS = 120
-_drci_failed_at: float | None = None
 # What to do after a failed Dr.CI call; see _drci_retry_kind.
 DrciRetry = Literal["pause", "now", "stop"]
 
@@ -2637,13 +2630,12 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    global _drci_failed_at
     delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
     retry: DrciRetry = "now"
     for attempt, delay in enumerate(delays):
         if retry == "stop":
             break
-        if retry == "pause" and not _drci_recently_exhausted():
+        if retry == "pause":
             time.sleep(delay)
         try:
             failures = gh_fetch_url(
@@ -2658,7 +2650,6 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 reader=json.load,
                 timeout=DRCI_TIMEOUT_SECONDS,
             )
-            _drci_failed_at = None
             return failures.get(str(pr_num), {}) if failures else {}
         except HTTPError as err:
             # gh_fetch_url has already printed the status. Dr.CI answers 400 for
@@ -2678,15 +2669,7 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
                 f'with "{e}"'
             )
             retry = _drci_retry_kind(e)
-    _drci_failed_at = time.monotonic()
     return None
-
-
-def _drci_recently_exhausted() -> bool:
-    return (
-        _drci_failed_at is not None
-        and time.monotonic() - _drci_failed_at < DRCI_OUTAGE_WINDOW_SECONDS
-    )
 
 
 def _drci_retry_kind(err: Exception) -> DrciRetry:
