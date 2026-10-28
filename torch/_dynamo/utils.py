@@ -4379,6 +4379,8 @@ def _get_fake_value_impl(
             op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
+                if tx.output.package is not None:
+                    tx.output.package.add_graph_break_op(op)
                 maybe_pystub = torch._C._dispatch_pystub(
                     op._schema.name, op._schema.overload_name
                 )
