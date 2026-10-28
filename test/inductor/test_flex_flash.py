@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -2717,7 +2718,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         def seq_len_scale(x):
             return 8.0 / x.shape[1]
 
-        for scale_fn in (default_scale, seq_len_scale):
+        def log_scale(x):
+            # Printed with math.log2 in the generated module.
+            return 1.0 / math.log2(x.shape[1])
+
+        for scale_fn in (default_scale, seq_len_scale, log_scale):
 
             def attention(x, backend):
                 # Deriving the head dim from a dynamic size makes the default scale symbolic.
@@ -2770,7 +2775,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             scale = 1.0 / y.shape[0]
             return flex_attention(q, q, q, scale=scale, kernel_options=kernel_options)
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         for seq_len, n in ((128, 7), (256, 13)):
             x = torch.randn(1, seq_len, 256, device="cuda", dtype=torch.float16)
             y = torch.randn(n)
@@ -2778,6 +2784,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             torch.testing.assert_close(
                 compiled(x, y).float(), ref, atol=2e-2, rtol=2e-2
             )
+        self.assertEqual(counter.frame_count, 1)
 
     def test_dynamic_batch_size(self):
         """Test dynamic batch sizes."""

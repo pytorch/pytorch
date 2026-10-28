@@ -963,9 +963,7 @@ def flex_attention_backward(*args, **kwargs):
             logsumexp,
             grad_out,
             grad_logsumexp,
-            # FlyDSL declines a symbolic scale and falls back to Triton, which
-            # computes it at runtime, so don't specialize it here.
-            scale,
+            V.graph.sizevars.guard_float(scale),
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
             fw_subgraph=fw_graph,

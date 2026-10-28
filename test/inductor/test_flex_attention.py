@@ -6684,7 +6684,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             q = x.view(1, x.shape[1], -1, 64).transpose(1, 2)
             return flex_attention(q, q, q, scale=1.0 / y.shape[0])
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         for tokens, n in ((128, 7), (256, 13)):
             x = torch.randn(1, tokens, 256, device=device, requires_grad=True)
             y = torch.randn(n, device="cpu")
@@ -6694,6 +6695,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_ref.sum().backward()
             torch.testing.assert_close(out, out_ref, atol=2e-2, rtol=2e-2)
             torch.testing.assert_close(x.grad, x_ref.grad, atol=2e-2, rtol=2e-2)
+        self.assertEqual(counter.frame_count, 1)
 
     @supported_platform
     def test_dynamic_shapes_with_max_autotune(self, device):

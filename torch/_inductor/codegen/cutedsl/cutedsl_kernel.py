@@ -253,6 +253,7 @@ class CuteDSLTemplateKernel(Kernel):
         imports.splice(
             """
             import torch
+            import math
             import cutlass
             import cutlass.cute as cute
             from cutlass.cute.runtime import from_dlpack

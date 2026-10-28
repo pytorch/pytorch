@@ -122,12 +122,12 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIsInstance(imports, str)
 
         lines = imports.strip().split("\n")
-        self.assertEqual(len(lines), 8)
+        self.assertEqual(len(lines), 9)
 
         asm_imports = kernel.gen_imports(uses_inline_asm=True)
         self.assertIn("inline_asm_elementwise_intrinsic", asm_imports)
         self.assertNotIn("inline_asm_elementwise_intrinsic", imports)
-        self.assertEqual(len(asm_imports.strip().split("\n")), 9)
+        self.assertEqual(len(asm_imports.strip().split("\n")), 10)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
