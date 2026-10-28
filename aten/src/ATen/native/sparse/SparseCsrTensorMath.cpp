@@ -568,7 +568,7 @@ static void addmm_out_sparse_csr_native_cpu(
               for (index_t h = irow_start; h < irow_end; ++h) {
                 index_t i_start = csr_accessor[h];
                 index_t i_end = csr_accessor[h + 1];
-                for (index_t i = i_start; i < i_end; i++) {
+                for (const auto i : c10::irange(i_start, i_end)) {
                   scalar_t val = values_accessor[i];
                   index_t col = col_indices_accessor[i];
                   at::native::cpublas::axpy<scalar_t>(
@@ -1186,7 +1186,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;
     new_crow_indices_ptr[0] = 0;
-    for(int64_t i=0; i<nrows; i++) {
+    for(const auto i : c10::irange(nrows)) {
       if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
         row_map_ptr[i] = nnz;
         nnz++;
@@ -1212,7 +1212,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
               i_end = crow_indices_ptr[h+1];
               if (i_start != i_end) {
                 acc_t res = static_cast<acc_t>(values_ptr[i_start]);
-                for (index_t i = i_start + 1; i < i_end; i++) {
+                for (const auto i : c10::irange(i_start + 1, i_end)) {
                   res = rop(res, static_cast<acc_t>(values_ptr[i]));
                 }
                 new_values_acc_ptr[row_map_ptr[h]] = res;
@@ -1261,7 +1261,7 @@ In [4]: %timeit torch.sum(t.values())
                                        rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
                                          acc_t res = acc_t(identity);
-                                         for (int64_t i=i_start; i<i_end; i++) {
+                                         for (const auto i : c10::irange(i_start, i_end)) {
                                            acc_t val = acc_t(values_ptr[i]);
                                            res = rop(res, val);
                                          }
