@@ -5296,10 +5296,21 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         # changes_requested, even under Needs Discussion (pytorch#202251).
         prompt = " ".join(prompt_scalar(self.stage_b).split())
         self.assertIn(
-            'unless the review names a point as blocking: then it is "changes_requested"',
+            "unless the review names a defect that must be fixed before approval:"
+            ' then it is "changes_requested"',
             prompt,
         )
-        self.assertIn("reason for Request Changes or names as blocking", prompt)
+        # Not every point that holds up approval is a defect to fix.
+        self.assertIn(
+            "An open question, a request for data or discussion, or files left"
+            " unreviewed is not such a defect.",
+            prompt,
+        )
+        self.assertIn(
+            "reason for Request Changes or as a defect that must be fixed before"
+            " approval",
+            prompt,
+        )
         # The summary keeps the Recommendation and explains an override.
         self.assertIn("summary and its Recommendation", prompt)
         self.assertIn("under Approve or Needs Discussion, say so in words", prompt)
