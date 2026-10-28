@@ -20499,6 +20499,70 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_cuda_and_triton
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_wait_after_workspace_kernel(self):
+        def fn(x):
+            y = x
+            for _ in range(32):
+                y = torch.sin(y) * 1.5
+            c = torch.cumsum(y, 0)
+            z = torch.arange(2**21, device=x.device, dtype=torch.float32) * 3
+            w = torch.arange(8192, device=x.device, dtype=torch.float32) * 2 + 1
+            return c, z, w
+
+        x = torch.randn(2**20, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # the split scan's workspace is freed right after launch, so the next
+        # kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("def triton_spl_fused_cumsum")
+            .check("def triton_poi_fused_arange_mul")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "triton.cooperative_reductions": True,
+            "triton.force_cooperative_reductions": True,
+            "triton.multi_kernel": 2,
+        }
+    )
+    def test_pdl_wait_after_workspace_multi_kernel(self):
+        def fn(x):
+            s = x.sum(-1)
+            w = torch.arange(64, device=x.device, dtype=torch.float32) * 2 + 1
+            return s, w
+
+        x = torch.randn(1, 2**16, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False, atol=1e-2, rtol=1e-3)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        if not is_dynamic_shape_enabled():
+            # the non-cooperative alternative needs a static rnumel
+            self.assertIn("async_compile.multi_kernel", code)
+        # the cooperative reduction's workspace is freed right after launch, so
+        # the next kernel must wait before storing into memory it may reuse
+        (
+            FileCheck()
+            .check("fused_sum")
+            .check("def triton_poi_fused_add_arange_mul")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
             "triton.enable_pdl": True,
