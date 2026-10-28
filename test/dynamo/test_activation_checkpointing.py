@@ -2731,7 +2731,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 instantiate_parametrized_tests(ActivationCheckpointingViaTagsGenericTests)
 
 
-class ActivationCheckpointingViaTagsCUDA(ActivationCheckpointingViaTagsTestBase):
+class ActivationCheckpointingViaTagsCUDAOnlyTests(
+    ActivationCheckpointingViaTagsTestBase
+):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -3664,7 +3666,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
-class RematerializeACNodesPassCUDA(RematerializeACNodesPassTestBase):
+class RematerializeACNodesPassCUDAOnlyTests(RematerializeACNodesPassTestBase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
