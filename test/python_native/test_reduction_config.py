@@ -3,6 +3,7 @@
 import os
 import sys
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest import mock
 
@@ -50,13 +51,18 @@ class TestReductionConfig(TestCase):
 
     @parametrize(
         "sum_gate,native_gate,expected",
-        [("0", "0", "unordered"), ("1", "0", "inner_tree"), ("0", "1", "inner_tree")],
+        [
+            ("0", "0", "unordered"),
+            ("1", "0", "unordered"),
+            ("0", "1", "inner_tree"),
+            ("0", "strict", "inner_tree"),
+        ],
     )
     def test_explicit_order_and_live_environment(self, sum_gate, native_gate, expected):
-        """Resolve explicit order ahead of live environment gates for predictable routing."""
+        """Resolve explicit order ahead of the live gate; the sum rollout flag is separate."""
         with mock.patch.dict(
             os.environ,
-            {rt._SUM_INNER_TREE_ENV: sum_gate, rt._INNER_TREE_ENV: native_gate},
+            {"PYTORCH_SUM_INNER_TREE": sum_gate, rt._INNER_TREE_ENV: native_gate},
         ):
             self.assertEqual(rt.reduction_order(), expected)
             self.assertEqual(rt.reduction_order("unordered"), "unordered")
@@ -261,6 +267,117 @@ class TestReductionConfigDevice(TestCase):
             indexed.assert_not_called()
             row_tree.assert_not_called()
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+    def test_tuned_inner_tree_without_plan_falls_back(self, device):
+        """Use a linear row kernel when tuning picks inner-tree but no plan exists."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn(64, 1024, device=device)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = x.sum(1)
+        with (
+            mock.patch.object(rt, "select_row_order", return_value="inner_tree"),
+            mock.patch.object(rt, "trait_itree_plan", return_value=None),
+        ):
+            got = kg.reduce_dim(
+                traits.SumOps(acc=cutlass.Float32),
+                "sum",
+                x,
+                [1],
+                torch.float32,
+                order="unordered",
+            )
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("entry", ["reduce_dim2", "reduce_all", "reduce_all2"])
+    def test_order_keyword_reaches_the_row_kernel(self, device, entry):
+        """Thread an explicit order through every reduce entry point."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn(1, 4096, device=device)
+        one = traits.SumOps(acc=cutlass.Float32)
+        two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
+        f32 = torch.float32
+        calls = {
+            "reduce_dim2": lambda order: kg.reduce_dim2(
+                two, "var_mean", x, [1], [f32, f32], order=order
+            ),
+            "reduce_all": lambda order: (
+                kg.reduce_all(one, "sum", x, f32, order=order),
+            ),
+            "reduce_all2": lambda order: kg.reduce_all2(
+                two, "var_mean", x, [f32, f32], order=order
+            ),
+        }
+        with mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row:
+            ordered = calls[entry]("inner_tree")
+        orders = [c.kwargs.get("order") for c in row.call_args_list]
+        self.assertIn("inner_tree", orders)
+        for got, ref in zip(ordered, calls[entry]("unordered")):
+            self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
+
+    def test_inner_tree_rejects_64bit_extents(self, device):
+        """Refuse inner-tree order when the reduced extent needs 64-bit indexing."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        # A stride-0 view reaches the extent check without allocating 2^31 elements.
+        x = torch.zeros(1, 1, device=device).expand(2, 2**31)
+        with self.assertRaisesRegex(ValueError, "32-bit logical extents"):
+            kg.reduce_dim(
+                traits.SumOps(acc=cutlass.Float32),
+                "sum",
+                x,
+                [1],
+                torch.float32,
+                order="inner_tree",
+            )
+
+    def test_env_gate_falls_back_with_one_warning(self, device):
+        """Serve unservable geometry unordered under the env gate, warning only once."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn((8, 2048), device=device)[:, ::2]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = x.sum(1)
+        call = lambda: kg.reduce_dim(  # noqa: E731
+            traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
+        )
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
+            mock.patch.object(kg, "_try_indexed_itree", return_value=None),
+            mock.patch.object(rt, "_warned_inner_tree_fallback", False),
+        ):
+            with self.assertWarnsRegex(UserWarning, "could not be honoured"):
+                got = call()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                again = call()
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(again, expected, atol=1e-4, rtol=1e-4)
+
+    def test_strict_env_gate_raises(self, device):
+        """Raise under the strict env gate instead of changing reduction order."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn((8, 2048), device=device)[:, ::2]
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
+            mock.patch.object(kg, "_try_indexed_itree", return_value=None),
+        ):
+            with self.assertRaisesRegex(ValueError, f"{rt._INNER_TREE_ENV}=strict"):
+                kg.reduce_dim(
+                    traits.SumOps(acc=cutlass.Float32), "sum", x, [1], torch.float32
+                )
 
 
 instantiate_parametrized_tests(TestReductionConfig)
