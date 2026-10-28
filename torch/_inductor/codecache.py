@@ -1818,11 +1818,13 @@ class FxGraphHashDetails:
         # post-grad quantization pattern rewrites fire for a device type, so
         # it must be part of the cache key: an artifact compiled under a
         # different allowlist could dispatch aten._weight_int8pack_mm on a
-        # backend that does not implement it. Sorted so the key does not
-        # depend on registration order.
-        from torch._inductor.fx_passes.quantization import _woq_int8pack_fusion_devices
+        # backend that does not implement it. The shared helper keeps this
+        # snapshot identical to the one sent to compile workers.
+        from torch._inductor.fx_passes.quantization import (
+            _get_woq_int8pack_fusion_devices,
+        )
 
-        self.woq_int8pack_fusion_devices = tuple(sorted(_woq_int8pack_fusion_devices))
+        self.woq_int8pack_fusion_devices = _get_woq_int8pack_fusion_devices()
 
         # Register the custom partitioner function
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(

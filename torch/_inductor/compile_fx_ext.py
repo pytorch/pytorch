@@ -596,8 +596,8 @@ class _SerializedFxCompile(FxCompile):
             for name, values in input.backend_configs.items():
                 stack.enter_context(importlib.import_module(name).patch(values))
             # Apply the parent's WOQ allowlist snapshot before compiling so
-            # the worker's pattern matching (and its cache-key computation)
-            # agree with the parent's allowlist state.
+            # the worker's pattern matching agrees with the allowlist state
+            # the parent already hashed into the FX graph cache key.
             from .fx_passes.quantization import _patch_woq_int8pack_fusion_devices
 
             stack.enter_context(

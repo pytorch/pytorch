@@ -1200,11 +1200,12 @@ def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
 
 
 def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
-    """Snapshot the allowlist for transfer to a compile worker.
+    """Snapshot the allowlist as a sorted, deterministic tuple.
 
-    The tuple is sorted so the value is deterministic (matching how
-    ``FxGraphHashDetails`` hashes it). Used by the serialized (subprocess)
-    compile path in ``torch/_inductor/compile_fx_ext.py``.
+    Both consumers of the snapshot must stay identical:
+    ``FxGraphHashDetails`` hashes it into the FX-graph cache key, and the
+    serialized (subprocess) compile path in
+    ``torch/_inductor/compile_fx_ext.py`` transfers it to compile workers.
     """
     return tuple(sorted(_woq_int8pack_fusion_devices))
 
@@ -1214,10 +1215,11 @@ def _patch_woq_int8pack_fusion_devices(devices):
     """Apply an allowlist snapshot captured in the parent process.
 
     Used by ``_run_in_child`` in ``torch/_inductor/compile_fx_ext.py`` so the
-    worker pattern-matches against the parent's allowlist state (the same
-    state hashed into ``FxGraphHashDetails``) instead of reading its own
-    module-level default. The set is mutated in place - references obtained
-    via ``from ... import`` keep observing the parent's state.
+    worker's pattern matching agrees with the allowlist state the parent
+    already hashed into the FX-graph cache key, instead of reading the
+    worker's own module-level default. The set is mutated in place -
+    references obtained via ``from ... import`` keep observing the parent's
+    state.
     """
     saved = OrderedSet(_woq_int8pack_fusion_devices)
     _woq_int8pack_fusion_devices.clear()

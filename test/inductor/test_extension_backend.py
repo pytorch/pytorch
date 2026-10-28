@@ -41,6 +41,7 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch._inductor.compile_fx import FxCompileMode
+from torch._inductor.compile_fx_ext import _SerializedFxCompile
 from torch._inductor.fx_passes.quantization import (
     register_woq_int8pack_fusion_device,
     unregister_woq_int8pack_fusion_device,
@@ -334,21 +335,22 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
 
     @xfailIfS390X
     @skipIfWindows
-    def test_woq_int8pack_fusion_propagates_to_worker(self):
-        # End-to-end WOQ check under FxCompileMode.SERIALIZE, which runs the
-        # serialize -> _run_in_child path a subprocess worker takes (a real
-        # subprocess worker cannot host this test: the PrivateUse1 rename,
-        # the loaded extension module and the registered codegen backends are
-        # all process-local state). The assertions below hold on both paths
-        # this compile can take: if the WOQ graph serializes, the child
-        # applies the allowlist received over the wire (see
-        # test_compile_options.py::test_compile_fx_ext_propagates_woq_allowlist
-        # for the wire-level check); if it is not picklable (currently the
-        # graph carries prims.convert_element_type, which _ops_filter_safe
-        # rejects), the serialized compile bypasses to in-process compilation,
-        # which still observes this process's allowlist. Either way the
-        # fusion and the cache-reuse behavior must match the allowlist state
-        # the parent hashed into FxGraphHashDetails.
+    def test_woq_int8pack_fusion_serialize_mode_falls_back_in_process(self):
+        # WOQ graphs cannot currently cross the serialization boundary: every
+        # graph the WOQ pattern can match contains prims.convert_element_type,
+        # which GraphPickler's _ops_filter_safe rejects, so serialize_compile
+        # returns None and _SerializedFxCompile.codegen_and_compile falls back
+        # to in-process compilation. The serialize_compile spy below pins that
+        # path: if the ops filter is ever relaxed, the final assertion fails
+        # and this test should be rewritten to cover the worker path instead
+        # (the wire-level propagation of the allowlist itself is covered by
+        # test_compile_options.py::test_compile_fx_ext_propagates_woq_allowlist;
+        # a real subprocess worker cannot host this test anyway, since the
+        # PrivateUse1 rename, the loaded extension module and the registered
+        # codegen backends are all process-local state). The FX graph cache
+        # key is computed in the parent (_compile_fx_inner) before codegen,
+        # so the miss/hit/miss sequence below still regression-tests that the
+        # key tracks the allowlist state.
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)
         register_backend_for_device(
@@ -378,15 +380,31 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
 
         counters.clear()
         FxGraphCache.clear()
+        serialize_bypassed = []
+        real_serialize_compile = _SerializedFxCompile.serialize_compile
+
+        def serialize_compile_spy(
+            self, gm, example_inputs, inputs_to_check, graph_kwargs
+        ):
+            result = real_serialize_compile(
+                self, gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+            serialize_bypassed.append(result is None)
+            return result
+
         with (
             config.patch({"fx_graph_cache": True}),
             mock.patch(
                 "torch._inductor.compile_fx.fx_compile_mode",
                 FxCompileMode.SERIALIZE,
             ),
+            mock.patch.object(
+                _SerializedFxCompile, "serialize_compile", serialize_compile_spy
+            ),
         ):
-            # First compile: the worker applies the allowlist received over
-            # the wire, so the fusion fires and the fused op is dispatched.
+            # First compile: cache miss. The graph bypasses serialization
+            # (the spy records it) and compiles in-process, where this
+            # process's allowlist turns the fusion on.
             torch._dynamo.reset()
             opt_fn = torch.compile()(fn)
             res = opt_fn(x, w, s)
@@ -395,8 +413,8 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
 
             # Recompiling with the same allowlist state reuses the artifact:
-            # the worker derives the same key because the allowlist it sees
-            # (via the wire) matches the parent's.
+            # the parent derives the same key, and a cache hit skips codegen
+            # entirely (serialization is never reached).
             torch._dynamo.reset()
             opt_fn = torch.compile()(fn)
             res = opt_fn(x, w, s)
@@ -415,6 +433,11 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             # The generic path runs aten.mm on the device, never the fused op.
             self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 2)
+
+        # Every SERIALIZE-mode compile of this WOQ graph took the bypass
+        # (serialize_compile returned None); the middle compile above hit the
+        # cache in the parent and never reached serialization.
+        self.assertEqual(serialize_bypassed, [True, True])
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)

@@ -331,8 +331,9 @@ class TestCompileOptions(TestCase):
         # The WOQ int8pack fusion allowlist registered in this process must
         # travel through _WireProtocolInput and be applied by the child (the
         # same wire path a subprocess worker takes), so the worker's pattern
-        # matching - and its cache-key computation - match the allowlist
-        # state the parent hashed into FxGraphHashDetails.
+        # matching matches the allowlist state the parent hashed into
+        # FxGraphHashDetails (the parent computes the cache key; the worker
+        # only runs the post-grad pattern passes).
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.sin(x * 2)
