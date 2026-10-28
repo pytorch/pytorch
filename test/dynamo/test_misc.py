@@ -10050,6 +10050,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(f(), torch.zeros(2, 2))
             self.assertEqual(opt_f(), torch.ones(2, 2))
 
+    def test_is_compiling_thread_local(self):
+        # https://github.com/pytorch/pytorch/issues/202042
+        # is_compiling() must only be True on the thread that is compiling.
+        started, release = threading.Event(), threading.Event()
+        seen_in_backend = []
+
+        def slow_backend(gm, example_inputs):
+            seen_in_backend.append(torch.compiler.is_compiling())
+            started.set()
+            release.wait(10)
+            return gm.forward
+
+        @torch.compile(backend=slow_backend)
+        def f(x):
+            return x + 1
+
+        t = threading.Thread(target=f, args=(torch.ones(3),))
+        t.start()
+        try:
+            self.assertTrue(started.wait(10))
+            # The main thread is not compiling, even while another thread is.
+            self.assertFalse(torch.compiler.is_compiling())
+            self.assertFalse(torch._dynamo.is_compiling())
+            self.assertFalse(torch._utils.is_compiling())
+        finally:
+            release.set()
+            t.join()
+        self.assertEqual(seen_in_backend, [True])
+        self.assertFalse(torch.compiler.is_compiling())
+
     def test_is_exporting_not_true_during_compile(self):
         def f():
             if torch.compiler.is_exporting():

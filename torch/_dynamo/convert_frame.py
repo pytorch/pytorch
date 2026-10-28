@@ -1751,7 +1751,7 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
-            # Hold _is_compiling_flag True for the duration of compilation so
+            # Hold the per-thread compiling flag True for the duration of compilation so
             # torch.compiler.is_compiling() is observable in code that runs
             # during the compile session but is not directly Dynamo-traced
             # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,

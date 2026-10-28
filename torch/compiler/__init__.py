@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -575,7 +576,11 @@ def wrap_numpy(fn):
     return wrap(fn)
 
 
-_is_compiling_flag: bool = False
+# Per-thread compile state (see https://github.com/pytorch/pytorch/issues/202042).
+# torch.compiler.is_compiling() must only report True on the thread that is
+# actually compiling: a process-global flag leaked True into unrelated threads
+# (e.g. data-loading threads) while any thread was inside a compile session.
+_compiling_state = threading.local()
 _is_exporting_flag: bool = False
 _is_non_strict_tracing_flag: bool = False
 
@@ -599,7 +604,7 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _is_compiling_flag
+        return getattr(_compiling_state, "is_compiling", False)
 
 
 def _is_non_strict_tracing() -> bool:
@@ -623,16 +628,15 @@ def _non_strict_tracing_context():
 
 @contextlib.contextmanager
 def _compile_session_context():
-    """Context manager that sets _is_compiling_flag for the duration of a
-    torch.compile session.
+    """Context manager that sets the per-thread compiling flag for the duration
+    of a torch.compile session.
     """
-    global _is_compiling_flag
-    old = _is_compiling_flag
+    old = getattr(_compiling_state, "is_compiling", False)
+    _compiling_state.is_compiling = True
     try:
-        _is_compiling_flag = True
         yield
     finally:
-        _is_compiling_flag = old
+        _compiling_state.is_compiling = old
 
 
 @contextlib.contextmanager
