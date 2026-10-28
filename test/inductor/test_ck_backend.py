@@ -1,16 +1,11 @@
 # Owner(s): ["module: inductor"]
-import collections
 import contextlib
-import hashlib
-import itertools
 import logging
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -52,217 +47,6 @@ _test_env = {}
 
 def _dtype_test_name(dtype):
     return {torch.float16: "float16", torch.bfloat16: "bfloat16"}[dtype]
-
-
-# TEMPORARY triage aids for the mi350 amd-dpx failure on #200195; revert before landing.
-_TRIAGE_RTOL = 1.6e-2
-
-
-def _triage_emit(text):
-    # pytest runs with --capture=sys, so fd 2 reaches the CI log even when the test passes.
-    os.write(2, f"\n{text}\n".encode())
-
-
-def _triage_read(path):
-    try:
-        with open(path) as fh:
-            return fh.read().strip()
-    except OSError:
-        return "n/a"
-
-
-def _triage_env():
-    from importlib.metadata import version
-
-    from torch._inductor.codegen.rocm import compile_command
-
-    p = torch.cuda.get_device_properties(0)
-    bdf = f"{p.pci_domain_id:04x}:{p.pci_bus_id:02x}:{p.pci_device_id:02x}"
-    cards = sorted(os.listdir("/sys/class/drm"))
-    sysfs = {
-        f: sorted({_triage_read(f"/sys/class/drm/{c}/device/{f}") for c in cards})
-        for f in ("current_compute_partition", "current_memory_partition")
-    }
-    fw = {}
-    for card in cards:
-        dev = os.path.realpath(f"/sys/class/drm/{card}/device")
-        if bdf in dev and os.path.isdir(f"{dev}/fw_version"):
-            fw = {f: _triage_read(f"{dev}/fw_version/{f}") for f in sorted(os.listdir(f"{dev}/fw_version"))}
-            break
-    try:
-        ck_version = version("rocm-composable-kernel")
-    except Exception as e:
-        ck_version = repr(e)
-    compiler = compile_command.rocm_compiler()
-    try:
-        cc_version = subprocess.run([compiler, "--version"], capture_output=True, text=True).stdout.splitlines()[0]
-    except Exception as e:
-        cc_version = repr(e)
-    env_re = r"SCCACHE|CCACHE|LAUNCHER|HIPCC|HIP_|HSA_|ROCM|AMD_|TORCHINDUCTOR|PYTORCH_ROCM"
-    env = {k: v[:200] for k, v in sorted(os.environ.items()) if re.search(env_re, k)}
-    return "\n".join(
-        [
-            f"device {p.name} {p.gcnArchName} CUs={p.multi_processor_count} mem={p.total_memory / 2**30:.1f}GiB",
-            f"pci {bdf} sysfs {sysfs} mtype_local={_triage_read('/sys/module/amdgpu/parameters/mtype_local')}",
-            f"amdgpu {_triage_read('/sys/module/amdgpu/version')} kernel {os.uname().release} fw {fw}",
-            f"host boot epoch {time.time() - time.monotonic():.0f}",
-            f"torch {torch.__version__} git {torch.version.git_version} hip {torch.version.hip} ck {ck_version}",
-            f"compiler {compiler}: {cc_version}",
-            f"rocm config arch={config.rocm.arch} fast_math={config.rocm.use_fast_math} "
-            f"opt={config.rocm.compile_opt_level} rocm_home={config.rocm.rocm_home}",
-            f"compiler options {compile_command._rocm_compiler_options()}",
-            f"env {env}",
-        ]
-    )
-
-
-def _triage_isa(so_path):
-    from torch._inductor.codegen.rocm.compile_command import rocm_compiler
-
-    objdump = os.path.join(os.path.dirname(rocm_compiler()), "llvm-objdump")
-    with tempfile.TemporaryDirectory() as d:
-        so = shutil.copy(so_path, d)
-        subprocess.run([objdump, "--offloading", so], cwd=d, capture_output=True, check=True)
-        co = next(os.path.join(d, f) for f in os.listdir(d) if "gfx950" in f)
-        cmd = [objdump, "-d", "--mcpu=gfx950", co]
-        asm = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-    insts = [ln.split("//")[0].strip() for ln in asm.splitlines() if ln[:1] in ("\t", " ") and ln.strip()]
-    forms = collections.Counter(re.sub(r"\d+", "N", i) for i in insts if i.startswith("v_pk_") and "_f32" in i)
-    digest = hashlib.sha256("\n".join(insts).encode()).hexdigest()[:16]
-    nmfma = sum(i.startswith("v_mfma") for i in insts)
-    return f"isa sha={digest} insts={len(insts)} mfma={nmfma} pk_f32 forms={dict(forms.most_common(8))}"
-
-
-def _triage_kernels(newest=6):
-    # The newest CK .so files in the inductor cache dir, i.e. the ones this test just built and loaded.
-    from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
-    from torch._inductor.runtime.cache_dir_utils import cache_dir
-
-    tag_res = (r"KblocksizeV\d+", r"KcelementwiseopV[A-Za-z]+", r"Kblockgemmpipelineversionv\d")
-    sos = []
-    for root, _, files in os.walk(cache_dir()):
-        sos += [os.path.join(root, f) for f in files if f.endswith(".so") and f[:-3] + ".cpp" in files]
-    sos.sort(key=os.path.getmtime, reverse=True)
-    lines = []
-    for so in sos[:newest]:
-        try:
-            with open(so[:-3] + ".cpp") as fh:
-                src = fh.read()
-            if "ck::" not in src:
-                continue
-            with open(so, "rb") as fh:
-                so_sha = hashlib.sha256(fh.read()).hexdigest()[:16]
-            tags = [m.group(0) for pat in tag_res if (m := re.search(pat, src))]
-            cmd = rocm_compile_command([so[:-3] + ".cpp"], so, "so")
-            flags = [t for t in cmd.split() if "math" in t or t.startswith(("-Xarch", "--offload-arch", "-O"))]
-            lines.append(f"  {os.path.basename(so)} so sha={so_sha} {tags} flags={flags}")
-            lines.append(f"    {_triage_isa(so)}")
-        except Exception as ex:
-            lines.append(f"  {so}: {type(ex).__name__}: {str(ex)[:300]}")
-    return "\n".join(lines) or "  (none)"
-
-
-def _triage_mismatch(y, ref):
-    bad = (~torch.isclose(y.float(), ref.float(), rtol=_TRIAGE_RTOL, atol=1e-5)).nonzero()
-    if not len(bad):
-        return "0"
-    r, c = bad[:, 0], bad[:, 1]
-    d = (y.float() - ref.float())[r, c]
-    return (
-        f"{len(bad)} rows={r.unique().numel()} col%4={torch.bincount(c % 4, minlength=4).tolist()} "
-        f"col%128 range=({int((c % 128).min())},{int((c % 128).max())}) "
-        f"diff min/max/mean=({d.min():.3f},{d.max():.3f},{d.mean():.3f}) first={bad[:8].tolist()}"
-    )
-
-
-def _triage_run(x_shape, dtype, choice, strip_flag, calls):
-    # Rebuilds the addmm with one forced CK candidate (fresh numbering: 0 = 64-thread v2,
-    # 1 = 256-thread multi-D v3, the usual autotune winner), optionally without the gfx950
-    # -fno-associative-math workaround, and counts wrong calls.
-    from torch._inductor.codegen.rocm import compile_command
-    from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
-    from torch._inductor.utils import fresh_cache
-
-    orig = compile_command._rocm_compiler_options
-
-    def opts():
-        o = orig()
-        if strip_flag:
-            o = [t for t in o if not (t.startswith("-Xarch_gfx950") or t == "-fno-associative-math")]
-        return o
-
-    m, k, n = 4096, 224, 2048
-    o = {"device": "cuda", "dtype": dtype}
-    torch.manual_seed(1234)
-    x, a, b = torch.ones(x_shape, **o), torch.randn(m, k, **o), torch.randn(k, n, **o)
-    eager = torch.addmm(x, a, b)
-    torch._dynamo.reset()
-    ROCmTemplate.index_counter = itertools.count()
-    cfg = {
-        "max_autotune": True,
-        "autotune_in_subproc": False,
-        "max_autotune_gemm_backends": "CK",
-        "compile_threads": 1,
-        "rocm.ck_dir": try_import_ck_lib()[0],
-        "rocm.ck_max_profiling_configs": 2,
-        "force_disable_caches": True,
-        "test_configs.autotune_choice_name_regex": f"^rocm_ck_gemm_template_{choice}$",
-    }
-    with fresh_cache(), patch.object(compile_command, "_rocm_compiler_options", opts):
-        with config.patch(cfg), tf32_off():
-            f = torch.compile(lambda x, a, b: torch.addmm(x, a, b), dynamic=False)
-            bad_calls, first, prev, nondet = 0, None, None, 0
-            for _ in range(calls):
-                y = f(x, a, b)
-                if not torch.allclose(y.float(), eager.float(), rtol=_TRIAGE_RTOL, atol=1e-5):
-                    bad_calls += 1
-                    first = first or _triage_mismatch(y, eager)
-                nondet += prev is not None and not torch.equal(y, prev)
-                prev = y
-            kernels = _triage_kernels()
-    torch._dynamo.reset()
-    return (
-        f"x={x_shape} choice={choice} strip_flag={strip_flag}: wrong calls {bad_calls}/{calls}, "
-        f"calls differing from the previous call {nondet}, first wrong: {first}\n{kernels}"
-    )
-
-
-def _addmm_mismatch_report(fn, x, a, b, Y_compiled, Y_eager):
-    def nbad(y, ref):
-        return int((~torch.isclose(y.float(), ref.float(), rtol=_TRIAGE_RTOL, atol=1e-5)).sum())
-
-    def wrong(y):
-        return not torch.allclose(y.float(), Y_eager.float(), rtol=_TRIAGE_RTOL, atol=1e-5)
-
-    ref = torch.addmm(x.float(), a.float(), b.float())
-    Y_compiled2, Y_eager2 = fn(x, a, b, 1.0, 1.0), torch.addmm(x, a, b)
-    bad = (~torch.isclose(Y_compiled.float(), Y_eager.float(), rtol=_TRIAGE_RTOL, atol=1e-5)).nonzero()
-    tiles = sorted({(r // 128, c // 128) for r, c in bad.tolist()})
-    wrong_calls = sum(wrong(fn(x, a, b, 1.0, 1.0)) for _ in range(50))
-    stale = 0
-    probe_x = torch.zeros(1, device="cuda")
-    zeros = torch.zeros(1 << 20, device="cuda")
-    out = torch.empty_like(zeros)
-    for i in range(1, 101):
-        probe_x.fill_(float(i))
-        torch.add(zeros, probe_x, out=out)
-        stale += bool((out != float(i)).any())
-    same = f"compiled identical={torch.equal(Y_compiled, Y_compiled2)} eager identical={torch.equal(Y_eager, Y_eager2)}"
-    report = "\n".join(
-        [
-            "=== addmm mismatch triage ===",
-            _triage_env(),
-            f"vs fp32 reference: compiled bad={nbad(Y_compiled, ref)} eager bad={nbad(Y_eager, ref)}",
-            f"repeat: {same}",
-            f"compiled wrong on {wrong_calls}/50 further calls",
-            f"compiled-vs-eager mismatches: {_triage_mismatch(Y_compiled, Y_eager)} 128x128 tiles={tiles[:16]}",
-            f"cross-XCC coherence probe: {stale}/100 iterations stale",
-            "newest CK kernels in the inductor cache:",
-            _triage_kernels(),
-        ]
-    )
-    _triage_emit(report)
-    return report
 
 
 _parametrize_dtype = parametrize(
@@ -549,21 +333,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    def test_triage_addmm_ck_flag(self):
-        # TEMPORARY triage for #200195, revert before landing. Always prints; never fails.
-        if "gfx950" not in torch.cuda.get_device_properties(0).gcnArchName:
-            raise unittest.SkipTest("gfx950 only")
-        lines = ["=== addmm CK triage (always printed) ===", _triage_env()]
-        for x_shape in ([2048], [4096, 1]):
-            for choice, strip_flag in ((1, False), (1, True), (0, False)):
-                try:
-                    lines.append(_triage_run(x_shape, torch.bfloat16, choice, strip_flag, 100))
-                except Exception as e:
-                    err = f"{type(e).__name__}: {str(e)[:300]}"
-                    lines.append(f"x={x_shape} choice={choice} strip_flag={strip_flag}: {err}")
-        _triage_emit("\n".join(lines))
-
-    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
@@ -609,11 +378,7 @@ class TestCKBackend(TestCase):
             Y_compiled = addmm(x, a, b, alpha, beta)
             Y_eager = torch.addmm(x, a, b, alpha=alpha, beta=beta)
 
-            try:
-                torch.testing.assert_close(Y_compiled, Y_eager)
-            except AssertionError as e:
-                report = _addmm_mismatch_report(addmm, x, a, b, Y_compiled, Y_eager)
-                raise AssertionError(f"{e}\n{report}") from None
+            torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skip(
         "FIXME(tenpercent): kernel compilation errors on gfx942 as of 09/01/25"
