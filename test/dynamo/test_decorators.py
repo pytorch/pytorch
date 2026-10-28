@@ -2387,6 +2387,26 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         res = g6(inp)
         self.assertEqual(res, inp + 1)
 
+    def test_dont_skip_tracing_respects_disallow_in_graph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.dont_skip_tracing
+        def inner(x):
+            return torch.sub(x, 1)
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return inner(x) + 1
+
+        torch._dynamo.disallow_in_graph(torch.sub)
+        try:
+            fn(torch.randn(3))
+        finally:
+            torch._dynamo.allow_in_graph(torch.sub)
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
     def test_patch_dynamo_config_errors(self):
         @torch.compile(backend="eager")
         def f1(x):
