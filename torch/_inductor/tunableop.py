@@ -291,17 +291,18 @@ _worker_lock = threading.Lock()
 
 
 def _get_worker_locked(key: tuple[int, str]) -> TuningProcess:
-    """The long-lived process that runs every TunableOp benchmark for this compile.
+    """The process that runs every TunableOp benchmark. Module-global, so it
+    spans compiles -- nothing marks their boundaries.
 
     Assumes _worker_lock is held.
 
     Dedicated rather than the shared TuningProcessPool because TunableOp's flags
     are process-global: a shared worker would tune unrelated GEMMs into the
-    results file. Reused across GEMMs because startup dominates, and torn down
-    only on a key change or at exit, so an idle child holds its context.
+    results file. Reused across GEMMs because startup dominates.
 
-    Keyed on (device, resolved results filename): a restart is what releases the
-    old GPU's context and the results map the worker loaded at startup.
+    Torn down on a key change, on any fault in submit(), and at exit. Keyed on
+    (device, resolved results filename) so a restart releases the old GPU's
+    context and the results map the child loaded at startup.
     """
     global _worker, _worker_key, _atexit_registered
     from .autotune_process import TuningProcess
