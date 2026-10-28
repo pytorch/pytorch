@@ -403,29 +403,31 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
 # keeps the descriptor's state in the tensor's __dict__ under the same names,
 # and like the descriptor drops the memo once the tensor is mutated or
 # fake_mode's epoch changes.
-def maybe_get_sym_memo(x: Tensor, name: str, fake_mode: FakeTensorMode) -> Any:
+def maybe_get_sym_memo(x: object, name: str, fake_mode: FakeTensorMode) -> Any:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return getattr(x, name)
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
     memo = getattr(x, f"_{name}", None)
     if memo is None:
         return None
-    if not x.is_inference() and getattr(x, f"_{name}_vc", None) != x._version:
-        return None
-    if getattr(x, f"_{name}_epoch", None) != fake_mode.epoch:
+    mutated = not x.is_inference() and getattr(x, f"_{name}_vc", None) != x._version
+    if mutated or getattr(x, f"_{name}_epoch", None) != fake_mode.epoch:
+        setattr(x, f"_{name}", None)
         return None
     return memo
 
 
 def maybe_set_sym_memo(
-    x: Tensor, name: str, value: SymInt | int, fake_mode: FakeTensorMode
+    x: object, name: str, value: SymInt | int, fake_mode: FakeTensorMode
 ) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         setattr(x, name, value)
-        return
-    setattr(x, f"_{name}", value)
-    if not x.is_inference():
-        setattr(x, f"_{name}_vc", x._version)
-    setattr(x, f"_{name}_epoch", fake_mode.epoch)
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        setattr(x, f"_{name}", value)
+        if not x.is_inference():
+            setattr(x, f"_{name}_vc", x._version)
+        setattr(x, f"_{name}_epoch", fake_mode.epoch)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
@@ -470,9 +472,12 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
     return None
 
 
-def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
-    # The Python type of the real tensor a fake stands for; a fake without a
-    # recorded pytype is a Parameter if it carries the Parameter marker.
+def maybe_get_fake_pytype_for_serialization(x: object) -> type[Tensor] | None:
+    # The Python type of the real tensor a fake stands for, which serialized
+    # guards check the real input against; a fake without a recorded pytype is
+    # a Parameter if it carries the Parameter marker. Guards built from a live
+    # fake (TENSOR_MATCH, TYPE_MATCH) check the fake itself and must use
+    # type(value) instead.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         if x.pytype is not None:
             return x.pytype
