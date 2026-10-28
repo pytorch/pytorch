@@ -4322,6 +4322,15 @@ def _get_fake_value_impl(
         if e.__cause__ is not None:
             cause = e.__cause__
 
+        fake_tensor = torch._subclasses.fake_tensor
+        graph_break_causes = (
+            fake_tensor.DataDependentOutputException,
+            fake_tensor.DynamicOutputShapeException,
+            fake_tensor.UnsupportedOperatorException,
+        )
+        if tx.output.package is not None and isinstance(cause, graph_break_causes):
+            tx.output.package.add_graph_break_op(cause.func)
+            tx.output.package.add_graph_break_op(node.target)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -4379,9 +4388,6 @@ def _get_fake_value_impl(
             op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
-                if tx.output.package is not None:
-                    tx.output.package.add_graph_break_op(op)
-                    tx.output.package.add_graph_break_op(node.target)
                 maybe_pystub = torch._C._dispatch_pystub(
                     op._schema.name, op._schema.overload_name
                 )
