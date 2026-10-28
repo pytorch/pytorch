@@ -451,23 +451,6 @@ if TEST_NUMBA:
 else:
     TEST_NUMBA_CUDA = False
 
-# Used below in `initialize_cuda_context_rng` to ensure that CUDA context and
-# RNG have been initialized.
-__cuda_ctx_rng_initialized = False
-
-
-# after this call, CUDA context and RNG must have been initialized on each GPU
-def initialize_cuda_context_rng():
-    global __cuda_ctx_rng_initialized
-    if not TEST_CUDA:
-        raise AssertionError('CUDA must be available when calling initialize_cuda_context_rng')
-    if not __cuda_ctx_rng_initialized:
-        # initialize cuda context and rng for memory tests
-        for i in range(torch.cuda.device_count()):
-            torch.randn(1, device=f"cuda:{i}")
-        __cuda_ctx_rng_initialized = True
-
-
 _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
 _tf32_off_saved_precision = None

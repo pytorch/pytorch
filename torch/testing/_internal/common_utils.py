@@ -3364,41 +3364,62 @@ class CudaNonDefaultStream:
                                      device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
+# Checks the current accelerator (CUDA, XPU, ...) for leaks. The "Cuda" in
+# this name, in `TestCase.assertLeaksNoCudaTensors` and in
+# `TestCase.wrap_with_cuda_memory_check` predates accelerator-agnostic testing
+# and is kept for the existing call sites.
 class CudaMemoryLeakCheck:
+    # Guards the one-time context & RNG initialization below.
+    _ctx_rng_initialized = False
+
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        if acc is None:
+            raise AssertionError('an accelerator must be available when checking for memory leaks')
+        self.device_type = acc.type
+        self.device_label = self.device_type.upper()
+        self.device_module = torch.get_device_module(acc)
 
         # initialize context & RNG to prevent false positive detections
         # when the test is the first to initialize those
-        from torch.testing._internal.common_cuda import initialize_cuda_context_rng
-        initialize_cuda_context_rng()
+        if not CudaMemoryLeakCheck._ctx_rng_initialized:
+            for i in range(self.device_module.device_count()):
+                torch.randn(1, device=torch.device(self.device_type, i))
+            CudaMemoryLeakCheck._ctx_rng_initialized = True
 
-    # Stores CUDA memory data provided by PyTorch's caching allocator and
-    #   the CUDA driver.
+    # cuBLAS workspaces are a CUDA-only allocation that must not be counted as
+    #   a leak; no other accelerator has an equivalent.
+    def _clear_cublas_workspaces(self):
+        if self.device_type == "cuda":
+            torch._C._cuda_clearCublasWorkspaces()
+
+    # Stores accelerator memory data provided by PyTorch's caching allocator
+    #   and the device driver.
     #
-    # NOTE: The undocumented torch.cuda.mem_get_info() returns
+    # NOTE: The undocumented mem_get_info() returns
     #   (#free bytes, #total bytes available) on the GPU
     def __enter__(self):
         self.caching_allocator_befores = []
         self.driver_befores = []
 
-        # Performs a gc if required (required if any CUDA memory is held)
-        num_devices = torch.cuda.device_count()
+        # Performs a gc if required (required if any accelerator memory is held)
+        num_devices = self.device_module.device_count()
         for i in range(num_devices):
-            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            caching_allocator_mem_allocated = self.device_module.memory_allocated(i)
             # NOTE: gc is based exclusively on caching allocator memory
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch._C._cuda_clearCublasWorkspaces()
-                torch.cuda.empty_cache()
+                self._clear_cublas_workspaces()
+                self.device_module.empty_cache()
                 break
 
         # Acquires caching allocator and driver statistics before the test is run
         for i in range(num_devices):
-            self.caching_allocator_befores.append(torch.cuda.memory_allocated(i))
-            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            self.caching_allocator_befores.append(self.device_module.memory_allocated(i))
+            bytes_free, bytes_total = self.device_module.mem_get_info(i)
             driver_mem_allocated = bytes_total - bytes_free
             self.driver_befores.append(driver_mem_allocated)
 
@@ -3409,18 +3430,18 @@ class CudaMemoryLeakCheck:
 
         self.testcase.before_cuda_memory_leak_check()
         gc.collect()
-        torch._C._cuda_clearCublasWorkspaces()
-        torch.cuda.empty_cache()
+        self._clear_cublas_workspaces()
+        self.device_module.empty_cache()
 
         # Compares caching allocator before/after statistics
         # An increase in allocated memory is a discrepancy indicating a possible
         #   memory leak
         discrepancy_detected = False
-        num_devices = torch.cuda.device_count()
+        num_devices = self.device_module.device_count()
         for i in range(num_devices):
             # avoid counting cublasWorkspace allocations
-            torch._C._cuda_clearCublasWorkspaces()
-            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+            self._clear_cublas_workspaces()
+            caching_allocator_mem_allocated = self.device_module.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
                 discrepancy_detected = True
@@ -3439,7 +3460,7 @@ class CudaMemoryLeakCheck:
 
         # GCs and clears the cache
         gc.collect()
-        torch.cuda.empty_cache()
+        self.device_module.empty_cache()
 
         for i in range(num_devices):
 
@@ -3447,8 +3468,8 @@ class CudaMemoryLeakCheck:
 
             # Query memory multiple items to ensure leak was not transient
             for _ in range(3):
-                caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-                bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+                caching_allocator_mem_allocated = self.device_module.memory_allocated(i)
+                bytes_free, bytes_total = self.device_module.mem_get_info(i)
                 driver_mem_allocated = bytes_total - bytes_free
 
                 caching_allocator_discrepancy = False
@@ -3473,22 +3494,22 @@ class CudaMemoryLeakCheck:
                 #   driver API
                 # NOTE: this may be a problem with how the caching allocator collects its
                 #   statistics or a leak too small to trigger the allocation of an
-                #   additional block of memory by the CUDA driver
-                msg = ("CUDA caching allocator reports a memory leak not "  # type: ignore[possibly-undefined]
+                #   additional block of memory by the device driver
+                msg = (f"{self.device_label} caching allocator reports a memory leak not "  # type: ignore[possibly-undefined]
                        f"verified by the driver API in {self.name}! "
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
+                       f"{self.device_label} driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
                 warnings.warn(msg, stacklevel=2)
             elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = (f"CUDA driver API confirmed a leak in {self.name}! "  # type: ignore[possibly-undefined]
+                msg = (f"{self.device_label} driver API confirmed a leak in {self.name}! "  # type: ignore[possibly-undefined]
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
                        f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
+                       f"{self.device_label} driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
 
                 raise RuntimeError(msg)
 
