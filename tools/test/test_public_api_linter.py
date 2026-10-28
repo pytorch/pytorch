@@ -41,6 +41,11 @@ try:
 except ImportError:
     sys.exit(3)
 
+# An installed wheel passes the import above but inspects the wheel's code
+# rather than this tree, so it cannot exercise these checks either.
+if not os.path.realpath(torch.__file__).startswith(os.path.realpath(repo) + os.sep):
+    sys.exit(3)
+
 if scenario == "probe":
     sys.exit(0)
 
