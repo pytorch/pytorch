@@ -1127,9 +1127,16 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         from contextlib import nullcontext
 
         from torch._inductor import utils as inductor_utils
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        def mask_configs(table):
+            return re.sub(r": \{.*\},$", ": {...},", table.group(0), flags=re.MULTILINE)
 
         def norm(s):
-            return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            s = re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            # Each device autotunes on its own, so the configs it pins can differ.
+            table = r"^KERNEL_CONFIGS = \{\n(?:    .*\n)*?\}"
+            return re.sub(table, mask_configs, s, flags=re.MULTILINE)
 
         cases = {
             "benchmark_kernel": (
@@ -1176,7 +1183,21 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         if path == "user_defined_triton":
             fn = fn()
 
+        # The python wrapper runs the compile-time autotune block without writing it
+        # into the module, so record the block's code and check it with the module's.
+        run_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
         def code_on(dev):
+            tuning = []
+
+            def record_block(w):
+                for buf in (w.kernel_autotune_defs, w.kernel_autotune_calls):
+                    tuning.append(buf.getvalue())
+                return run_block(w)
+
+            block_spy = patch.object(
+                PythonWrapperCodegen, "generate_and_run_autotune_block", record_block
+            )
             big_gpu = (
                 patch.object(inductor_utils, "is_big_gpu", return_value=True)
                 if force_big_gpu
@@ -1186,8 +1207,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 torch._inductor.config.patch(**cfg),
                 inductor_utils.fresh_cache(),
                 big_gpu,
+                block_spy,
             ):
-                return self._inductor_code_on_device(dev, fn, input_shapes)
+                code = self._inductor_code_on_device(dev, fn, input_shapes)
+            return "\n".join([code, *tuning])
 
         code0 = code_on(0)
         code1 = code_on(1)
@@ -1207,6 +1230,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             self.assertIn("triton_tem_fused", code0)
         elif path == "combo_kernel":
             self.assertIn("combo_grid_meta", code0)
+        elif path == "compile_time_autotune":
+            self.assertIn("generate_example_value(", code0)
         self._assert_no_baked_device(code0)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
@@ -1884,11 +1909,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_index_symbol_is_not_size_like(self):
-        # The index is unbacked, but it is not a *size*. Allocating it with
-        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
-        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
-        # rank is never cuda:0 or cuda:1.
+    def test_device_index_symbol_preserves_zero_one(self):
+        # Accelerator indices zero and one must remain valid symbolic values.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1896,9 +1918,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with FakeTensorMode(shape_env=shape_env):
             index = torch.ops.coor.current_device_index.default()
 
-        self.assertEqual(shape_env.size_like, set())
-        # The >= 0 bound is the part worth keeping.
-        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
+        index_range = shape_env.var_to_range[index.node.expr]
+        self.assertEqual(index_range.lower, 0)
+        self.assertIn(0, index_range)
+        self.assertIn(1, index_range)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
