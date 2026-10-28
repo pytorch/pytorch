@@ -8,6 +8,7 @@
 #include <ATen/cuda/MemPool.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -147,7 +148,16 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
     CUDAMemPoolHandle pool) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(graph != nullptr && pool != nullptr, "Null CUDA graph handle");
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
+    // On another device, the allocator would quietly route the capture to a
+    // new pool on that device.
+    TORCH_CHECK(
+        c10::cuda::current_device() == mem_pool->device(),
+        "A CUDA graph capture must run on its pool's device ",
+        static_cast<int>(mem_pool->device()),
+        ", not the current device ",
+        static_cast<int>(c10::cuda::current_device()));
     // Python creates the default generators when it initializes CUDA; other
     // hosts would create one lazily inside the capture, which fails.
     at::cuda::detail::getDefaultCUDAGenerator(mem_pool->device());

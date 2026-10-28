@@ -187,7 +187,29 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
+TEST_F(AOTICudaGraphTest, CaptureBeginChecksItsArguments) {
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, nullptr), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(nullptr, pool_), AOTI_TORCH_FAILURE);
+  if (c10::cuda::device_count() < 2) {
+    return;
+  }
+  // A pool on device 1 while device 0 is current.
+  CUDAMemPoolHandle pool = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_mem_pool(1, &pool), AOTI_TORCH_SUCCESS);
+  at::cuda::CUDAStreamGuard guard(*capture_stream_);
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, pool), AOTI_TORCH_FAILURE);
+  EXPECT_FALSE(stream_is_capturing());
+  EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
+}
+
 TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
+#ifdef USE_ROCM
+  GTEST_SKIP() << "hipStreamEndCapture doesn't end an invalidated capture: "
+                  "the stream rejects work until the next capture begins";
+#endif
   at::cuda::CUDAStreamGuard guard(*capture_stream_);
   ASSERT_EQ(
       aoti_torch_cuda_graph_capture_begin(graph_, pool_), AOTI_TORCH_SUCCESS);

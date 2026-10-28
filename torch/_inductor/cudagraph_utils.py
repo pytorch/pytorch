@@ -211,6 +211,13 @@ def get_mutating_use_stack_trace_from_node(
         if use.target is torch.ops.aten.copy_.default:
             if stack_trace := use.meta.get("stack_trace", None):
                 return stack_trace
+            # Functionalization's write-back copy_ has no stack trace, but the
+            # op whose result it copies does.
+            src = use.args[1]
+            if isinstance(src, torch.fx.Node) and (
+                stack_trace := src.meta.get("stack_trace", None)
+            ):
+                return stack_trace
 
     return None
 
@@ -422,22 +429,27 @@ def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule
 
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
     """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
-    the whole graph, including the subgraphs of higher-order ops, can be
-    captured into a CUDA graph. Runs after lowering, before codegen. AOT mode
-    lowers with graph_partition off, so lowering's partition-gated reasons
-    (e.g. for while_loop) apply, and CPU nodes aren't exempted."""
+    the graph and the subgraphs of its higher-order ops can be captured into a
+    CUDA graph. AOT mode lowers with graph_partition off, so CPU nodes and
+    partition-gated lowering reasons (e.g. for while_loop) count."""
 
     def with_stack_trace(msg: str, stack_trace: str | None) -> str:
         return f"{msg}. Found from:\n{stack_trace}" if stack_trace else msg
+
+    host_syncs = {
+        torch.ops.streams.synchronize_event.default: "Event.synchronize",
+        torch.ops.streams.synchronize_stream.default: "Stream.synchronize",
+        torch.ops.streams.synchronize_device.default: "torch.cuda.synchronize",
+    }
 
     def check_fx(gm: torch.fx.GraphModule) -> str | None:
         if node := get_first_incompatible_cudagraph_node(gm):
             stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
             return with_stack_trace(f"incompatible op {node.target}", stack_trace)
-        sync_event = torch.ops.streams.synchronize_event.default
-        for node in gm.graph.find_nodes(op="call_function", target=sync_event):
-            msg = "it waits on the host for a CUDA event (Event.synchronize)"
-            return with_stack_trace(msg, node.meta.get("stack_trace"))
+        for target, sync in host_syncs.items():
+            for node in gm.graph.find_nodes(op="call_function", target=target):
+                msg = f"it waits on the host ({sync})"
+                return with_stack_trace(msg, node.meta.get("stack_trace"))
         return None
 
     def find_reason() -> str | None:
@@ -456,8 +468,13 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
                 device_node_mapping.setdefault(device, node)
         if reason := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
             return reason.removeprefix(format_default_skip_message(""))
-        if mutated := [n for n in graph.graph_inputs if n in graph.mutated_buffers]:
-            return f"it mutates inputs {', '.join(mutated)}"
+        placeholders = get_placeholder_info(graph.graph)
+        mutated = [
+            i for i, p in enumerate(placeholders) if p.name in graph.mutated_buffers
+        ]
+        if mutated:
+            msg = get_mutation_stack_trace(placeholders, mutated)
+            return msg.removeprefix(format_default_skip_message(""))
         return None
 
     if reason := find_reason():

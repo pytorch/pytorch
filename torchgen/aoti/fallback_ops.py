@@ -60,6 +60,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._flash_attention_forward.quantized": {"since": "TORCH_VERSION_2_11_0"},
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
+    "aten._foreach_copy_.default": {"since": "TORCH_VERSION_2_16_0"},
     "aten._fused_rms_norm.default": {},
     "aten._grouped_mm.default": {"since": "TORCH_VERSION_2_12_0"},
     "aten._histogramdd_from_bin_cts.default": {},
