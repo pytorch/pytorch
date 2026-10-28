@@ -776,7 +776,8 @@ def extract_loop_body_with_args(
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
         name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
-    for entry in fn.memory_usage[MemoryUsageType.LOAD]:
+    loads = fn.memory_usage[MemoryUsageType.LOAD]
+    for entry in OrderedSet(loads) if normalize else loads:
         inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
         inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
