@@ -195,7 +195,8 @@ class _CanonicalMatrixInput(NamedTuple):
     r"""TMA input and metadata for returning results in the caller's axis order.
 
     For contiguous ``[*B0, M, *B1, K, B2]``, canonicalization moves all batch
-    axes ahead of ``(M, K)`` and folds them into ``B_product``.
+    axes ahead of ``(M, K)`` and folds them into ``B_product``. Batch axes retain
+    their physical stride order even when their logical positions change.
 
     Attributes:
         input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
@@ -231,8 +232,9 @@ def _canonicalize_matrix_input(
     For contiguous ``[*B0, M, *B1, K, B2]``, the trailing ``B2`` prevents
     TMA from directly loading an ``(M, K)`` tile. Permute to
     ``[*B0, *B1, B2, M, K]``, materialize contiguous storage, and fold the
-    batch axes into ``(B_product, M, 1, K)``. When the physical matrix axes
-    permit a direct TMA load, instead use a view shaped like
+    batch axes into ``(B_product, M, 1, K)``. Keep batch axes in physical stride
+    order when materializing, even if their logical order differs. When the
+    physical matrix axes permit a direct TMA load, instead use a view shaped like
     ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), without
     materializing. Return normalized axes and metadata to undo the permutation.
 
@@ -264,6 +266,7 @@ def _canonicalize_matrix_input(
         input if physical_axes == tuple(range(ndim)) else input.permute(physical_axes)
     )
     physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
+    batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
     fast_axis = physical_matrix_axes[-1]
     quant_axis = normalized[0][-1]
     physical_dim_k = quant_axis == fast_axis
@@ -282,7 +285,6 @@ def _canonicalize_matrix_input(
         inner_batch = prod(
             input.shape[axis] for axis in physical_axes[slow_pos + 1 : fast_pos]
         )
-        batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
         permutation = (*batch_axes, *physical_matrix_axes)
         if batch_axes:
             matrix_input = physical_input.view(
@@ -296,7 +298,6 @@ def _canonicalize_matrix_input(
             len(normalized) == 2 and normalized[0] != physical_matrix_axes
         )
     else:
-        batch_axes = tuple(axis for axis in range(ndim) if axis not in matrix_axes)
         permutation = (*batch_axes, *matrix_axes)
         matrix_input = (
             input if permutation == tuple(range(ndim)) else input.permute(permutation)

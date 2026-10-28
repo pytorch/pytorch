@@ -694,6 +694,38 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(scales.shape, scales_ref.shape)
 
     @parametrize(
+        "dim,is_square_scaling,is_scale_swizzled",
+        (
+            subtest(((1, 2), False, False), name="dim_k_compact"),
+            subtest(((1, 2), False, True), name="dim_k_swizzled"),
+            subtest(((2, 1), False, True), name="dim_m_swizzled"),
+            subtest(((1, 2), True, True), name="dim_k_square"),
+        ),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_batch_axis_transpose_strides(
+        self, dim, is_square_scaling, is_scale_swizzled, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        input = torch.randn(2, 256, 128, 3, dtype=torch.bfloat16, device=device)
+        swizzle = (
+            SwizzleType.SWIZZLE_32_4_4 if is_scale_swizzled else SwizzleType.NO_SWIZZLE
+        )
+        kwargs = {
+            **_MXFP8_KWARGS,
+            "dim": dim,
+            "swizzle_type": swizzle,
+            "scaling_type_use_square_block_size": is_square_scaling,
+        }
+        outputs = F.quantize_tensor(input, **kwargs)
+        transposed_outputs = F.quantize_tensor(input.transpose(0, 3), **kwargs)
+        for output, transposed in zip(outputs, transposed_outputs, strict=True):
+            expected = output.transpose(0, 3)
+            self.assertEqual(transposed, expected)
+            self.assertEqual(transposed.stride(), expected.stride())
+
+    @parametrize(
         "layout",
         (
             "leading",
