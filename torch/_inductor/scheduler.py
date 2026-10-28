@@ -51,6 +51,7 @@ from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv, Identity
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton
 
 from . import comms, config, config_comms, dependencies, ir, metrics
@@ -12625,6 +12626,28 @@ class Scheduler:
         previous_nodes_by_stream: dict[
             tuple[torch.device | None, int], BaseSchedulerNode
         ] = {}
+        # Launchers skip a kernel whose grid is empty at runtime, so a node
+        # whose size may be zero cannot stand in for the previous launch.
+        sizevars = V.graph.sizevars
+        var_to_range = sizevars.shape_env.var_to_range
+
+        @functools.cache
+        def is_known_nonzero(size: sympy.Expr) -> bool:
+            symbols = free_symbols(size)
+            if not symbols:
+                return sizevars.statically_known_gt(size, 0)
+            if not all(s in var_to_range for s in symbols):
+                return False
+            # Backed size symbols are sympy-positive even when their range
+            # includes 0 (backed_size_oblivious), so guard-based reasoning is
+            # trusted only when every symbol is at least 1.
+            return bound_sympy(size, var_to_range).lower >= 1 or (
+                all(var_to_range[s].lower >= 1 for s in symbols)
+                and (
+                    sizevars.statically_known_gt(size, 0)
+                    or sizevars.statically_known_true(sympy.Ne(size, 0))
+                )
+            )
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12813,7 +12836,13 @@ class Scheduler:
                     self.generate_stream_ctx_exit()
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
-            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+            if all(
+                isinstance(n, SchedulerNode)
+                and all(
+                    map(is_known_nonzero, itertools.chain.from_iterable(n.get_ranges()))
+                )
+                for n in node.get_nodes()
+            ):
                 previous_nodes_by_stream[stream_key] = node
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
