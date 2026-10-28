@@ -12,6 +12,7 @@ from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._library as _library
+from torch._library.aoti_impl import AOTTarget, register_aot_impl, TVMFFIKernel
 from torch._library.custom_ops import (
     _cast,
     _maybe_get_opdef,
@@ -42,6 +43,9 @@ __all__ = [
     "triton_op",
     "wrap_triton",
     "infer_schema",
+    "register_aot_impl",
+    "TVMFFIKernel",
+    "AOTTarget",
 ]
 
 _T = TypeVar("_T")
