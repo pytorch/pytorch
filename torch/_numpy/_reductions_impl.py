@@ -434,7 +434,7 @@ def quantile(
 
     keepdims = bool(keepdims)
     result = torch.quantile(a, q, axis, keepdim=keepdims, interpolation=method)
-    if axis is None and keepdims:
+    if axis is None and (keepdims or q_shape):
         result = result.reshape(q_shape + result.shape[1:])
     return result
 
