@@ -22,6 +22,7 @@ from typing_extensions import TypeIs
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.utils._pytree import SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -118,11 +119,9 @@ def _cpython_has_simple_slice_bug() -> bool:
     # simple slices (step is None or 1) raised "can only assign an
     # iterable" instead of "must assign iterable to extended slice".
     # Verified empirically against real CPython builds: the fix shipped in
-    # 3.10.20, 3.11.15, and 3.12.5 (3.12.0 is the first 3.12 release, so
-    # 3.12.0-3.12.4 predate it); 3.13+ never had the bug.
+    # 3.11.15 and 3.12.5 (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4
+    # predate it); 3.13+ never had the bug.
     v = sys.version_info
-    if v[:2] == (3, 10):
-        return v < (3, 10, 20)
     if v[:2] == (3, 11):
         return v < (3, 11, 15)
     if v[:2] == (3, 12):
@@ -1480,14 +1479,6 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker:
         return self._seq_richcompare(tx, other, op, collections.deque)
 
-    if sys.version_info < (3, 11):
-
-        def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-            # deque fills nb_bool (deque_bool: Py_SIZE(deque) != 0) up to Python
-            # 3.10; CPython GH-32397 dropped the slot in 3.11, so newer versions
-            # fall through to sq_length in generic_is_true and never reach here.
-            return ConstantVariable.create(len(self.items) > 0)
-
     def is_hashable(self) -> bool:
         return False
 
@@ -2407,6 +2398,41 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def _bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        method: str,
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            return VariableTracker.build(
+                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+            )
+        except (MemoryError, OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "split")
+
+    def bytearray_rsplit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rsplit")
+
     def bytearray_hex(
         self,
         tx: "InstructionTranslatorBase",
@@ -2523,14 +2549,108 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(None)
 
+    def bytearray_insert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_insert_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "insert", len(args), 2, 2)
+        index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        item = pynumber_index(tx, args[1])
+        if not item.is_python_constant():
+            return None
+        new_data = bytearray(self.data)
+        try:
+            new_data.insert(index, item.as_python_constant())
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    def bytearray_pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_pop_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "pop", len(args), 0, 1)
+        index = -1
+        if args:
+            index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        new_data = bytearray(self.data)
+        try:
+            result = new_data.pop(index)
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(result)
+
+    def _bytearray_case_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        method_name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # upper(), lower() and title() are METH_NOARGS: Method.__call__
+        # enforces arity before this handler runs, so args/kwargs are
+        # always empty here (same no-arg pattern as list_copy).
+        result = getattr(self.data, method_name)()
+        return ByteArrayVariable(
+            result,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def bytearray_upper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "upper", args, kwargs)
+
+    def bytearray_lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "lower", args, kwargs)
+
+    def bytearray_title(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "title", args, kwargs)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
+        "split": Method(bytearray_split),
+        "rsplit": Method(bytearray_rsplit),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
+        "insert": Method(bytearray_insert),
+        "pop": Method(bytearray_pop),
+        "upper": Method(bytearray_upper),
+        "lower": Method(bytearray_lower),
+        "title": Method(bytearray_title),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2562,8 +2682,8 @@ class SizeVariable(TupleVariable):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # torch.Size items may be TensorVariables wrapping scalar tensors with
-        # known constant values (node.meta["example_value"].constant).  Extract
-        # the actual int values so the hash matches eager torch.Size hashing.
+        # known constant values. Extract the actual int values so the hash
+        # matches eager torch.Size hashing.
         from .tensor import TensorVariable
 
         int_items: list[int] = []
@@ -2578,7 +2698,7 @@ class SizeVariable(TupleVariable):
                 example_value = (
                     meta.get("example_value") if isinstance(meta, dict) else None
                 )
-                constant = getattr(example_value, "constant", None)
+                constant = maybe_get_fake_constant(example_value)
                 if isinstance(constant, torch.Tensor) and constant.numel() == 1:
                     int_items.append(int(constant.item()))
                     continue
@@ -2737,7 +2857,8 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         elif isinstance(arg, TensorVariable):
             value = get_fake_value(arg.as_proxy().node, tx)
-            if value.constant is None or value.constant.numel() != 1:
+            constant = maybe_get_fake_constant(value)
+            if constant is None or constant.numel() != 1:
                 unimplemented(
                     gb_type="Indexing torch.Size with non-scalar tensor",
                     context=f"get_item_dyn {self} {arg}",
@@ -2746,7 +2867,7 @@ class SizeVariable(TupleVariable):
                     ),
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            index = value.constant.item()
+            index = constant.item()
         else:
             index = arg.as_python_constant()
 
