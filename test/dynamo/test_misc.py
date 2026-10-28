@@ -3030,12 +3030,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def fn(x, g):
             g.foo = 1
             g.__annotations__ = {"x": int}
-
-            def h():
-                pass
-
-            h.__annotations__ = {"y": int}
-            return x + g.foo, h.__annotations__["y"] is int
+            return x + g.foo
 
         x = torch.ones(1)
         g_ref, g_res = make_g(), make_g()
@@ -3044,19 +3039,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(g_res.foo, 1)
         self.assertEqual(g_res.__annotations__, {"x": int})
-
-    def test_setattr_unmodeled_function_attribute_graph_breaks(self):
-        def fn(x):
-            def h(a=1):
-                return a
-
-            h.__defaults__ = (2,)
-            return x + h()
-
-        x = torch.ones(1)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method

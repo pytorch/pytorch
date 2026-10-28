@@ -3844,24 +3844,12 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        from .base import readonly_setter, unmodeled_setter
         from .functions import BaseUserFunctionVariable
 
-        # Function tp_getset/tp_members entries that never write (read-only or
-        # unmodeled) must run on every path, since functions with a source skip
-        # call_method below. Validating writable slots (e.g. the type of
-        # __name__) on sourced functions is out of scope; they keep store_attr.
-        if (
-            isinstance(obj, BaseUserFunctionVariable)
-            and name_var.is_python_constant()
-            and isinstance(name_var.as_python_constant(), str)
-        ):
-            entry = obj.lookup_tp_getset_member(name_var.as_python_constant())
-            if entry is not None and entry.setter in (
-                readonly_setter,
-                unmodeled_setter,
-            ):
-                entry.setter(obj, tx, val)
+        # Read-only function members (e.g. __closure__) must raise on every path,
+        # since functions with a source skip call_method below.
+        if isinstance(obj, BaseUserFunctionVariable) and name_var.is_python_constant():
+            obj.raise_if_readonly_slot(tx, name_var.as_python_constant())
         if isinstance(
             obj,
             (

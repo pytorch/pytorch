@@ -436,6 +436,20 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
+    def raise_if_readonly_slot(
+        self, tx: "InstructionTranslatorBase", name: object
+    ) -> None:
+        # func_setattro is PyObject_GenericSetAttr: a READONLY tp_members entry
+        # (e.g. __closure__, __globals__) raises AttributeError on set and delete
+        # instead of landing in __dict__. Writable and unmodeled slots are out of
+        # scope and keep their existing paths.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
+        if not isinstance(name, str):
+            return
+        entry = self.lookup_tp_getset_member(name)
+        if entry is not None and entry.setter is readonly_setter:
+            readonly_setter(self, tx, None)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -444,28 +458,18 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("__setattr__", "__delattr__") and args[0].is_python_constant():
-            # Read-only and unmodeled tp_getset/tp_members entries never write: like
-            # CPython data descriptors they raise AttributeError (or graph break)
-            # instead of landing in __dict__. Modeling writable slots such as
-            # __name__ or __doc__ is out of scope; they keep the __dict__ path.
-            # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
-            attr = args[0].as_python_constant()
-            entry = (
-                self.lookup_tp_getset_member(attr) if isinstance(attr, str) else None
-            )
-            if entry is not None and entry.setter in (
-                readonly_setter,
-                unmodeled_setter,
-            ):
-                entry.setter(self, tx, args[1] if name == "__setattr__" else None)
-            if args[0].is_constant_match("__annotations__"):
-                value = args[1] if name == "__setattr__" else None
-                return self._set_annotations(tx, value)
+            self.raise_if_readonly_slot(tx, args[0].as_python_constant())
         if name == "__setattr__":
+            if args[0].is_constant_match("__annotations__"):
+                self.annotations = args[1]
+                return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
         elif name == "__delattr__":
+            if args[0].is_constant_match("__annotations__"):
+                self.annotations = None
+                return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
