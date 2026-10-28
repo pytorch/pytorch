@@ -404,7 +404,6 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
-    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.is_nested_int": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.optimization_hint": TorchInGraphFunctionVariable,
@@ -501,6 +500,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.atan",
         "math.atan2",
         "math.atanh",
+        "math.cbrt",
         "math.ceil",
         "math.comb",
         "math.copysign",
@@ -511,6 +511,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.erf",
         "math.erfc",
         "math.exp",
+        "math.exp2",
         "math.expm1",
         "math.fabs",
         "math.factorial",
@@ -2439,10 +2440,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
     TorchInGraphFunctionVariable,
 )
 
-
-if sys.version_info >= (3, 11):
-    torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
-    torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 12):
     torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable

@@ -3541,9 +3541,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 sym_num=None,
             )
 
-        # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
-            a = a.dv_dict
+            # View truth uses guarded length, never the owner's __bool__ override.
+            return VariableTracker.build(
+                tx, not generic_is_true(tx, a).as_python_constant()
+            )
         # Must precede the container fast path below: a user subclass now also
         # satisfies those isinstance checks, but its __bool__/__len__ override
         # has to win.
@@ -4116,10 +4118,15 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     input_node = obj.as_proxy().node
                     if input_node.op == "placeholder":
                         ev = input_node.meta.get("example_value")
-                        if ev is not None and hasattr(ev, "fake_mode"):
+                        from torch._subclasses.fake_tensor import (
+                            is_fake_tensor,
+                            maybe_get_fake_mode,
+                        )
+
+                        if is_fake_tensor(ev):
                             from torch._subclasses.fake_impls import fast_detach
 
-                            snapshot = fast_detach(ev.fake_mode, ev)
+                            snapshot = fast_detach(maybe_get_fake_mode(ev), ev)
                             tx.output._shallow_copy_placeholder_snapshots.setdefault(
                                 input_node, snapshot
                             )
