@@ -13043,6 +13043,20 @@ class TestGDS(TestCase):
             del file
             self.assertTrue(torch.cuda.current_stream().query())
 
+    def test_gds_async_deregister_buffer_waits(self):
+        # Deregistering a buffer waits for pending async I/O on it. hipFile
+        # rejects deregistering a buffer with operations outstanding.
+        self._require_gds()
+        src = torch.empty(4096, device="cuda")
+        torch.cuda.gds.gds_register_buffer(src.untyped_storage())
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage_async(src.untyped_storage())
+            torch.cuda.gds.gds_deregister_buffer(src.untyped_storage())
+            self.assertTrue(torch.cuda.current_stream().query())
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_gds_async_deregister_waits_multi_gpu(self):
         # Each device's default stream has the same file handle, so the pending

@@ -94,6 +94,9 @@ def gds_deregister_buffer(s: Storage) -> None:
     """Deregisters a previously registered GDS buffer.
 
     This is a wrapper around ``cuFileBufDeregister`` (CUDA) / ``hipFileBufDeregister`` (ROCm).
+    It first synchronizes the storage's device, so that any
+    :meth:`GdsFile.load_storage_async` or :meth:`GdsFile.save_storage_async`
+    still pending on the buffer has run.
 
     Example::
 
@@ -106,6 +109,8 @@ def gds_deregister_buffer(s: Storage) -> None:
     Args:
         s (Storage): Buffer to register.
     """
+    # Async I/O on s may be pending on any stream, and through any GdsFile.
+    torch.cuda.synchronize(s.device)
     torch._C._gds_deregister_buffer(s)
 
 
