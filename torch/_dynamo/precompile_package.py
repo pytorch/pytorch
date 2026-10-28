@@ -1593,8 +1593,15 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        # The operators each backend graph calls, by backend id.
+        # The operators each backend graph calls, by backend id, and those run
+        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function or a
+        # frame Dynamo falls back on, and ops only AOTAutograd traces (a custom
+        # op's backward formula), are not recorded.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
+        self.graph_break_op_names: set[tuple[str, str]] = set()
+        # The current compile's graph-break ops, kept only if it records a guarded
+        # code, so a bypassed compile's ops are dropped like its backend graphs.
+        self._compile_graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1610,6 +1617,24 @@ class _CapturePackage(CompilePackage):
         from torch._precompile import _op_names
 
         self.op_names[backend_id] = _op_names(gm)
+
+    def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
+        name = (op._schema.name, op._schema.overload_name)
+        self._compile_graph_break_op_names.add(name)
+
+    @contextlib.contextmanager
+    def code_context(
+        self, code: types.CodeType, global_scope: dict[str, object] | None = None
+    ) -> Iterator[None]:
+        self._compile_graph_break_op_names = set()
+        with super().code_context(code, global_scope):
+            yield
+
+    def add_guarded_code(
+        self, guards_state: bytes, dynamo_code: types.CodeType
+    ) -> None:
+        super().add_guarded_code(guards_state, dynamo_code)
+        self.graph_break_op_names |= self._compile_graph_break_op_names
 
     def add_resume_function(
         self,
@@ -2118,14 +2143,20 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import _build_multigraph_artifact, _custom_op_modules
+        from torch._precompile import (
+            _build_multigraph_artifact,
+            _custom_op_modules,
+            _custom_ops,
+        )
 
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = set().union(*(self._package.op_names.get(b, ()) for b in backends))
+        op_names = self._package.graph_break_op_names.union(
+            *(self._package.op_names.get(b, ()) for b in backends)
+        )
         return _build_multigraph_artifact(
             self._served_entry()[0],
             backends,
@@ -2133,6 +2164,7 @@ class PrecompileSession(Generic[_P, _R]):
             self._backend,
             self._fn,
             _custom_op_modules(op_names),
+            _custom_ops(op_names),
         )
 
 
