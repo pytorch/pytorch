@@ -2016,15 +2016,23 @@ def _torch_op_module(
     return file_modules().get(os.path.realpath(path))
 
 
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``."""
+def _custom_op_modules(
+    op_names: Iterable[tuple[str, str]],
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """The modules registering the ops among ``op_names``, and the custom ops among
+    them that no known module registers."""
     file_modules = functools.cache(_file_modules)
-    modules = {
-        _custom_op_module(op_name, overload)
-        or _torch_op_module(op_name, overload, file_modules)
-        for op_name, overload in op_names
-    }
-    return tuple(sorted(m for m in modules if m is not None))
+    modules: set[str] = set()
+    unmapped: set[tuple[str, str]] = set()
+    for op_name, overload in op_names:
+        module = _custom_op_module(op_name, overload)
+        if module is None:
+            module = _torch_op_module(op_name, overload, file_modules)
+        if module is not None:
+            modules.add(module)
+        elif op_name.split("::")[0] not in ("aten", "prims"):
+            unmapped.add((op_name, overload))
+    return tuple(sorted(modules)), tuple(sorted(unmapped))
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -2100,7 +2108,8 @@ def _build_python_source(
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
     op_names = _called_op_names(graph_python)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    modules, _ = _custom_op_modules(op_names)
+    _write_custom_op_imports(buf, modules, _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2155,7 +2164,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
     op_names = _op_names(gm)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    modules, _ = _custom_op_modules(op_names)
+    _write_custom_op_imports(buf, modules, _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2316,6 +2326,16 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         }
         for i, code in enumerate(entry.codes)
     ]
+
+
+def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
+    """The modules a load imports for its frames: the entry's, and those of the
+    frames ``_build_multigraph_forward`` opens a scope for. Never a dead record's."""
+    return {
+        f["python_module"]
+        for f in frames
+        if f["is_entry"] or f["variants"] or (f["trivial"] and f["resume_names"])
+    }
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:

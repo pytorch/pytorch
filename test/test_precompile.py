@@ -571,6 +571,29 @@ class TestPrecompile(TestCase):
         self.assertEqual(frames[0]["code"].co_name, "forward")
         self.assertEqual(frames[0]["import_sources"], {"__import_torch": "torch"})
 
+    def test_served_modules_skip_dead_records(self):
+        from torch._precompile import _served_modules
+
+        def frame(module, entry=False, variants=(), trivial=False, resume=()):
+            return {
+                "python_module": module,
+                "is_entry": entry,
+                "variants": list(variants),
+                "trivial": trivial,
+                "resume_names": list(resume),
+            }
+
+        frames = [
+            frame("entry", entry=True),
+            frame("graph", variants=[{}]),
+            frame("plain_continuation", trivial=True, resume=["__resume_at_8_1"]),
+            frame("callback", trivial=True),
+            frame("bypassed", resume=["__resume_at_8_2"]),
+        ]
+        self.assertEqual(
+            _served_modules(frames), {"entry", "graph", "plain_continuation"}
+        )
+
     def test_reachable_frames_follow_resume_names(self):
         # A continuation is reachable only through a reachable parent's bytecode
         # (nested code objects included), so carrying a resume name is not
@@ -9169,6 +9192,8 @@ def _(x):
 lib = torch.library.Library("{ns}", "FRAGMENT")
 lib.define("cpu_only(Tensor x) -> Tensor")
 lib.impl("cpu_only", lambda x: x * 2, "CPU")
+lib.define("fragment(Tensor x) -> Tensor")
+lib.impl("fragment", lambda x: x * 2, "CompositeExplicitAutograd")
 
 
 # Dynamo graph-breaks on each of these and runs it eagerly, outside every graph.
@@ -9264,6 +9289,9 @@ torch.library.impl("{ns}::entry_op", "Meta", func=torch.empty_like)
 
 def library_fn(x):
     return torch.ops.{ns}.entry_op.default(torch.ops.{ns}.triple.default(x.sin())) + 1
+
+def fragment_fn(x):
+    return torch.ops.{ns}.fragment.default(x.sin()) + 1
 """
 
 
@@ -9415,6 +9443,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "dynamic_shape_fn", "standalone"),
             ("dynamo", "eager", "library_fn", "standalone"),
             ("dynamo", "inductor", "library_fn", "standalone"),
+            ("dynamo", "eager", "fragment_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9460,11 +9489,12 @@ class TestPrecompileCustomOpModules(TestCase):
             # and its replay passes only because the forward op's module imports
             # the backward op's module.
             traced_bw = entry == "train_fn" and (tracer, backend) != ("dynamo", "eager")
-            # entry_op has no known module, so a Dynamo artifact imports its frames'
-            # modules before checking it.
-            modules = {module} | ({bwmod} if traced_bw else set())
-            modules |= {entries} if entry == "library_fn" else set()
-            self.assertEqual(line, f"CUSTOM_OP_MODULES = {tuple(sorted(modules))!r}")
+            # entry_op has no known module, so a Dynamo artifact also imports its
+            # frames' modules before checking it. fragment's Library lives in a
+            # module no frame runs in, and is recorded by its file.
+            modules = tuple(sorted({module} | ({bwmod} if traced_bw else set())))
+            modules += (entries,) if entry == "library_fn" else ()
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)
             if mode is not None:
@@ -9663,7 +9693,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.impl("op", lambda x: x.clone(), "CompositeExplicitAutograd")
         names = {(f"{ns}::op", ""), ("aten::add", "Tensor")}
         # A Library a torch helper created records no module, but is still checked.
-        self.assertEqual(_custom_op_modules(names), ())
+        self.assertEqual(_custom_op_modules(names), ((), ((f"{ns}::op", ""),)))
         self.assertEqual(_custom_ops(names), ((f"{ns}::op", ""),))
 
         # A module that imports but raises is collected like a missing one.
