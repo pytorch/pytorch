@@ -3,7 +3,7 @@
   "models": [
     {
       "id": "global.anthropic.claude-sonnet-5",
-      "use": "Issue triage before the switch to GPT-6.1 Sol; same model as the Claude Code triage"
+      "use": "Same model as the Claude Code triage"
     },
     {
       "id": "global.anthropic.claude-opus-5",
@@ -19,7 +19,7 @@
     },
     {
       "id": "global.openai.gpt-6.1-sol",
-      "use": "Issue triage"
+      "use": "Optional issue-triage comparison"
     },
     {
       "id": "us.openai.gpt-6.1-sol",
