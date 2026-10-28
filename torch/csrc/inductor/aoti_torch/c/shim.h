@@ -637,32 +637,25 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-// CUDA graph capture. These are thin wrappers over at::cuda::MemPool and
-// at::cuda::CUDAGraph with the same contract as that C++ API: unlike
-// torch.cuda.graph, they don't warm up, synchronize or manage tensor
-// lifetimes. capture_begin and capture_end work on the current CUDA stream
-// (see aoti_torch_create_cuda_stream_guard), which must belong to the pool's
-// device, and replay on the current stream of the capture's device. Captures
-// record in thread-local mode, and random number generators advance on every
-// replay. The caller must:
-// - capture on a stream created with cudaStreamNonBlocking: while a blocking
-//   stream captures, work any thread launches on the legacy default stream
-//   invalidates the capture;
-// - end every capture with capture_end, on the thread and stream that began
-//   it, before deleting its graph, also when the captured work failed;
-//   capture_end ends the capture even when it returns an error;
+// CUDA graph capture: thin wrappers over at::cuda::MemPool and
+// at::cuda::CUDAGraph, with that C++ API's contract rather than
+// torch.cuda.graph's: no warm-up, synchronization or tensor lifetime
+// management. capture_begin and capture_end use the current stream, which
+// must be on the pool's device; replay uses the current stream of the
+// capture's device. Captures are thread-local, and a graph captures once.
+// Callers must:
+// - capture on a cudaStreamNonBlocking stream;
+// - end every capture, even a failed one, with capture_end on its thread and
+//   stream before deleting the graph. On ROCm, a stream whose capture was
+//   invalidated rejects work until the next capture begins;
 // - use a pool and its graphs from one thread at a time, capture into a pool
 //   one graph at a time, and use a new pool once every graph that began a
-//   capture into a pool, successfully or not, is deleted;
-// - order replays on different streams, and use or copy a replay's outputs
-//   before another graph in the pool replays, unless the graphs replay in the
-//   order they were captured: a graph captured later can place its outputs in
-//   memory an earlier graph uses for temporaries;
-// - order work queued on the capture stream before capture_begin ahead of a
-//   replay on another stream, and wait for a graph's replays to finish before
-//   deleting it, since the graph's random number state lives in memory from
-//   the capture stream.
-// A graph captures once; capture_end instantiates it for replay.
+//   capture into it is deleted;
+// - not overlap replays of graphs sharing a pool, and use a replay's outputs
+//   before replaying another graph of the pool, unless replaying in capture
+//   order;
+// - order earlier work on the capture stream before a replay on another
+//   stream, and wait for a graph's replays before deleting it.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 
