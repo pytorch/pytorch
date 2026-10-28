@@ -768,7 +768,7 @@ def convolution(
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    if use_ck_conv_template(layout) and not transposed:
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
