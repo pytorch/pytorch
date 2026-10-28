@@ -3,8 +3,9 @@
 
 The plan comes from a model that read untrusted issue text, so it is treated
 as a request: labels are filtered with the triaging-issues skill's rules,
-comments are limited to templates.json, and only a usage-question decision
-may close the issue. Labels are only ever added.
+comments are limited to templates.json, and only usage questions or expected
+numerical behavior may close the issue. Labels are only ever added. Reproduction
+requests redact download links using a fixed policy, never a model-written body.
 
 Usage:
   apply_plan.py <owner/repo> <issue> <plan.json> [--apply] [--replay]
@@ -19,11 +20,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from labels import (
     DISTRIBUTED,
@@ -48,9 +51,26 @@ CLOSING_TEMPLATES = {
 }
 
 
-def gh_api(args: list[str]) -> str:
-    """Run `gh api`, retrying transient failures (429/5xx surface as exit 1)."""
-    attempts = 3
+REDACTED_LINK = (
+    "[Link removed - external file downloads are not permitted for security reasons]"
+)
+DOWNLOAD_SUFFIXES = (".zip", ".pt", ".pth", ".pkl", ".safetensors", ".onnx", ".bin")
+STORAGE_HOSTS = (
+    "drive.google.com",
+    "dropbox.com",
+    "dropboxusercontent.com",
+    "onedrive.live.com",
+    "1drv.ms",
+    "mega.nz",
+    "mega.co.nz",
+    "wetransfer.com",
+    "we.tl",
+)
+
+
+def gh_api(args: list[str], *, retry: bool = True) -> str:
+    """Run `gh api`; disable retries for writes derived from a mutable snapshot."""
+    attempts = 3 if retry else 1
     for attempt in range(1, attempts + 1):
         result = subprocess.run(
             ["gh", "api", *args], capture_output=True, text=True, timeout=30
@@ -85,11 +105,12 @@ class Effects:
     add_labels: list[str] = field(default_factory=list)
     comment: str = ""
     close: bool = False
+    redact_body: bool = False
     notes: list[str] = field(default_factory=list)
 
     @property
     def mutates(self) -> bool:
-        return bool(self.add_labels or self.comment or self.close)
+        return bool(self.add_labels or self.comment or self.close or self.redact_body)
 
 
 def template_comment(
@@ -210,7 +231,13 @@ def plan_effects(
         effects.notes.append("dropped 'triaged': the issue needs human review")
         labels = [label for label in labels if label != "triaged"]
 
+    effects.redact_body = decision == "request_reproduction"
+    if effects.redact_body:
+        labels = [label for label in labels if label != "triaged"]
     keys = list(dict.fromkeys(plan.get("templates", [])))
+    repro_template = "request_self_contained_reproduction"
+    if effects.redact_body and repro_template not in keys:
+        keys.insert(0, repro_template)
     effects.close = decision in CLOSING_TEMPLATES
     if effects.close and CLOSING_TEMPLATES[decision] not in keys:
         keys.insert(0, CLOSING_TEMPLATES[decision])
@@ -246,8 +273,55 @@ def labels_before_triage(events: list[dict]) -> set[str]:
     return labels
 
 
+def redact_external_links(body: str) -> str:
+    """Replace download URLs without following them or accepting replacement prose."""
+
+    def replace_url(match: re.Match[str]) -> str:
+        text = match.group()
+        url = text.rstrip(".,;:!?)]}")
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            return text
+        host = (parsed.hostname or "").lower().rstrip(".")
+        path = unquote(parsed.path).lower()
+        storage = any(
+            host == item or host.endswith("." + item) for item in STORAGE_HOSTS
+        )
+        if storage or path.endswith(DOWNLOAD_SUFFIXES):
+            return REDACTED_LINK + text[len(url) :]
+        return text
+
+    # Stop at Markdown/quote boundaries, allowing a parenthesized filename segment.
+    url_pattern = (
+        r"https?://[^\s<>\"'`\[\]()]+(?:\([^\s<>\"'`\[\]()]*\)[^\s<>\"'`\[\]()]*)*"
+    )
+    redacted = re.sub(url_pattern, replace_url, body, flags=re.IGNORECASE)
+    # Preserve readable Markdown rather than leaving the notice in a URL position.
+    notice = re.escape(REDACTED_LINK)
+    redacted = re.sub(
+        r"!?\[[^\[\]\n]*\]\(" + notice + r'(?:\s+"[^"\n]*")?\)', REDACTED_LINK, redacted
+    )
+    return redacted.replace("<" + REDACTED_LINK + ">", REDACTED_LINK)
+
+
 def apply_effects(repo: str, issue: int, effects: Effects) -> None:
     """Write the effects to GitHub. Labels use the append endpoint, never SET."""
+    if effects.redact_body:
+        # Use the current body, not the model's input snapshot or proposed prose.
+        current = json.loads(gh_api([f"repos/{repo}/issues/{issue}"]))["body"] or ""
+        redacted = redact_external_links(current)
+        if redacted != current:
+            gh_api(
+                [
+                    "-X",
+                    "PATCH",
+                    f"repos/{repo}/issues/{issue}",
+                    "-f",
+                    f"body={redacted}",
+                ],
+                retry=False,
+            )
     if effects.comment:
         gh_api(
             [
@@ -297,6 +371,8 @@ def summary_markdown(
         f"**Add labels:** {', '.join(f'`{label}`' for label in effects.add_labels) or '—'}",
         f"**Comment templates:** {', '.join(plan.get('templates', [])) or '—'} · **Close:** {effects.close}",
     ]
+    if effects.redact_body:
+        lines.append("**Body:** redact external download links using the fixed policy")
     if effects.notes:
         lines.append(f"**Notes:** {'; '.join(effects.notes)}")
     if reference is not None:

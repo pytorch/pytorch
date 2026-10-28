@@ -107,7 +107,9 @@ Check if the issue body contains links to external files that users would need t
 1. Use `decision: "request_reproduction"` with the `request_self_contained_reproduction` template
 2. Do NOT add `triaged` — wait for the user to provide a reproducible example
 
-The links stay in the issue body: editing issue bodies is not supported.
+The apply step re-reads the issue body and replaces matching download/storage URLs with
+`[Link removed - external file downloads are not permitted for security reasons]`.
+It uses a fixed URL policy; do not submit a rewritten body or download the files.
 
 ### 1.55) Missing Reproduction — Other Cases
 

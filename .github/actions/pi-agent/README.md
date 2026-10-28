@@ -116,8 +116,10 @@ Run it manually with `mode`: `replay` shows already-triaged issues as they were 
 triage bot acted (their labels and human comments from before its first label event) and
 compares each plan with the labels added since; `dry-run` plans against the issues as they
 are now; `apply` writes and accepts exactly one issue per run. `replay` and `dry-run`
-can process batches. Issue transfers and issue-body redaction are not automated: a
-transfer becomes `triage review`, and download links stay in the body.
+can process batches. Issue transfers become `triage review`. A `request_reproduction` plan
+redacts download/storage links from the current issue body using a fixed policy and posts
+the self-contained-reproduction template. Other issue text is preserved; the model cannot
+supply replacement prose.
 
 ## Distributed triage
 
