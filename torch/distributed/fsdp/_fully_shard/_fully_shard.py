@@ -1114,17 +1114,25 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
 
-    def _set_unshard_async_op(self, async_op: bool):
+    def set_unshard_async_op(self, async_op: bool) -> None:
         """
-        Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
-        and pre-backward unshard op. This defaults to ``False`` but can be set
-        to ``True`` with this method.
+        Sets whether FSDP issues the pre-forward and pre-backward all-gathers
+        with ``async_op=True`` from the current stream instead of on its
+        separate all-gather streams. This applies to this module and all FSDP
+        submodules. Defaults to ``False``.
 
-        Setting this to ``True`` allows the all-gather allocations to happen in
-        the default stream, avoiding inter-stream memory fragmentation.
-        However, you must use explicit prefetching (e.g. via :meth:`unshard`)
-        in forward to still get overlap, and the pre-all-gather ops like dtype
-        casting and copy-in will not overlap with compute.
+        Setting this to ``True`` allocates the all-gather buffers in the
+        current stream's memory, which avoids inter-stream memory
+        fragmentation: the CUDA caching allocator does not reuse memory freed
+        on one stream for allocations on another. In return, the copy-in and
+        dtype cast before each all-gather run on the current stream and do not
+        overlap with compute.
+
+        An all-gather issued from the current stream overlaps with compute
+        only if it is issued ahead of time. In forward, configure explicit
+        prefetching with :meth:`set_modules_to_forward_prefetch` or call
+        :meth:`unshard` with ``async_op=True``; otherwise each module's
+        all-gather is exposed. Backward prefetching needs no configuration.
         """
         self_module = cast(nn.Module, self)
         for module in self_module.modules():
@@ -1132,6 +1140,10 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.unshard_async_op = async_op
+
+    def _set_unshard_async_op(self, async_op: bool) -> None:
+        # Kept for existing callers of the private name
+        self.set_unshard_async_op(async_op)
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
