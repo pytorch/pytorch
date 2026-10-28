@@ -1458,6 +1458,7 @@ class TestUnbackedSymints(InductorTestCase):
             torch._dynamo.decorators.mark_unbacked(x, 0)
             self.assertEqual(compiled(x), fn(x))
 
+    @dynamo_config.patch(error_on_recompile=True)
     def test_reshape_indexer_unbacked_total_size_fixes_value(self, device):
         # Reshape [4*u0, 32, 4096] -> [128, 4096]
         def fn(x):
@@ -1471,7 +1472,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         bad = torch.randn(2, 32, 4608, device=device)
         torch._dynamo.decorators.mark_unbacked(bad, 0)
-        with self.assertRaisesRegex(RuntimeError, r"Eq\(u0, 1\)"):
+        with self.assertRaisesRegex(RuntimeError, r"u0 <= 1"):
             compiled(bad)
 
     def test_reshape_indexer_fallback(self, device):
