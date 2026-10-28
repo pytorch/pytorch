@@ -585,7 +585,7 @@ class BaseUserFunctionVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> "VariableTracker | None":
-        if value is not None and not issubclass(value.python_type(), tuple):
+        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__type_params__", value)
 
