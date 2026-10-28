@@ -1435,7 +1435,9 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
         def pytest_collection_finish(self, session):
             for item in session.items:
-                self.tests.append(session.config.cwd_relative_nodeid(item.nodeid))
+                # Node ids are relative to the rootdir, but children run from our cwd.
+                path = os.path.relpath(item.path, session.config.invocation_params.dir)
+                self.tests.append(f"{path}::{item.nodeid.split('::', 1)[1]}")
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
