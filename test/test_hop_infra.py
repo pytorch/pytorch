@@ -178,6 +178,26 @@ class TestHOPInfra(TestCase):
 
         self.assertIsNone(out)
 
+    def test_kernel_side_table_instances_are_independent(self):
+        # Each user-kernel DSL owns a KernelSideTable; their index spaces and
+        # constant args must not leak into each other.
+        from torch._higher_order_ops.user_kernel_hop import KernelSideTable
+
+        a, b = KernelSideTable(), KernelSideTable()
+        k0, k1 = object(), object()
+        self.assertEqual(a.add_kernel(k0), 0)
+        self.assertEqual(a.add_kernel(k0), 0)
+        self.assertEqual(b.add_kernel(k1), 0)
+        self.assertIs(a.get_kernel(0), k0)
+        self.assertIs(b.get_kernel(0), k1)
+        self.assertEqual(a.add_constant_args({"x": 1}), 0)
+        self.assertEqual(b.add_constant_args({"y": 2}), 0)
+        self.assertEqual(a.get_constant_args(0), {"x": 1})
+        b.reset_table()
+        self.assertIs(a.get_kernel(0), k0)
+        with self.assertRaises(AssertionError):
+            b.get_kernel(0)
+
 
 if __name__ == "__main__":
     run_tests()
