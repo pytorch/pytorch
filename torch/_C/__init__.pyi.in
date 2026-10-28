@@ -2694,6 +2694,9 @@ class _XpuDeviceProperties:
     platform_name: str
     vendor: str
     device_id: _int
+    pci_domain_id: _int
+    pci_bus_id: _int
+    pci_device_id: _int
     driver_version: str
     version: str
     max_compute_units: _int
