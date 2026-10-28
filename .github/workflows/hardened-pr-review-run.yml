@@ -790,7 +790,7 @@ jobs:
         if: steps.diff.outputs.too_large == 'false'
         run: |
           set -euo pipefail
-          # A user skill, as in an interactive session. Copied from the trusted
+          # User skills, as in an interactive session. Copied from the trusted
           # checkout; the PR tree's own .agents/ is never loaded
           # (`--setting-sources user` below).
           mkdir -p ~/.claude/skills
