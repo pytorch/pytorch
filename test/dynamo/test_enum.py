@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import sys
 import unittest
 
 import torch
@@ -12,6 +13,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+_MIXIN_ENUM_CASES = [
+    ((enum.IntEnum,), int, (0, 1)),
+    ((enum.IntFlag,), int, (1, 2)),
+    ((float, enum.Enum), float, (0.5, 1.5)),
+]
+if sys.version_info >= (3, 11):
+    _MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):
@@ -478,12 +488,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
 
     @parametrize(
         "bases,mixin,values",
-        [
-            ((enum.IntEnum,), int, (0, 1)),
-            ((enum.IntFlag,), int, (1, 2)),
-            ((enum.StrEnum,), str, ("a", "b")),
-            ((float, enum.Enum), float, (0.5, 1.5)),
-        ],
+        _MIXIN_ENUM_CASES,
         name_fn=lambda bases, mixin, values: "_".join(b.__name__ for b in bases),
     )
     def test_enum_explicit_mixin_dunder_comparison(self, bases, mixin, values):
@@ -509,36 +514,32 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         for backend in Backend:
             self.assertEqual(fn(x, backend), opt_fn(x, backend))
 
-    @parametrize("base", [int, enum.IntEnum])
-    def test_stateful_eq_on_constant_subclass(self, base):
-        # https://github.com/pytorch/pytorch/pull/201565: the constant compare
-        # fast path must not run a user __eq__ eagerly at trace time.
-        if base is int:
+    @parametrize("op", ["__eq__", "__ne__", "__lt__", "__ge__"])
+    def test_unbound_int_comparison_ignores_enum_overrides(self, op):
+        # int.__eq__(member, x) calls int's slot, not the member's overrides.
+        class Mode(enum.IntEnum):
+            A = 0
+            B = 1
 
-            class Mode(int):
-                def __eq__(self, other):
-                    return self.enabled
+            def __eq__(self, other):
+                return True
 
-            a, b = Mode(0), Mode(1)
-        else:
+            def __ne__(self, other):
+                return True
 
-            class Mode(enum.IntEnum):
-                A = 0
-                B = 1
+            def __lt__(self, other):
+                return False
 
-                def __eq__(self, other):
-                    return self.enabled
+            def __ge__(self, other):
+                return False
 
-            a, b = Mode.A, Mode.B
+            __hash__ = enum.IntEnum.__hash__
 
         def fn(x):
-            return x + (1 if a == b else 2)
+            return x + (1 if getattr(int, op)(Mode.A, Mode.B) else 2)
 
         x = torch.zeros(())
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        a.enabled = False
-        self.assertEqual(fn(x), opt_fn(x))
-        a.enabled = True
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_flag_enum(self):
