@@ -245,6 +245,16 @@ def plan_effects(
         keys, templates, bot_comments, effects.notes
     )
 
+    if (
+        decision == "label"
+        and not {TRIAGE_REVIEW, "needs reproduction"} & (existing_labels | set(labels))
+        and not any(
+            label.startswith("oncall:") and label != "oncall: pt2" for label in labels
+        )
+        and not {"request_more_info", repro_template} & set(keys)
+    ):
+        labels.append("triaged")
+
     effects.add_labels = [
         label for label in dict.fromkeys(labels) if label not in existing_labels
     ]
