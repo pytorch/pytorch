@@ -9360,6 +9360,8 @@ class TestPrecompileCustomOpModules(TestCase):
             traced_bw = tracer == "make_fx" and entry == "train_fn"
             modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
+            if traced_bw:
+                self.assertIn(repr((f"{bwns}::scale", "")), python_code)
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
@@ -9367,6 +9369,15 @@ class TestPrecompileCustomOpModules(TestCase):
 def _no_fake_op_fn(x):
     # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
     return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
+
+
+def _composite_impl(x):
+    return torch.ops.precompile_no_fake.op.default(x) * 2
+
+
+def _composite_op_fn(x):
+    # Fake mode fails on the decomposed op, but the graph break runs this one.
+    return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
 
 
 class TestPrecompileCustomOpRecording(TestCase):
@@ -9451,16 +9462,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
-        try:
-            import libtorch_agn_2_13  # noqa: F401
-        except ImportError:
-            self.skipTest("requires the libtorch_agn_2_13 cpp extension")
         from torch._precompile import _custom_op_module
 
-        name = "libtorch_agn_2_13::identity_with_fake_module"
-        self.assertEqual(_custom_op_module(name, ""), "libtorch_agn_2_13")
-        missing = "libtorch_agn_2_13::identity_w_nonexistent_fake_module"
-        self.assertIsNone(_custom_op_module(missing, ""))
+        # As a C++ op that names its module with m.set_python_module.
+        name = f"precompile_pystub_{uuid.uuid4().hex}::op"
+        with mock.patch.object(torch._C, "_dispatch_pystub") as dispatch_pystub:
+            dispatch_pystub.return_value = ("unittest", "context")
+            self.assertEqual(_custom_op_module(name, ""), "unittest")
+            dispatch_pystub.return_value = None
+            self.assertIsNone(_custom_op_module(name, ""))
 
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage
@@ -9489,11 +9499,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CPU")
+        lib.define("composite(Tensor x) -> Tensor")
+        lib.impl("composite", _composite_impl, "CompositeImplicitAutograd")
         lib.define("bypassed(Tensor x) -> Tensor")
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "artifact.py")
             with capture(
-                _no_fake_op_fn,
+                _composite_op_fn,
                 artifact_path=artifact,
                 cache_path=os.path.join(directory, "artifact.cache"),
                 tracer=DynamoTracer(),
@@ -9502,14 +9514,20 @@ class TestPrecompileCustomOpRecording(TestCase):
                 cap(torch.ones(4))
                 # A compile that graph-broke on an op and was then bypassed.
                 package = cap._session._package
-                with package.code_context(_no_fake_op_fn.__code__):
+                with package.code_context(_composite_op_fn.__code__):
                     package.add_graph_break_op(
                         torch.ops.precompile_no_fake.bypassed.default
                     )
                     package.bypass_current_compile()
+                # A recompile that records a guarded code must not keep its ops.
+                cap(torch.ones(4, 4))
             with open(artifact) as f:
                 python_code = f.read()
-        self.assertIn("CUSTOM_OPS = (('precompile_no_fake::op', ''),)", python_code)
+        expected = (
+            ("precompile_no_fake::composite", ""),
+            ("precompile_no_fake::op", ""),
+        )
+        self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
         served, served_name = self._op("served")
