@@ -63,6 +63,24 @@ class TestInnerTreeStagedIndex(TestCase):
             self.assertEqual(direct, expected)
             self.assertEqual(actual, expected)
 
+    def test_int64_index_partials_fit_the_async_combine(self, device):
+        """Size the async combine from the widest partial so Int64 indices fit cp.async."""
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits
+
+        trait = traits.ArgMaxOps(acc=cutlass.Float32, idx=cutlass.Int64)
+        m, n = 3, 1 << 20
+        x = torch.randn(m, n, device=device)
+        x[:, 700001] = 10
+        b200 = rt._ITREE_ARCH[(10, 0)]
+        with mock.patch.object(rt, "_itree_arch", return_value=b200):
+            plan = rt.itree_plan(n, m, 4, device=x.device)
+            combine = rt.itree_combine_plan(plan, 8, x.device, nfields=2, nrows=m)
+            self.assertGreater(combine.combine_tile, 0)
+            (got,) = rt._run_itree(trait, "argmax_int64_split", x, [torch.int64], plan)
+        self.assertEqual(got, torch.full((m,), 700001, device=device))
+
 
 instantiate_device_type_tests(TestInnerTreeStagedIndex, globals(), only_for="cuda")
 

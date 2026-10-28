@@ -8,13 +8,13 @@ from collections.abc import Sequence
 from typing import Any, cast, Literal
 
 import cutlass.cute as cute
-from cutlass import Float32, Float64, Int32, Int64
+from cutlass import Int32, Int64
 
 import torch
 from torch._tensor_iterator import reduce_op
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
 from .traits import WARP
@@ -121,12 +121,6 @@ class ReduceBlock:
 _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
-_PART_TORCH = {
-    Float32: torch.float32,
-    Float64: torch.float64,
-    Int32: torch.int32,
-    Int64: torch.int64,
-}
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
@@ -428,7 +422,7 @@ def _two_stage_general(
         return None
     inner = count // E
     parts = [
-        torch.empty(num_o * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(num_o * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
@@ -483,7 +477,9 @@ def _try_indexed_itree(
     from . import kernel_rowtile as rt
 
     # General addressing cannot stage physically adjacent rows.
-    plan = rt.itree_plan(count, num_o, x.element_size(), stage=False, device=x.device)
+    plan = rt.trait_itree_plan(
+        trait, count, num_o, x.element_size(), stage=False, device=x.device
+    )
     if plan is None:
         return None
     nbatch = plan.split[0] if plan.shape == "split" else 1
@@ -511,7 +507,7 @@ def _try_indexed_itree(
         torch.empty(
             num_o * nbatch,
             device=x.device,
-            dtype=_PART_TORCH[trait.fdtypes[f]],
+            dtype=cute2torch[trait.fdtypes[f]],
         )
         for f in range(trait.nfields)
     ]
@@ -534,7 +530,7 @@ def _try_indexed_itree(
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
     combine = rt.itree_combine_plan(
         plan,
-        parts[0].element_size(),
+        max(p.element_size() for p in parts),
         x.device,
         nfields=trait.nfields,
         nrows=num_o,
@@ -798,7 +794,7 @@ def _reduce_all(
     chunk = (L + G - 1) // G
 
     parts = [
-        torch.empty(G, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(G, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
