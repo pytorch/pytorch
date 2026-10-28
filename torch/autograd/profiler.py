@@ -154,8 +154,9 @@ class profile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -221,7 +222,7 @@ class profile:
         with_flops=False,
         profile_memory=False,
         with_stack=False,
-        with_modules=False,
+        with_modules=None,
         use_kineto=False,
         use_cpu=True,
         experimental_config=None,
@@ -246,7 +247,7 @@ class profile:
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        self.with_modules = bool(with_modules)
         self.use_cpu = use_cpu
         self.acc_events = acc_events
         if experimental_config is None:
@@ -259,12 +260,12 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if with_modules:
+        if with_modules is not None:
             warn(
-                "with_modules is deprecated and will be removed in a future release. "
-                "It only collects data for TorchScript models, which are themselves "
-                "deprecated, and does nothing in eager mode. Use with_stack=True, "
-                "which records nn.Module events for eager models.",
+                "with_modules is deprecated and will be removed in a future release; "
+                "stop passing it. It only collects data for TorchScript models, which "
+                "are themselves deprecated, and does nothing in eager mode. Use "
+                "with_stack=True, which records nn.Module events for eager models.",
                 FutureWarning,
                 stacklevel=2,
             )

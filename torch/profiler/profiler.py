@@ -302,8 +302,9 @@ class _KinetoProfile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -342,7 +343,7 @@ class _KinetoProfile:
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
@@ -1129,8 +1130,9 @@ class profile(_KinetoProfile):
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -1258,7 +1260,7 @@ class profile(_KinetoProfile):
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,

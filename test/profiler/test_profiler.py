@@ -1055,11 +1055,19 @@ class TestProfiler(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
                     config.__setstate__(old_state)
 
-    def test_with_modules_deprecated(self):
+    @parametrize("with_modules", [True, False])
+    def test_with_modules_deprecated(self, with_modules):
         # with_modules only collects data for TorchScript models and is on its
-        # way out: passing it must warn with FutureWarning and not error.
+        # way out: passing it with any value must warn with FutureWarning and
+        # not error.
         with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
-            with profile(activities=[ProfilerActivity.CPU], with_modules=True):
+            with profile(activities=[ProfilerActivity.CPU], with_modules=with_modules):
+                torch.ones(1)
+
+    def test_with_modules_omitted_does_not_warn(self):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            with profile(activities=[ProfilerActivity.CPU]):
                 torch.ones(1)
 
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
