@@ -640,10 +640,14 @@ class CompiledFxGraph(OutputCode):
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
         # User CuTeDSL kernels the generated module launches through objects bound in
-        # this process (see prepare_for_serialization).
+        # this process, or objects exported for this compile and linked by path (see
+        # prepare_for_serialization).
         wrapper = getattr(graph, "wrapper_code", None)
         self.process_local_kernels = sorted(
-            getattr(wrapper, "user_defined_cutedsl_launchers", None) or ()
+            [
+                *(getattr(wrapper, "user_defined_cutedsl_launchers", None) or ()),
+                *(getattr(wrapper, "cutedsl_exported_kernels", None) or ()),
+            ]
         )
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
