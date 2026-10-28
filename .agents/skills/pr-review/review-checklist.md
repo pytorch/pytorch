@@ -36,6 +36,7 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
 - [ ] **Useful comments only** - Comments explain non-obvious context that cannot be inferred locally. For large comment use the `# Note [Good note title]` and `See Note [Good note title]` to write larger comments that can be referenced from multiple places in the codebase.
+- [ ] **Implementation notes out of headers** - New or substantially rewritten long explanations of how or why an implementation works (e.g. a `Note [...]`) go in the `.cpp`/`.cu` file that implements the logic, with a short `See Note [...]` pointer in the header, since any header edit rebuilds every includer. Documentation callers need (API docs, interface contracts) stays in the header; existing comments need not move
 - [ ] **No backward-compatibility hacks** - Unused code is deleted completely, not renamed with underscores or marked with "removed" comments
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
