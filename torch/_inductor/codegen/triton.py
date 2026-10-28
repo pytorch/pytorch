@@ -9063,8 +9063,8 @@ class TritonScheduling(SIMDScheduling):
 
         current_device = V.graph.get_current_device_or_throw()
 
-        # The default wrapper's async_compile.triton literal is this dedented, stripped
-        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # A string-form wrapper's (C++, FX) async_compile.triton literal is this dedented,
+        # stripped source; the eager submission must be the same bytes so CompiledTritonKernels
         # (keyed on the exact string) hits at wrapper time instead of compiling the
         # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
@@ -9095,6 +9095,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):
