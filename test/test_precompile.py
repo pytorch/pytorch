@@ -7440,6 +7440,88 @@ def fn(x, w):
 """
 
 
+_NEVER_RUN_BACKWARD_MODULE = """
+def fn(x, w):
+    return (x @ w).softmax(-1)
+"""
+
+
+_NEVER_RUN_BACKWARD_DRIVER = """
+import os
+import sys
+
+phase, directory, module = sys.argv[1:4]
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
+os.environ.pop("TRITON_CACHE_DIR", None)
+os.environ.pop("TRITON_CACHE_AUTOTUNING", None)
+if phase == "replay":
+    os.environ["TORCH_PRECOMPILE_NO_COMPILATION"] = "1"
+
+import torch
+
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+torch._inductor.config.use_static_cuda_launcher = True
+torch._inductor.config.coordinate_descent_tuning = True
+sys.path.insert(0, directory)
+fn = __import__(module).fn
+
+
+def inputs():
+    g = torch.Generator(device="cuda").manual_seed(0)
+    x = torch.randn(64, 128, device="cuda", generator=g, requires_grad=True)
+    return x, torch.randn(128, 32, device="cuda", generator=g, requires_grad=True)
+
+
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+benchmarked = []
+benchmark_all_configs = CachingAutotuner.benchmark_all_configs
+
+
+def recording_benchmark_all_configs(self, *args, **kwargs):
+    benchmarked.append((self.is_backward, len(self.launchers)))
+    return benchmark_all_configs(self, *args, **kwargs)
+
+
+CachingAutotuner.benchmark_all_configs = recording_benchmark_all_configs
+if phase == "capture":
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+        # Lowers the backward too, but no call runs it.
+        cap(*inputs())
+    # The backward was tuned across its configs while it lowered.
+    assert any(bw and n > 1 for bw, n in benchmarked), benchmarked
+else:
+    from triton.runtime.cache import FileCacheManager
+
+    x, w = inputs()
+    expected = fn(x, w)
+    expected.sum().backward()
+    writes = []
+    put = FileCacheManager.put
+
+    def recording_put(self, data, filename, binary=True):
+        writes.append(filename)
+        return put(self, data, filename, binary=binary)
+
+    FileCacheManager.put = recording_put
+    x2, w2 = inputs()
+    with pc.no_compilation():
+        loaded = pc.load(artifact, cache)
+        out = loaded(x2, w2)
+        out.sum().backward()
+    torch.testing.assert_close(out, expected)
+    torch.testing.assert_close(x2.grad, x.grad)
+    torch.testing.assert_close(w2.grad, w.grad)
+    # Neither a Triton compile nor an autotuning benchmark ran for the backward.
+    assert not writes, writes
+    assert not benchmarked, benchmarked
+print("never-run backward phase ok:", phase)
+"""
+
+
 _RUNTIME_CACHE_DRIVER = """
 import os
 import sys
@@ -7588,6 +7670,34 @@ class TestPrecompileRuntimeCache(TestCase):
         kernel.launchers = []
         with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
             _freeze_triton_kernel("source", [kernel])
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_of_a_never_run_backward(self):
+        from torch.compiler._runtime_cache import _triton_runtime_cache
+
+        if _triton_runtime_cache() is None:
+            self.skipTest("requires a Triton with cache and autotuning knobs")
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"precompile_never_run_{uuid.uuid4().hex}"
+            with open(os.path.join(directory, module + ".py"), "w") as f:
+                f.write(_NEVER_RUN_BACKWARD_MODULE)
+            for phase in ("capture", "replay"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _NEVER_RUN_BACKWARD_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"never-run backward phase ok: {phase}", out.stdout)
 
     def test_static_records_follow_cache_reset(self):
         import hashlib
