@@ -853,8 +853,6 @@ class TestCuteDSLReadOnlyWrapperCUDA(TestCase):
         # copy-on-write across the kernel launch.
         a_cow = a._lazy_clone()
         b_cow = b._lazy_clone()
-        if not torch._C._is_cow_tensor(a_cow):
-            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(torch._C._is_cow_tensor(a_cow))
         self.assertTrue(torch._C._is_cow_tensor(b_cow))
         # const_data_ptr() is the exported pointer and does not materialize COW;
