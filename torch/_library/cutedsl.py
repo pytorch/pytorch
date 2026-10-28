@@ -44,15 +44,41 @@ def is_traceable_cutedsl_wrapper(obj: object) -> bool:
     return module is not None and isinstance(obj, module.TraceableCuteDSLKernelWrapper)
 
 
+def _is_dsl_function(obj: object, module: str, qualname: str) -> bool:
+    # The DSL's own function, not a replacement stored under its name: a mock, or a
+    # wrapper made with functools.wraps (which copies __module__ and __qualname__).
+    return (
+        inspect.isfunction(obj)
+        and obj.__module__ == module
+        and obj.__qualname__ == qualname
+        and not hasattr(obj, "__wrapped__")
+    )
+
+
+def is_cutedsl_from_dlpack(obj: object) -> bool:
+    """Whether ``obj`` is ``cutlass.cute.runtime.from_dlpack``, which makes the cute
+    tensors of a raw host-function call."""
+    return _is_dsl_function(obj, "cutlass.cute.runtime", "from_dlpack")
+
+
+def is_cutedsl_current_stream(obj: object) -> bool:
+    """Whether ``obj`` is ``cutlass.torch.current_stream``, which makes the stream
+    argument of a raw host-function call."""
+    return _is_dsl_function(obj, "cutlass.torch", "current_stream")
+
+
 def wrap_cutedsl(
     host_fn: Callable[..., Any],
     /,
     *,
     mutates_args: Iterable[str] | Literal["unknown"],
 ) -> "TraceableCuteDSLKernelWrapper":
-    """Allows capture of a CuTeDSL kernel launch into a graph via ``torch.compile``,
-    make_fx or non-strict ``torch.export``: the counterpart of
-    :func:`torch.library.wrap_triton` for ``@cute.jit`` host functions.
+    """Allows capture of a CuTeDSL kernel launch into a graph via make_fx or
+    non-strict ``torch.export``: the counterpart of :func:`torch.library.wrap_triton`
+    for ``@cute.jit`` host functions. These trace through ``__torch_dispatch__`` and
+    cannot see a raw call of a host function. Dynamo (``torch.compile``, strict
+    ``torch.export``) captures a call of the wrapper as well as a raw call written as
+    for eager, with ``from_dlpack(t)`` tensors and ``cutlass.torch.current_stream()``.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
