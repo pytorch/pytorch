@@ -10428,6 +10428,20 @@ class AOTInductorTestsTemplate:
                 event.synchronize()
                 return y * 2
 
+        class SyncsStream(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        class SyncsDevice(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                torch.cuda.synchronize()
+                return y * 2
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -10441,9 +10455,11 @@ class AOTInductorTestsTemplate:
             # AOT mode lowers without graph partitioning, which skips CPU ops.
             (CpuOp(), "cpu device", {"triton.cudagraphs": True}),
             (Item(), "incompatible op", {}),
-            (MutatesInput(), "mutates inputs", {}),
+            (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
             (Cond(), "control flow operator: torch.cond", {}),
-            (SyncsEvent(), "waits on the host for a CUDA event", {}),
+            (SyncsEvent(), r"waits on the host \(Event.synchronize\)", {}),
+            (SyncsStream(), r"waits on the host \(Stream.synchronize\)", {}),
+            (SyncsDevice(), r"waits on the host \(torch.cuda.synchronize\)", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
