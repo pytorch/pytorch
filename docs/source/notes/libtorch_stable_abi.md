@@ -36,6 +36,11 @@ We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please fi
 
 For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/api/stable/index.html).
 
+(shim-overhead)=
+```{note}
+Crossing the ABI boundary through the C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Stable ops that interact with the dispatcher via [`torch_call_dispatcher`](stack-based-apis) will have extra overhead (on the order of a microsecond for a typical op), since each call will box and unbox arguments and returns into their stable counterparts.
+```
+
 ### Stable C headers
 
 The stable C headers started by AOTInductor form the foundation of the stable ABI. Presently, the available C headers include:
@@ -74,11 +79,21 @@ runtime and must be called with the GIL held. If you call them from a context th
 may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
 acquire it first.
 
+### Performance Overhead
+
+Using the stable ABI adds a small host-side overhead to each op call, typically a few microseconds depending on your CPU. This comes from registering through the dispatcher (see [dispatcher overhead](dispatcher-overhead)) and from calling into libtorch through the C shims (see [shim overhead](shim-overhead)). The overhead is negligible next to a sizable GPU kernel and disappears after warmup under graph capture such as CUDA Graphs, but it can be noticeable in eager mode for kernels that are already fast.
+
+
 ## Migrating your kernel to the LibTorch stable ABI
 
 If you'd like your kernel to be ABI stable with LibTorch, meaning you'd have the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
 
 Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI stable kernels must be registered via `STABLE_TORCH_LIBRARY`. Note that implementations registered via `STABLE_TORCH_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. The `TORCH_BOX` macro handles this automatically for most use cases. See the simple example below or our docs on [Stack-based APIs](stack-based-apis) for more details. For kernels that are registered via `pybind`, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
+
+(dispatcher-overhead)=
+```{note}
+Like `TORCH_LIBRARY`, `STABLE_TORCH_LIBRARY` registers your kernels with the PyTorch dispatcher so that they behave like any ATen op, with out-of-the-box support for autograd, autocast, `torch.compile`, the profiler, and other dispatcher features. Each call through the dispatcher typically adds under a microsecond to a few microseconds of overhead compared to binding a C++ function directly to Python (e.g. with pybind11).
+```
 
 While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers). This means that your extension should no longer use any utilities from the `at::` or `c10::` namespaces but instead use their replacements in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
 - all uses of `at::Tensor` must be replaced with `torch::stable::Tensor`
@@ -89,7 +104,7 @@ While previously your kernels might have included APIs from `<torch/*.h>` (for e
 
 As mentioned above, the LibTorch stable ABI is still under development. If there is any API or feature you would like to see added to the stable ABI/`torch::headeronly`/`torch::stable`, please file a request through a [new issue on the PyTorch repo](https://github.com/pytorch/pytorch/issues).
 
-Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRARY` to the stable ABI (`TORCH_STABLE_LIBRARY`). For a larger end to end example you can take a look at the FA3 repository. Specifically the diff between [`flash_api.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api.cpp#L1) and the stable variant [`flash_api_stable.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api_stable.cpp#L1).
+Below is a simple example of migrating an existing kernel that uses `TORCH_LIBRARY` to the stable ABI (`STABLE_TORCH_LIBRARY`). For a larger end to end example you can take a look at the FA3 repository. Specifically the diff between [`flash_api.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api.cpp#L1) and the stable variant [`flash_api_stable.cpp`](https://github.com/Dao-AILab/flash-attention/blob/ad70a007e6287d4f7e766f94bcf2f9a813f20f6b/hopper/flash_api_stable.cpp#L1).
 
 
 ### Original Version with `TORCH_LIBRARY`
@@ -163,7 +178,6 @@ STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
 
 } // namespace myops
 ```
-
 
 ## How are objects passed across the ABI boundary when interacting with the dispatcher?
 
