@@ -1531,6 +1531,39 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
+        @register(torch._library.cutedsl.wrap_cutedsl)
+        def handle_wrap_cutedsl(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .cutedsl import CuteDSLKernelVariable
+
+            # Unlike wrap_triton this is not a no-op: the result carries the write set.
+            if (
+                len(args) == 1
+                and isinstance(args[0], CuteDSLKernelVariable)
+                # a @cute.jit function, not a wrapper, as in eager
+                and not args[0].is_wrapper
+                and set(kwargs) == {"mutates_args"}
+                and kwargs["mutates_args"].is_python_constant()
+            ):
+                return args[0].with_mutates_args(
+                    kwargs["mutates_args"].as_python_constant()
+                )
+
+            unimplemented(
+                gb_type="unsupported torch._library.cutedsl.wrap_cutedsl call",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) "
+                "where host_fn is a @cute.jit function and mutates_args is a constant.",
+                hints=[
+                    "Pass a @cute.jit function and a constant mutates_args.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(
             self, tx: "InstructionTranslatorBase", input: VariableTracker
