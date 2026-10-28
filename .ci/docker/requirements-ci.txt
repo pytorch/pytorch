@@ -425,7 +425,8 @@ fsspec
 #Description: torch runtime dependency. In the Linux CI images this means the
 # torch wheel install at test time finds it already satisfied, so it upgrades
 # when the image is rebuilt rather than on every run. macOS, Windows and s390x
-# install this file at test time, so there it floats like the rest of the file.
+# install this file at test time, so there fsspec, like the file's other
+# unpinned entries, still resolves to the newest release on each run.
 #Pinned versions:
 #test that import: distributed/checkpoint/test_fsspec.py
 
