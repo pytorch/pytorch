@@ -744,11 +744,50 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(out.cpu(), torch.tensor([3.0, 2.0]))
 
     def test_div_out_as_primary_inplace(self):
-        """Inplace variant: derived from div_out, feeds self into the out slot."""
+        """Inplace variant: aten's composite runs meta(), then feeds self into div_out."""
         x = torch.tensor([6.0, 8.0], device="openreg")
         y = torch.tensor([2.0, 4.0], device="openreg")
         x.div_(y)
         self.assertEqual(x.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_inplace_matches_cpu_errors(self):
+        """div_ goes through aten's meta(), so invalid inplace calls raise as on CPU
+        instead of resizing self or silently casting into it."""
+        x = torch.ones(1, 3, device="openreg")
+        with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast shape"):
+            x.div_(torch.ones(2, 3, device="openreg"))
+        i = torch.ones(3, dtype=torch.long, device="openreg")
+        with self.assertRaisesRegex(
+            RuntimeError, "can't be cast to the desired output type"
+        ):
+            i.div_(torch.full((3,), 2.0, device="openreg"))
+
+    def test_angle_derived_functional(self):
+        """angle has no aten structured or composite kernel, so angle() is derived
+        from angle_out: the kernel allocates the undefined out with the real dtype."""
+        x = torch.tensor([1, -2, 3], device="openreg")
+        z = torch.angle(x)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.dtype, torch.angle(x.cpu()).dtype)
+        self.assertEqual(z.cpu(), torch.angle(x.cpu()))
+
+    def test_generated_registrations(self):
+        """The CPU fallback would return the same values without these kernels, so
+        check the registrations directly: structured ops get every variant, plain
+        .out ops get the .out plus only what aten does not already provide."""
+        has = torch._C._dispatch_has_kernel_for_dispatch_key
+        for op in (
+            "aten::maximum",
+            "aten::maximum.out",
+            "aten::minimum",
+            "aten::minimum.out",
+            "aten::div.out",
+            "aten::angle",
+            "aten::angle.out",
+        ):
+            self.assertTrue(has(op, "PrivateUse1"), op)
+        for op in ("aten::div.Tensor", "aten::div_.Tensor"):
+            self.assertFalse(has(op, "PrivateUse1"), op)
 
 
 if __name__ == "__main__":

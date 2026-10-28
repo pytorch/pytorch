@@ -9,6 +9,25 @@ set(OPENREG_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(OPENREG_BACKEND_YAML
     "${CMAKE_CURRENT_SOURCE_DIR}/aten/openreg_native_functions.yaml")
 file(MAKE_DIRECTORY ${OPENREG_GEN_DIR})
+# Rerun the codegen when torchgen, native_functions.yaml or the templates change,
+# not only when the backend YAML does. Mirror gen_backend_stubs.run(): it reads
+# aten/src next to torchgen in a source tree, torchgen/packaged otherwise.
+execute_process(
+    COMMAND ${PYTHON_EXECUTABLE} -c
+        "import os, torchgen; print(os.path.dirname(torchgen.__file__))"
+    OUTPUT_VARIABLE TORCHGEN_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+get_filename_component(TORCHGEN_ROOT "${TORCHGEN_DIR}" DIRECTORY)
+if(EXISTS "${TORCHGEN_ROOT}/aten/src")
+  set(TORCHGEN_COMMON_DIR "${TORCHGEN_ROOT}/aten/src")
+else()
+  set(TORCHGEN_COMMON_DIR "${TORCHGEN_DIR}/packaged")
+endif()
+file(GLOB_RECURSE TORCHGEN_INPUTS CONFIGURE_DEPENDS
+    "${TORCHGEN_DIR}/*.py"
+    "${TORCHGEN_COMMON_DIR}/ATen/native/native_functions.yaml"
+    "${TORCHGEN_COMMON_DIR}/ATen/native/tags.yaml"
+    "${TORCHGEN_COMMON_DIR}/ATen/templates/*")
 add_custom_command(
     OUTPUT
         "${OPENREG_GEN_DIR}/RegisterPrivateUse1.cpp"
@@ -16,7 +35,7 @@ add_custom_command(
     COMMAND ${PYTHON_EXECUTABLE} -m torchgen.gen_backend_stubs
         --source-yaml "${OPENREG_BACKEND_YAML}"
         --output-dir "${OPENREG_GEN_DIR}"
-    DEPENDS "${OPENREG_BACKEND_YAML}"
+    DEPENDS "${OPENREG_BACKEND_YAML}" ${TORCHGEN_INPUTS}
     COMMENT "torchgen: generating PrivateUse1 stubs for openreg"
     VERBATIM
 )

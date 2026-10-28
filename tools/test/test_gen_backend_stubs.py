@@ -322,9 +322,10 @@ at::Tensor abs(const at::Tensor & self)
         )
 
     # The per-op dict form (PrivateUse1 out-of-tree structured/out-as-primary
-    # feature) lets an op opt into a structured kernel. The op name and its
-    # options (structured/device_guard) are siblings, so the
-    # options must sit at the same indentation as the "- op:" key.
+    # feature) lets an op opt into a structured kernel. Its options
+    # (structured/device_guard) nest under the op name ("- mul.out:" then an
+    # indented "structured: true"); the flat sibling form is rejected
+    # (test_flat_dict_shape_rejected).
 
     # structured: true reuses the native structured kernel for the op.
     def test_valid_per_op_structured(self) -> None:

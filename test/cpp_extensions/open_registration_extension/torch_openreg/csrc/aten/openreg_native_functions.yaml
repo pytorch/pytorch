@@ -7,7 +7,8 @@ supported:
       structured: true
   - minimum.out:
       structured: true
-  # Non-structured op: out-as-primary only (no native structured kernel). The
-  # backend supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the
-  # functional/inplace variants from it.
+  # Plain .out kernels (structured: false). div is structured in aten, so div and
+  # div_ stay with aten's composite (meta() + redispatch to div_out); angle has no
+  # aten structured or composite kernel, so torchgen derives angle() from angle_out.
   - div.out
+  - angle.out
