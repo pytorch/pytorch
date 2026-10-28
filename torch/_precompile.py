@@ -2037,11 +2037,6 @@ _TORCH_HELPER_OP_MODULES = MappingProxyType(
         "pippy": "torch.distributed.pipelining._IR",
     }
 )
-# torch.distributed._ops.device_mesh imports only once torch.distributed.tensor has
-# registered DeviceMesh as an opaque type.
-_TORCH_OP_MODULE_PREREQUISITES = MappingProxyType(
-    {"torch.distributed._ops.device_mesh": "torch.distributed.tensor"}
-)
 # The modules defining prims with torch._prims._make_prim, which records itself.
 _TORCH_PRIM_MODULES = (
     "torch._prims",
@@ -2097,12 +2092,14 @@ def _torch_op_module(
     return file_modules().get(os.path.realpath(path))
 
 
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``, warning about the ops
-    torch defines only at runtime and the ops no importable module is known to
-    register."""
+def _custom_op_modules(
+    op_names: Iterable[tuple[str, str]],
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """The modules registering the ops among ``op_names``, and the custom ops among
+    them that no importable module is known to register. Warns about those, and
+    about the ops torch defines only at runtime."""
     modules: set[str] = set()
-    unrecorded: set[str] = set()
+    unrecorded: set[tuple[str, str]] = set()
     lazy: dict[str, set[str]] = {}
     file_modules = functools.cache(_file_modules)
     for op_name, overload in op_names:
@@ -2117,7 +2114,7 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
         if module is not None:
             modules.add(module)
         elif ns not in _TORCH_OP_NAMESPACES:
-            unrecorded.add(op_name)
+            unrecorded.add((op_name, overload))
     for setup, ops in sorted(lazy.items()):
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
@@ -2136,12 +2133,9 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
             "torch.library.custom_op in an importable module, and give a C++ op "
             "m.set_python_module; for a library's ops, import that library before "
             "loading the artifact.",
-            ", ".join(sorted(unrecorded)),
+            ", ".join(sorted({op_name for op_name, _ in unrecorded})),
         )
-    prerequisites = {
-        p for m in modules if (p := _TORCH_OP_MODULE_PREREQUISITES.get(m)) is not None
-    }
-    return tuple(sorted(prerequisites)) + tuple(sorted(modules - prerequisites))
+    return tuple(sorted(modules)), tuple(sorted(unrecorded))
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -2172,8 +2166,7 @@ def _write_custom_op_imports(
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
-    # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-    # torch.distributed.tensor raises ValueError.
+    # Not just ImportError: a module can raise anything while it registers ops.
     buf.writeline("    except Exception as _e:")
     buf.writeline("        _import_errors[_module] = _e")
     buf.writeline("_missing = []")
@@ -2216,7 +2209,8 @@ def _build_python_source(
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
     op_names = _called_op_names(graph_python)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    modules, _ = _custom_op_modules(op_names)
+    _write_custom_op_imports(buf, modules, _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2271,7 +2265,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
     op_names = _op_names(gm)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    modules, _ = _custom_op_modules(op_names)
+    _write_custom_op_imports(buf, modules, _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2432,6 +2427,16 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         }
         for i, code in enumerate(entry.codes)
     ]
+
+
+def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
+    """The modules a load imports for its frames: the entry's, and those of the
+    frames ``_build_multigraph_forward`` opens a scope for. Never a dead record's."""
+    return {
+        f["python_module"]
+        for f in frames
+        if f["is_entry"] or f["variants"] or (f["trivial"] and f["resume_names"])
+    }
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
