@@ -12,12 +12,12 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Float64, Int32, Int64
+from cutlass import const_expr, Int32, Int64
 
 import torch
 
 from ...cutedsl import hw_caps as _hw, launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
@@ -25,9 +25,6 @@ from . import (  # safe: kernel_general imports us only lazily
     tile,
 )
 from .traits import welford_nouts
-
-
-_PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
@@ -232,7 +229,7 @@ def _reduce_row_xcta(
     # Size scratch per M; all operands keep M dynamic for plan reuse.
     sub = x.reshape(M * C, s)
     parts = [
-        torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(M * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
@@ -353,7 +350,7 @@ def _build_geom(
         return _L.compile_kernel(
             fop,
             _fake_in(),
-            [_fake_1d(_PART_TORCH[trait.fdtypes[f]]) for f in range(trait.nfields)],
+            [_fake_1d(cute2torch[trait.fdtypes[f]]) for f in range(trait.nfields)],
             [_fake_1d(d) for d in out_dtypes],
             *_s2_args(C, M, N),
             *s1_counts,
