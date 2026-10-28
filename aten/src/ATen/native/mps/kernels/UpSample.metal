@@ -312,17 +312,17 @@ kernel void upsample_trilinear(
           params.input_strides,
           n,
           c,
-          real.z,
-          real.y,
-          real.x);
+          input.z,
+          input.y,
+          input.x);
       auto i001 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
           params.input_strides,
           n,
           c,
-          real.z,
-          real.y,
+          input.z,
+          input.y,
           input.x + 1);
       auto i010 = upsample_get_value_bounded<T>(
           inputData,
@@ -330,16 +330,16 @@ kernel void upsample_trilinear(
           params.input_strides,
           n,
           c,
-          real.z,
+          input.z,
           input.y + 1,
-          real.x);
+          input.x);
       auto i011 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
           params.input_strides,
           n,
           c,
-          real.z,
+          input.z,
           input.y + 1,
           input.x + 1);
       auto i100 = upsample_get_value_bounded<T>(
@@ -349,8 +349,8 @@ kernel void upsample_trilinear(
           n,
           c,
           input.z + 1,
-          real.y,
-          real.x);
+          input.y,
+          input.x);
       auto i101 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
@@ -358,7 +358,7 @@ kernel void upsample_trilinear(
           n,
           c,
           input.z + 1,
-          real.y,
+          input.y,
           input.x + 1);
       auto i110 = upsample_get_value_bounded<T>(
           inputData,
@@ -368,7 +368,7 @@ kernel void upsample_trilinear(
           c,
           input.z + 1,
           input.y + 1,
-          real.x);
+          input.x);
       auto i111 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
@@ -469,12 +469,12 @@ kernel void upsample_linear1d(
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/false);
   auto t_x = fract(real_x);
-  long input_x = floor(real_x);
+  const auto input_x = static_cast<long>(floor(real_x));
 
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
       auto i00 = upsample_get_value_bounded<T>(
-          inputData, input_sizes, input_strides, long3(n, c, real_x));
+          inputData, input_sizes, input_strides, long3(n, c, input_x));
       auto i01 = upsample_get_value_bounded<T>(
           inputData, input_sizes, input_strides, long3(n, c, input_x + 1));
       auto res = linear_interp(i00, i01, t_x);
@@ -503,26 +503,26 @@ kernel void upsample_bilinear2d(
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/false);
   auto t_x = fract(real_x);
-  long input_x = floor(real_x);
+  const auto input_x = static_cast<long>(floor(real_x));
 
   auto real_y = area_pixel_compute_source_index(
       scales.y, output_y, align_corners, /*cubic=*/false);
   auto t_y = fract(real_y);
-  long input_y = floor(real_y);
+  const auto input_y = static_cast<long>(floor(real_y));
   for (int n = 0; n < output_sizes.x; n++) {
     for (int c = 0; c < output_sizes.y; c++) {
       auto i00 = upsample_get_value_bounded<T>(
-          inputData, input_sizes, input_strides, long4(n, c, real_y, real_x));
+          inputData, input_sizes, input_strides, long4(n, c, input_y, input_x));
       auto i01 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
           input_strides,
-          long4(n, c, real_y, input_x + 1));
+          long4(n, c, input_y, input_x + 1));
       auto i10 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
           input_strides,
-          long4(n, c, input_y + 1, real_x));
+          long4(n, c, input_y + 1, input_x));
       auto i11 = upsample_get_value_bounded<T>(
           inputData,
           input_sizes,
