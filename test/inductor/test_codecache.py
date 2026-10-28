@@ -18,7 +18,7 @@ import types
 import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, ExitStack, nullcontext
 from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
@@ -5904,22 +5904,19 @@ class TestCppCodeCacheKey(TestCase):
     def test_a_load_a_capture_opens_during_is_recorded(self):
         from torch.compiler import _runtime_cache
 
-        scope = _runtime_cache.capture_scope()
-
         def capture_opens():
             # Asked as the uncached load starts, before the kernel is built.
-            scope.__enter__()
+            scope.enter_context(_runtime_cache.capture_scope())
             return False
 
         with (
             fresh_cache(),
             mock.patch.object(_runtime_cache, "has_frozen_cpp_kernels", capture_opens),
+            ExitStack() as scope,
         ):
-            try:
-                CppCodeCache.load_async(self.CODE)
-                recorded = len(_runtime_cache._capture.cpp_kernels)
-            finally:
-                scope.__exit__(None, None, None)
+            CppCodeCache.load_async(self.CODE)
+            self.assertTrue(_runtime_cache.capturing())
+            recorded = len(_runtime_cache._capture.cpp_kernels)
         self.assertEqual(recorded, 1)
 
     def test_relocatable_key_only_for_a_capture_or_replay(self):
