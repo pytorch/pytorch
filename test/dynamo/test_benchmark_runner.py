@@ -450,7 +450,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
     def _cache_tensors(self, model):
         return [
-            (layer.conv_states, layer.recurrent_states)
+            (layer.conv_states[0], layer.recurrent_states[0])
             if is_linear
             else (layer.keys, layer.values)
             for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
@@ -470,8 +470,8 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             starting_lengths.append(int(cache.get_seq_length()))
             for layer, is_linear in zip(cache.layers, cache.is_linear):
                 if is_linear:
-                    self.assertFalse(layer.has_previous_state)
-                    for states in (layer.conv_states, layer.recurrent_states):
+                    self.assertFalse(layer.has_previous_state[0])
+                    for states in (layer.conv_states[0], layer.recurrent_states[0]):
                         self.assertEqual(states, torch.zeros_like(states))
             return original_forward(*args, **kwargs)
 

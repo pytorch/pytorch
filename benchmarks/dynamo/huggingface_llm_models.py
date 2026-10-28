@@ -179,9 +179,10 @@ class TextGenerationPrefillModel(torch.nn.Module):
                             conv_states=conv_states, recurrent_states=recurrent_states
                         )
             if not all(
-                layer.is_conv_states_initialized
+                initialized
                 for layer, is_linear in zip(self.cache.layers, self.cache.is_linear)
                 if is_linear
+                for initialized in layer.is_conv_states_initialized.values()
             ):
                 raise RuntimeError(
                     f"cannot preallocate linear attention cache for {config.model_type}"
