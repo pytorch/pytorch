@@ -36,6 +36,9 @@ Float8_e5m2
 # torch/headeronly/util/Float8_e5m2fnuz.h
 Float8_e5m2fnuz
 
+# torch/headeronly/util/Float8_e5m3fnu.h
+Float8_e5m3fnu
+
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
