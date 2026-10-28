@@ -132,11 +132,8 @@ class BenchmarkJob:
                     return self.bmreq.benchmark()
             return self.bmreq.benchmark()
         finally:
-            # The worker outlives this job -- it is torn down only on a key
-            # change or at exit -- so without this it sits idle holding every
-            # block its allocator cached for the benchmark (inputs, rotating
-            # buffers) on a GPU the training job wants back. The context itself
-            # still stays; only an explicit shutdown releases that.
+            # The worker outlives this job, so without this it sits idle
+            # holding what the benchmark allocated. The context stays either way.
             try:
                 torch.cuda.empty_cache()
             except Exception:
