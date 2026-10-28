@@ -9317,6 +9317,17 @@ def data_dependent_fn(x):
 
 def dynamic_shape_fn(x):
     return torch.ops.{ns}.dynamic_shape.default(x.sin()) + 1
+
+
+# The artifact knows no module registering a Library.define op.
+lib = torch.library.Library("{ns}", "FRAGMENT")
+lib.define("entry_op(Tensor x) -> Tensor")
+lib.impl("entry_op", lambda x: x * 2, "CPU")
+lib.impl("entry_op", torch.empty_like, "Meta")
+
+
+def library_fn(x):
+    return torch.ops.{ns}.entry_op.default(torch.ops.{ns}.triple.default(x.sin())) + 1
 """
 
 
@@ -9428,6 +9439,8 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "unfakeable_fn", "standalone"),
             ("dynamo", "eager", "data_dependent_fn", "standalone"),
             ("dynamo", "eager", "dynamic_shape_fn", "standalone"),
+            ("dynamo", "eager", "library_fn", "standalone"),
+            ("dynamo", "inductor", "library_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9467,23 +9480,29 @@ class TestPrecompileCustomOpModules(TestCase):
                 for line in python_code.splitlines()
                 if line.startswith("CUSTOM_OP_MODULES = ")
             ]
-            # A make_fx training capture traces the backward, so its op's module is
-            # recorded. Dynamo records its backend graphs before AOTAutograd, so
-            # the backward's op is not recorded, and its Dynamo replay passes only
-            # because the forward op's module imports the backward op's module.
-            traced_bw = tracer == "make_fx" and entry == "train_fn"
-            modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
-            self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
+            # A make_fx training capture traces the backward, and a Dynamo one
+            # records the ops of Inductor's backward code, so their op's module is
+            # recorded. A Dynamo eager backend records only its forward graphs,
+            # and its replay passes only because the forward op's module imports
+            # the backward op's module.
+            traced_bw = entry == "train_fn" and (tracer, backend) != ("dynamo", "eager")
+            # cpu_only and entry_op have no known module, so a Dynamo artifact
+            # imports its frames' modules before checking them.
+            unknown = entry in ("unfakeable_fn", "library_fn")
+            modules = {module} | ({bwmod} if traced_bw else set())
+            modules |= {entries} if unknown else set()
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {tuple(sorted(modules))!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
-    def test_inductor_records_the_custom_ops_its_code_calls(self):
+    @parametrize("tracer", ["make_fx", "dynamo"])
+    def test_inductor_records_the_custom_ops_its_code_calls(self, tracer):
         from torch._inductor import decomposition
         from torch.library import _scoped_library
 
-        ns = f"precompile_inductor_ops_{uuid.uuid4().hex}"
+        ns = "precompile_inductor_ops"
         directory = self.enterContext(tempfile.TemporaryDirectory())
         artifact = os.path.join(directory, "artifact.py")
         cache = os.path.join(directory, "artifact.cache")
@@ -9495,9 +9514,6 @@ class TestPrecompileCustomOpModules(TestCase):
             with graph.inserting_before(out):
                 result = graph.call_function(ops.inserted.default, out.args[0])
             out.args = ((result,),)
-
-        def fn(x):
-            return ops.decomposed.default(x.sin()) + 1
 
         with _scoped_library(ns, "FRAGMENT") as lib:
             lib.define("inserted(Tensor x) -> Tensor")
@@ -9512,21 +9528,26 @@ class TestPrecompileCustomOpModules(TestCase):
                 decomposition.fast_random_decomps.cache_clear()
                 self.addCleanup(decomposition.fast_random_decomps.cache_clear)
                 self.addCleanup(decomposition.decompositions.pop, op)
-                with (
-                    torch._inductor.config.patch(post_grad_custom_post_pass=insert_op),
-                    capture(
-                        fn,
-                        artifact_path=artifact,
-                        cache_path=cache,
-                        tracer=MakeFxTracer(),
-                        backend="inductor",
-                    ) as cap,
-                ):
-                    expected = cap(x)
+                with torch._inductor.config.patch(post_grad_custom_post_pass=insert_op):
+                    _capture_files(
+                        self,
+                        _decomposed_op_fn,
+                        [(x,)],
+                        "inductor",
+                        tracer=MakeFxTracer() if tracer == "make_fx" else None,
+                        paths=(artifact, cache),
+                    )
+            # Inductor decomposed the op away, so a make_fx artifact loads without
+            # it. A Dynamo artifact still needs it: its guards name the op.
+            if tracer == "make_fx":
+                expected = ((f"{ns}::inserted", ""),)
+                self.assertEqual(load(artifact, cache)(x), (x.sin() * 2 + 1) * 2)
+            else:
+                expected = ((f"{ns}::decomposed", ""), (f"{ns}::inserted", ""))
+                with self.assertRaisesRegex(PrecompileError, f"{ns}::decomposed"):
+                    load(artifact, cache)
             with open(artifact) as f:
-                self.assertIn(f"CUSTOM_OPS = {((f'{ns}::inserted', ''),)!r}", f.read())
-            # Inductor decomposed the op away, so the artifact loads without it.
-            self.assertEqual(load(artifact, cache)(x), expected)
+                self.assertIn(f"CUSTOM_OPS = {expected!r}", f.read())
         with self.assertRaisesRegex(PrecompileError, f"{ns}::inserted"):
             load(artifact, cache)
 
@@ -9566,9 +9587,8 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
 
 
-def _no_fake_op_fn(x):
-    # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
-    return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
+def _decomposed_op_fn(x):
+    return torch.ops.precompile_inductor_ops.decomposed.default(x.sin()) + 1
 
 
 def _composite_impl(x):
