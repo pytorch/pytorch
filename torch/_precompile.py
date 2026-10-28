@@ -3687,11 +3687,18 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
+    Before anything else runs, the artifact imports the modules in its
+    ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
+    and then checks that every op in ``CUSTOM_OPS`` is registered. A module that
+    fails to import only warns when its ops are registered anyway, e.g. by a
+    module the server imported under another name.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture), or if a custom op the
+    artifact calls is not registered once its imports ran. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
