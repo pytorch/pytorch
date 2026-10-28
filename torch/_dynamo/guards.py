@@ -121,13 +121,18 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -1124,6 +1129,23 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
+
+
+def convert_sizes_to_concrete_values(sizes: Sequence[Any]) -> list[int | None]:
+    # Preserve the same size wildcards before serialization loses SymInt provenance.
+    concrete_sizes = convert_to_concrete_values(sizes)
+    for i, dim in enumerate(sizes):
+        if (
+            concrete_sizes[i] in (0, 1)
+            and isinstance(dim, torch.SymInt)
+            and isinstance(dim.node, SymNode)
+            and dim.node.shape_env is not None
+        ):
+            expr = _get_placeholder_expr(dim.node)
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                # Runtime checks, not input guards, enforce this refinement.
+                concrete_sizes[i] = None
+    return concrete_sizes
 
 
 def _guard_device_index_is_current(
@@ -4173,14 +4195,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4268,7 +4290,7 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
-                size = convert_to_concrete_values(metadata["size"])
+                size = convert_sizes_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
                     value, output_graph.compile_on_one_rank
@@ -5226,22 +5248,22 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
             # For FakeTensors, use pytype if set, otherwise default to
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
@@ -6253,7 +6275,15 @@ class CheckFunctionManager:
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
-                output_graph_guards_state.input_source_to_sizes_strides,
+                {
+                    source: {
+                        **metadata,
+                        "size": convert_sizes_to_concrete_values(metadata["size"]),
+                    }
+                    for source, metadata in (
+                        output_graph_guards_state.input_source_to_sizes_strides.items()
+                    )
+                },
             ),
             skip_guards_check=True,
         )

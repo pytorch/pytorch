@@ -238,7 +238,7 @@ class FakeProcessGroup : public Backend {
     // output version counters].
     at::AutoDispatchBelowAutograd guard;
     for (auto& outputTensorList : outputTensorLists) {
-      for (size_t i = 0; i < inputTensors.size(); ++i) {
+      for (const auto i : c10::irange(inputTensors.size())) {
         outputTensorList[i].copy_(inputTensors[i]);
       }
     }
@@ -712,7 +712,7 @@ class FakeProcessGroup : public Backend {
         " entries for a world of ",
         worldSize);
     int64_t offset = 0;
-    for (int64_t i = 0; i < index; ++i) {
+    for (const auto i : c10::irange(index)) {
       offset += splitSizes[i] * rowSize;
     }
     const auto length = splitSizes[index] * rowSize;
