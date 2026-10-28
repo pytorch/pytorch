@@ -54,6 +54,15 @@ class TestInnerTreeCombineUnroll(TestCase):
             with self.assertRaisesRegex(ValueError, "combine_unroll"):
                 rt.itree_combine_plan(None, 4)
 
+    def test_async_combine_requires_one_warp_of_rows(self):
+        """Reject async staging when a block's rows exceed the lanes that copy them."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        policy = rt._ITREE_ARCH[(10, 0)]._replace(combine_rpb=64)
+        with mock.patch.object(rt, "_itree_arch", return_value=policy):
+            with self.assertRaisesRegex(ValueError, "combine_rpb"):
+                rt.itree_combine_plan(None, 4)
+
     @parametrize(
         "count,last,itemsize,fields,weights",
         [
@@ -71,23 +80,23 @@ class TestInnerTreeCombineUnroll(TestCase):
             "split", 4, 16, 1, 2, (), (), (1024, count, last, 512, 512)
         )
         arch = rt._ITREE_ARCH["default"]._replace(
+            combine_rpb=32,
             combine_group_bytes=16,
             combine_async=8,
             combine_max=512,
             combine_unroll=4,
         )
-        with mock.patch.object(
-            rt._hw, "caps", return_value=SimpleNamespace(smem_per_block_optin=232448)
+        caps = SimpleNamespace(smem_per_block_optin=232448)
+        with (
+            mock.patch.object(rt._hw, "caps", return_value=caps),
+            mock.patch.object(rt, "_itree_arch", return_value=arch),
         ):
-            baseline = rt.itree_combine_plan(
-                split, itemsize, nfields=fields, nrows=1, arch=arch
-            )
+            baseline = rt.itree_combine_plan(split, itemsize, nfields=fields, nrows=1)
             candidate = rt.itree_combine_plan(
                 split,
                 itemsize,
                 nfields=fields,
                 nrows=1,
-                arch=arch,
                 uniform_count=True,
                 combine_weights=weights,
             )
