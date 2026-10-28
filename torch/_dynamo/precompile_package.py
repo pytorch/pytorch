@@ -2118,7 +2118,11 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import _build_multigraph_artifact, _custom_op_modules
+        from torch._precompile import (
+            _build_multigraph_artifact,
+            _custom_op_modules,
+            _custom_ops,
+        )
 
         summary = self._gated_summary(
             require_complete=require_complete,
@@ -2133,6 +2137,7 @@ class PrecompileSession(Generic[_P, _R]):
             self._backend,
             self._fn,
             _custom_op_modules(op_names),
+            _custom_ops(op_names),
         )
 
 

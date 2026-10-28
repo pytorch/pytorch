@@ -1698,6 +1698,8 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
+#   0. Imports of the modules registering the custom ops the graph calls, and a check
+#      that those ops are registered (only when the graph calls custom ops).
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
 #      Inductor kernels (JIT-compiled from the embedded source on first use -- no
 #      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
@@ -1888,6 +1890,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
         "CUSTOM_OP_MODULES",
+        "CUSTOM_OPS",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2039,31 +2042,56 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     return tuple(sorted(modules))
 
 
-def _write_custom_op_imports(buf: Any, modules: tuple[str, ...]) -> None:
+def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+    """The ops among ``op_names`` outside aten and prims, which the artifact checks
+    are registered once its imports ran."""
+    return tuple(
+        sorted(n for n in op_names if n[0].split("::")[0] not in ("aten", "prims"))
+    )
+
+
+def _write_custom_op_imports(
+    buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
+) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers the op.
-    if not modules:
+    # path imports the module whose torch.library.custom_op registers the op. The
+    # recorded module is a best guess (and ops defined with Library.define have
+    # none), so the imports are best effort and the ops themselves are checked.
+    if not ops:
         return
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 0. The modules registering the custom ops the graphs call")
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
+    buf.writeline(f"CUSTOM_OPS = {ops!r}")
     buf.writeline("import importlib as _importlib")
     buf.writeline("import torch as _torch")
+    buf.writeline("_import_errors = {}")
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
     buf.writeline("    except ImportError as _e:")
-    buf.writeline("        raise _torch.compiler.PrecompileError(")
+    buf.writeline("        _import_errors[_module] = _e")
+    buf.writeline("_missing = []")
+    buf.writeline("for _name, _overload in CUSTOM_OPS:")
+    buf.writeline("    try:")
+    buf.writeline("        _torch._C._dispatch_find_schema_or_throw(_name, _overload)")
+    buf.writeline("    except RuntimeError:")
     buf.writeline(
-        '            f"this artifact calls custom ops that module {_module!r} '
-        'registers, "'
+        '        _missing.append(f"{_name}.{_overload}" if _overload else _name)'
+    )
+    buf.writeline("if _missing:")
+    buf.writeline("    raise _torch.compiler.PrecompileError(")
+    buf.writeline(
+        '        f"this artifact calls custom ops not registered here: {_missing}. "'
     )
     buf.writeline(
-        '            "which cannot be imported here. Make it importable wherever the "'
+        '        "Import the modules registering them before loading it. Modules "'
     )
-    buf.writeline('            "artifact is served."')
-    buf.writeline("        ) from _e")
+    buf.writeline(
+        "        f\"that failed to import: {sorted(_import_errors) or 'none'}.\""
+    )
+    buf.writeline("    ) from next(iter(_import_errors.values()), None)")
     buf.writeline("")
 
 
@@ -2078,7 +2106,8 @@ def _build_python_source(
     buf.writeline("")
     if compiled._gm is None:
         raise PrecompileError("internal: graph missing before _compile()")
-    _write_custom_op_imports(buf, _custom_op_modules(_op_names(compiled._gm)))
+    op_names = _op_names(compiled._gm)
+    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2132,7 +2161,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
-    _write_custom_op_imports(buf, _custom_op_modules(_op_names(gm)))
+    op_names = _op_names(gm)
+    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2442,6 +2472,7 @@ def _build_multigraph_python_source(
     mode: str,
     unreachable: list[str],
     custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2459,7 +2490,7 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_modules)
+    _write_custom_op_imports(buf, custom_op_modules, custom_ops)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -2592,6 +2623,7 @@ def _build_multigraph_artifact(
     backend: str,
     entry_fn: object,
     custom_op_modules: tuple[str, ...] = (),
+    custom_ops: tuple[tuple[str, str], ...] = (),
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2620,6 +2652,7 @@ def _build_multigraph_artifact(
         mode,
         unreachable,
         custom_op_modules,
+        custom_ops,
     )
     inductor_bundle = None
     if backend != "eager":
