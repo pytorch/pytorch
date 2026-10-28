@@ -503,6 +503,8 @@ namespace at::hip::detail {
 
             using Configs = CkTileGroupGemmConfigs<Arch, DataType>;
             static_assert(AcceptsAnyShape<typename Configs::Fallback>, "the Fallback config must pad M, N and K and use 1-element C vectors");
+            static_assert(std::apply([](auto... c) { return (decltype(c)::PadK && ...); }, typename Configs::GradWeight::Candidates{}),
+                    "every GradWeight candidate must pad K: K is jagged and config_fits accepts any config for a jagged dim");
             // Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
             const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
             const GemmProblem problem{
