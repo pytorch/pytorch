@@ -180,6 +180,8 @@ void _check_mslk_grouped_inputs(
   TORCH_CHECK_VALUE(
       scaled_mm_arch_allowed(/*sm90_only*/ false, /*sm100_only*/ true),
       "MSLK ", recipe, " grouped GEMM requires SM10.x; got SM", dprops->major, ".", dprops->minor);
+  // MSLK's mx8mx8bf16_grouped_common.cuh and f4f4bf16_grouped_common.cuh
+  // launch one setup thread per group in a single block (CUDA limit: 1024 threads).
   TORCH_CHECK_VALUE(
       batch_count >= 1 && batch_count <= 1024,
       "MSLK ", recipe, " grouped GEMM batchCount must be in [1, 1024], got ", batch_count);
@@ -358,14 +360,7 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
-    const bool a_is_2d = mat_a.dim() == 2;
-    const bool b_is_2d = mat_b.dim() == 2;
-    bool b_is_3d = mat_b.dim() == 3;
-    bool is_2d_2d = a_is_2d && b_is_2d;
-    bool is_2d_3d = a_is_2d && b_is_3d;
-    TORCH_CHECK_VALUE(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
     TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
-    TORCH_CHECK_VALUE(out.scalar_type() == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
     // MXFP8 expects float8_e8m0fnu scales.
     TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu,
         "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
@@ -730,6 +725,15 @@ static void scaled_grouped_mm_cublaslt(
   const auto scaling_b = recipe_b[0];
   // NO_SWIZZLE is a placeholder for omitted metadata, not a claim that scales
   // are unswizzled. Their storage layout is determined by gemm_impl.
+  const bool hopper = gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128 ||
+      gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
+      gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128;
+  if (hopper) {
+    TORCH_CHECK_VALUE(
+        (swizzle_a.empty() || (swizzle_a.size() == 1 && swizzle_a[0] == SwizzleType::NO_SWIZZLE)) &&
+            (swizzle_b.empty() || (swizzle_b.size() == 1 && swizzle_b[0] == SwizzleType::NO_SWIZZLE)),
+        "Hopper grouped block scaling requires swizzle_a/swizzle_b to be empty or NO_SWIZZLE");
+  }
   const auto swizzle_a_value = swizzle_a.empty() ? SwizzleType::NO_SWIZZLE : swizzle_a[0];
   const auto swizzle_b_value = swizzle_b.empty() ? SwizzleType::NO_SWIZZLE : swizzle_b[0];
   const auto [layout_a, layout_b] = get_cublaslt_grouped_scale_layouts(gemm_impl, scale_a[0], scale_b[0]);
@@ -868,6 +872,7 @@ _scaled_grouped_mm_cuda(
 #endif
 
   if (is_mx8mx8bf16) {
+    TORCH_CHECK_VALUE(a_is_2d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
     // Note: Passing implied SwizzleType here, correctness of scale previously checked
     //       in `check_scale` call
     return _mx8_mx8_bf16_grouped_mm_mslk(

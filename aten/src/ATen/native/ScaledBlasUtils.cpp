@@ -585,8 +585,9 @@ void validate_scaled_mm_v2_inputs(
 }
 
 // Recipe-independent validation for `_scaled_grouped_mm_v2`. Mirrors the
-// non-recipe checks at the top of `_scaled_grouped_mm_cuda_v2` so that
-// torch.compile tracing fails fast with the same messages users get in eager.
+// non-recipe checks at the top of `_scaled_grouped_mm_cuda_v2` for eager
+// execution. FakeTensor and compile use the Python meta, which checks output
+// dtype and offset contiguity before inferring the output shape.
 // Per-recipe scale-shape checks (`_check_scales_*`), the device-capability
 // gate, and the `find_scaled_gemm_impl` dispatch stay in the kernel -- they
 // depend on layout/arch and the (data-dependent) offset values.
