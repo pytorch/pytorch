@@ -2872,7 +2872,17 @@ class GuardBuilder(GuardBuilderBase):
 
             return tuple(map(id, hooks))
 
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, ...] | None = None
+        if are_inline_hooks(hooks):
+            # The guard compares only the hooks' ids, and a freed hook's id can
+            # be reused by new hooks, so freeing either hook must invalidate
+            # this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
