@@ -253,6 +253,10 @@ def _full_itree_arch(
 # Default per-thread width for the order, in elements (k*vec*eff live in registers at once).
 # Fusing adjacent chunks keeps a full warp, and therefore coalesced loads, on each.
 _ITREE_THREAD_ELEMS = 64
+# Per-thread width for ragged 16-bit sum-like rows (trait_itree_plan). B200 CUDA graphs,
+# 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and 4097, within 4% for N=3000-12289,
+# 0.65x at N=1025.
+_ITREE_LOWP_THREAD_ELEMS = 32
 
 # Vector-width multiplier; each doubling costs ~2x. `bte`, not this, fixes the bits.
 _ITREE_VEC_MUL = 1
@@ -622,7 +626,7 @@ def trait_itree_plan(
         N,
         M,
         itemsize,
-        thread_elems=32,
+        thread_elems=_ITREE_LOWP_THREAD_ELEMS,
         stage=stage,
         device=device,
         arch=arch,
@@ -640,7 +644,11 @@ def itree_combine_plan(
     uniform_count: bool | None = None,
     combine_weights: bool | None = None,
 ) -> _ItreePlan:
-    """Plan the architecture-tuned, bit-neutral fold of each row's split partials."""
+    """Plan the architecture-tuned, bit-neutral fold of each row's split partials.
+
+    `itemsize` is the widest partial field's size, so each field's copy group stays within
+    `combine_group_bytes` and `nfields * itemsize` bounds the staged footprint.
+    """
     arch = _itree_arch(device) if arch is None else arch
     if uniform_count is None:
         uniform_count = arch.uniform_count
@@ -865,13 +873,8 @@ def _run_itree(
         # for every staged shape).
         itree = cast(
             _ItreePlan,
-            itree_plan(
-                N,
-                M,
-                x.element_size(),
-                stage=False,
-                device=x.device,
-                arch=arch,
+            trait_itree_plan(
+                trait, N, M, itemsize, stage=False, device=x.device, arch=arch
             ),
         )
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
@@ -938,14 +941,15 @@ def _run_itree(
     outs = results()
     # DECLARE the partials' alignment or stage 2 reads them one element at a time: autovec_copy
     # cannot widen past what the descriptor claims. Keyed on the BATCH COUNT, a row's stride.
-    palign = tile.align_bytes(nbatch, parts[0].element_size())
+    paligns = [tile.align_bytes(nbatch, p.element_size()) for p in parts]
+    palign = min(paligns)
     strided_outs = tuple(o.stride(0) != 1 for o in outs)
     _launch_itree(
         trait,
         trait_key,
         itree_combine_plan(
             itree,
-            parts[0].element_size(),
+            max(p.element_size() for p in parts),
             x.device,
             nfields=trait.nfields,
             nrows=M,
@@ -953,7 +957,7 @@ def _run_itree(
         ),
         dt,
         (
-            [fake_1d(p, align=palign) for p in parts],
+            [fake_1d(p, align=a) for p, a in zip(parts, paligns)],
             [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
         ),
         ([_L.read_only(p) for p in parts], list(outs)),
@@ -1023,7 +1027,7 @@ def reduce_row_tile(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
             f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
         )
-    if gated and itree is None and final and threads_per_row is None:
+    if gated and itree is None and final and threads_per_row is None and N > 0:
         inner_tree_fallback(f"no inner-tree plan for N={N}, M={M}")
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts, arch=arch)
