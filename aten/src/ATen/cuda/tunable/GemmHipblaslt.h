@@ -12,6 +12,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 #include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
@@ -764,7 +765,7 @@ auto GetHipBlasLtTypeStringAndOps() {
               " when calling `hipblaslt_ext::getAllAlgos`");
 
   int returned_algo_count = heuristic_result.size();
-  for (int i = 0; i < returned_algo_count; i++) {
+  for (const auto i : c10::irange(returned_algo_count)) {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);

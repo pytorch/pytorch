@@ -290,7 +290,7 @@ static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Ten
                                         : batches.size();
 
 
-  for(int _i = 0; _i < batchsize; _i++){
+  for(const auto _i : c10::irange(batchsize)){
     int i = calculate_all_batches ? _i : batches[_i];
 
     at::cuda::solver::gesvd<scalar_t>(
@@ -397,7 +397,7 @@ static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Te
 
   auto dataPtr = allocator.allocate(sizeof(scalar_t)*lwork);
 
-  for(int i = 0; i < batchsize; i++){
+  for(const auto i : c10::irange(batchsize)){
     at::cuda::solver::gesvdj<scalar_t>(
       handle, jobz, econ, m, n,
       A_data + i * A_stride,
@@ -599,7 +599,7 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
 
   std::vector<int64_t> res;
 
-  for(int64_t i = 0; i < infos.numel(); i++) {
+  for(const auto i : c10::irange(infos.numel())) {
     int info_for_batch_i = infos_cpu_data[i];
 
     // From cusolver doc, if info < 0, the i-th function call parameter is wrong,
@@ -837,7 +837,7 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
   auto workdata_host = host_allocator.allocate(worksize_host * batch_size);
   void* workdata_host_ptr = workdata_host.get();
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     at::cuda::solver::xpotrf(
       handle, params, uplo, n, datatype,
       self_working_copy_ptr + i * matrix_stride,
@@ -861,7 +861,7 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
   auto work_data = allocator.allocate(sizeof(scalar_t)*lwork * batch_size);
   scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     at::cuda::solver::potrf<scalar_t>(
       handle, uplo, n_32,
       self_working_copy_ptr + i * matrix_stride,
@@ -948,7 +948,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
     cusolverDnParams_t params;
     cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
     TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       at::cuda::solver::xpotrs(
         handle, params, uplo, n, nrhs, datatype,
         A_ptr + i * A_matrix_stride,
@@ -967,7 +967,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
     int lda_32 = cuda_int_cast(lda, "lda");
     int ldb_32 = cuda_int_cast(ldb, "ldb");
 
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       at::cuda::solver::potrs<scalar_t>(
         handle, uplo, n_32, nrhs_32,
         A_ptr + i * A_matrix_stride,

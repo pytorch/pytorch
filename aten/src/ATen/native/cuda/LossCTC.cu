@@ -35,6 +35,7 @@
 
 #include <type_traits>
 #include <numeric>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -245,7 +246,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   auto tg_batch_offsets_data = tg_batch_offsets.template mutable_data_ptr<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       TORCH_CHECK(target_lengths[i] >= 0,
                   "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
                   " (while checking arguments for ", c, ")");
@@ -260,7 +261,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       TORCH_CHECK(target_lengths[i] >= 0,
                   "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
                   " (while checking arguments for ", c, ")");
@@ -275,7 +276,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
              " (while checking arguments for ", c, ")");
   }
   int64_t max_input_length = log_probs.size(0);
-  for (int64_t b = 0; b < batch_size; b++) {
+  for (const auto b : c10::irange(batch_size)) {
     TORCH_CHECK(input_lengths[b] >= 0,
              "Expected input_lengths to have value at least ", 0, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -491,7 +492,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
   if (zero_infinity && nll == INFINITY)
     return;
 
-  for (int64_t t = 0; t < input_length; t++) {
+  for (const auto t : c10::irange(input_length)) {
     scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * target];
     gpuAtomicAddNoReturn(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
               -std::exp(log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * (s*2+1)]
@@ -559,7 +560,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
   scalar_t nll = neg_log_likelihood_data[b];
   scalar_t gr =  grad_out_data[b * grad_out_batch_stride];
 
-  for (int64_t c = 0; c < num_labels; c++) {
+  for (const auto c : c10::irange(num_labels)) {
     scalar_t& res = gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * c];
     if (t < input_length && (! zero_infinity || nll != INFINITY)) {
       scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * c];
@@ -622,7 +623,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     max_target_length = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets_data[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -633,7 +634,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets_data[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);

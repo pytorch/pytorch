@@ -50,6 +50,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 namespace {
@@ -106,9 +107,9 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t pool_indices_size = pool_sizes[index];
     scalar_t* mx_row = mx_rows + index * nvalues;
 
-    for (int64_t j = 0; j < nvalues; j++) {
+    for (const auto j : c10::irange(nvalues)) {
       scalar_t exp_sums = 0;
-      for (int64_t p = 0; p < pool_indices_size; p++) {
+      for (const auto p : c10::irange(pool_indices_size)) {
         auto i = pool_indices[p];
         auto values_row = input_values_acc[i];
         auto out_values_row = output_values_acc[i];
@@ -119,7 +120,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
         }
         exp_sums += v;
       }
-      for (int64_t p = 0; p < pool_indices_size; p++) {
+      for (const auto p : c10::irange(pool_indices_size)) {
         auto i = pool_indices[p];
         auto values_row = input_values_acc[i];
         auto out_values_row = output_values_acc[i];
@@ -167,11 +168,11 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     int64_t* pool_indices = sorted_pool_indices + offset;
     int64_t pool_indices_size = pool_sizes[index];
 
-    for (int64_t k = 0; k < nvalues; k++) {
+    for (const auto k : c10::irange(nvalues)) {
       scalar_t tmp_row{0};
 
       /* Compute tmp = - sum_j output_j * grad_j */
-      for (int64_t p = 0; p < pool_indices_size; p++) {
+      for (const auto p : c10::irange(pool_indices_size)) {
         auto i = pool_indices[p];
         auto out_values_row = out_values_accessor[i];
         auto j = lower_bound_values[i];
@@ -188,7 +189,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
       }
 
       /* Compute grad_input = output * (grad + tmp)*/
-      for (int64_t p = 0; p < pool_indices_size; p++) {
+      for (const auto p : c10::irange(pool_indices_size)) {
         auto i = pool_indices[p];
         auto out_values_row = out_values_accessor[i];
         auto values_row = values_accessor[i];
@@ -258,7 +259,7 @@ Tensor get_offsets(
       thrust::device_ptr<int64_t>(offsets.data_ptr<int64_t>()),
       [indices_accessor, strides_ptr, dim, ndim] __device__(int64_t x) {
         int64_t pool_index = 0;
-        for (int64_t j = 0; j < ndim; j++) {
+        for (const auto j : c10::irange(ndim)) {
           if (j != dim) {
             auto indices_row = indices_accessor[j];
             auto stride = strides_ptr[j];
@@ -357,10 +358,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
           int64_t curr_pool_size = pool_sizes_ptr[index];
           auto mx_row = mx_buffer_ptr + index * nvalues;
           int64_t offset = pool_offsets_ptr[index];
-          for (int64_t p = 0; p < curr_pool_size; p++) {
+          for (const auto p : c10::irange(curr_pool_size)) {
             int64_t i = *(sorted_indices_ptr + offset + p);
             auto values_row = values_accessor[i].data();
-            for (int64_t j = 0; j < nvalues; j++) {
+            for (const auto j : c10::irange(nvalues)) {
               mx_row[j] = c10::cuda::compat::max(mx_row[j], values_row[j]);
             }
           }
@@ -496,7 +497,7 @@ void cuda_sparse_coo_softmax_backward(
           grad_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
       auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
       auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
-      for (int64_t i = 0; i < out_nnz; i++) {
+      for (const auto i : c10::irange(out_nnz)) {
         auto low = thrust::lower_bound(
             grad_offsets_accessor,
             grad_offsets_accessor + grad_offsets.size(0),

@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <c10/util/irange.h>
 
 namespace at::cuda::tunable {
 
@@ -931,7 +932,7 @@ GetCublasltHeuristicCandidates(const ProblemT& problem) {
     return ret;
   }
 
-  for (int i = 0; i < returned_result; ++i) {
+  for (const auto i : c10::irange(returned_result)) {
     if (heuristic_results[i].state != CUBLAS_STATUS_SUCCESS) {
       continue;
     }

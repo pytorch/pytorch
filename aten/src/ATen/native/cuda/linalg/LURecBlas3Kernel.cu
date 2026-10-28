@@ -7,6 +7,7 @@
 #include <c10/util/complex.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
+#include <c10/util/irange.h>
 #include <thrust/swap.h>
 
 /*
@@ -279,7 +280,7 @@ setup_pivinfo_kernel(
 
   // Thread 0 replays the sequential swaps
   if (tid == 0) {
-    for (int src = row_offset; src < row_offset + nb; ++src) {
+    for (const auto src : c10::irange(row_offset, row_offset + nb)) {
       auto dst = ip[src] - 1;
       if (src != dst) {
         thrust::swap(piv[src], piv[dst]);
@@ -346,7 +347,7 @@ laswp_rowparallel_kernel(
 
     // Pass 1: gather source into shared memory, patch dA.
     // Strided read/write.
-    for (int i = 0; i < tile_width; ++i) {
+    for (const auto i : c10::irange(tile_width)) {
       int col = col_offset + tile_col_start + i;
       sdata[tid + i * nb] = A[LinOff(src, col, lda)];
       A[LinOff(src, col, lda)] = A[LinOff(dst, col, lda)];
@@ -357,7 +358,7 @@ laswp_rowparallel_kernel(
   if (tid < nb) {
     // Pass 2: write shared memory back -- coalesced write
     auto row = row_offset + tid;
-    for (int i = 0; i < tile_width; ++i) {
+    for (const auto i : c10::irange(tile_width)) {
       auto col = col_offset + tile_col_start + i;
       A[LinOff(row, col, lda)] = sdata[tid + i * nb];
     }
@@ -445,7 +446,7 @@ batched_panel_register_resident_fused_kernel(
   // Each thread owns its full row stored in registers
   scalar_t rA[MAX_RECNB];
   #pragma unroll
-  for (int i = 0; i < nb; ++i) {
+  for (const auto i : c10::irange(nb)) {
     rA[i] = (tid < nrows)
       ? A[LinOff(col_start + tid, col_start + i, lda)]
       : static_cast<scalar_t>(0);
@@ -487,7 +488,7 @@ batched_panel_register_resident_fused_kernel(
     // 3. Pivot row broadcasts its values to shared memory
     if (curr_row == argmax) {
       #pragma unroll
-      for (int j = 0; j < nb; ++j) { spivrow[j] = rA[j]; }
+      for (const auto j : c10::irange(nb)) { spivrow[j] = rA[j]; }
     }
     __syncthreads();
 
@@ -521,7 +522,7 @@ batched_panel_register_resident_fused_kernel(
   // Write back results using curr_row
   if (tid < nrows) {
     #pragma unroll
-    for (int i = 0; i < nb; ++i) {
+    for (const auto i : c10::irange(nb)) {
       A[LinOff(col_start + curr_row, col_start + i, lda)] = rA[i];
     }
   }
@@ -547,17 +548,17 @@ batched_panel_register_resident_nopiv_fused_kernel(
   // Each thread owns its full row stored in registers;
   scalar_t rA[MAX_RECNB];
   #pragma unroll
-  for (int i = 0; i < nb; ++i) {
+  for (const auto i : c10::irange(nb)) {
     rA[i] = (tid < nrows)
       ? A[LinOff(col_start + tid, col_start + i, lda)]
       : static_cast<scalar_t>(0);
   }
 
-  for (int i = 0; i < nb; ++i) {
+  for (const auto i : c10::irange(nb)) {
     // 1. Broadcast current "pivot" row
     if (i == tid) {
       #pragma unroll
-      for (int j = 0; j < nb; ++j) {
+      for (const auto j : c10::irange(nb)) {
         spivrow[j] = rA[j];
       }
     }
@@ -582,7 +583,7 @@ batched_panel_register_resident_nopiv_fused_kernel(
   // Write back result
   if (tid < nrows) {
     #pragma unroll
-    for (int i = 0; i < nb; ++i) {
+    for (const auto i : c10::irange(nb)) {
       A[LinOff(col_start + tid, col_start + i, lda)] = rA[i];
     }
   }
@@ -646,7 +647,7 @@ batched_panel_colserial_fused_kernel(
   int tid = threadIdx.x;
   int panel_end = col_start + nb;
 
-  for (int k = col_start; k < panel_end; ++k) {
+  for (const auto k : c10::irange(col_start, panel_end)) {
     int rows_below = m - k - 1;
     int update_cols = panel_end - k - 1;
 

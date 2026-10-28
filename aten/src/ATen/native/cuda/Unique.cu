@@ -29,6 +29,7 @@
 #include <thrust/scatter.h>
 
 #include <ATen/native/cuda/UniqueCub.cuh>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -141,7 +142,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   if (!consecutive) {
     thrust::sort(policy, indices_data, indices_data + num_inp,
       [=] __device__ (int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < n; ++i) {
+        for (const auto i : c10::irange(n)) {
           scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
           scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
           if (lhs < rhs) {
@@ -159,7 +160,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     policy, indices_data, num_inp, indices,
     return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
         scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
         if (lhs != rhs) {
@@ -169,7 +170,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
       return true;
     },
     [=] __device__ (int64_t a, int64_t b) -> int64_t {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
         scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
         if (lhs != rhs) {

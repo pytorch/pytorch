@@ -14,6 +14,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -100,7 +101,7 @@ __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
   int idx = nv * blockIdx.x + threadIdx.x;
 
   #pragma unroll
-  for (int i = 0; i < vt; ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(vt)) {
     if (idx < N) {
       f(idx);
       idx += nt;
