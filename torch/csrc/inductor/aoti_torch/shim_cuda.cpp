@@ -8,6 +8,7 @@
 #include <ATen/cuda/MemPool.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/ScopeExit.h>
@@ -261,8 +262,23 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
         !usage->captured || usage->graphs > 0,
         "A CUDA memory pool can't take a capture once every graph that began "
         "a capture into it is deleted; use a new pool");
-    auto capture_stream = at::cuda::getStreamFromExternal(
-        static_cast<cudaStream_t>(stream), mem_pool->device());
+    // Checked first: querying a capturing stream's flags would invalidate its
+    // capture.
+    auto raw_stream = static_cast<cudaStream_t>(stream);
+    cudaStreamCaptureStatus capture_status = cudaStreamCaptureStatusNone;
+    C10_CUDA_CHECK(cudaStreamIsCapturing(raw_stream, &capture_status));
+    TORCH_CHECK(
+        capture_status == cudaStreamCaptureStatusNone,
+        "The CUDA graph capture stream is already capturing");
+    // While a blocking stream captures, work that other threads launch on the
+    // legacy default stream would invalidate the capture.
+    unsigned int stream_flags = 0;
+    C10_CUDA_CHECK(cudaStreamGetFlags(raw_stream, &stream_flags));
+    TORCH_CHECK(
+        stream_flags & cudaStreamNonBlocking,
+        "A CUDA graph capture stream must be created with cudaStreamNonBlocking");
+    auto capture_stream =
+        at::cuda::getStreamFromExternal(raw_stream, mem_pool->device());
     // Python creates the default generators when it initializes CUDA; other
     // hosts would create one lazily inside the capture, which fails.
     at::cuda::detail::getDefaultCUDAGenerator(mem_pool->device());
