@@ -18,7 +18,6 @@ from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
-from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
@@ -35,12 +34,11 @@ from ..pattern_matcher import (
     CallFunction,
     Ignored,
     init_once_fakemode,
-    insert_current_device_node,
     KeywordArg,
     Match,
     MULTIPLE,
     PatternMatcherPass as PatternMatcherPassBase,
-    rank_agnostic,
+    rank_agnostic_device,
     rank_agnostic_passes,
     register_graph_pattern,
     stable_topological_sort,
@@ -628,7 +626,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         node_replacements_shapes = cf.node_replacements_shapes
 
         graph = gm.graph
-        device_node = None
 
         zeros = OrderedSet[Any]()
         ones = OrderedSet[Any]()
@@ -697,13 +694,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 if _has_self_referential_shape(shapes, node):
                     continue
 
-                # Under compile-on-one-rank, don't bake the compiling rank's device.
-                device = fake_tensor.device
-                if rank_agnostic() and _coor_device_index_is_current(device):
-                    if device_node is None:
-                        device_node = insert_current_device_node(graph, device)
-                    device = device_node
-
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
                     aten.full.default,
@@ -711,7 +701,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
-                        "device": device,
+                        "device": rank_agnostic_device(graph, fake_tensor.device),
                         "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
@@ -925,7 +915,8 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
 
     if len(user_devices) == 1 and "val" in node.meta:
         (user_device,) = user_devices
-        if device.type != user_device.type:
+        # Under compile-on-one-rank, device may be a current_device() node.
+        if node.meta["val"].device.type != user_device.type:
             repl = match.graph.call_function(
                 torch.ops.prims.iota.default,
                 (length,),
@@ -933,7 +924,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
                     "start": start,
                     "step": step,
                     "dtype": dtype,
-                    "device": user_device,
+                    "device": rank_agnostic_device(match.graph, user_device),
                     "requires_grad": requires_grad,
                 },
             )

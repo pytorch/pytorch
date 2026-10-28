@@ -750,6 +750,67 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("other_index", (False, True))
+    def test_current_device_matches_only_this_ranks_pattern_device(self, other_index):
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+
+        def f(x):
+            return x * torch.full(x.shape, 2.0, device=x.device)
+
+        gm = make_fx(f)(torch.randn(4, device="cuda"))
+        index = torch.cuda.current_device() + other_index
+        pattern = CallFunction(
+            torch.ops.aten.full.default,
+            [4],
+            2.0,
+            device=torch.device("cuda", index),
+            pin_memory=False,
+        )
+        patterns = PatternMatcherPass()
+        matched = []
+        register_graph_pattern(pattern, pass_dict=patterns)(
+            lambda match: matched.append(match)
+        )
+        patterns.apply(gm.graph)
+        self.assertEqual(len(matched), 0 if other_index else 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("index_device", ("cpu", "cuda"))
+    def test_iota_device_fix_rank_agnostic_under_coor(self, index_device):
+        # fix_iota_device moves an index arange onto the indexed tensor's device during
+        # the joint graph passes, where the device must stay a current_device() node.
+        from torch._inductor.utils import fresh_cache
+
+        def f(x):
+            return x[torch.arange(4, device=index_device)]
+
+        iota_devices = []
+
+        class Record(CustomGraphPass):
+            def __call__(self, graph):
+                iota = torch.ops.prims.iota.default
+                nodes = graph.find_nodes(op="call_function", target=iota)
+                iota_devices.extend(n.kwargs["device"] for n in nodes)
+
+            def uuid(self):
+                return None
+
+        torch._dynamo.reset()
+        x = torch.randn(8, device="cuda")
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Record())
+        with cfg, fresh_cache():
+            self.assertEqual(torch.compile(f, backend="inductor")(x), f(x))
+        (device,) = iota_devices
+        self.assertIsInstance(device, torch.fx.Node)
+        self.assertIs(device.target, torch.ops.coor.current_device.default)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
         # pointless_cumsum_replacement builds an arange on the matched device, and it
         # runs after respecialize_current_device_nodes, outside rank_agnostic_passes.

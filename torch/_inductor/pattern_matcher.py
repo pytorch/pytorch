@@ -435,8 +435,7 @@ class Match:
                         example_vals, _convert_to_fake_mode
                     )
                 replacement = trace_fn(replacement_fn, example_vals)
-            if rank_agnostic():
-                _use_current_device_node(replacement)
+            _use_current_device_node(replacement)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -2226,8 +2225,7 @@ def register_replacement(
                 match.replacement_graph = trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
-                if rank_agnostic():
-                    _use_current_device_node(match.replacement_graph)
+                _use_current_device_node(match.replacement_graph)
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
@@ -3168,8 +3166,14 @@ def rank_agnostic_passes() -> Generator[None, None, None]:
     """Mark passes that run on a graph still carrying coor.current_device() nodes.
 
     Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
-    respecialize_current_device_nodes. That can't be read off the graph: one with
-    no device operands has no such node either before or after.
+    respecialize_current_device_nodes, so passes inside this window must not bake
+    this rank's device: they get device operands from rank_agnostic_device.
+
+    This is a property of the pipeline phase, not something stored on the graph.
+    Node presence can't tell the phases apart (a graph with no device operands has
+    no such node either before or after), and a GraphModule.meta flag would be lost
+    on every GraphModule(root, graph) rebuild, such as prepare_for_partitioner's
+    right before the joint passes.
     """
     token = _in_rank_agnostic_passes.set(True)
     try:
@@ -3183,42 +3187,49 @@ def rank_agnostic() -> bool:
     return _in_rank_agnostic_passes.get() and _coor_enabled()
 
 
-def insert_current_device_node(
+def rank_agnostic_device(
     graph: torch.fx.Graph, device: torch.device
-) -> torch.fx.Node:
-    """Insert a coor.current_device() node standing for ``device``.
+) -> torch.device | torch.fx.Node:
+    """The operand to give a node inserted into ``graph`` for ``device``.
 
-    It goes before the first non-placeholder so it precedes every use. It carries
-    meta["val"] like the nodes make_fx creates: the partitioner only lets a device
-    node be recomputed in the backward when it has one.
+    Inside rank_agnostic_passes under compile-on-one-rank, this rank's current
+    accelerator becomes a coor.current_device() node, the one a CooR trace would have
+    emitted. It goes before the first non-placeholder, so it precedes every use and
+    later calls reuse it. It carries meta["val"] like the nodes make_fx creates: the
+    partitioner only lets a device node be recomputed in the backward when it has one.
     """
+    if not (rank_agnostic() and _coor_device_index_is_current(device)):
+        return device
+    target = torch.ops.coor.current_device.default
     first = next(n for n in graph.nodes if n.op != "placeholder")
+    if first.target is target:
+        return first
     with graph.inserting_before(first):
-        node = graph.call_function(torch.ops.coor.current_device.default)
+        node = graph.call_function(target)
     node.meta["val"] = device
     return node
 
 
 def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
     # trace_fns trace with CooR off, so a replacement bakes this rank's device.
-    # Under CooR the inputs are on the current accelerator by invariant, so swap
-    # that device for the current_device() node a CooR trace would have emitted.
     # Only the top-level graph is walked, not HOP subgraphs.
+    if not rank_agnostic():
+        return
     graph = gm.graph
-    current_device = None
+    swapped = False
 
     def swap(a: Any) -> Any:
-        nonlocal current_device
-        if not (isinstance(a, torch.device) and _coor_device_index_is_current(a)):
+        nonlocal swapped
+        if not isinstance(a, torch.device):
             return a
-        if current_device is None:
-            current_device = insert_current_device_node(graph, a)
-        return current_device
+        operand = rank_agnostic_device(graph, a)
+        swapped |= operand is not a
+        return operand
 
     for n in list(graph.nodes):
         n.args = torch.fx.node.map_aggregate(n.args, swap)
         n.kwargs = torch.fx.node.map_aggregate(n.kwargs, swap)
-    if current_device is not None:
+    if swapped:
         gm.recompile()
 
 
