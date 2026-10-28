@@ -59,6 +59,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```{doxygenfunction} torch::stable::from_blob(void *data, torch::headeronly::IntHeaderOnlyArrayRef sizes, torch::headeronly::IntHeaderOnlyArrayRef strides, torch::stable::Device device, torch::headeronly::ScalarType dtype, int64_t storage_offset, torch::headeronly::Layout layout)
 ```
 
+```{doxygenfunction} torch::stable::from_file
+```
+
 **Example:**
 
 ```cpp
@@ -89,6 +92,9 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::permute
+```
+
+```{doxygenfunction} torch::stable::flip
 ```
 
 ```{doxygenfunction} torch::stable::flatten
@@ -164,6 +170,9 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::sum_out
+```
+
+```{doxygenfunction} torch::stable::add
 ```
 
 ```{doxygenfunction} torch::stable::subtract

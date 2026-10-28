@@ -1356,7 +1356,6 @@ def _broadcast_in_dim_meta(
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):
-                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -2003,6 +2002,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
+    utils.check_shell_dtype_cast(a.dtype, dtype)
 
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
@@ -2894,6 +2894,14 @@ _uniform_helper = _make_prim(
 #
 
 
+def _fft_aten_result(result: TensorLikeType) -> TensorLikeType:
+    # FFT prims promise contiguous strides, unlike backend-dependent ATen layouts.
+    result = result.contiguous()
+    return result.as_strided_(
+        result.shape, utils.make_contiguous_strides_for(result.shape)
+    )
+
+
 def _fft_r2c_meta(
     input: TensorLike,
     *,
@@ -2920,7 +2928,7 @@ def _fft_r2c_aten(
     onesided: bool,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_r2c(input, dim, normalization, onesided)
+    return _fft_aten_result(torch._fft_r2c(input, dim, normalization, onesided))
 
 
 _fft_r2c_doc = """
@@ -2960,7 +2968,7 @@ def _fft_c2c_aten(
     forward: bool,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_c2c(input, dim, normalization, forward)
+    return _fft_aten_result(torch._fft_c2c(input, dim, normalization, forward))
 
 
 _fft_c2c_doc = """
@@ -3000,7 +3008,7 @@ def _fft_c2r_aten(
     last_dim_size: int,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_c2r(input, dim, normalization, last_dim_size)
+    return _fft_aten_result(torch._fft_c2r(input, dim, normalization, last_dim_size))
 
 
 _fft_c2r_doc = """
