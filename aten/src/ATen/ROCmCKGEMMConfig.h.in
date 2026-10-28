@@ -1,0 +1,14 @@
+#pragma once
+
+// Comma-separated allowlist of the architectures Composable Kernel GEMM is built
+// and enabled for. Generated from the TORCH_CK_GEMM_ARCH_LIST CMake cache
+// variable (the single source of truth, declared in the top-level
+// CMakeLists.txt), which also drives the ck_gemm build arch filter
+// (torch_filter_ck_gemm_arches). The runtime support check
+// (at::Context::ckGemmSupported) and the .hip dispatch read this macro so they
+// stay in step with what was built; override the whole set with
+// -DTORCH_CK_GEMM_ARCH_LIST=... at configure time.
+//
+// Keep this generated configuration header out of public headers; include it
+// only from implementation files.
+#define TORCH_CK_GEMM_ARCH_LIST "@TORCH_CK_GEMM_ARCH_LIST_STR@"
