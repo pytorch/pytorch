@@ -1989,11 +1989,14 @@ def _write_custom_op_imports(
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     buf.writeline(f"CUSTOM_OPS = {ops!r}")
     buf.writeline("import importlib as _importlib")
+    buf.writeline("import warnings as _warnings")
     buf.writeline("import torch as _torch")
     buf.writeline("_import_errors = {}")
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
+    # Not just ImportError: e.g. importing torch.distributed.device_mesh before
+    # torch.distributed.tensor raises ValueError.
     buf.writeline("    except Exception as _e:")
     buf.writeline("        _import_errors[_module] = _e")
     buf.writeline("_missing = []")
@@ -2016,6 +2019,13 @@ def _write_custom_op_imports(
         "        f\"that failed to import: {sorted(_import_errors) or 'none'}.\""
     )
     buf.writeline("    ) from next(iter(_import_errors.values()), None)")
+    buf.writeline("for _module, _e in _import_errors.items():")
+    buf.writeline(
+        '    _warnings.warn(f"importing custom op module {_module!r} raised {_e!r}; "'
+    )
+    buf.writeline(
+        '    "the ops this artifact calls are registered, so it loads anyway")'
+    )
     buf.writeline("")
 
 
