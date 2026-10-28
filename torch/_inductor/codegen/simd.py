@@ -5982,7 +5982,7 @@ class SIMDScheduling(BaseScheduling):
             node.is_split_scan()
             for node in NodeScheduleMarker.only_nodes(node_schedule)
         ):
-            if len(tiling) != 2 or "r0_" not in tiling:
+            if set(tiling) != {"x", "r0_"}:
                 return False
         return all(
             SIMDKernel.is_compatible(
@@ -6059,6 +6059,14 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
+        # TritonSplitScanKernel requires 1-D pointwise and 1-D scan (x, r0_).
+        # Multi-dimensional pointwise tiling is not supported for split scan.
+        if any(
+            node.is_split_scan()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            return _TilingSelection(default_tiling, None, None)
+
         # Force tiling compatible with matmul dimensions
         # when natively generating matmul without template calls.
         for node in EnableReduction.filter(node_schedule):
@@ -6074,14 +6082,6 @@ class SIMDScheduling(BaseScheduling):
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
-
-        # TritonSplitScanKernel requires 1-D pointwise and 1-D scan (x, r0_).
-        # Multi-dimensional pointwise tiling is not supported for split scan.
-        if any(
-            node.is_split_scan()
-            for node in NodeScheduleMarker.only_nodes(node_schedule)
-        ):
-            return _TilingSelection(default_tiling, None, None)
 
         # # TODO: enable by default
         if (
