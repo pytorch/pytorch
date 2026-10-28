@@ -446,6 +446,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       disableProfiler,
       py::call_guard<py::gil_scoped_release>());
   m.def(
+      "_close_global_callback_session",
+      closeGlobalCallbackSession,
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
       "_prepare_profiler",
       [](const ProfilerConfig& config,
          const std::set<ActivityType>& activities,
