@@ -1444,10 +1444,12 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
-    pytest.main(
+    exit_code = pytest.main(
         [arg for arg in argv if arg != '-vv'] + ['--collect-only', '-qq', '--use-main-module'],
         plugins=[test_collector_plugin]
     )
+    if exit_code not in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED):
+        raise RuntimeError(f"pytest test collection failed with exit code {exit_code}")
     return test_collector_plugin.tests
 
 
