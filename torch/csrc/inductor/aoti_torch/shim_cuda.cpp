@@ -12,7 +12,6 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/ScopeExit.h>
 
-#include <atomic>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -23,10 +22,11 @@ namespace {
 // The caching allocators fail, and leak a pool reference, on a second capture
 // into a pool that is already capturing. Only graphs hold the host caching
 // allocator's reference on a pool, and it asserts on a capture into a pool
-// whose graphs are all gone. The shim checks both before capturing.
+// whose graphs are all gone. The shim checks both before capturing; a pool
+// and its graphs are used by one thread at a time.
 struct CUDAMemPoolUsage {
-  std::atomic<bool> capturing{false};
-  std::atomic<int64_t> graphs{0};
+  bool capturing = false;
+  int64_t graphs = 0;
   bool captured = false;
 };
 
@@ -93,7 +93,7 @@ void discard_capture(CUDAGraphState& state) {
     return;
   }
   auto pool_free =
-      c10::make_scope_exit([&] { state.pool_usage->capturing.store(false); });
+      c10::make_scope_exit([&] { state.pool_usage->capturing = false; });
   at::cuda::CUDAStreamGuard stream_guard(*stream);
   IgnoreEmptyGraphWarning warning_handler(
       c10::WarningUtils::get_warning_handler());
@@ -251,28 +251,34 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto* state = to_graph_state(graph);
     TORCH_CHECK(pool != nullptr, "CUDA memory pool handle is null");
+    TORCH_CHECK(state->pool_usage == nullptr, "A CUDA graph captures once");
     auto* pool_state = reinterpret_cast<CUDAMemPoolState*>(pool);
     auto* mem_pool = &pool_state->pool;
     auto& usage = pool_state->usage;
     TORCH_CHECK(
-        !usage->capturing.exchange(true),
-        "A CUDA memory pool takes one capture at a time");
-    auto pool_free =
-        c10::make_scope_exit([&] { usage->capturing.store(false); });
+        !usage->capturing, "A CUDA memory pool takes one capture at a time");
     TORCH_CHECK(
-        !usage->captured || usage->graphs.load() > 0,
-        "A CUDA memory pool can't take a capture once every graph captured "
-        "into it is deleted; use a new pool");
+        !usage->captured || usage->graphs > 0,
+        "A CUDA memory pool can't take a capture once every graph that began "
+        "a capture into it is deleted; use a new pool");
     auto capture_stream = at::cuda::getStreamFromExternal(
         static_cast<cudaStream_t>(stream), mem_pool->device());
     // Python creates the default generators when it initializes CUDA; other
     // hosts would create one lazily inside the capture, which fails.
     at::cuda::detail::getDefaultCUDAGenerator(mem_pool->device());
     at::cuda::CUDAStreamGuard stream_guard(capture_stream);
-    state->graph.capture_begin(
-        mem_pool->id(), cudaStreamCaptureModeThreadLocal);
-    pool_free.release();
+    // Even a capture_begin that fails may have taken, and then dropped, the
+    // host caching allocator's reference on the pool.
     usage->captured = true;
+    try {
+      state->graph.capture_begin(
+          mem_pool->id(), cudaStreamCaptureModeThreadLocal);
+    } catch (...) {
+      // Undoes the pool routing a failed capture_begin may have set up.
+      state->graph.reset();
+      throw;
+    }
+    usage->capturing = true;
     usage->graphs++;
     state->pool_usage = usage;
     state->capture_stream = capture_stream;
@@ -290,8 +296,8 @@ AOTITorchError aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph) {
     // The stream stops capturing even if ending the capture fails.
     at::cuda::CUDAStreamGuard stream_guard(*state->capture_stream);
     state->capture_stream.reset();
-    auto pool_free = c10::make_scope_exit(
-        [&] { state->pool_usage->capturing.store(false); });
+    auto pool_free =
+        c10::make_scope_exit([&] { state->pool_usage->capturing = false; });
     state->graph.capture_end();
   });
 }
