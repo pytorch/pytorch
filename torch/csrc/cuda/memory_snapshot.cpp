@@ -571,7 +571,9 @@ std::string _memory_snapshot_pickled() {
         allocated_size_s, static_cast<int64_t>(seg.allocated ? seg.size : 0));
     segmentDict.insert(
         active_size_s, static_cast<int64_t>(seg.active ? seg.size : 0));
-    segmentDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(
+        requested_size_s,
+        static_cast<int64_t>(seg.active ? seg.requested_size : 0));
     segmentDict.insert(stream_s, int64_t(0));
     segmentDict.insert(segment_type_s, small_s);
     segmentDict.insert(
@@ -587,7 +589,8 @@ std::string _memory_snapshot_pickled() {
     auto blockDict = new_dict();
     blockDict.insert(address_s, static_cast<int64_t>(seg.address));
     blockDict.insert(size_s, static_cast<int64_t>(seg.size));
-    blockDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(
+        requested_size_s, static_cast<int64_t>(seg.requested_size));
     blockDict.insert(
         state_s,
         (seg.allocated ? active_allocated_s

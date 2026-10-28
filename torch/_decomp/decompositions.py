@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -239,6 +240,30 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
+
+
+@register_decomposition(aten.softshrink_backward)
+@out_wrapper("grad_input")
+def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
+    # Like the ATen kernel, compute in the common dtype. The comparisons round
+    # lambd to it, as the kernel's lambd.to<scalar_t>() does.
+    dtype = torch.result_type(grad_output, self)
+    grad_output, self = grad_output.to(dtype), self.to(dtype)
+    # lambd.to<scalar_t>() also rejects finite values out of range
+    limit = torch.finfo(dtype).max
+    message = lambda: f"value cannot be converted to type {dtype} without overflow"  # noqa: E731
+    if isinstance(lambd, (torch.SymInt, torch.SymFloat)):
+        # math.isfinite would specialize lambd. Dynamo specializes inf and nan,
+        # so bounds suffice, except that an unbacked non-finite lambd (e.g.
+        # from .item()) can be rejected.
+        torch._check(lambd >= -limit, message)
+        torch._check(lambd <= limit, message)
+    else:
+        torch._check(not (math.isfinite(lambd) and abs(lambd) > limit), message)
+    if self.device.type == "cpu":
+        # Like the CPU vectorized path (but not the scalar path), NaN gets 0
+        return torch.where((self < -lambd) | (self > lambd), grad_output, 0)
+    return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -660,11 +685,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
@@ -3595,7 +3627,26 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Note [log_sigmoid_forward buffer contract]: The buffer output is only
+    # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
+    # CUDA and MPS forward kernels allocate an empty (0,) buffer and ignore
+    # it (log_sigmoid_forward_{cuda,mps}; the same NOTE also appears in some
+    # backward and out variants, e.g. log_sigmoid_backward_cuda and
+    # log_sigmoid_forward_out_mps). PrivateUse1 backends follow the
+    # accelerator semantics (verified on the registered torch_npu backend).
+    # Meta tensors follow the CPU branch: this op has no Meta kernel, and
+    # this decomposition is what activate_meta()
+    # (torch/_meta_registrations.py) registers as its Meta kernel, so it
+    # defines its own meta behavior. Backends not listed below keep the
+    # historical full-shape buffer.
+    if self.is_cpu or self.is_meta:
+        buffer = z
+    elif (
+        self.is_cuda
+        or self.is_xpu
+        or self.is_mps
+        or self.device.type == torch._C._get_privateuse1_backend_name()
+    ):
         buffer = self.new_zeros((0,))
     else:
         buffer = z
@@ -5873,6 +5924,8 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Tensor | None = None,
     scale: float | None = None,
 ) -> tuple[Tensor, Tensor]:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
@@ -5889,6 +5942,8 @@ def scaled_dot_product_flash_attention_for_cpu(
         lambda: "q, k, v should have the same head size",
     )
 
+    # For these 4D CPU inputs, the current math implementation returns a
+    # contiguous (and therefore dense) output of shape (N, H, L, E).
     output, attn = aten._scaled_dot_product_attention_math.default(
         query,
         key,
@@ -5900,6 +5955,7 @@ def scaled_dot_product_flash_attention_for_cpu(
         scale=scale,
         enable_gqa=query.size(1) != key.size(1),
     )
+
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
@@ -5923,11 +5979,27 @@ def scaled_dot_product_flash_attention_for_cpu(
     # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
-    output = (
-        output.permute(2, 0, 1, 3)
-        .contiguous(memory_format=torch.contiguous_format)
-        .permute(1, 2, 0, 3)
+
+    # Native/meta allocate empty_like(query), so match the query's physical
+    # dim order, e.g. (L, N, H, E) for MHA and (N, L, H, E) for BERT-style inputs.
+    output_has_same_layout_as_input = all(
+        statically_known_true(actual == expected)
+        for actual, expected in zip(output.stride(), query.stride())
     )
+
+    # TODO: Preserve exact native output strides for singleton/empty dimensions.
+    # The contiguous clone below can normalize these strides; additional handling
+    # and regression tests are needed.
+    if not output_has_same_layout_as_input:
+        physical_order, _ = utils.compute_elementwise_output_logical_to_physical_perm(
+            query
+        )
+        inverse_order = utils.invert_perm(physical_order)
+        output = (
+            output.permute(physical_order)
+            .clone(memory_format=torch.contiguous_format)
+            .permute(inverse_order)
+        )
     return output, attn
 
 

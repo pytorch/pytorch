@@ -294,8 +294,8 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {
             "x": x_lp,
             "y": y_lp.t(),  # mat_b is (K, N)
-            "scale_a": x_scales.reciprocal(),
-            "scale_b": y_scales.reciprocal(),
+            "scale_a": x_scales,
+            "scale_b": y_scales,
         }
         self._set_scaled_mm_call_config(
             scale_recipe_a=scaling_type_a,

@@ -906,7 +906,9 @@ IValue IValue::deepcopy(
     case IValue::Tag::Tensor: {
       const at::Tensor& src_tensor = toTensor();
       copy = device.has_value() && !src_tensor.device().is_meta()
-          ? IValue(src_tensor.to(*device))
+          // non_blocking must be false: deepcopy never synchronizes the copy.
+          ? IValue(
+                src_tensor.to(*device, /*non_blocking=*/false, /*copy=*/true))
           : IValue(src_tensor.clone());
     } break;
     case IValue::Tag::Tuple: {

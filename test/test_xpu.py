@@ -1111,7 +1111,6 @@ print(torch.xpu.is_initialized())
 
     @unittest.skipIf(not HAS_PYZES, "requires pyzes")
     @unittest.skipIf(not Xe2_Or_Later, "not available")
-    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
     @serialTest()
     def test_mem_get_info_with_pyzes(self):
         torch.xpu.synchronize()
@@ -3172,6 +3171,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertTrue(check(set()))
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(not Xe2_Or_Later, "XPU IPC not available")
 @unittest.skipIf(IS_WINDOWS, "XPU IPC not available on non-Linux platforms")
 @unittest.skipIf(
@@ -3184,8 +3184,8 @@ class TestBlockStateAbsorption(TestCase):
 )
 class TestXPUMultiprocessing(TestCase):
     @staticmethod
-    def _event_handle_importer_consumer(handle, p2c, c2p):
-        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+    def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+        e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
@@ -3193,10 +3193,10 @@ class TestXPUMultiprocessing(TestCase):
         p2c.get()  # wait for parent to finish
 
     @staticmethod
-    def _event_handle_exporter_consumer(handle, p2c, c2p):
+    def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
         stream = torch.xpu.Stream()
         with stream:
-            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
             torch.xpu._sleep(200_000_000)  # spin for about 200 ms
             e1.record()
             c2p.put(0)
@@ -3209,8 +3209,15 @@ class TestXPUMultiprocessing(TestCase):
         event.synchronize()
         c2p.put(1)  # notify parent synchronization is done
 
-    def test_event_handle_importer(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
         ctx = mp.get_context("spawn")
@@ -3218,7 +3225,7 @@ class TestXPUMultiprocessing(TestCase):
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestXPUMultiprocessing._event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -3233,15 +3240,22 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(1)  # notify child to finish
         p.join()
 
-    def test_event_handle_exporter(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestXPUMultiprocessing._event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -3253,8 +3267,15 @@ class TestXPUMultiprocessing(TestCase):
         p2c.put(0)  # notify child to finish
         p.join()
 
-    def test_event_multiprocess(self):
-        event = torch.xpu.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.xpu.Event, name="xpu_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
@@ -4042,6 +4063,37 @@ class TestMemPool(TestCase):
         # each thread should create a unique mempool, since
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
+
+    @serialTest()
+    def test_nested_mempool(self):
+        torch.xpu.empty_cache()
+        pool1 = torch.xpu.MemPool()
+        pool2 = torch.xpu.MemPool()
+        pool3 = torch.xpu.MemPool()
+
+        data = []
+        nelem_1mb = 1024 * 1024 // 4
+
+        def allocate_data():
+            x = torch.empty(nelem_1mb * 20, device="xpu")
+            data.append(x)
+
+        with torch.xpu.use_mem_pool(pool1):
+            allocate_data()
+            with torch.xpu.use_mem_pool(pool2):
+                allocate_data()
+                with torch.xpu.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.xpu.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.xpu.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.xpu.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
 
     def test_mempool_empty_cache(self):
         torch.xpu.empty_cache()
