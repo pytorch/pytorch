@@ -43,7 +43,6 @@ _ORDERED_WORKER_WARPS = 16
 
 
 class ColConfig(NamedTuple):
-    order: str
     rule: str
     threads_per_block: int
     npar: int
@@ -69,20 +68,14 @@ def select_col_config(
     nouts: int,
     alignment: int,
     contiguous: bool,
-    order: str = "unordered",
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
-) -> ColConfig | None:
-    """Select an implementation for unordered semantics, including ordered plans."""
-    if order not in ("unordered", "inner_tree"):
-        raise ValueError(f"unknown reduction order: {order!r}")
-    if order == "inner_tree":
-        return None
+) -> ColConfig:
+    """Select the column kernel and geometry; explicit arguments override it."""
     explicit = any(v is not None for v in (threads_per_block, npar, vec))
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
     cfg = ColConfig(
-        order,
         "explicit" if explicit else "default",
         threads if threads_per_block is None else threads_per_block,
         _split_p(rows) if npar is None else npar,
@@ -642,8 +635,6 @@ def reduce_col_tile(
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
-    *,
-    order: str = "unordered",
 ) -> torch.Tensor:
     """Reduce dim 0 of 2D x with a unit last stride to (C,), splitting it npar ways."""
     return _reduce_col_tile(
@@ -655,7 +646,6 @@ def reduce_col_tile(
         threads_per_block,
         npar,
         vec,
-        order=order,
     )[0]
 
 
@@ -667,8 +657,6 @@ def reduce_col_tile_2out(
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
-    *,
-    order: str = "unordered",
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 0 of 2D x like reduce_col_tile, projecting two outputs per column."""
     return _reduce_col_tile(
@@ -680,7 +668,6 @@ def reduce_col_tile_2out(
         threads_per_block,
         npar,
         vec,
-        order=order,
     )
 
 
@@ -690,13 +677,9 @@ def reduce_batched_col_tile(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    *,
-    order: str = "unordered",
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
-    return _reduce_col_tile(
-        trait, trait_key, x, out_dtypes, nouts, None, None, None, order=order
-    )
+    return _reduce_col_tile(trait, trait_key, x, out_dtypes, nouts, None, None, None)
 
 
 def _reduce_col_tile(
@@ -708,11 +691,7 @@ def _reduce_col_tile(
     threads_per_block: int | None,
     npar: int | None,
     vec: int | None,
-    *,
-    order: str = "unordered",
 ) -> tuple[torch.Tensor, ...]:
-    if order != "unordered":
-        raise ValueError(f"column tiling requires unordered reduction, got {order!r}")
     if x.dim() not in (2, 3) or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(
             f"want 2D/3D contiguous-last-dim CUDA, got {tuple(x.shape)}"
@@ -746,13 +725,10 @@ def _reduce_col_tile(
         nouts=nouts,
         alignment=align,
         contiguous=x.is_contiguous(),
-        order=order,
         threads_per_block=threads_per_block,
         npar=npar,
         vec=vec,
     )
-    if cfg is None:
-        raise AssertionError("unordered column reduction needs a column configuration")
     if cfg.kernel_order == "inner_tree":
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts)
         if ordered is not None:
