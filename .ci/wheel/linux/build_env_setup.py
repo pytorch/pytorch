@@ -501,6 +501,13 @@ def main() -> None:
         # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
         rocm_home = discover_rocm_home()
         env_out["ROCM_HOME"] = rocm_home
+        # A from-source AOTriton build (no prebuilt runtime for this HIP) finds
+        # hip via ROCM_PATH and liblzma via pkg-config; the SDK vendors the latter.
+        env_out["ROCM_PATH"] = rocm_home
+        pkg_config_dirs = [str(Path(rocm_home) / "lib/rocm_sysdeps/lib/pkgconfig")]
+        if os.environ.get("PKG_CONFIG_PATH"):
+            pkg_config_dirs.append(os.environ["PKG_CONFIG_PATH"])
+        env_out["PKG_CONFIG_PATH"] = os.pathsep.join(pkg_config_dirs)
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
