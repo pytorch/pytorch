@@ -65,6 +65,13 @@ from ._ptx import cvta_smem, make_bulk_reduce_add
 from .cutedsl_impl import _SRC_ALIGN_BYTES, _TMA_DST_ALIGN_BYTES
 
 
+# Row lengths below are checked against one 16B TMA requirement shared by both
+# operands; the kernel doesn't support the src and dst alignments differing.
+if _SRC_ALIGN_BYTES != _TMA_DST_ALIGN_BYTES:
+    raise AssertionError(
+        f"TMA src/dst alignment differ: {_SRC_ALIGN_BYTES} vs {_TMA_DST_ALIGN_BYTES}"
+    )
+
 _MAX_CHUNK_BYTES = 512
 _THREADS_PER_CTA = 32  # one warp per CTA
 # cp.async.bulk requires 128B-aligned smem destinations.
