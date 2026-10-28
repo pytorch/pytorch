@@ -93,6 +93,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .object_protocol import python_constant_repr_impl
 from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable
 
@@ -3466,6 +3467,18 @@ class SymNodeVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_invert_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+    ) -> VariableTracker:
+        if self.python_type() is not int:
+            return super().nb_invert_impl(tx)
+        return SymNodeVariable.create(
+            tx,
+            operator.neg(self.as_proxy()) - 1,
+            sym_num=None,
+        )
+
     def nb_power_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -3498,6 +3511,9 @@ class SymNodeVariable(VariableTracker):
         # Essentially convert the SymNode to a constant variable whenever its
         # searched for a dict key.
         return hash(self.evaluate_expr())
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return python_constant_repr_impl(self, tx)
 
 
 class NumpyNdarrayVariable(TensorVariable):
