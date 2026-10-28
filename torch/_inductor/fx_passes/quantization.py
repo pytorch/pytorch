@@ -1148,64 +1148,48 @@ _woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"
 
 
 def _validate_woq_device_type(device_type: str) -> None:
-    """Reject ``device_type`` values that can never match the fusion check.
-
-    The check in ``_is_valid_woq_optimization_pattern`` compares against
-    ``x.device.type``, so a string carrying a device index (``"cuda:0"``) or
-    the pre-rename ``"privateuseone"`` would silently never match.
-    """
+    """Reject ``device_type`` values that can never match the fusion check."""
     if not isinstance(device_type, str):
         raise TypeError(f"device_type must be a str, got {type(device_type).__name__}")
     try:
         parsed = torch.device(device_type).type
     except RuntimeError as e:
         raise ValueError(
-            f"unknown device type {device_type!r}: the WOQ fusion check "
-            "compares against x.device.type, so device_type must be parseable "
-            "by torch.device (for a PrivateUse1 backend, register after "
-            "torch.utils.rename_privateuse1_backend)"
+            f"expected a bare device type such as 'cuda', got {device_type!r} "
+            "which torch.device cannot parse (for a PrivateUse1 backend, "
+            "register after torch.utils.rename_privateuse1_backend)"
         ) from e
     if parsed != device_type:
         raise ValueError(
-            f"expected a bare device type such as 'cuda', got {device_type!r} "
-            f"(torch.device({device_type!r}).type is {parsed!r}): a device "
-            "index or the pre-rename 'privateuseone' never matches the "
-            "device-type comparison in _is_valid_woq_optimization_pattern"
+            f"expected a bare device type such as 'cuda', got {device_type!r}: "
+            "a device index (e.g. 'cuda:0') or the pre-rename 'privateuseone' "
+            "would never match (for a PrivateUse1 backend, register after "
+            "torch.utils.rename_privateuse1_backend)"
         )
 
 
 def register_woq_int8pack_fusion_device(device_type: str) -> None:
     """Enable the WOQ int8pack-mm fusion on ``device_type``.
 
-    Meant for third-party backends that implement the
-    ``aten._weight_int8pack_mm`` operator. Registration is an explicit
-    opt-in; the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist
-    is hashed into the FX-graph cache key (``FxGraphHashDetails``), so
-    compiles observe the allowlist state they were compiled under and
-    changing it produces new cache entries instead of reusing stale ones.
+    For third-party backends that implement ``aten._weight_int8pack_mm``;
+    the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist is
+    part of the FX-graph cache key, so changing it produces new cache
+    entries instead of reusing stale ones.
     """
     _validate_woq_device_type(device_type)
     _woq_int8pack_fusion_devices.add(device_type)
 
 
 def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
-    """Disable the WOQ int8pack-mm fusion on ``device_type``.
-
-    Removes ``device_type`` from the allowlist (e.g. to restore the default
-    state in test teardown). The same cache-key behavior as
-    :func:`register_woq_int8pack_fusion_device` applies.
-    """
+    """Disable the WOQ int8pack-mm fusion on ``device_type`` (e.g. teardown)."""
     _validate_woq_device_type(device_type)
     _woq_int8pack_fusion_devices.discard(device_type)
 
 
 def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
-    """Snapshot the allowlist as a sorted, deterministic tuple.
+    """Snapshot the allowlist for the FX-graph cache key and compile workers.
 
-    Both consumers of the snapshot must stay identical:
-    ``FxGraphHashDetails`` hashes it into the FX-graph cache key, and the
-    serialized (subprocess) compile path in
-    ``torch/_inductor/compile_fx_ext.py`` transfers it to compile workers.
+    The two consumers must stay identical.
     """
     return tuple(sorted(_woq_int8pack_fusion_devices))
 
@@ -1214,12 +1198,9 @@ def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
 def _patch_woq_int8pack_fusion_devices(devices):
     """Apply an allowlist snapshot captured in the parent process.
 
-    Used by ``_run_in_child`` in ``torch/_inductor/compile_fx_ext.py`` so the
-    worker's pattern matching agrees with the allowlist state the parent
-    already hashed into the FX-graph cache key, instead of reading the
-    worker's own module-level default. The set is mutated in place -
-    references obtained via ``from ... import`` keep observing the parent's
-    state.
+    Used by ``_run_in_child`` so the worker's pattern matching follows the
+    parent's allowlist. Mutated in place so ``from ... import`` references
+    observe the change.
     """
     saved = OrderedSet(_woq_int8pack_fusion_devices)
     _woq_int8pack_fusion_devices.clear()

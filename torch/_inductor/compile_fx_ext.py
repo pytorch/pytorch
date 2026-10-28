@@ -229,11 +229,8 @@ class _WireProtocolInput:
     logger_state: _LoggerState
     lowering: _LoweringSerializer
     fake_tensor_mode: _FakeTensorModeSerializer
-    # WOQ int8pack fusion device allowlist from the parent process
-    # (sorted tuple snapshot). Applied in the child via
-    # _patch_woq_int8pack_fusion_devices so the worker pattern-matches
-    # against the same allowlist state the parent hashed into
-    # FxGraphHashDetails, instead of the worker's own module default.
+    # WOQ int8pack fusion device allowlist snapshot from the parent;
+    # applied in the child via _patch_woq_int8pack_fusion_devices.
     woq_int8pack_fusion_devices: tuple[str, ...]
 
     def serialize(self) -> _WireProtocolPickledInput:
@@ -525,8 +522,7 @@ class _SerializedFxCompile(FxCompile):
 
         from pickle import PicklingError
 
-        # Captured before pickling: the snapshot must describe the allowlist
-        # state the parent also hashes into FxGraphHashDetails.
+        # Allowlist snapshot, kept identical to the cache-key snapshot.
         from .fx_passes.quantization import _get_woq_int8pack_fusion_devices
 
         try:
@@ -595,9 +591,7 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(config.patch(input.config))
             for name, values in input.backend_configs.items():
                 stack.enter_context(importlib.import_module(name).patch(values))
-            # Apply the parent's WOQ allowlist snapshot before compiling so
-            # the worker's pattern matching agrees with the allowlist state
-            # the parent already hashed into the FX graph cache key.
+            # Keep the worker's pattern matching on the parent's allowlist.
             from .fx_passes.quantization import _patch_woq_int8pack_fusion_devices
 
             stack.enter_context(

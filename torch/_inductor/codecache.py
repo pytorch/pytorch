@@ -1814,12 +1814,9 @@ class FxGraphHashDetails:
             # FxGraphCachePickler includes these rule fingerprints through self.__dict__.
             self.custom_backend_codegen_implications = implication_hashes
 
-        # The WOQ int8pack fusion device allowlist decides whether the
-        # post-grad quantization pattern rewrites fire for a device type, so
-        # it must be part of the cache key: an artifact compiled under a
-        # different allowlist could dispatch aten._weight_int8pack_mm on a
-        # backend that does not implement it. The shared helper keeps this
-        # snapshot identical to the one sent to compile workers.
+        # The WOQ fusion device allowlist must be part of the cache key: an
+        # artifact compiled under a different allowlist could dispatch
+        # aten._weight_int8pack_mm on a backend that does not implement it.
         from torch._inductor.fx_passes.quantization import (
             _get_woq_int8pack_fusion_devices,
         )

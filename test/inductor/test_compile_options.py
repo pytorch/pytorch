@@ -328,12 +328,9 @@ class TestCompileOptions(TestCase):
         self.assertTrue(fake_config_module.e_bool)
 
     def test_compile_fx_ext_propagates_woq_allowlist(self):
-        # The WOQ int8pack fusion allowlist registered in this process must
-        # travel through _WireProtocolInput and be applied by the child (the
-        # same wire path a subprocess worker takes), so the worker's pattern
-        # matching matches the allowlist state the parent hashed into
-        # FxGraphHashDetails (the parent computes the cache key; the worker
-        # only runs the post-grad pattern passes).
+        # The parent's allowlist must reach the child (the same wire path a
+        # subprocess worker takes) so its pattern matching follows the
+        # parent's cache key.
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.sin(x * 2)
