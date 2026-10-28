@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <string>
 
@@ -1099,7 +1100,7 @@ py::object apply_output_convert(
   if (py::isinstance<py::tuple>(result)) {
     py::tuple tup = result.cast<py::tuple>();
     py::tuple converted(tup.size());
-    for (size_t i = 0; i < tup.size(); i++) {
+    for (const auto i : c10::irange(tup.size())) {
       converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
     }
     return converted;
@@ -1427,7 +1428,12 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor fake_tensor;
   {
     // Exclude Fake so from_real_tensor's meta conversion doesn't re-enter the
-    // fake fallback (the meta factory ops it runs are otherwise plain).
+    // fake fallback (the meta factory ops it runs are otherwise plain). With
+    // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
+    // describer then reads the source's fake device, which Fake exclusion no
+    // longer hides (see Note [in_kernel_invocation]). from_real_tensor must
+    // only query the source's metadata and build outputs with an explicit meta
+    // device.
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
