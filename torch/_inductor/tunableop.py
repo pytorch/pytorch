@@ -386,6 +386,11 @@ def _shutdown_locked(graceful: bool = True) -> None:
 
 def _insert_device_ordinal(filename: str, device: int) -> str:
     """Mirror of TuningContext::SetFilename(filename, insert_device_ordinal=true)."""
+    if not filename:
+        # SetFilename returns early on an empty name, which is how an empty
+        # PYTORCH_TUNABLEOP_FILENAME turns persistence off. Appending an
+        # ordinal would write results to a file called "0" instead.
+        return ""
     ordinal = str(device)
     if "%d" in filename:
         return filename.replace("%d", ordinal, 1)
@@ -479,7 +484,8 @@ def resolve_and_pin_filename(device: int) -> str:
             os.environ.get("PYTORCH_TUNABLEOP_FILENAME", "tunableop_results.csv"),
             device,
         )
-        tunable.set_filename(filename, insert_device_ordinal=False)
+        if filename:
+            tunable.set_filename(filename, insert_device_ordinal=False)
     return filename
 
 

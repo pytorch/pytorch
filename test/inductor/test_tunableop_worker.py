@@ -476,10 +476,28 @@ class TunableOpWorkerTest(TestCase):
             tunableop.submit(job)
             self.assertEqual(self._stamped().filename, "env1.csv")
 
+    def test_empty_env_filename_is_left_off_not_turned_into_a_file(self):
+        # PYTORCH_TUNABLEOP_FILENAME="" means "do not persist". Deriving an
+        # ordinal would write to ./0, and pinning it would re-enable
+        # persistence in the parent too.
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = ""
+        job = tunableop.BenchmarkJob(None, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+            mock.patch.dict(os.environ, {"PYTORCH_TUNABLEOP_FILENAME": ""}),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(self._stamped().filename, "")
+        tunable.set_filename.assert_not_called()
+
     def test_insert_device_ordinal_matches_cpp_rule(self):
         self.assertEqual(tunableop._insert_device_ordinal("r%d.csv", 3), "r3.csv")
         self.assertEqual(tunableop._insert_device_ordinal("a.b.csv", 2), "a.b2.csv")
         self.assertEqual(tunableop._insert_device_ordinal("results", 0), "results0")
+        # An empty name disables persistence; SetFilename returns early on it.
+        self.assertEqual(tunableop._insert_device_ordinal("", 0), "")
 
     def test_submit_uses_parent_filename_when_set(self):
         job = tunableop.BenchmarkJob(None, tuning=False)
