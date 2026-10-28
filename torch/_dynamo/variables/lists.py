@@ -118,11 +118,9 @@ def _cpython_has_simple_slice_bug() -> bool:
     # simple slices (step is None or 1) raised "can only assign an
     # iterable" instead of "must assign iterable to extended slice".
     # Verified empirically against real CPython builds: the fix shipped in
-    # 3.10.20, 3.11.15, and 3.12.5 (3.12.0 is the first 3.12 release, so
-    # 3.12.0-3.12.4 predate it); 3.13+ never had the bug.
+    # 3.11.15 and 3.12.5 (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4
+    # predate it); 3.13+ never had the bug.
     v = sys.version_info
-    if v[:2] == (3, 10):
-        return v < (3, 10, 20)
     if v[:2] == (3, 11):
         return v < (3, 11, 15)
     if v[:2] == (3, 12):
@@ -1480,14 +1478,6 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker:
         return self._seq_richcompare(tx, other, op, collections.deque)
 
-    if sys.version_info < (3, 11):
-
-        def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-            # deque fills nb_bool (deque_bool: Py_SIZE(deque) != 0) up to Python
-            # 3.10; CPython GH-32397 dropped the slot in 3.11, so newer versions
-            # fall through to sq_length in generic_is_true and never reach here.
-            return ConstantVariable.create(len(self.items) > 0)
-
     def is_hashable(self) -> bool:
         return False
 
@@ -2407,6 +2397,41 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def _bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        method: str,
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            return VariableTracker.build(
+                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+            )
+        except (MemoryError, OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def bytearray_split(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "split")
+
+    def bytearray_rsplit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rsplit")
+
     def bytearray_hex(
         self,
         tx: "InstructionTranslatorBase",
@@ -2573,6 +2598,8 @@ class ByteArrayVariable(VariableTracker):
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
+        "split": Method(bytearray_split),
+        "rsplit": Method(bytearray_rsplit),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
