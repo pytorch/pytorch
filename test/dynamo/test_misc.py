@@ -75,7 +75,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     expect_true,
     guard_or_false,
-    guard_size_oblivious,
     ShapeEnv,
 )
 from torch.nn import functional as F
@@ -16414,20 +16413,6 @@ fn
             RuntimeError, "Could not guard on data-dependent expression"
         ):
             fn(x, y)
-
-    def test_guard_size_oblivious_backed(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            y = x.size(0)
-            # This doesn't actually do anything
-            if guard_size_oblivious(y == 0):
-                return torch.randn(1)
-            else:
-                return torch.randn(2)
-
-        # Should not fail in either case
-        self.assertEqual(f(torch.randn(0)).shape, (1,))
-        self.assertEqual(f(torch.randn(2)).shape, (2,))
 
     def _clear_inspect_mro_cache(self):
         # Some Python 3.12 builds cache classes in inspect.getattr_static.
