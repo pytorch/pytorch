@@ -107,34 +107,6 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
-def _bind_key_default(
-    tx: "InstructionTranslatorBase",
-    name: str,
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> list[VariableTracker]:
-    # OrderedDict.pop/setdefault are Argument Clinic methods taking key= and
-    # default= by keyword; bind them to the positional form dict's handlers use.
-    for key in kwargs:
-        if key not in ("key", "default"):
-            raise_type_error(tx, f"{name}() got an unexpected keyword argument '{key}'")
-    if len(args) + len(kwargs) > 2:
-        raise_type_error(
-            tx, f"{name}() takes at most 2 arguments ({len(args) + len(kwargs)} given)"
-        )
-    if "key" in kwargs:
-        if args:
-            raise_type_error(tx, f"{name}() got multiple values for argument 'key'")
-        args = [kwargs["key"]]
-    if not args:
-        check_positional(tx, name, 0, 1, 2)
-    if "default" in kwargs:
-        if len(args) == 2:
-            raise_type_error(tx, f"{name}() got multiple values for argument 'default'")
-        args = [*args, kwargs["default"]]
-    return args
-
-
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
@@ -971,7 +943,12 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self.dict_pop(tx, _bind_key_default(tx, "pop", args, kwargs), {})
+        if not kwargs:
+            return self.dict_pop(tx, args, {})
+        from .builder import SourcelessBuilder
+
+        fn = SourcelessBuilder.create(tx, polyfills.odict_pop)
+        return fn.call_function(tx, [self, *args], kwargs)
 
     def odict_setdefault(
         self: "OrderedDictVariable",
@@ -979,8 +956,12 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        bound = _bind_key_default(tx, "setdefault", args, kwargs)
-        return self.dict_setdefault(tx, bound, {})
+        if not kwargs:
+            return self.dict_setdefault(tx, args, {})
+        from .builder import SourcelessBuilder
+
+        fn = SourcelessBuilder.create(tx, polyfills.odict_setdefault)
+        return fn.call_function(tx, [self, *args], kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
