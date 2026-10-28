@@ -11,7 +11,6 @@
 #include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
 
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -35,13 +34,6 @@ struct CudaGraphOptions {
   int64_t max_graphs = 8;
 };
 
-// AOTI_RUNTIME_STRICT_CUDA_GRAPH set to anything but 0 makes a failed capture
-// an error instead of a fallback to eager execution.
-inline bool strict_cuda_graph_env() {
-  const char* value = std::getenv("AOTI_RUNTIME_STRICT_CUDA_GRAPH");
-  return value != nullptr && value[0] != '0';
-}
-
 // Deleters run in destructors, so they log errors instead of throwing.
 inline void delete_cuda_graph(void* ptr) {
   if (aoti_torch_delete_cuda_graph(reinterpret_cast<CUDAGraphHandle>(ptr)) !=
@@ -62,7 +54,7 @@ inline void delete_cuda_mem_pool(void* ptr) {
 // one memory pool, so each replay waits for the previous one, whatever stream
 // it ran on, copies its inputs in right before and clones its outputs right
 // after. A key whose capture fails but whose eager call succeeds runs eagerly
-// from then on, unless AOTI_RUNTIME_STRICT_CUDA_GRAPH is set.
+// from then on.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
@@ -100,9 +92,10 @@ class CudaGraphManager {
   CudaGraphManager(CudaGraphManager&&) = delete;
   CudaGraphManager& operator=(CudaGraphManager&&) = delete;
 
-  // Calls fn(inputs, outputs, stream), or replays a capture of it. fn borrows
-  // `inputs`, writes new references into `outputs`, and must enqueue all of
-  // its GPU work on the stream it is given, which may be the capture stream.
+  // Calls fn(inputs, outputs, stream), or replays a capture of it. A manager
+  // serves one fn with a fixed number of outputs. fn borrows `inputs`, writes
+  // new references into `outputs`, and must enqueue all of its GPU work on the
+  // stream it is given, which may be the capture stream.
   // Callers must make sure fn doesn't mutate its inputs: a replay runs on the
   // graph's copies of them, so the caller's tensors would miss the change.
   // Replayed outputs never alias the inputs, and alias each other only where
@@ -152,9 +145,6 @@ class CudaGraphManager {
       try {
         graph = capture(fn, inputs, num_inputs, num_outputs, stream);
       } catch (const std::exception& e) {
-        if (strict_cuda_graph_env()) {
-          throw;
-        }
         // A discarded capture ran nothing, so the call can still run eagerly.
         // An error there isn't about capturing, and is the caller's.
         run_eagerly(fn, inputs, outputs, stream);
@@ -398,9 +388,6 @@ class CudaGraphManager {
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(&graph_handle));
     graph->graph.reset(graph_handle);
 
-    // The capture can reuse memory of dropped graphs, which a replay on
-    // another stream may still be using.
-    AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, last_replay_, 0));
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, stream));
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(capture_stream_, event_, 0));
     std::vector<AtenTensorHandle> raw_outputs(num_outputs, nullptr);
@@ -463,29 +450,45 @@ class CudaGraphManager {
       AtenTensorHandle* outputs,
       size_t num_outputs,
       cudaStream_t stream) {
+    AOTI_RUNTIME_CHECK(
+        num_outputs == graph.output_slots.size(),
+        "CudaGraphManager: a graph was captured with a different number of "
+        "outputs");
     AOTICudaStreamGuard stream_guard(stream, device_index_);
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamWaitEvent(stream, last_replay_, 0));
-    for (size_t i = 0; i < graph.input_buffers.size(); ++i) {
-      copy_input(graph, i, inputs[i]);
-    }
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_cuda_graph_replay(graph.graph.get(), stream));
-    // Clones, so that later replays can't overwrite the outputs. Aliasing
-    // between different outputs is not preserved.
-    std::vector<RAIIAtenTensorHandle> clones;
-    clones.reserve(graph.static_outputs.size());
-    for (auto& output : graph.static_outputs) {
-      AtenTensorHandle clone = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_clone_preserve_strides(output, &clone));
-      clones.emplace_back(clone);
-    }
-    for (size_t i = 0; i < num_outputs; ++i) {
-      outputs[i] = nullptr;
-      if (graph.output_slots[i] != kNoOutput) {
-        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
-            clones[graph.output_slots[i]], &outputs[i]));
+    std::fill(outputs, outputs + num_outputs, nullptr);
+    try {
+      for (size_t i = 0; i < graph.input_buffers.size(); ++i) {
+        copy_input(graph, i, inputs[i]);
       }
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_cuda_graph_replay(graph.graph.get(), stream));
+      // Clones, so that later replays can't overwrite the outputs. Aliasing
+      // between different outputs is not preserved.
+      std::vector<RAIIAtenTensorHandle> clones;
+      clones.reserve(graph.static_outputs.size());
+      for (auto& output : graph.static_outputs) {
+        AtenTensorHandle clone = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_clone_preserve_strides(output, &clone));
+        clones.emplace_back(clone);
+      }
+      for (size_t i = 0; i < num_outputs; ++i) {
+        if (graph.output_slots[i] != kNoOutput) {
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(
+              clones[graph.output_slots[i]], &outputs[i]));
+        }
+      }
+    } catch (...) {
+      for (size_t i = 0; i < num_outputs; ++i) {
+        if (outputs[i] != nullptr) {
+          (void)aoti_torch_delete_tensor_object(outputs[i]);
+          outputs[i] = nullptr;
+        }
+      }
+      // Later calls must still wait for whatever this one enqueued.
+      (void)cudaEventRecord(last_replay_, stream);
+      throw;
     }
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(last_replay_, stream));
   }

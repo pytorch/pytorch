@@ -9,10 +9,12 @@
 #include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/env.h>
 #include <torch/csrc/inductor/aoti_runtime/cudagraph_manager.h>
 
+#include <array>
+#include <string>
 #include <thread>
+#include <vector>
 
 using torch::aot_inductor::CudaGraphManager;
 using torch::aot_inductor::CudaGraphOptions;
@@ -316,16 +318,66 @@ TEST_F(CudaGraphManagerTest, CaptureOnlyFailureRunsEagerly) {
   EXPECT_EQ(manager.num_graphs(), 1);
 }
 
-TEST_F(CudaGraphManagerTest, StrictModeRethrowsCaptureFailure) {
-  c10::utils::set_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH", "1");
+TEST_F(CudaGraphManagerTest, ForgetsUncapturableKeysPastLimit) {
+  CudaGraphManager manager(0, no_warmup());
+  Region region(affine);
+  region.fail_in_capture = true;
+  struct IgnoreWarnings : c10::WarningHandler {
+    void process(const c10::Warning& /*warning*/) override {}
+  } ignore_warnings;
+  c10::WarningUtils::WarningHandlerGuard guard(&ignore_warnings);
+  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupKeys + 1; ++n) {
+    run(manager, region, at::randn({static_cast<int64_t>(n)}, at::kCUDA));
+  }
+  // The first shape was forgotten, so its capture is tried again.
+  int calls = region.calls;
+  run(manager, region, at::randn({1}, at::kCUDA));
+  EXPECT_EQ(region.calls - calls, 2);
+  // The last one wasn't, so it just runs eagerly.
+  calls = region.calls;
+  auto n = static_cast<int64_t>(CudaGraphManager::kMaxWarmupKeys + 1);
+  run(manager, region, at::randn({n}, at::kCUDA));
+  EXPECT_EQ(region.calls - calls, 1);
+}
+
+TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
+  CudaGraphManager manager(0, no_warmup());
+  Region region(affine);
+  auto x = at::randn({16}, at::kCUDA);
+  run(manager, region, x);
+  run(manager, region, x);
+  ASSERT_EQ(manager.num_graphs(), 1);
+  auto input = reinterpret_cast<AtenTensorHandle>(&x);
+  std::array<AtenTensorHandle, 2> outputs{};
+  EXPECT_THROW(
+      manager.run(
+          region,
+          &input,
+          1,
+          outputs.data(),
+          outputs.size(),
+          at::cuda::getCurrentCUDAStream().stream()),
+      std::runtime_error);
+}
+
+TEST_F(CudaGraphManagerTest, WarnsOnceWhenCaptureFails) {
+  struct CollectWarnings : c10::WarningHandler {
+    std::vector<std::string> messages;
+    void process(const c10::Warning& warning) override {
+      messages.push_back(warning.msg());
+    }
+  } warnings;
+  c10::WarningUtils::WarningHandlerGuard guard(&warnings);
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
   region.fail_in_capture = true;
   auto x = at::randn({16}, at::kCUDA);
-  EXPECT_THROW(run(manager, region, x), c10::Error);
-  c10::utils::unset_env("AOTI_RUNTIME_STRICT_CUDA_GRAPH");
-  EXPECT_EQ(region.calls, 1);
-  EXPECT_EQ(manager.num_graphs(), 0);
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+  }
+  ASSERT_EQ(warnings.messages.size(), 1);
+  EXPECT_NE(
+      warnings.messages[0].find("region can't be captured"), std::string::npos);
 }
 
 TEST_F(CudaGraphManagerTest, RegionErrorAlsoFailingEagerlyIsRethrown) {

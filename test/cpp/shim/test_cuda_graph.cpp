@@ -8,7 +8,9 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <optional>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -171,6 +173,123 @@ TEST_F(AOTICudaGraphTest, PoolTakesOneCaptureAtATime) {
   ASSERT_EQ(replay(second), AOTI_TORCH_SUCCESS);
   EXPECT_TRUE(y.equal(at::full({8}, 2.0, at::kCUDA)));
   EXPECT_EQ(aoti_torch_delete_cuda_graph(second), AOTI_TORCH_SUCCESS);
+}
+
+TEST_F(AOTICudaGraphTest, GraphCapturesOnce) {
+  auto x = at::zeros({8}, at::kCUDA);
+  auto y = capture([&] { return x + 1; });
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(
+          graph_, pool_, capture_stream_->stream()),
+      AOTI_TORCH_FAILURE);
+  EXPECT_FALSE(stream_is_capturing());
+  // The pool still takes captures from other graphs.
+  CUDAGraphHandle second = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_graph(&second), AOTI_TORCH_SUCCESS);
+  auto z = capture([&] { return x * 2; }, second);
+  x.fill_(2);
+  ASSERT_EQ(replay(second), AOTI_TORCH_SUCCESS);
+  EXPECT_TRUE(z.equal(at::full({8}, 4.0, at::kCUDA)));
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(second), AOTI_TORCH_SUCCESS);
+}
+
+TEST_F(AOTICudaGraphTest, FailedCaptureBegin) {
+  // capture_begin fails on a stream that is already capturing, after the
+  // allocators started routing to the pool.
+  auto begin_on_capturing_stream = [&](CUDAMemPoolHandle pool) {
+    CUDAMemPoolHandle outer_pool = nullptr;
+    CUDAGraphHandle outer = nullptr;
+    CUDAGraphHandle failed = nullptr;
+    EXPECT_EQ(
+        aoti_torch_create_cuda_mem_pool(0, &outer_pool), AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(aoti_torch_create_cuda_graph(&outer), AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(aoti_torch_create_cuda_graph(&failed), AOTI_TORCH_SUCCESS);
+    auto stream = capture_stream_->stream();
+    EXPECT_EQ(
+        aoti_torch_cuda_graph_capture_begin(outer, outer_pool, stream),
+        AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(
+        aoti_torch_cuda_graph_capture_begin(failed, pool, stream),
+        AOTI_TORCH_FAILURE);
+    EXPECT_EQ(aoti_torch_delete_cuda_graph(outer), AOTI_TORCH_SUCCESS);
+    EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(outer_pool), AOTI_TORCH_SUCCESS);
+    return failed;
+  };
+
+  // A pool holding a graph takes captures afterwards, even while the failed
+  // graph still exists.
+  auto x = at::zeros({8}, at::kCUDA);
+  auto y = capture([&] { return x + 1; });
+  CUDAGraphHandle failed = begin_on_capturing_stream(pool_);
+  CUDAGraphHandle second = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_graph(&second), AOTI_TORCH_SUCCESS);
+  auto z = capture([&] { return x * 2; }, second);
+  x.fill_(2);
+  ASSERT_EQ(replay(second), AOTI_TORCH_SUCCESS);
+  EXPECT_TRUE(z.equal(at::full({8}, 4.0, at::kCUDA)));
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(failed), AOTI_TORCH_SUCCESS);
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(second), AOTI_TORCH_SUCCESS);
+
+  // A pool whose only capture failed to begin rejects new captures cleanly.
+  CUDAMemPoolHandle fresh_pool = nullptr;
+  ASSERT_EQ(
+      aoti_torch_create_cuda_mem_pool(0, &fresh_pool), AOTI_TORCH_SUCCESS);
+  failed = begin_on_capturing_stream(fresh_pool);
+  CUDAGraphHandle third = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_graph(&third), AOTI_TORCH_SUCCESS);
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(
+          third, fresh_pool, capture_stream_->stream()),
+      AOTI_TORCH_FAILURE);
+  EXPECT_FALSE(stream_is_capturing());
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(third), AOTI_TORCH_SUCCESS);
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(failed), AOTI_TORCH_SUCCESS);
+  EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(fresh_pool), AOTI_TORCH_SUCCESS);
+}
+
+TEST_F(AOTICudaGraphTest, NullHandlesFail) {
+  auto stream = capture_stream_->stream();
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(nullptr, pool_, stream),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, nullptr, stream),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_cuda_graph_capture_end(nullptr), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_cuda_graph_replay(nullptr, stream), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(nullptr), AOTI_TORCH_SUCCESS);
+  EXPECT_FALSE(stream_is_capturing());
+}
+
+TEST_F(AOTICudaGraphTest, AbandoningEmptyCaptureDoesntWarn) {
+  struct CollectWarnings : c10::WarningHandler {
+    std::vector<std::string> messages;
+    void process(const c10::Warning& warning) override {
+      messages.push_back(warning.msg());
+    }
+  } warnings;
+  c10::WarningUtils::WarningHandlerGuard guard(&warnings);
+  auto stream = capture_stream_->stream();
+  ASSERT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, pool_, stream),
+      AOTI_TORCH_SUCCESS);
+  ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+  graph_ = nullptr;
+  EXPECT_TRUE(warnings.messages.empty());
+  // Ending an empty capture does warn, so the filter still matches.
+  CUDAMemPoolHandle pool = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool), AOTI_TORCH_SUCCESS);
+  ASSERT_EQ(aoti_torch_create_cuda_graph(&graph_), AOTI_TORCH_SUCCESS);
+  ASSERT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, pool, stream),
+      AOTI_TORCH_SUCCESS);
+  (void)aoti_torch_cuda_graph_capture_end(graph_);
+  ASSERT_EQ(warnings.messages.size(), 1);
+  EXPECT_NE(
+      warnings.messages[0].find("The CUDA Graph is empty"), std::string::npos);
+  ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+  graph_ = nullptr;
+  EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
 TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
