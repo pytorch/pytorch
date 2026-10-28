@@ -29,6 +29,11 @@ if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2026.1] (
     set XPU_BUNDLE_VERSION=2026.1.3+11
 )
 
+if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2026.2] (
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b177a006-5cd9-4cb2-807f-8199cc73d53c/intel-deep-learning-essentials-2026.2.0.638_offline.exe
+    set XPU_BUNDLE_VERSION=2026.2.0+632
+)
+
 :: Check if XPU bundle is target version or already installed
 if exist "%XPU_BUNDLE_PARENT_DIR%\Installer\installer.exe" goto xpu_bundle_ver_check
 goto xpu_bundle_install
