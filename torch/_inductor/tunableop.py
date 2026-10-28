@@ -79,15 +79,15 @@ _TUNE_BLOCKING_ENV = (
 # worker with an empty results map and nothing to borrow.
 _REUSE_BLOCKING_ENV = (("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),)
 _env_warned = False
-_fault_warned = False
+_warned_faults: set[str] = set()
 
 
-def _warn_fault_once(msg: str) -> None:
-    """Faults repeat per GEMM; warn on the first so a systematic one is seen."""
-    global _fault_warned
-    report = log.debug if _fault_warned else log.warning
-    _fault_warned = True
-    report(msg, exc_info=True)
+def _warn_fault_once(status: WorkerStatus, detail: str) -> None:
+    """A fault repeats for every GEMM; warn once per kind, then drop to debug."""
+    kind = f"{status}:{detail}"
+    report = log.debug if kind in _warned_faults else log.warning
+    _warned_faults.add(kind)
+    report("TunableOp benchmark %s: %s", status, detail, exc_info=True)
 
 
 def _warn_if_env_blocks(
@@ -471,7 +471,7 @@ def snapshot_settings() -> dict[str, Any]:
     return settings
 
 
-def resolve_and_pin_filename(device: int) -> str:
+def _resolve_and_pin_filename_locked(device: int) -> str:
     """The results file, committed to so the parent cannot later pick another.
 
     Assumes _worker_lock is held. Until the manager initializes it is free to
@@ -500,7 +500,7 @@ def _job_device(job: BenchmarkJob) -> int:
     rather than lowering, so a graph targeting cuda:1 can be autotuned while
     the process current device is 0. The child builds its tensors from these
     metas, so this is the GPU it really tunes on, and the ordinal
-    resolve_and_pin_filename names an as-yet-unchosen results file for. Mirrors
+    _resolve_and_pin_filename_locked names an unchosen results file for. Mirrors
     BenchmarkRequest._get_benchmark_device, including its fall back to the
     current device when nothing carries one.
     """
@@ -548,16 +548,16 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         # the device can fail just as the benchmark can.
         device = _job_device(job)
         settings = snapshot_settings()
-    except Exception as e:  # resolve before the worker: no restart
+    except Exception:  # resolve before the worker: no restart
         # Report without touching the worker: shutting down here would kill a
         # healthy one another thread is using, and write the None sentinel into
         # the pipe mid-stream once _worker_lock is released.
-        log.warning("TunableOp benchmark setup failed", exc_info=True)
+        _warn_fault_once("error", "could not resolve the device or settings")
         return Outcome(None, "error")
     try:
         with _worker_lock:
             # Under the lock: two threads must not pin different filenames.
-            filename = resolve_and_pin_filename(device)
+            filename = _resolve_and_pin_filename_locked(device)
             stamped = _StampedJob(job, device, filename, settings)
             worker = _get_worker_locked((device, filename))
             try:
@@ -571,21 +571,22 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                     status: WorkerStatus = (
                         "timeout" if isinstance(e, TimeoutError) else "crash"
                     )
+                    _warn_fault_once(status, "the worker was killed or died")
                     # get() killed or closed it but never waited; reap it.
                     _shutdown_locked(graceful=False)
                     return Outcome(None, status)
-                _warn_fault_once("TunableOp job raised; treating as an error")
+                _warn_fault_once("error", "the job raised")
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
-            except Exception as e:  # a failed benchmark must not fail the compile
-                _warn_fault_once("TunableOp benchmark failed")
+            except Exception:  # a failed benchmark must not fail the compile
+                _warn_fault_once("error", "the benchmark failed")
                 # A caught exception can leave a sticky GPU fault behind, so
                 # every later GEMM would fail alike. Kill rather than ask: a
                 # child wedged in teardown never acts on the sentinel.
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
-    except Exception as e:  # lock/restart machinery itself failed
-        log.warning("TunableOp worker machinery failed", exc_info=True)
+    except Exception:  # lock/restart machinery itself failed
+        _warn_fault_once("error", "the worker machinery failed")
         return Outcome(None, "error")
     # inf is what a benchmark returns when it declines to run the op, and
     # select_algorithm drops an inf candidate silently rather than reporting it.
