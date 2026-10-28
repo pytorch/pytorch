@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import math
 import unittest.mock
 from collections.abc import Callable
 from typing import Any
@@ -11,7 +12,10 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
-from torch._dynamo.testing import expectedFailureDynamicWrapper
+from torch._dynamo.testing import (
+    CompileCounterWithBackend,
+    expectedFailureDynamicWrapper,
+)
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -27,11 +31,14 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout, ShapeAsConstantBuffer
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternalTritonTemplateKernel,
     ExternKernelChoice,
     PartialRender,
+    RuntimeFloat,
+    SymbolicGridFn,
     TritonTemplate,
     TritonTemplateKernel,
 )
@@ -1741,6 +1748,151 @@ class TestTemplateRender(TestCase):
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
             )
+
+    @requires_gpu()
+    @requires_triton()
+    # The patched lowerings are not part of the cache key.
+    @config.patch(cuda_backend="triton", force_disable_caches=True)
+    def test_runtime_float_kwarg_computed_on_host(self):
+        """
+        A symbolic RuntimeFloat template kwarg is computed by the wrapper and
+        passed to the kernel as a float arg, so it does not specialize the kernel.
+        """
+        import sympy
+
+        from torch.utils._sympy.functions import (
+            FloatTrueDiv,
+            OpaqueUnaryFn_sqrt,
+            ToFloat,
+        )
+
+        @SymbolicGridFn
+        def grid(n, meta, *, cdiv):
+            return (cdiv(n, meta["XBLOCK"]), 1, 1)
+
+        scale_template = TritonTemplate(
+            name="test_runtime_float_scale",
+            grid=grid,
+            source=r"""
+{{def_kernel("A")}}
+    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)
+    xmask = xindex < {{size("A", 0)}}
+    scaled = tl.load(A + xindex, xmask) * SCALE
+    {{store_output(("xindex",), "scaled", mask="xmask", val_shape=("XBLOCK",))}}
+""",
+        )
+        self.addCleanup(TritonTemplate.all_templates.pop, scale_template.name, None)
+
+        def scaled(a, n, symbolic=True):
+            # Template computing a / sqrt(n); n may be a size that `a` does not carry.
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            scale = FloatTrueDiv(sympy.Float(1.0), OpaqueUnaryFn_sqrt(ToFloat(n)))
+            choices = []
+            for xblock in (64, 128):
+                scale_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(a,),
+                    layout=layout,
+                    num_stages=1,
+                    num_warps=1,
+                    XBLOCK=xblock,
+                    SCALE=RuntimeFloat(scale if symbolic else 0.5),
+                )
+            return autotune_select_algorithm("scaled", choices, [a], layout)[0]
+
+        promotion = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
+        def make_lowering(symbolic):
+            def lowering(a):
+                return scaled(a, a.get_size()[0], symbolic)
+
+            return {aten.neg.default: (lowering, False, promotion, False)}
+
+        def fn(a):
+            return torch.neg(a) + 1
+
+        cases = [
+            {"cpp_wrapper": False},
+            {"cpp_wrapper": True},
+            {"max_autotune": True, "benchmark_epilogue_fusion": True},
+        ]
+        for patches in cases:
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend("inductor")
+            with (
+                self.subTest(**patches),
+                config.patch(patches),
+                patch_lowering(make_lowering(symbolic=True)),
+            ):
+                compiled = torch.compile(fn, backend=counter, dynamic=True)
+                for n in (100, 300):
+                    a = torch.randn(n, device=GPU_TYPE)
+                    self.assertEqual(compiled(a), a / math.sqrt(n) + 1)
+                self.assertEqual(counter.frame_count, 1)
+                _, (code, *_) = run_and_get_code(compiled, a)
+                FileCheck().check("SCALE = tl.full(").run(code)
+                FileCheck().check_not("SCALE : tl.constexpr").run(code)
+                host_decl = (
+                    r"double pf\d+ = " if patches.get("cpp_wrapper") else r"pf\d+ = "
+                )
+                FileCheck().check_regex(host_decl).run(code)
+
+        # The FX wrapper derives the scale from the size symbol, and compile-time
+        # tuning launches the kernel with its float hint, not an integer one.
+        float_args = []
+        orig_run = CachingAutotuner.run
+
+        def run(self, *args, **kwargs):
+            float_args.extend(arg for arg in args if isinstance(arg, float))
+            return orig_run(self, *args, **kwargs)
+
+        torch._dynamo.reset()
+        counter = CompileCounterWithBackend("inductor")
+        fx_tuning = {"fx_wrapper": True, "triton.autotune_at_compile_time": True}
+        with (
+            config.patch(fx_tuning),
+            patch_lowering(make_lowering(symbolic=True)),
+            unittest.mock.patch.object(CachingAutotuner, "run", run),
+        ):
+            compiled = torch.compile(fn, backend=counter, dynamic=True)
+            for n in (100, 300):
+                a = torch.randn(n, device=GPU_TYPE)
+                self.assertEqual(compiled(a), a / math.sqrt(n) + 1)
+            self.assertEqual(counter.frame_count, 1)
+            self.assertIn(1 / math.sqrt(100), float_args)
+
+        # Graph partitions receive the symbols of a scale that no template input
+        # carries, here the length of the CPU tensor y.
+        @torch.library.custom_op("test_runtime_float::scale_by_len", mutates_args=())
+        def scale_by_len(a: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return a / math.sqrt(y.shape[0])
+
+        scale_by_len.register_fake(lambda a, y: torch.empty_like(a))
+        op = torch.ops.test_runtime_float.scale_by_len.default
+
+        def partition_lowering(a, y):
+            return scaled(a, y.get_size()[0])
+
+        torch._dynamo.reset()
+        partitioning = {"graph_partition": True, "triton.cudagraphs": True}
+        with (
+            config.patch(partitioning),
+            patch_lowering({op: (partition_lowering, False, promotion, False)}),
+        ):
+            compiled = torch.compile(scale_by_len, fullgraph=True, dynamic=True)
+            for n, m in ((100, 7), (300, 13)):
+                a = torch.randn(n, device=GPU_TYPE)
+                y = torch.randn(m)
+                self.assertEqual(compiled(a, y), a / math.sqrt(m))
+
+        # A numeric RuntimeFloat stays a constexpr with no host-computed arg.
+        torch._dynamo.reset()
+        with patch_lowering(make_lowering(symbolic=False)):
+            a = torch.randn(100, device=GPU_TYPE)
+            out, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), a)
+            self.assertEqual(out, a * 0.5 + 1)
+            FileCheck().check("SCALE : tl.constexpr = 0.5").run(code)
+            FileCheck().check_not("SCALE = tl.full(").run(code)
 
     def test_subgraph_nodes_participate_in_template_index_dtype(self):
         """Covers implicit template buffers that are not explicit arguments."""

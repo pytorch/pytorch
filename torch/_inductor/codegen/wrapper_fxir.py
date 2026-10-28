@@ -1140,17 +1140,14 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int:
-                    return V.graph.sizevars.optimization_hint(arg)
-
                 def to_size_hint_list(arg: list[torch.SymInt | int]) -> list[int]:
                     args_sympy = [
                         x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
                     ]
-                    return pytree.tree_map(to_size_hint_sympy_int, args_sympy)
+                    return pytree.tree_map(V.graph.sizevars.size_arg_hint, args_sympy)
 
                 if not isinstance(arg, torch.fx.Node):
-                    return to_size_hint_sympy_int(arg)
+                    return V.graph.sizevars.size_arg_hint(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
