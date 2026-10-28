@@ -100,10 +100,9 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. The native gate is live for tests;
-# the published sum gate also selects this order for geometries its adapter cannot serve.
+# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
+# affecting upstream kernels, which register first.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
-_SUM_INNER_TREE_ENV = "PYTORCH_SUM_INNER_TREE"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -217,10 +216,7 @@ _ITREE_STAGE_E = 32
 
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return any(
-        os.environ.get(name, "") not in ("", "0")
-        for name in (_INNER_TREE_ENV, _SUM_INNER_TREE_ENV)
-    )
+    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
 
 
 class _ItreePlan(NamedTuple):
@@ -695,7 +691,7 @@ def _run_itree(
     compact = x.stride(0) == N
     if not compact:
         align = min(align, math.gcd(x.stride(0) * itemsize, natural))
-    if align < natural and itree.stage_e:
+    if align < natural and (itree.stage_e or itree.stage_rows):
         # cp.async's 128-bit atom needs a statically `natural`-aligned source, so a misaligned base
         # cannot use the staged form at all -- it fails IR verification rather than the load. Serve
         # this call with the UNSTAGED form of the same plan: staging is bit-neutral, so the DAG and
@@ -707,7 +703,6 @@ def _run_itree(
                 N,
                 M,
                 x.element_size(),
-                kchunk=itree.kchunk,
                 stage=False,
                 device=x.device,
                 arch=arch,
