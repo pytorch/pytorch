@@ -456,7 +456,7 @@ def reduce_col_tile(
     *,
     order: str = "unordered",
 ) -> torch.Tensor:
-    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
+    """Reduce dim 0 of 2D x with a unit last stride to (C,), splitting it npar ways."""
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -481,6 +481,7 @@ def reduce_col_tile_2out(
     *,
     order: str = "unordered",
 ) -> tuple[torch.Tensor, ...]:
+    """Reduce dim 0 of 2D x like reduce_col_tile, projecting two outputs per column."""
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -503,6 +504,7 @@ def reduce_batched_col_tile(
     *,
     order: str = "unordered",
 ) -> tuple[torch.Tensor, ...]:
+    """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
     return _reduce_col_tile(
         trait, trait_key, x, out_dtypes, nouts, None, None, None, order=order
     )
@@ -526,6 +528,8 @@ def _reduce_col_tile(
         raise AssertionError(
             f"want 2D/3D contiguous-last-dim CUDA, got {tuple(x.shape)}"
         )
+    if len(out_dtypes) < nouts:
+        raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     if x.dim() == 2:
         B, (R, C) = 1, x.shape
         rows = x
@@ -534,6 +538,9 @@ def _reduce_col_tile(
         if not x.is_contiguous():
             raise AssertionError(f"want contiguous batched input, got {x.stride()}")
         B, R, C = x.shape
+        # Stage one indexes batched rows as batch * R + row in Int32.
+        if B * R >= 2**31:
+            raise AssertionError(f"want B * R < 2^31, got B={B}, R={R}")
         rows = x.reshape(B * R, C)
         out_shape = (B, C)
     align = _L.supported_alignment(rows, tile.align_bytes(C, x.element_size()))
