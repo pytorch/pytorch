@@ -46,9 +46,37 @@ class PlanEffectsTest(unittest.TestCase):
         self.assertFalse(result.close)
         self.assertEqual(result.comment, "")
 
+    def test_complete_label_plan_gets_triaged_without_model_request(self):
+        for labels in (
+            ["module: mps", "module: performance", "module: memory format"],
+            ["oncall: pt2", "module: aotdispatch"],
+        ):
+            with self.subTest(labels=labels):
+                result = effects("label", labels)
+                self.assertEqual(result.add_labels, [*labels, "triaged", "bot-triaged"])
+
+    def test_other_decisions_do_not_get_automatic_completion(self):
+        for decision in set(SCHEMA["decision"]["enum"]) - {"label"}:
+            with self.subTest(decision=decision):
+                result = effects(decision, ["module: nn"])
+                self.assertNotIn("triaged", result.add_labels)
+
+    def test_label_completion_respects_routing_and_pending_work(self):
+        for labels, templates, existing in (
+            (["oncall: distributed"], [], []),
+            (["module: nn", "triage review"], [], []),
+            (["module: nn"], [], ["triage review"]),
+            (["module: nn"], [], ["needs reproduction"]),
+            (["module: nn"], ["request_more_info"], []),
+            (["module: nn"], ["request_self_contained_reproduction"], []),
+        ):
+            with self.subTest(labels=labels, templates=templates, existing=existing):
+                result = effects("label", labels, templates, existing)
+                self.assertNotIn("triaged", result.add_labels)
+
     def test_first_pass_cannot_add_the_distributed_completion_marker(self):
         result = effects("label", ["module: nn", "bot-triaged", "ptd-bot-triaged"])
-        self.assertEqual(result.add_labels, ["module: nn", "bot-triaged"])
+        self.assertEqual(result.add_labels, ["module: nn", "triaged", "bot-triaged"])
 
     def test_high_priority_requires_review_not_triaged(self):
         result = effects("label", ["module: nn", "high priority", "triaged"])
@@ -100,7 +128,7 @@ class PlanEffectsTest(unittest.TestCase):
 
     def test_redundant_general_label_is_dropped(self):
         result = effects("label", ["module: rnn", "module: nn"])
-        self.assertEqual(result.add_labels, ["module: rnn", "bot-triaged"])
+        self.assertEqual(result.add_labels, ["module: rnn", "triaged", "bot-triaged"])
 
     def test_labels_already_present_are_not_re_added(self):
         result = effects(
