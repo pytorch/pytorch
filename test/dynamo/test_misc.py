@@ -3046,14 +3046,40 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return 1
 
         def fn(x):
-            g.__closure__ = None
-            return x + 1
+            try:
+                g.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
 
+        # The lru_cache wrapper is not a FunctionType, so eager allows the write.
+        # Replaying it onto the wrapper's __dict__ is tracked in #202350.
         x = torch.ones(1)
+        ref = fn(x)
         res = torch.compile(fn, backend="eager")(x)
-        self.assertEqual(res, x + 1)
-        # Only checks that tracing no longer raises: replaying the write onto the
-        # wrapper's __dict__ is a separate gap that also exists on main.
+        self.assertEqual(ref, res)
+        self.assertTrue(res[1])
+
+    def test_setattr_readonly_names_on_script_if_tracing_wrapper(self):
+        @torch.jit._script_if_tracing
+        def h(x):
+            return x
+
+        def fn(x):
+            try:
+                h.__closure__ = None
+                ok = True
+            except AttributeError:
+                ok = False
+            return x + 1, ok
+
+        # The wrapper is a real function, so __closure__ stays read-only.
+        x = torch.ones(1)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(res[1])
 
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
