@@ -9195,8 +9195,9 @@ def step(x):
 
 def train_fn(x):
     x = x.detach().requires_grad_()
-    torch.ops.{ns}.triple.default(x.sin()).sum().backward()
-    return x.grad
+    y = torch.ops.{ns}.triple.default(x.sin())
+    y.sum().backward()
+    return x.grad + y.detach()
 
 
 def cond_fn(x):
@@ -9396,6 +9397,57 @@ def _eager_fallback_op_fn(x):
     with _UserContext():
         x = torch.ops.precompile_no_fake.op.default(x)
     return x + 1
+
+    def test_inductor_records_the_custom_ops_its_code_calls(self):
+        from torch._inductor import decomposition
+        from torch.library import _scoped_library
+
+        ns = f"precompile_inductor_ops_{uuid.uuid4().hex}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        artifact = os.path.join(directory, "artifact.py")
+        cache = os.path.join(directory, "artifact.cache")
+        x = torch.arange(4, dtype=torch.float32)
+        ops = getattr(torch.ops, ns)
+
+        def insert_op(graph):
+            (out,) = graph.find_nodes(op="output")
+            with graph.inserting_before(out):
+                result = graph.call_function(ops.inserted.default, out.args[0])
+            out.args = ((result,),)
+
+        def fn(x):
+            return ops.decomposed.default(x.sin()) + 1
+
+        with _scoped_library(ns, "FRAGMENT") as lib:
+            lib.define("inserted(Tensor x) -> Tensor")
+            lib.impl("inserted", lambda x: x * 2, "CompositeExplicitAutograd")
+            with _scoped_library(ns, "FRAGMENT") as decomposed_lib:
+                decomposed_lib.define("decomposed(Tensor x) -> Tensor")
+                decomposed_lib.impl(
+                    "decomposed", lambda x: x * 2, "CompositeExplicitAutograd"
+                )
+                op = ops.decomposed.default
+                decomposition.register_decomposition(op)(lambda x: x * 2)
+                decomposition.fast_random_decomps.cache_clear()
+                self.addCleanup(decomposition.fast_random_decomps.cache_clear)
+                self.addCleanup(decomposition.decompositions.pop, op)
+                with (
+                    torch._inductor.config.patch(post_grad_custom_post_pass=insert_op),
+                    capture(
+                        fn,
+                        artifact_path=artifact,
+                        cache_path=cache,
+                        tracer=MakeFxTracer(),
+                        backend="inductor",
+                    ) as cap,
+                ):
+                    expected = cap(x)
+            with open(artifact) as f:
+                self.assertIn(f"CUSTOM_OPS = {((f'{ns}::inserted', ''),)!r}", f.read())
+            # Inductor decomposed the op away, so the artifact loads without it.
+            self.assertEqual(load(artifact, cache)(x), expected)
+        with self.assertRaisesRegex(PrecompileError, f"{ns}::inserted"):
+            load(artifact, cache)
 
 
 class TestPrecompileCustomOpRecording(TestCase):
