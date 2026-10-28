@@ -301,6 +301,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+        with self.assertRaises(TypeError):
+            b.count("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.count(256)
 
     @make_dynamo_test
     def test_rindex(self):
@@ -565,13 +569,16 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
         # The values above would also hold if n were specialized to a constant,
         # so pin the fallback down: under fullgraph the non-constant start must
-        # raise Unsupported instead of tracing.
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def fn_fullgraph(ba, n):
-            return ba.find(b"i", n), ba.count(b"i", n), ba.rfind(b"i", n)
+        # raise Unsupported instead of tracing. Check each method separately,
+        # since tracing stops at the first graph break.
+        for name in ("find", "rfind", "count"):
 
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            fn_fullgraph(bytearray(b"mississippi"), 5)
+            @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+            def fn_fullgraph(ba, n, name=name):
+                return getattr(ba, name)(b"i", n)
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                fn_fullgraph(bytearray(b"mississippi"), 5)
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
