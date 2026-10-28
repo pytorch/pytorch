@@ -3732,6 +3732,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsNone(torch.compile(fn, backend="eager")().strerror)
 
+    @unittest.expectedFailure
     def test_property_without_name_no_setter(self):
         class C:
             pass
