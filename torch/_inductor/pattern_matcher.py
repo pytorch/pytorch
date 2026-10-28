@@ -1719,6 +1719,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
                     args_set, _ = pytree.tree_flatten(args)
+                    args_set = [
+                        arg for arg in args_set if isinstance(arg, torch.fx.Node)
+                    ]
                     # args (named as args in the replace_with_graph).
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
@@ -3174,6 +3177,17 @@ def rank_agnostic_passes() -> Generator[None, None, None]:
     no such node either before or after), and a GraphModule.meta flag would be lost
     on every GraphModule(root, graph) rebuild, such as prepare_for_partitioner's
     right before the joint passes.
+
+    There is deliberately no check on exit that no node holds this rank's device:
+    it can't tell a device a pass inserted from one already in the incoming graph,
+    and would turn the programs below into crashes, where a leak only costs
+    cross-rank cache sharing (post_grad respecializes the device either way).
+
+    TODO: HOP proxy implementations (auto_functionalized, with_effects, ...) build
+    their nodes with create_proxy directly, bypassing make_fx's compile-on-one-rank
+    rewrite. So an explicit torch.device("cuda", idx) passed to e.g. a mutable
+    custom op reaches the joint graph with its index and still splits the FX graph
+    cache per rank.
     """
     token = _in_rank_agnostic_passes.set(True)
     try:
@@ -3212,7 +3226,8 @@ def rank_agnostic_device(
 
 def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
     # trace_fns trace with CooR off, so a replacement bakes this rank's device.
-    # Only the top-level graph is walked, not HOP subgraphs.
+    # TODO: only the top-level graph is walked, so a replacement containing a HOP
+    # still bakes this rank's device inside the HOP's subgraph.
     if not rank_agnostic():
         return
     graph = gm.graph

@@ -496,12 +496,12 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op, _bt, is_size_obv = shape_env.guards[-1]
+        gt_op = shape_env.guards[-1].expr
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
-        self.assertFalse(is_size_obv)
+        self.assertEqual(len(shape_env.guards[-1]), 2)
 
     def test_floordiv_static(self):
         shape_env = ShapeEnv()
@@ -831,6 +831,34 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         self.assertFalse(any(i.has(sympy.Gt, sympy.Ge) for i in implications))
         self.assertTrue(all(i == canonicalize_bool_expr(i) for i in implications))
 
+    def test_canonicalize_bool_expr_constant_difference(self):
+        # sympy leaves relations between bitwise expressions unevaluated, so
+        # canonicalize_bool_expr moves everything to one side and leaves a
+        # constant there. It must keep the sign and the zero of that constant.
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5)
+        x = (s0 & 3).node.expr
+        cases = [
+            sympy.Lt(x, x, evaluate=False),
+            sympy.Gt(x, x, evaluate=False),
+            sympy.Le(x, x - 1),
+            sympy.Lt(x + 3, x),
+            sympy.Ge(x, x + 2),
+            sympy.Le(x, x, evaluate=False),
+            sympy.Lt(x, x + 1),
+            sympy.Eq(x, x, evaluate=False),
+            sympy.Ne(x, x, evaluate=False),
+        ]
+        for rel in cases:
+            canon = canonicalize_bool_expr(rel)
+            self.assertEqual(canon.free_symbols, set())
+            expected = rel.xreplace({s0.node.expr: sympy.Integer(5)})
+            self.assertEqual(canon.func(*canon.args), expected, msg=str(rel))
+
+        self.assertFalse(guard_bool((s0 & 3) < (s0 & 3)))
+        self.assertFalse(guard_bool((s0 | 1) + 2 <= (s0 | 1)))
+        self.assertTrue(guard_bool((s0 & 3) <= (s0 & 3)))
+
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
@@ -864,6 +892,27 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """u3""")
+
+    def test_unbacked_size_range_refines_to_zero_one(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        symbol = i0.node.expr
+        _constrain_range_for_size(i0)
+        self.assertTrue(expect_true(i0 <= 1))
+        self.assertEqual(shape_env.var_to_range[symbol], ValueRanges(0, 1))
+
+    def test_unbacked_size_replaced_by_zero_one(self):
+        for value in (0, 1):
+            with self.subTest(value=value):
+                shape_env = ShapeEnv()
+                i0 = shape_env.create_unbacked_symint()
+                symbol = i0.node.expr
+                _constrain_range_for_size(i0)
+                self.assertTrue(expect_true(i0 == value))
+                self.assertEqual(shape_env.replacements[symbol], sympy.Integer(value))
+                self.assertEqual(
+                    shape_env.var_to_range[symbol], ValueRanges(value, value)
+                )
 
     def test_rename_unbacked_to_unifies_unbacked_dest(self):
         shape_env = ShapeEnv()
@@ -1923,22 +1972,6 @@ class f(torch.nn.Module):
         for Tensor in legacy_ctors:
             res = Tensor(sym_args)
             self.assertEqual(res, expected, exact_dtype=False)
-
-    def test_backed_size_oblivious_01_spec(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        @torch.compile(dynamic=True, fullgraph=True)
-        def f(a, b):
-            if guard_size_oblivious(a.size(0) == 1):
-                return b * 10
-            else:
-                return b * 20
-
-        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
-            # always go to the >= 2 branch.
-            self.assertEqual(
-                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
-            )
 
     @fresh_cache()
     def test_slice_backed_size_oblivious(self):
@@ -4860,8 +4893,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_6 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_17: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_17,)""",
+        mul_15: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_15,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -7670,32 +7703,6 @@ class TestTransferSymbolsFromForeignShapeEnv(TestCase):
         self.assertEqual(
             len(local_env.foreign_unbacked_symbol_cache), cache_size_before
         )
-
-    def test_transfer_constrains_size_on_cache_hit(self):
-        """When is_size=True and the expression resolves to a single Symbol
-        from the cache (cached via a non-size path earlier),
-        _constrain_range_for_size is still applied; the symbol ends up in
-        size_like."""
-        foreign_env = ShapeEnv()
-        u0 = foreign_env.create_unbacked_symint()
-
-        local_env = ShapeEnv()
-        # First: transfer u0 via the raw SymInt path (is_size=False).
-        raw_symint = self._transfer_symint(
-            local_env, u0, source=self._make_source("raw")
-        )
-        raw = raw_symint.node.expr
-        self.assertNotIn(raw, local_env.size_like)
-
-        # Now: transfer the same u0 as a tensor size dim (is_size=True via
-        # transfer_symbols_from_foreign_shape_env's UNBACKED path).
-        new_sizes, _, _ = local_env.transfer_symbols_from_foreign_shape_env(
-            (u0,), (1,), 0, source=self._make_source("tensor")
-        )
-        # Same cached local symbol reused.
-        self.assertEqual(new_sizes[0].node.expr, raw)
-        # And now it carries the size lower-bound constraint.
-        self.assertIn(raw, local_env.size_like)
 
     def test_foreign_unbacked_transfer_preserves_derived_tensor_expr(self):
         """Derived tensor dims are minted as opaque symbols; raw SymInt with

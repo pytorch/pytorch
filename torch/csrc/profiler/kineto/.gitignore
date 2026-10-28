@@ -10,5 +10,5 @@ __pycache__
 libkineto/build/
 
 # Stale nested-submodule checkout left behind in existing recursive PyTorch checkouts.
-# Dynolog is no longer a submodule; required headers are vendored under dynolog_headers/.
+# Dynolog is no longer a submodule; headers are in PyTorch's third_party/dynolog_headers/.
 /libkineto/third_party/dynolog/
