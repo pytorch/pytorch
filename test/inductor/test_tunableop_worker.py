@@ -95,10 +95,8 @@ class TunableOpWorkerTest(TestCase):
             return tunableop.submit(job or tunableop.BenchmarkJob(None, tuning=False))
 
     def test_worker_does_not_inherit_a_rewritten_visibility_mask(self):
-        # TuningProcess.start() REPLACES CUDA_VISIBLE_DEVICES with str(device),
-        # so passing a logical ordinal would point the worker at a different
-        # physical GPU: with CUDA_VISIBLE_DEVICES=4,7 and logical 1, the parent
-        # is on physical 7 and the worker would take physical 1.
+        # start() REPLACES CUDA_VISIBLE_DEVICES with str(device), so a logical
+        # ordinal would point the worker at a different physical GPU.
         self._submit(device=1)
         self.assertEqual(len(self.created), 1)
         self.assertIsNone(self.created[0].device)
@@ -249,10 +247,8 @@ class TunableOpWorkerTest(TestCase):
             self.assertIsNone(outcome.time)
 
     def test_job_raised_pipe_exception_is_an_error_not_a_timeout(self):
-        # TuningProcess.get re-raises whatever the child sent back. A job that
-        # raises a TimeoutError subclass must not be filed as a pipe timeout:
-        # the worker is still up, so it needs the sticky-fault restart. The
-        # discriminator is running, which a real fault clears and this does not.
+        # The discriminator is running, which a real pipe fault clears and a
+        # child-raised exception does not.
         for exc in (TimeoutError("from the job"), EOFError("from the job")):
             tunableop._worker = None
             tunableop._worker_key = None
@@ -762,6 +758,21 @@ class TunableOpRealWorkerTest(TestCase):
         self.assertEqual(outcome.time, 1.0)
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_job_raised_exception_through_the_real_pipe_is_an_error(self):
+        # The fake test sets running by hand. Here TuningProcess.get decides:
+        # it raises the child's exception after its own except clauses, leaving
+        # running set, so the job's TimeoutError must not be filed as a pipe
+        # timeout.
+        outcome = self._submit(
+            self._job(exc=TimeoutError("from the job")), timeout=120.0
+        )
+        self.assertEqual(outcome.status, "error")
+        self.assertIsNone(outcome.time)
+        outcome = self._submit(self._job(), timeout=120.0)
+        self.assertEqual(outcome.status, "ok")
+        self.assertEqual(outcome.time, 1.0)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_job_with_settings_and_mask_survives_the_pipe(self):
         """A fully populated BenchmarkJob pickles and runs in the child.
 
@@ -825,16 +836,11 @@ class TunableOpRocmWorkerTest(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
     def test_rotating_buffer_size_round_trips_through_snapshot(self):
-        # The mocked settings test cannot catch a unit mismatch, because it
-        # chooses both sides of the comparison. This drives the real getter and
-        # setter: get reports bytes, set takes MB, so stamping the raw value
-        # would re-scale by 2**20 and overflow the setter's signed int.
+        # Drives the real getter and setter, which the mocked test cannot:
+        # it chooses both sides of the comparison.
         tunable = torch.cuda.tunable
         previous = tunable.get_rotating_buffer_size()
-        # The getter reports the L2 size when the knob is unset, so restoring
-        # previous // MB would replace "unset" with a rounded concrete value.
-        # Any negative size means "use L2" (TuningContext::SetRotatingBufferSize),
-        # which is what -1 restores.
+        # Unset reads back as the L2 size, and any negative size restores it.
         l2 = torch.cuda.get_device_properties(torch.cuda.current_device()).L2_cache_size
         self.addCleanup(
             tunable.set_rotating_buffer_size,
