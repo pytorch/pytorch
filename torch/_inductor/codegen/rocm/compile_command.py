@@ -110,10 +110,11 @@ def _rocm_compiler_options() -> list[str]:
     if config.rocm.use_fast_math:
         opts += ["-ffast-math"]
         # Works around a gfx950 codegen issue that gives wrong CK addmm results.
-        # -Xarch_ must match the offload-arch spelling exactly; plain gfx950 also
-        # covers --offload-arch=native.
-        for arch in ["gfx950", *(a for a in arch_list if a.startswith("gfx950:"))]:
-            opts += [f"-Xarch_{arch}", "-fno-associative-math"]
+        # -Xarch_ must match the target id exactly, and --offload-arch=native may
+        # resolve to any feature spelling (e.g. gfx950:sramecc+:xnack-).
+        for sramecc in ("", ":sramecc+", ":sramecc-"):
+            for xnack in ("", ":xnack+", ":xnack-"):
+                opts += [f"-Xarch_gfx950{sramecc}{xnack}", "-fno-associative-math"]
     return opts
 
 
