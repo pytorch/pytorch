@@ -1960,18 +1960,12 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
-# Torch's namespaces whose schemas record no torch module of their own: those defined
-# from C++, which record a build-time path, and those torch defines through
-# torch.library's helpers, which record the helper.
+# Torch's namespaces defined from C++, whose schemas record a build-time path and
+# which `import torch` registers.
 _TORCH_OP_NAMESPACES = frozenset(
     {
         "aten",
         "prim",
-        "coor",
-        "debugprims",
-        "pippy",
-        "device_mesh",
-        "onnx",
         "inductor",
         "inductor_prims",
         "profiler",
@@ -1980,7 +1974,6 @@ _TORCH_OP_NAMESPACES = frozenset(
         "quantization",
         "sparse",
         "c10d",
-        "c10d_functional",
         "_c10d_functional",
         "_c10d_functional_autograd",
         "_dtensor",
@@ -2001,20 +1994,34 @@ _TORCH_OP_NAMESPACES = frozenset(
         "_nnapi",
     }
 )
+_TORCH_DIR = os.path.dirname(torch.__file__)
+# torch's helpers that build a Library for the caller's namespace record themselves,
+# so the torch modules defining ops through them are listed by namespace.
+_TORCH_OP_HELPERS = tuple(
+    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
+)
+_TORCH_HELPER_OP_MODULES = MappingProxyType(
+    {
+        "coor": "torch.fx.experimental.proxy_tensor",
+        "debugprims": "torch._prims",
+        "device_mesh": "torch.distributed._ops.device_mesh",
+        "onnx": "torch.onnx.ops._impl",
+        "pippy": "torch.distributed.pipelining._IR",
+    }
+)
 
 
-def _registered_by_torch(op_name: str, overload: str) -> bool:
-    if op_name.split("::")[0] in _TORCH_OP_NAMESPACES:
-        return True
+def _torch_op_module(op_name: str, overload: str) -> str | None:
+    """The torch module whose import registers ``op_name``, if torch defines it from
+    Python."""
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
-    torch_dir = os.path.dirname(torch.__file__)
-    # torch's helpers that build a Library for the caller's namespace record themselves.
-    helpers = tuple(
-        os.path.join(torch_dir, name)
-        for name in ("library.py", "_library", "_custom_op")
-    )
-    return path.startswith(torch_dir + os.sep) and not path.startswith(helpers)
+    if path.startswith(_TORCH_OP_HELPERS):
+        return _TORCH_HELPER_OP_MODULES.get(op_name.split("::")[0])
+    if not (path.startswith(_TORCH_DIR + os.sep) and path.endswith(".py")):
+        return None
+    relpath = os.path.relpath(path.removesuffix(".py"), os.path.dirname(_TORCH_DIR))
+    return relpath.replace(os.sep, ".").removesuffix(".__init__")
 
 
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
@@ -2023,9 +2030,12 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     modules: set[str] = set()
     unrecorded: set[str] = set()
     for op_name, overload in op_names:
-        if (module := _custom_op_module(op_name, overload)) is not None:
+        module = _custom_op_module(op_name, overload)
+        if module is None:
+            module = _torch_op_module(op_name, overload)
+        if module is not None:
             modules.add(module)
-        elif not _registered_by_torch(op_name, overload):
+        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
             unrecorded.add(op_name)
     if unrecorded:
         log.warning(
@@ -2070,7 +2080,7 @@ def _write_custom_op_imports(
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
-    buf.writeline("    except ImportError as _e:")
+    buf.writeline("    except Exception as _e:")
     buf.writeline("        _import_errors[_module] = _e")
     buf.writeline("_missing = []")
     buf.writeline("for _name, _overload in CUSTOM_OPS:")
@@ -2622,8 +2632,8 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_modules: tuple[str, ...] = (),
-    custom_ops: tuple[tuple[str, str], ...] = (),
+    custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 

@@ -1812,6 +1812,50 @@ class TestFX(JitTestCase):
             torch.fx.symbolic_trace(Outer())
         self.assertEqual(seen, [True])
 
+    def test_nested_trace_reverts_inner_patches_first_and_reapplies_them_last(self):
+        # The child's globals resolve in the inner module_call_wrapper, after both
+        # traces patched Module.__call__ and the inner one recorded the outer wrapper
+        # as its original.
+        from torch.fx._symbolic_trace import _orig_module_call
+
+        seen = []
+
+        class Child(torch.nn.Module):
+            pass
+
+        def forward(self, x):
+            return x
+
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+        Child.forward = types.FunctionType(forward.__code__, scope)
+
+        class LeafTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, qualname):
+                return isinstance(m, Child) or super().is_leaf_module(m, qualname)
+
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                return self.child(self.child(x))
+
+        graphs = []
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                graphs.append(LeafTracer().trace(Inner()))
+                return x + 1
+
+        with self._patch_is_lazy_import():
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+        # The second child call must still go through the inner trace's wrapper.
+        targets = [n.target for n in graphs[0].nodes if n.op == "call_module"]
+        self.assertEqual(targets, ["child", "child"])
+        self.assertIs(torch.nn.Module.__call__, _orig_module_call)
+
     def _builtin_patch(self, patcher):
         # What torch.fx.wrap("len") makes: a patch deleted, not restored, on revert.
         frame_dict = {"__builtins__": builtins}
