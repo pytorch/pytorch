@@ -1,11 +1,8 @@
 # Owner(s): ["module: inductor"]
-import inspect
 import math
-import os
 import unittest
 
 import torch
-from torch._dynamo.utils import counters
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters
@@ -759,9 +756,7 @@ class PadBaddbmmTest(TestCase):
         )
         grad_args = tuple(arg for arg in args if arg.requires_grad)
         expected_grads = (
-            torch.autograd.grad(expected, grad_args, tangent)
-            if grad_args
-            else ()
+            torch.autograd.grad(expected, grad_args, tangent) if grad_args else ()
         )
         with inductor_config.patch(joint_custom_post_pass=record_graph):
             actual = torch.compile(fn, fullgraph=True)(*args)
@@ -803,7 +798,9 @@ class PadBaddbmmTest(TestCase):
         for arg in args:
             arg.requires_grad_()
         if not bias_shape:
-            self.assertFalse(can_pad(args[1][0], args[2][0], torch.ops.aten.addmm, args[0]))
+            self.assertFalse(
+                can_pad(args[1][0], args[2][0], torch.ops.aten.addmm, args[0])
+            )
 
         def fn(bias, mat1, mat2):
             return torch.baddbmm(bias, mat1, mat2, **scalars)
@@ -918,9 +915,7 @@ class PadBaddbmmTest(TestCase):
             torch.ones((batch, m, k), device=device, requires_grad=requires_grad),
             torch.ones((batch, k, n), device=device, requires_grad=requires_grad),
         )
-        dimensions = tuple(
-            dim if dim == 1 else (dim + 3) // 4 * 4 for dim in (m, k, n)
-        )
+        dimensions = tuple(dim if dim == 1 else (dim + 3) // 4 * 4 for dim in (m, k, n))
         actual = self._check_compiled(torch.baddbmm, args, dimensions)
         self.assertEqual(actual.stride(), torch.baddbmm(*args).stride())
 
@@ -998,7 +993,9 @@ class PadBaddbmmTest(TestCase):
         def fn(bias, mat1, mat2, scalar):
             return torch.baddbmm(bias, mat1, mat2, **{scalar_name: scalar.item()})
 
-        with unittest.mock.patch.object(pad_mm, "is_mm_compute_bound", return_value=True):
+        with unittest.mock.patch.object(
+            pad_mm, "is_mm_compute_bound", return_value=True
+        ):
             self._check_compiled(fn, args, expect_padding=False)
 
     @fresh_cache()
@@ -1022,7 +1019,9 @@ class PadBaddbmmTest(TestCase):
         input_node, _, mat2_node, _ = graph.find_nodes(op="placeholder")
         producer, pointwise = graph.find_nodes(op="output")[0].args[0]
         match = unittest.mock.Mock()
-        match.kwargs = dict(input=input_node, mat1=producer, mat2=mat2_node, alpha=-0.5, beta=2.0)
+        match.kwargs = dict(
+            input=input_node, mat1=producer, mat2=mat2_node, alpha=-0.5, beta=2.0
+        )
         self.assertFalse(pad_mm.should_exclude_padding_time(match, "mat1"))
         calls, timed_padding = [], []
 
@@ -1030,7 +1029,10 @@ class PadBaddbmmTest(TestCase):
             def __torch_function__(self, func, types, args=(), kwargs=None):
                 if func is torch.ops.aten.baddbmm:
                     calls.append((args, kwargs))
-                if func is torch.ops.aten.constant_pad_nd and args[0].shape == mat1.shape:
+                if (
+                    func is torch.ops.aten.constant_pad_nd
+                    and args[0].shape == mat1.shape
+                ):
                     timed_padding.append(True)
                 return super().__torch_function__(func, types, args, kwargs)
 
@@ -1038,7 +1040,9 @@ class PadBaddbmmTest(TestCase):
             with RecordBaddbmm():
                 fn()
             args, kwargs = calls[-1]
-            self.assertEqual(kwargs, {name: match.kwargs[name] for name in ("alpha", "beta")})
+            self.assertEqual(
+                kwargs, {name: match.kwargs[name] for name in ("alpha", "beta")}
+            )
             self.assertFalse(any(is_fake_tensor(arg) for arg in args))
             if args[1].shape[2] == 11:
                 self.assertEqual(args[0].stride(), bias.stride())
@@ -1047,7 +1051,9 @@ class PadBaddbmmTest(TestCase):
 
         op = torch.ops.aten.baddbmm
         with (
-            unittest.mock.patch.object(pad_mm, "is_mm_compute_bound", return_value=True),
+            unittest.mock.patch.object(
+                pad_mm, "is_mm_compute_bound", return_value=True
+            ),
             unittest.mock.patch.object(pad_mm, "get_do_bench", return_value=bench),
         ):
             encoded = []

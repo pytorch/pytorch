@@ -572,7 +572,7 @@ def _should_pad(
         if cached_pad is not None:
             return cached_pad
 
-        def realize_tensor(t):
+        def realize_tensor(t: Tensor) -> Tensor:
             if is_fake_tensor(t):
                 size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
@@ -656,9 +656,12 @@ def _should_pad(
                 )
             )
         elif op is aten.baddbmm:
+            baddbmm_input = input
+            if baddbmm_input is None:
+                raise AssertionError("expected input tensor for baddbmm")
             fns.append(
                 lambda: pad_baddbmm(
-                    input,
+                    baddbmm_input,
                     mat1_pad,
                     mat2_pad,
                     m_padded_length,
@@ -699,7 +702,13 @@ def _should_pad(
             if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
                 op(mat1, mat2)
             elif op is aten.baddbmm:
-                op(input, mat1, mat2, beta=match.kwargs["beta"], alpha=match.kwargs["alpha"])
+                op(
+                    input,
+                    mat1,
+                    mat2,
+                    beta=match.kwargs["beta"],
+                    alpha=match.kwargs["alpha"],
+                )
             else:
                 op(input, mat1, mat2)
 
@@ -1049,6 +1058,7 @@ def _pad_baddbmm_init() -> None:
             beta=KeywordArg("beta"),
             alpha=KeywordArg("alpha"),
         ),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=patterns,
         extra_check=should_pad_baddbmm,
     )
