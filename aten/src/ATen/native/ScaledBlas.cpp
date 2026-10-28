@@ -225,9 +225,10 @@ TORCH_META_FUNC(_scaled_addmm)(
 }
 
 // V2: Grouped scaled matrix multiply. Shape inference + output allocation runs
-// here; recipe-independent input validation runs here too (in eager, before
-// TORCH_IMPL_FUNC, and during `torch.compile` tracing). Per-recipe scale-shape
-// checks, the device-capability gate, and kernel dispatch live in the CUDA
+// here; recipe-independent input validation runs here in eager mode, before
+// TORCH_IMPL_FUNC. FakeTensor and torch.compile use the Python meta, which only
+// checks output dtype and offset contiguity before shape inference. Per-recipe
+// scale-shape checks, the device-capability gate, and kernel dispatch live in the CUDA
 // TORCH_IMPL_FUNC. Output may be bf16, fp16, or fp32, subject to backend support.
 //
 // `self`/`mat2` may be 2D or 3D; `offs` carries group boundaries when either
