@@ -1982,7 +1982,7 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
         unregister_woq_int8pack_fusion_device("cpu")
         self.addCleanup(register_woq_int8pack_fusion_device, "cpu")
         # A device index can never match the device-type check.
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "expected a bare device type"):
             register_woq_int8pack_fusion_device("cuda:0")
         self._test_common(
             M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07

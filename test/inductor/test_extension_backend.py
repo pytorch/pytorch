@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo
@@ -28,6 +29,7 @@ except ImportError:
 import torch._inductor.config as config
 from torch._dynamo.utils import counters
 from torch._inductor import cpu_vec_isa, metrics
+from torch._inductor.codecache import FxGraphCache
 from torch._inductor.codegen.common import (
     device_op_overrides_dict,
     DeviceOpOverrides,
@@ -38,6 +40,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
+from torch._inductor.compile_fx import FxCompileMode
 from torch._inductor.fx_passes.quantization import (
     register_woq_int8pack_fusion_device,
     unregister_woq_int8pack_fusion_device,
@@ -278,6 +281,10 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             ExtensionCppWrapperCodegen,
         )
         register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
+        # Reset the shared op counter when this test ends so tests that run
+        # after it (e.g. test_open_device_registration) observe a clean state;
+        # addCleanup also runs when an assertion below fails.
+        self.addCleanup(self.module.custom_op_called)
         device = self.module.custom_device()
 
         def fn(x, weight, scales):
@@ -321,13 +328,93 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
             # aten._weight_int8pack_mm kernel.
             self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 1)
 
-        # Reset the shared op counter so tests that run after this one
-        # (e.g. test_open_device_registration) observe a clean state.
-        self.module.custom_op_called()
-
         # Values that can never match the device-type check are rejected.
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "expected a bare device type"):
             register_woq_int8pack_fusion_device("extension_device:0")
+
+    @xfailIfS390X
+    @skipIfWindows
+    def test_woq_int8pack_fusion_propagates_to_worker(self):
+        # End-to-end WOQ check under FxCompileMode.SERIALIZE, which runs the
+        # serialize -> _run_in_child path a subprocess worker takes (a real
+        # subprocess worker cannot host this test: the PrivateUse1 rename,
+        # the loaded extension module and the registered codegen backends are
+        # all process-local state). The assertions below hold on both paths
+        # this compile can take: if the WOQ graph serializes, the child
+        # applies the allowlist received over the wire (see
+        # test_compile_options.py::test_compile_fx_ext_propagates_woq_allowlist
+        # for the wire-level check); if it is not picklable (currently the
+        # graph carries prims.convert_element_type, which _ops_filter_safe
+        # rejects), the serialized compile bypasses to in-process compilation,
+        # which still observes this process's allowlist. Either way the
+        # fusion and the cache-reuse behavior must match the allowlist state
+        # the parent hashed into FxGraphHashDetails.
+        torch.utils.rename_privateuse1_backend("extension_device")
+        torch._register_device_module("extension_device", self.module)
+        register_backend_for_device(
+            "extension_device",
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
+        )
+        register_device_op_overrides("extension_device", ExtensionDeviceOpOverrides())
+        self.addCleanup(self.module.custom_op_called)
+        device = self.module.custom_device()
+
+        def fn(x, weight, scales):
+            return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        # Distinct shapes from test_woq_int8pack_fusion_on_registered_device
+        # so artifacts from that test cannot be reused across tests.
+        x_cpu = torch.randn(1, 1, 512, dtype=torch.bfloat16)
+        w_cpu = torch.randint(-128, 127, (16, 512), dtype=torch.int8)
+        s_cpu = torch.randn(16, dtype=torch.bfloat16)
+        ref = fn(x_cpu, w_cpu, s_cpu)
+        x, w, s = x_cpu.to(device), w_cpu.to(device), s_cpu.to(device)
+        int8pack_calls = self.module.int8pack_mm_call_count()
+
+        register_woq_int8pack_fusion_device("extension_device")
+        self.addCleanup(unregister_woq_int8pack_fusion_device, "extension_device")
+
+        counters.clear()
+        FxGraphCache.clear()
+        with (
+            config.patch({"fx_graph_cache": True}),
+            mock.patch(
+                "torch._inductor.compile_fx.fx_compile_mode",
+                FxCompileMode.SERIALIZE,
+            ),
+        ):
+            # First compile: the worker applies the allowlist received over
+            # the wire, so the fusion fires and the fused op is dispatched.
+            torch._dynamo.reset()
+            opt_fn = torch.compile()(fn)
+            res = opt_fn(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+            # Recompiling with the same allowlist state reuses the artifact:
+            # the worker derives the same key because the allowlist it sees
+            # (via the wire) matches the parent's.
+            torch._dynamo.reset()
+            opt_fn = torch.compile()(fn)
+            res = opt_fn(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            # The reused artifact is still the fused one.
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 2)
+
+            # Unregistering must not reuse that artifact: the key changes with
+            # the allowlist state.
+            unregister_woq_int8pack_fusion_device("extension_device")
+            torch._dynamo.reset()
+            opt_fn = torch.compile()(fn)
+            res = opt_fn(x, w, s)
+            self.assertEqual(ref, res.to(device="cpu"), atol=0.001, rtol=0.07)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            # The generic path runs aten.mm on the device, never the fused op.
+            self.assertEqual(self.module.int8pack_mm_call_count(), int8pack_calls + 2)
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)

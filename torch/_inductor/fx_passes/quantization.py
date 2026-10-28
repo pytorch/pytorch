@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import contextlib
 import copy
 import itertools
 import math
@@ -1154,7 +1155,7 @@ def _validate_woq_device_type(device_type: str) -> None:
     the pre-rename ``"privateuseone"`` would silently never match.
     """
     if not isinstance(device_type, str):
-        raise ValueError(f"device_type must be a str, got {type(device_type).__name__}")
+        raise TypeError(f"device_type must be a str, got {type(device_type).__name__}")
     try:
         parsed = torch.device(device_type).type
     except RuntimeError as e:
@@ -1196,6 +1197,36 @@ def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
     """
     _validate_woq_device_type(device_type)
     _woq_int8pack_fusion_devices.discard(device_type)
+
+
+def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
+    """Snapshot the allowlist for transfer to a compile worker.
+
+    The tuple is sorted so the value is deterministic (matching how
+    ``FxGraphHashDetails`` hashes it). Used by the serialized (subprocess)
+    compile path in ``torch/_inductor/compile_fx_ext.py``.
+    """
+    return tuple(sorted(_woq_int8pack_fusion_devices))
+
+
+@contextlib.contextmanager
+def _patch_woq_int8pack_fusion_devices(devices):
+    """Apply an allowlist snapshot captured in the parent process.
+
+    Used by ``_run_in_child`` in ``torch/_inductor/compile_fx_ext.py`` so the
+    worker pattern-matches against the parent's allowlist state (the same
+    state hashed into ``FxGraphHashDetails``) instead of reading its own
+    module-level default. The set is mutated in place - references obtained
+    via ``from ... import`` keep observing the parent's state.
+    """
+    saved = OrderedSet(_woq_int8pack_fusion_devices)
+    _woq_int8pack_fusion_devices.clear()
+    _woq_int8pack_fusion_devices.update(devices)
+    try:
+        yield
+    finally:
+        _woq_int8pack_fusion_devices.clear()
+        _woq_int8pack_fusion_devices.update(saved)
 
 
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
