@@ -2816,9 +2816,10 @@ def fallback_handler(kernel, add_to_fallback_set=True):
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
-        # foreach ops have the getitem operation,
-        # so replacing it to match the register_foreach_inplace lowering
-        # and returning aten inputs
+        # The reinplace pass replaces the out-of-place overload with its
+        # in-place equivalent, which returns () but retains the original
+        # operator.getitem users. Return the mutated input list to preserve
+        # the expected outputs for these reinplaced foreach ops.
         if kernel in inplace_foreach_ops:
             return list(args[0])
         return out

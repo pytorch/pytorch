@@ -421,19 +421,34 @@ class ForeachTests(TestCase):
     @requires_gpu
     @inplace_bin_ops
     def test_inplace_fallback(self, op):
-        def fn(a, b):
+        def fn1(a, b):
+            op(a, b)
             op(a, b)
             return a
 
-        fn_opt = torch.compile(fn, backend="inductor", fullgraph=True)
+        def fn2(a, b):
+            op(a, b)
+            return [x * 2 for x in a]
+
+        fn1_opt = torch.compile(fn1, backend="inductor", fullgraph=True)
+        fn2_opt = torch.compile(fn2, backend="inductor", fullgraph=True)
 
         a = [torch.tensor([1 + 2j, 3 + 4j], device=GPU_TYPE, dtype=torch.complex64)]
-        a_expected = [t.clone() for t in a]
         b = 1j
 
-        actual = fn_opt(a, b)
-        expected = fn(a_expected, b)
-        self.assertEqual(actual, expected)
+        a1 = [t.clone() for t in a]
+        a1_expected = [t.clone() for t in a]
+
+        actual1 = fn1_opt(a1, b)
+        expected1 = fn1(a1_expected, b)
+        self.assertEqual(actual1, expected1)
+
+        a2 = [t.clone() for t in a]
+        a2_expected = [t.clone() for t in a]
+
+        actual2 = fn2_opt(a2, b)
+        expected2 = fn2(a2_expected, b)
+        self.assertEqual(actual2, expected2)
 
     @requires_gpu
     def test_sgd_foreach_fallback(self):
