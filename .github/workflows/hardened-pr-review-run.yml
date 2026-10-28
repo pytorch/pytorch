@@ -388,7 +388,7 @@ jobs:
                 scripts/pr_review/extract_verdict.py \
                 scripts/pr_review/emit_row.py \
                 scripts/pr_review/fetch_pr_comments.py &&
-            find .agents/skills/pr-review -type f -print0 \
+            find .agents/skills/pr-review .agents/skills/cuda-streams -type f -print0 \
               | LC_ALL=C sort -z | xargs -0 -r sha256sum
           } | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
@@ -795,6 +795,7 @@ jobs:
           # (`--setting-sources user` below).
           mkdir -p ~/.claude/skills
           cp -rT trusted/.agents/skills/pr-review ~/.claude/skills/pr-review
+          cp -rT trusted/.agents/skills/cuda-streams ~/.claude/skills/cuda-streams
 
       - name: "Stage A: pr-review"
         id: a
@@ -836,7 +837,7 @@ jobs:
           claude_args: |
             --model ${{ env.REVIEW_MODEL }}
             --effort high
-            --allowedTools "Skill,Read(~/.claude/skills/pr-review/**),Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(//tmp/pr-comments.json),Agent"
+            --allowedTools "Skill,Read(~/.claude/skills/pr-review/**),Read(~/.claude/skills/cuda-streams/**),Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(//tmp/pr-comments.json),Agent"
             --disallowedTools "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch,Read(//proc/**),Read(~/.aws/**),ScheduleWakeup"
             --setting-sources user
             --strict-mcp-config
