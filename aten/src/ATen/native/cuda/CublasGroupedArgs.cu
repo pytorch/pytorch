@@ -36,6 +36,7 @@ __global__ void populate_cublas_grouped_args_kernel(
     int64_t base_scale_a, int64_t base_scale_b,
     int64_t scale_a_bytes, int64_t scale_b_bytes,
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
+    bool blockwise_variable_a, bool blockwise_variable_b,
     CublasGroupedScaleLayout scale_layout_a,
     CublasGroupedScaleLayout scale_layout_b,
     int64_t* __restrict__ scalePtrA_out, int64_t* __restrict__ scalePtrB_out) {
@@ -113,8 +114,8 @@ __global__ void populate_cublas_grouped_args_kernel(
   // sizes via parallel scan.
   // cuBLAS-A scale: getScaleTensorSize(inner=K, outer=M)
   // cuBLAS-B scale: getScaleTensorSize(inner=K, outer=N)
-  const bool scan_a = (scalePtrA_out != nullptr) && (scale_a_stride_bytes == 0);
-  const bool scan_b = (scalePtrB_out != nullptr) && (scale_b_stride_bytes == 0);
+  const bool scan_a = (scalePtrA_out != nullptr) && blockwise_variable_a;
+  const bool scan_b = (scalePtrB_out != nullptr) && blockwise_variable_b;
   if (scan_a || scan_b) {
     extern __shared__ int64_t scale_scan[];
     int64_t* s_a = scale_scan;
@@ -157,10 +158,10 @@ __global__ void populate_cublas_grouped_args_kernel(
   }
 
   // Uniform stride (3D/3D or per-batch scalar scales): direct indexed offset.
-  if (scalePtrA_out != nullptr && scale_a_stride_bytes != 0) {
+  if (scalePtrA_out != nullptr && !blockwise_variable_a) {
     scalePtrA_out[i] = base_scale_a + i * scale_a_stride_bytes;
   }
-  if (scalePtrB_out != nullptr && scale_b_stride_bytes != 0) {
+  if (scalePtrB_out != nullptr && !blockwise_variable_b) {
     scalePtrB_out[i] = base_scale_b + i * scale_b_stride_bytes;
   }
 }
@@ -185,6 +186,7 @@ void launch_populate_cublas_grouped_args(
     int64_t base_scale_a, int64_t base_scale_b,
     int64_t scale_a_bytes, int64_t scale_b_bytes,
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
+    bool blockwise_variable_a, bool blockwise_variable_b,
     CublasGroupedScaleLayout scale_layout_a,
     CublasGroupedScaleLayout scale_layout_b,
     int64_t* scalePtrA_out, int64_t* scalePtrB_out,
@@ -212,8 +214,8 @@ void launch_populate_cublas_grouped_args(
   args.ldbArray = ldb_arr;
   args.lddArray = ldd_arr;
 
-  const bool scan_scales = (scalePtrA_out != nullptr && scale_a_stride_bytes == 0) ||
-      (scalePtrB_out != nullptr && scale_b_stride_bytes == 0);
+  const bool scan_scales = (scalePtrA_out != nullptr && blockwise_variable_a) ||
+      (scalePtrB_out != nullptr && blockwise_variable_b);
   const size_t shared_bytes = scan_scales ? 2 * batchCount * sizeof(int64_t) : 0;
   populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, shared_bytes, stream>>>(
       offs, base_A, base_B, base_D,
@@ -231,6 +233,7 @@ void launch_populate_cublas_grouped_args(
       base_scale_a, base_scale_b,
       scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
+      blockwise_variable_a, blockwise_variable_b,
       scale_layout_a, scale_layout_b,
       scalePtrA_out, scalePtrB_out);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -370,7 +373,7 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   // Byte stride between consecutive groups' scale data.
   // For per-batch scalars and 3D block scales, stride(0) selects a group.
-  // For a blockwise 2D scale, 0 signals variable-size mode.
+  // Blockwise 2D scales use explicit flags to select variable-size offsets.
   const bool mata_blockwise = cublas_grouped_scale_is_blockwise(mata_layout);
   const bool matb_blockwise = cublas_grouped_scale_is_blockwise(matb_layout);
   const bool blockwise_variable_a = mata_blockwise && a_is_2d;
@@ -416,6 +419,7 @@ cublasGroupedArgs::cublasGroupedArgs(
       base_scale_a, base_scale_b,
       scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
+      blockwise_variable_a, blockwise_variable_b,
       mata_layout, matb_layout,
       scaleAPtrArray, scaleBPtrArray,
       stream);
