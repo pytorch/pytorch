@@ -98,7 +98,8 @@ probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the al
 
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
 `issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
-`global.openai.gpt-6.1-sol` at medium thinking (the Claude Code stage 2 used Sonnet 5):
+`global.anthropic.claude-sonnet-5` at medium thinking, preserving the Claude Code triage model.
+Sol remains available through the `model` dispatch input. Distributed triage uses the same default:
 
 1. **plan** (`pi-triage-plan.yml`; Bedrock, `issues: read`,
    egress blocked): the model reads the issue through
