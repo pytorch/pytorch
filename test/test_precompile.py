@@ -7471,9 +7471,9 @@ def inputs(seed, requires_grad=False):
     return x, w
 
 
-# A Triton JIT compile or autotuning benchmark writes through the cache
-# manager; replaying from the imported runtime cache writes nothing. The
-# runtime-cache transport refuses a custom manager_class, so record in place.
+# A Triton JIT compile writes through the cache manager; replaying from the
+# imported runtime cache writes nothing. The runtime-cache transport refuses a
+# custom manager_class, so record in place.
 writes = []
 put = FileCacheManager.put
 
@@ -9568,11 +9568,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             modules = _custom_op_modules(names)
         self.assertEqual(modules, (module.__name__, "torch.export.custom_ops"))
-        (message,) = logs.output
+        torch_ops, message = logs.output
+        self.assertIn(f"_native::{native}", torch_ops)
+        self.assertIn("register_op_override", torch_ops)
+        self.assertNotIn(f"_native::{native}", message)
         self.assertIn(qualname, message)
         self.assertIn(f"{ns}::f", message)
         self.assertIn(f"{ns}::legacy_op", message)
-        self.assertIn(f"_native::{native}", message)
         self.assertNotIn(recorded._qualname, message)
         self.assertNotIn("aten::add", message)
         self.assertNotIn("export::", message)
@@ -9590,6 +9592,38 @@ class TestPrecompileCustomOpRecording(TestCase):
             ("device_mesh::_get_submesh", ""),
         ]
         self.assertEqual(_custom_op_modules(ops), modules)
+
+    def test_an_op_torch_defines_at_cuda_init_is_reported_with_its_setup(self):
+        from torch._precompile import _custom_op_modules
+
+        name = f"precompile_{uuid.uuid4().hex}"
+        torch._TritonLibrary.registerOp(
+            name, f"{name}(Tensor x) -> Tensor", lambda x: x.clone(), "CPU"
+        )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules([(f"triton::{name}", "")]), ())
+        (message,) = logs.output
+        self.assertIn(f"triton::{name}", message)
+        self.assertIn("torch.cuda.init()", message)
+        self.assertNotIn("set_python_module", message)
+
+    def test_a_prim_a_lazy_module_defines_is_imported_and_checked(self):
+        from torch._functorch._aot_autograd.codegen import PySourceBuilder
+        from torch._precompile import (
+            _custom_op_modules,
+            _custom_ops,
+            _write_custom_op_imports,
+        )
+
+        importlib.import_module("torch._dynamo.tensor_version_op")
+        names = {("prims::_unsafe_set_version_counter", ""), ("aten::add", "Tensor")}
+        modules, ops = _custom_op_modules(names), _custom_ops(names)
+        self.assertEqual(modules, ("torch._dynamo.tensor_version_op",))
+        self.assertEqual(ops, (("prims::_unsafe_set_version_counter", ""),))
+        buf = PySourceBuilder()
+        _write_custom_op_imports(buf, modules, ops)
+        self.assertIn("torch._dynamo.tensor_version_op", buf.getvalue())
+        self.assertIn("prims::_unsafe_set_version_counter", buf.getvalue())
 
     def test_a_prim_records_the_module_defining_it(self):
         from torch._precompile import _custom_op_modules
@@ -9612,7 +9646,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             import json
             import torch
             import torch.onnx.ops
-            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _torch_op_module
+            from torch._precompile import _TORCH_LAZY_OP_NAMESPACES, _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _torch_op_module
             if torch.distributed.is_available():
                 import torch.distributed.fsdp
                 import torch.distributed.pipelining
@@ -9624,6 +9658,8 @@ class TestPrecompileCustomOpRecording(TestCase):
                 op_name, _, overload = name.partition(".")
                 ns = op_name.split("::")[0]
                 debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+                if ns in _TORCH_LAZY_OP_NAMESPACES:
+                    continue
                 if ".py:" not in debug:
                     if ns not in _TORCH_OP_NAMESPACES:
                         reported.add(ns)
@@ -9641,9 +9677,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
         scan = json.loads(out)
-        # "_test" holds TorchScript's own test ops, and "_native" register_op_override's
-        # ops, which only that call defines.
-        self.assertEqual(set(scan["reported"]) - {"_test", "_native"}, set())
+        # "_test" holds TorchScript's own test ops.
+        self.assertEqual(set(scan["reported"]) - {"_test"}, set())
 
         # Each recorded module must register its ops when imported alone, as on a fresh
         # host. A child forked from a process that imported only torch imports each one.

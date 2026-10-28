@@ -2008,13 +2008,7 @@ _TORCH_DIR = os.path.dirname(torch.__file__)
 # torch's helpers that build a Library for the caller's namespace record themselves,
 # so the torch modules defining ops through them are listed by namespace.
 _TORCH_OP_HELPERS = tuple(
-    os.path.join(_TORCH_DIR, name)
-    for name in (
-        "library.py",
-        "_library",
-        "_custom_op",
-        os.path.join("_native", "registry.py"),
-    )
+    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
 )
 _TORCH_HELPER_OP_MODULES = MappingProxyType(
     {
@@ -2036,9 +2030,15 @@ _TORCH_PRIM_MODULES = (
     "torch._inductor.inductor_prims",
     "torch._dynamo.tensor_version_op",
 )
-# Torch namespaces defined only when a function runs (CUDA lazy init, inductor's
-# memory-check debug mode), so no module import registers them.
-_TORCH_LAZY_OP_NAMESPACES = frozenset({"triton", "_inductor_debug"})
+# Torch namespaces defined only when a function runs, not by a module import, and
+# what must run on the serving host before the artifact loads.
+_TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
+    {
+        "triton": "CUDA initialization (torch.cuda.init())",
+        "_inductor_debug": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
+        "_native": "the torch._native register_op_override call that defines the op",
+    }
+)
 
 
 def _torch_op_module(op_name: str, overload: str) -> str | None:
@@ -2068,14 +2068,26 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     ops torch does not register and no importable module is known to register."""
     modules: set[str] = set()
     unrecorded: set[str] = set()
+    lazy: dict[str, set[str]] = {}
     for op_name, overload in op_names:
+        ns = op_name.split("::")[0]
         module = _custom_op_module(op_name, overload)
         if module is None:
             module = _torch_op_module(op_name, overload)
         if module is not None:
             modules.add(module)
-        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+        elif ns in _TORCH_LAZY_OP_NAMESPACES:
+            lazy.setdefault(_TORCH_LAZY_OP_NAMESPACES[ns], set()).add(op_name)
+        elif ns not in _TORCH_OP_NAMESPACES:
             unrecorded.add(op_name)
+    for setup, ops in sorted(lazy.items()):
+        log.warning(
+            "torch.compiler.precompile: the captured graphs call %s, which torch "
+            "defines only when %s runs, so the artifact serves only where that ran "
+            "before it is loaded.",
+            ", ".join(sorted(ops)),
+            setup,
+        )
     if unrecorded:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
@@ -2095,11 +2107,10 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
-    """The ops among ``op_names`` outside aten and prims, which the artifact checks
-    are registered once its imports ran."""
-    return tuple(
-        sorted(n for n in op_names if n[0].split("::")[0] not in ("aten", "prims"))
-    )
+    """The ops among ``op_names`` outside aten, which the artifact checks are
+    registered once its imports ran. Prims are kept: inductor's and dynamo's are
+    registered only once their modules are imported."""
+    return tuple(sorted(n for n in op_names if not n[0].startswith("aten::")))
 
 
 def _write_custom_op_imports(
