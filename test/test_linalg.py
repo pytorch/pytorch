@@ -11143,8 +11143,9 @@ class TestLinalgCudaOnly(TestCase):
             """
         )
         # TunableOp writes its results file into the cwd at exit.
+        cmd = [sys.executable, "-c", script]
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = subprocess.run([sys.executable, "-c", script], cwd=tmpdir, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, check=True)
         op_sigs = result.stdout.split()
         self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
 
