@@ -4,6 +4,7 @@ import cmath
 import collections
 import collections.abc
 import contextlib
+import contextvars
 import enum
 import functools
 import inspect
@@ -6831,6 +6832,24 @@ class GraphModule(torch.nn.Module):
         D.__qualname__ = "Renamed"
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x)[1:3], ("Renamed.get", "Renamed.fromkeys"))
+
+    @parametrize("bound", [False, True])
+    @parametrize("kind", ["repeat", "contextvar"])
+    def test_method_descriptor_tracker_type(self, bound, kind):
+        descriptor = (
+            itertools.repeat.__length_hint__
+            if kind == "repeat"
+            else contextvars.ContextVar.get
+        )
+        context = contextvars.ContextVar("value", default=3)
+
+        def fn(x):
+            receiver = itertools.repeat(1, 3) if kind == "repeat" else context
+            value = descriptor.__get__(receiver)() if bound else descriptor(receiver)
+            return x + value
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_unbound_method_descriptor_call(self):
         # list.count read off the type inside the frame is a method_descriptor;
