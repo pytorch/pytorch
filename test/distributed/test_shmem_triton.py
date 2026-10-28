@@ -9,7 +9,6 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
-    skip_if_rocm_multiprocess,
 )
 
 
@@ -35,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
@@ -861,7 +861,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.tensor([expected_remote], device=self.device, dtype=dtype),
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
     def test_triton_alltoall(self) -> None:
@@ -907,7 +907,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             actual = dst[i * nelems_per_pe : (i + 1) * nelems_per_pe]
             torch.testing.assert_close(actual, torch.full_like(actual, expected))
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
     def test_triton_broadcast(self) -> None:
