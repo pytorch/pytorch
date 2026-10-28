@@ -128,12 +128,12 @@ inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
 inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
   std::ostringstream oss;
   oss << "inconsistent tensor size, expected ";
-  for (size_t i = 0; i < tensors.size() - 1; i++) {
+  for (const auto i : c10::irange(tensors.size() - 1)) {
     oss << tensors[i].sizes() << ", ";
   }
   oss << "and " << tensors[tensors.size() - 1].sizes()
       << " to have the same number of elements, but got ";
-  for (size_t i = 0; i < tensors.size() - 1; i++) {
+  for (const auto i : c10::irange(tensors.size() - 1)) {
     oss << tensors[i].numel() << ", ";
   }
   oss << "and " << tensors[tensors.size() - 1].numel()

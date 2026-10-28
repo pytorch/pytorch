@@ -624,11 +624,8 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
 
     def test_parameter_from_lazy_module_parameter(self):
         # A lazy module's UninitializedParameter needs _make_subclass on a fake,
-        # which fails for a Python FakeTensor and when propagating real tensors.
-        if (
-            not CPP_FAKETENSOR
-            or torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
+        # which fails for a Python FakeTensor.
+        if not CPP_FAKETENSOR:
             self.skipTest("lazy modules cannot be built under this fake mode")
         with FakeTensorMode():
             lin = torch.nn.LazyLinear(4)
@@ -638,6 +635,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(is_fake_tensor(tied))
         self.assertIsInstance(tied, torch.nn.Parameter)
 
+    @skipIfTorchDynamo("uses torch.compile")
     def test_compile_module_with_fake_parameters(self):
         # The parameter guards must accept the same fake parameters on later calls
         mode = FakeTensorMode()
@@ -646,10 +644,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             x = torch.randn(2, 4)
         cnt = torch._dynamo.testing.CompileCounter()
         f = torch.compile(m, backend=cnt)
-        with mode:
-            for _ in range(3):
-                f(x)
-        self.assertEqual(cnt.frame_count, 1)
+        try:
+            with mode:
+                for _ in range(3):
+                    f(x)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            torch._dynamo.reset()
 
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
@@ -974,6 +975,34 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(
                     torch._C._dispatch_key_set(y)
                 )
+
+    def test_alias_fake_tensor(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(4, 6).t(),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC],
+                constraint_sizes=[None, None],
+            ),
+        )
+        self.assertIsInstance(x.shape[0], torch.SymInt)
+        with fake_mode:
+            y = torch.ops.aten.alias.default(x)
+        self.assertEqual(y.shape, x.shape)
+        self.assertEqual(y.stride(), x.stride())
+        self.assertEqual(y.storage_offset(), x.storage_offset())
+        self.assertEqual(y.untyped_storage()._cdata, x.untyped_storage()._cdata)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_alias_fake_mkldnn(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(torch.randn(2, 3).to_mkldnn())
+            y = torch.ops.aten.alias.default(x)
+        self.assertTrue(y.is_mkldnn)
+        self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
 
     def test_fake_in_kernel_invocation_reports_meta_device(self):
         t = torch.empty(2, device="meta")
