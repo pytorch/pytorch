@@ -1,3 +1,4 @@
+#include <c10/util/safe_conv.h>
 #include <torch/csrc/python_headers.h>
 #ifdef _MSC_VER
 #include <c10/util/win32-headers.h>
@@ -448,7 +449,7 @@ static PyObject* THPStorage_newSharedCuda(
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
-  const auto device = c10::checked_convert<c10::DeviceIndex>(
+  const auto device = c10::safe_conv<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::cuda::CUDAGuard device_guard(device);
 

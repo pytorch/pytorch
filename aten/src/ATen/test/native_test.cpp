@@ -2,12 +2,20 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FakeTensor.h>
+#include <ATen/native/Pool.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/as_strided_native.h>
+#include <ATen/ops/avg_pool2d.h>
+#include <ATen/ops/avg_pool3d.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #endif
 #include <c10/util/irange.h>
+
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
 
 using namespace at;
 
@@ -266,6 +274,56 @@ TEST(TestNative, NativeTestCPU) {
 
   test(at::device(kCPU).dtype(kFloat),
        at::device(kCPU).dtype(kDouble));
+}
+
+TEST(TestNative, PoolingConversionOverflow2d) {
+  const auto input = at::ones({1, 1, 4, 4}, at::kFloat);
+  try {
+    (void)at::avg_pool2d(input, {std::numeric_limits<int64_t>::max(), 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolingConversionOverflow3d) {
+  const auto input = at::ones({1, 1, 4, 4, 4}, at::kFloat);
+  try {
+    (void)at::avg_pool3d(input, {std::numeric_limits<int64_t>::max(), 1, 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolingConversionOverflowQuantized2d) {
+  const auto input = at::quantize_per_tensor(
+      at::ones({1, 1, 4, 4}, at::kFloat), 0.5, 0, at::kQUInt8);
+  try {
+    (void)at::avg_pool2d(input, {std::numeric_limits<int64_t>::max(), 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolDowncastCompatibility) {
+  EXPECT_EQ(at::native::safe_downcast<int32_t>(3.9), 3);
+  EXPECT_EQ(
+      at::native::safe_downcast<int32_t>(c10::complex<double>{3.9, 0}), 3);
+  EXPECT_EQ(at::native::safe_downcast<uint8_t>(true), 1);
+  EXPECT_TRUE(at::native::safe_downcast<bool>(42));
+  try {
+    (void)at::native::safe_downcast<uint8_t>(int64_t{-1});
+    FAIL() << "Expected strict integer conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(),
+        "value cannot be converted to type dest_t without overflow");
+  }
 }
 
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {

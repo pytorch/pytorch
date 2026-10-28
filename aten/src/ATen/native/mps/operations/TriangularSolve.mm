@@ -7,6 +7,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/operations/TriangularSolve.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -49,9 +50,9 @@ static void triangular_solve_metal(const Tensor& A_,
   const uint64_t k = B_.size(-1);
 
   TriangularSolveParams params;
-  params.nbatch = safe_downcast<uint32_t, uint64_t>(batchSize);
-  params.n = safe_downcast<uint32_t, uint64_t>(n);
-  params.k = safe_downcast<uint32_t, uint64_t>(k);
+  params.nbatch = c10::safe_conv<uint32_t, uint64_t>(batchSize, "dest_t");
+  params.n = c10::safe_conv<uint32_t, uint64_t>(n, "dest_t");
+  params.k = c10::safe_conv<uint32_t, uint64_t>(k, "dest_t");
   params.upper = upper;
   params.transpose = transpose;
   params.conj = conjugate;
