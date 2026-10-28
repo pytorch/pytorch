@@ -1687,11 +1687,9 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
         const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
         const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
         bool transposed = false;
-        if (ndim > 1) {
-          for (const auto i : c10::irange(1, iter.ntensors())) {
-            const auto strides = iter.strides(i);
-            transposed |= strides[1] > 0 && strides[0] > strides[1];
-          }
+        for (const auto i : c10::irange(1, iter.ntensors())) {
+          const auto strides = iter.strides(i);
+          transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
         }
         if (transposed) {
           const auto tg_x = std::min<NSUInteger>(32, dim0);
