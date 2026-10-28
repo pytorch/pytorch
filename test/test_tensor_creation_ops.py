@@ -1315,10 +1315,10 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res_out.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res_out.select(dim, 2), z, atol=0, rtol=0)
 
-    # [1, 1] column views of a [1, N] row have strides [N, 1] and count as
-    # contiguous, so _stack uses the native serial kernel on CPU. The inputs and
-    # the output sit inside larger buffers, so a wrong copy length stays in
-    # bounds and shows up as wrong values.
+    # Size-1 dims may carry any stride and still count as contiguous, so _stack
+    # uses the native serial kernel on CPU. The inputs and the output sit inside
+    # larger buffers, so a wrong copy length stays in bounds and shows up as
+    # wrong values.
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test__stack_size_one_dim_strided_inputs(self, device, dtype):
@@ -1336,6 +1336,15 @@ class TestTensorCreation(TestCase):
         self.assertEqual(out, torch.stack((a, b), 0), atol=0, rtol=0)
         self.assertEqual(buffer[2:], torch.full_like(buffer[2:], -1), atol=0, rtol=0)
 
+        c = base.as_strided((3, 1), (1, 7))
+        d = base[1:].as_strided((3, 1), (1, 7))
+        self.assertTrue(c.is_contiguous())
+        out = buffer[:6].view(3, 2, 1)
+        torch._stack((c, d), 1, out=out)
+
+        self.assertEqual(out, torch.stack((c, d), 1), atol=0, rtol=0)
+        self.assertEqual(buffer[6:], torch.full_like(buffer[6:], -1), atol=0, rtol=0)
+
     # A size-1 stack dim may carry any stride and still be contiguous.
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -1347,6 +1356,14 @@ class TestTensorCreation(TestCase):
         torch._stack((a,), 0, out=out)
 
         self.assertEqual(out, torch.stack((a,), 0), atol=0, rtol=0)
+
+        b = torch.arange(1, 4, device=device, dtype=dtype).view(3, 1)
+        out = torch.zeros(3000, device=device, dtype=dtype).as_strided((3, 1, 1), (1, 999, 1))
+        self.assertTrue(out.is_contiguous())
+
+        torch._stack((b,), 1, out=out)
+
+        self.assertEqual(out, torch.stack((b,), 1), atol=0, rtol=0)
 
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
