@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.metadata
 import itertools
 import logging
 import math
@@ -14,6 +15,7 @@ import sympy
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
@@ -34,6 +36,7 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
+    _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
     commit_tdm_operand_layout,
@@ -85,6 +88,18 @@ IS_ROCM = torch.version.hip is not None
 def _origami_enabled() -> bool:
     """Check if origami GEMM optimization is enabled."""
     return config.rocm.origami
+
+
+def _origami_package_supported(
+    rocm_version: tuple[int, int], package_version: str
+) -> bool:
+    """On ROCm >= 10.0, rocm-origami < 0.0.3 lacks the API used here."""
+    if rocm_version < (10, 0):
+        return True
+    try:
+        return Version(package_version) >= Version("0.0.3")
+    except InvalidVersion:
+        return False
 
 
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
@@ -174,26 +189,21 @@ if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
 
-        # On ROCm >= 10.0, rocm-origami < 0.0.3 lacks the API used here.
-        # Warn and disable if an incompatible version is installed.
-        if torch.version.rocm is not None:
-            _rocm_ver = tuple(int(v) for v in torch.version.rocm.split(".")[:2])
-            if _rocm_ver >= (10, 0):
-                from importlib.metadata import PackageNotFoundError, version as _pkg_ver
-
-                try:
-                    _ov = tuple(int(v) for v in _pkg_ver("rocm-origami").split(".")[:3])
-                    if _ov < (0, 0, 3):
-                        log.warning(
-                            "rocm-origami %s is not compatible with ROCm %d.%d+; "
-                            "upgrade to rocm-origami>=0.0.3 or set "
-                            "TORCHINDUCTOR_ORIGAMI=0 to disable. Origami disabled.",
-                            ".".join(str(v) for v in _ov),
-                            *_rocm_ver[:2],
-                        )
-                        origami = None
-                except PackageNotFoundError:
-                    pass
+        try:
+            _origami_version = importlib.metadata.version("rocm-origami")
+        except importlib.metadata.PackageNotFoundError:
+            _origami_version = None
+        _rocm_version = _rocm_version_tuple()
+        if _origami_version is not None and not _origami_package_supported(
+            _rocm_version, _origami_version
+        ):
+            log.warning(
+                "rocm-origami %s is not compatible with ROCm %d.%d; upgrade to "
+                "rocm-origami>=0.0.3 or set TORCHINDUCTOR_ORIGAMI=0. Origami disabled.",
+                _origami_version,
+                *_rocm_version,
+            )
+            origami = None
     except ImportError:
         origami = None
         log.info(

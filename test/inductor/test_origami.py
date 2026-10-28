@@ -672,6 +672,31 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
                 torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-5)
 
 
+class TestOrigamiPackageVersionGate(TestCase):
+    """_origami_package_supported() decides whether the installed rocm-origami
+    works with the ROCm the build targets. No GPU or origami package needed."""
+
+    def test_package_version_gate(self):
+        from torch._inductor.heuristics.template.triton import (
+            _origami_package_supported,
+        )
+
+        cases = [
+            ((7, 2), "0.0.2", True),
+            ((10, 0), "0.0.2", False),
+            ((10, 1), "0.0.3", True),
+            ((10, 1), "0.0.4rc1", True),
+            ((10, 1), "0.0.3.dev1", False),
+            ((10, 1), "not-a-version", False),
+        ]
+        for rocm_version, package_version, expected in cases:
+            with self.subTest(rocm=rocm_version, package=package_version):
+                self.assertEqual(
+                    _origami_package_supported(rocm_version, package_version),
+                    expected,
+                )
+
+
 if __name__ == "__main__":
     if HAS_GPU_AND_TRITON and IS_ROCM:
         run_tests()
