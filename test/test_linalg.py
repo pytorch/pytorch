@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
+     freeze_rng_state, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
@@ -1118,6 +1118,44 @@ class TestLinalg(TestCase):
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test(shape, batch, uplo)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @serialTest()
+    def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
+        # Warm up n=1024 so the rocBLAS GEMM code objects are loaded. Then
+        # allocate until the device is full: 1 GiB blocks, then 64 MiB, 2 MiB,
+        # and 256 KiB, so the leftover hole is under 256 KiB. Deleting those
+        # tensors returns the blocks to the caching allocator without
+        # empty_cache. rocBLAS hipMalloc still cannot grow the handle
+        # workspace. The n=2048 syevd workspace is taken from that cache.
+        def spd(n):
+            a = torch.randn(4, n, n, device=device)
+            return a @ a.mT + torch.eye(n, device=device)
+
+        warmup = spd(1024)
+        torch.linalg.eigh(warmup)
+        torch.cuda.synchronize()
+        del warmup
+
+        chunks = []
+        try:
+            for size in (1 << 30, 64 << 20, 2 << 20, 256 << 10):
+                try:
+                    while True:
+                        chunks.append(torch.empty(size, dtype=torch.uint8, device=device))
+                except torch.OutOfMemoryError:
+                    pass
+            del chunks
+            chunks = []
+            values, _ = torch.linalg.eigh(spd(2048))
+            torch.cuda.synchronize()
+            # isnan on device would load a new kernel while the device is still
+            # full. The copy is a memcpy of the finished eigenvalues.
+            self.assertFalse(torch.isnan(values.cpu()).any())
+        finally:
+            del chunks
+            torch.cuda.empty_cache()
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -1422,8 +1460,6 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
     def test_vector_norm(self, device, dtype):
-        if IS_ARM64 and device == 'cpu' and dtype in [torch.float16, torch.bfloat16, torch.float32]:
-            raise unittest.SkipTest("Fails on ARM, see https://github.com/pytorch/pytorch/issues/125438")
         # have to use torch.randn(...).to(bfloat16) instead of
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
