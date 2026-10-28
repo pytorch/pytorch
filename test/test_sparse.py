@@ -4336,6 +4336,7 @@ class TestSparse(TestSparseBase):
             run_test(shape, max(shape))
             run_test(shape, shape[0] * shape[1])
 
+    @skipCUDAIf(True, "CUDA sspaddmm is not implemented")
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -4387,6 +4388,7 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
+    @skipCUDAIf(True, "CUDA sspaddmm is not implemented")
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfXPU(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_sspaddmm_wrong_mat_types_error_messages(self, device, dtype):
