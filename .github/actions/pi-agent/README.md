@@ -9,6 +9,7 @@ self-contained; the same action lives in `pytorch/ciforge`.
 |---|---|
 | `action.yml`, `run.sh` | Install pi from the lockfile, run the session, write the step summary |
 | `package.json`, `package-lock.json` | pi version and integrity-pinned dependencies |
+| `install-tools.sh` | SHA-256-pinned ripgrep and fd binaries; no sudo |
 | `allowed-models.json` | Model IDs callers may use |
 | `models.json` | Pinned definitions missing from pi's bundled model catalog |
 | `claude-execution.jq` | Converts pi events to the Claude-compatible execution file |
@@ -16,6 +17,10 @@ self-contained; the same action lives in `pytorch/ciforge`.
 | `extensions/submit-result.ts` | Schema-validated `submit_result` tool for structured output |
 
 ## Usage
+
+The search-tool installer currently targets Linux x86_64 runners (`ubuntu-24.04`).
+It installs ripgrep 15.2.0 and fd 10.5.0 under `RUNNER_TEMP` and adds them to `PATH`,
+so pi's `grep` and `find` work with `PI_OFFLINE=1`. Unsupported platforms fail at setup.
 
 ```yaml
 permissions:
@@ -69,7 +74,8 @@ For a job that reads untrusted input, combine the action with:
 
 - `step-security/harden-runner` with `egress-policy: block` and `disable-sudo: true` as the
   first step. pi needs `sts.us-east-1.amazonaws.com`, `bedrock-runtime.us-east-1.amazonaws.com`,
-  and `registry.npmjs.org`, plus the GitHub hosts the job uses. `pi.dev` is used only with
+  and `registry.npmjs.org`, plus the GitHub hosts the job uses. The pinned search-tool
+  downloads require `github.com` and `release-assets.githubusercontent.com`. `pi.dev` is used only with
   `allow-unlisted-model: "true"` when a model is missing from pi's catalog.
   `upload-artifact` works without extra entries.
 - No write scope in the model's job; apply effects in a separate job without AWS access.

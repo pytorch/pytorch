@@ -123,6 +123,7 @@ class TriageWorkflowContract(unittest.TestCase):
                 "github.com:443",
                 "codeload.github.com:443",
                 "objects.githubusercontent.com:443",
+                "release-assets.githubusercontent.com:443",
                 "registry.npmjs.org:443",
                 "ossci-raw-job-status.s3.us-east-1.amazonaws.com:443",
                 "ossci-raw-job-status.s3.amazonaws.com:443",
