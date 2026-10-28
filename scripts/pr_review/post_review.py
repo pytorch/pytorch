@@ -528,6 +528,8 @@ def with_removed(gh: GitHub, pr: int, findings: list[dict]) -> list[dict]:
         return findings
     try:
         files = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/files")
+    except OutOfTime:
+        raise
     except GitHubError as exc:
         warn(f"could not list the PR's files: {exc}")
         return findings

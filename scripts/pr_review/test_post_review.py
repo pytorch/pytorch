@@ -320,6 +320,40 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn(link, body["body"])
         self.assertNotIn(f"/blob/{SHA}/gone.py", body["body"])
 
+    def test_a_deleted_file_is_matched_and_linked_by_its_real_name(self):
+        # Findings carry neutralize_path's escaped form; GitHub knows the real one.
+        real = "torch/_inductor/@x.py"
+        finding = {
+            "path": neutralize_path(real),
+            "line": 4,
+            "severity": "major",
+            "message": "Used.",
+        }
+        self.assertNotEqual(finding["path"], real)
+        gh = FakeGitHub(files=[{"filename": real, "status": "removed"}])
+        go(gh, row(findings=[finding]))
+        (body,) = gh.posted()
+        (c,) = body["comments"]
+        self.assertEqual((c["path"], c["side"]), (real, "LEFT"))
+        digest = hashlib.sha256(real.encode()).hexdigest()
+        self.assertEqual(
+            post_review.permalink(
+                "o/r", SHA, post_review.with_removed(gh, 1, [finding])[0]
+            ),
+            f"https://github.com/o/r/pull/1/files#diff-{digest}L4",
+        )
+
+    def test_running_out_of_time_listing_files_stops_the_step(self):
+        class SlowFiles(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/files"):
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = SlowFiles()
+        with self.assertRaises(post_review.OutOfTime):
+            post_review.with_removed(gh, 1, [{"path": "a.py", "line": 1}])
+
     def test_a_discussion_on_the_other_side_is_not_this_finding(self):
         # A replied-to LEFT thread from when the file was deleted says nothing
         # about a RIGHT finding at the same number once the file is back.
