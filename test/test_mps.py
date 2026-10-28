@@ -204,7 +204,7 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
     # Regression test for https://github.com/pytorch/pytorch/issues/201630
-    @parametrize("backend", [None, "eager", "aot_eager"])
+    @parametrize("backend", [None, "eager", "aot_eager", "inductor"])
     def test_nested_autocast_compiled(self, backend):
         def f(x):
             with torch.autocast(device_type=x.device.type, enabled=False):
