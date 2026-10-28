@@ -4376,7 +4376,7 @@ class TestMainStatusTags(NoNetworkTestCase):
 
 def _drci_http_error(code: int, body: bytes) -> HTTPError:
     return HTTPError(
-        "https://hud.pytorch.org/api/drci/drci?prNumber=1",
+        "https://hud.pytorch.org/api/drci/drci?prNumber=1",  # @lint-ignore
         code,
         "Bad Request",
         {},  # type: ignore[arg-type]
@@ -4548,7 +4548,7 @@ class TestDrciRetries(TestCase):
 class TestFetchUrlTimeout(TestCase):
     @mock.patch("github_utils.urlopen")
     def test_timeout_reaches_urlopen_only_when_given(self, mock_urlopen: Any) -> None:
-        url = "https://hud.pytorch.org/x"
+        url = "https://hud.pytorch.org/x"  # @lint-ignore
         gh_fetch_url(url, reader=lambda conn: None, timeout=DRCI_TIMEOUT_SECONDS)
         self.assertEqual(
             mock_urlopen.call_args.kwargs, {"timeout": DRCI_TIMEOUT_SECONDS}
