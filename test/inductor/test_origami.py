@@ -9,6 +9,7 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.heuristics.template import triton as triton_heuristics
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
@@ -67,6 +68,13 @@ def tearDownModule():
 @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU and Triton")
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
+@unittest.skipIf(
+    HAS_ORIGAMI
+    and config.max_autotune
+    and config.rocm.origami
+    and triton_heuristics.origami is None,
+    "The installed rocm-origami does not support this ROCm version",
+)
 @unittest.skipIf(
     not (config.max_autotune and config.rocm.origami),
     "Requires both max_autotune and origami to be enabled. "
