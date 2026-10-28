@@ -2,6 +2,7 @@
 # each kernel across a vector class; narrow rows may use one thread and TMA staging.
 import math
 import os
+import warnings
 from collections.abc import Sequence
 from typing import Any, cast, Literal, NamedTuple
 
@@ -100,10 +101,11 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. The native gate is live for tests;
-# the published sum gate also selects this order for geometries its adapter cannot serve.
+# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
+# affecting upstream kernels, which register first. `1` prefers the order and warns once when
+# a call cannot use it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
-_SUM_INNER_TREE_ENV = "PYTORCH_SUM_INNER_TREE"
+_INNER_TREE_STRICT = "strict"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
@@ -219,10 +221,7 @@ _ITREE_STAGE_E = 32
 
 def inner_tree_order_enabled() -> bool:
     """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
-    return any(
-        os.environ.get(name, "") not in ("", "0")
-        for name in (_INNER_TREE_ENV, _SUM_INNER_TREE_ENV)
-    )
+    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
 
 
 def reduction_order(
@@ -233,6 +232,24 @@ def reduction_order(
     if order not in ("unordered", "inner_tree"):
         raise ValueError(f"unknown reduction order: {order!r}")
     return order
+
+
+_warned_inner_tree_fallback = False
+
+
+def inner_tree_fallback(reason: str) -> None:
+    """Serve an env-gated inner-tree request unordered: raise if strict, else warn once."""
+    global _warned_inner_tree_fallback
+    if os.environ.get(_INNER_TREE_ENV, "") == _INNER_TREE_STRICT:
+        raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
+    if not _warned_inner_tree_fallback:
+        _warned_inner_tree_fallback = True
+        strict = f"{_INNER_TREE_ENV}={_INNER_TREE_STRICT}"
+        warnings.warn(
+            f"{_INNER_TREE_ENV} could not be honoured ({reason}); such reductions use "
+            f"unordered kernels. Set {strict} to raise instead.",
+            stacklevel=2,
+        )
 
 
 def select_row_order(
@@ -752,7 +769,7 @@ def _run_itree(
     compact = x.stride(0) == N
     if not compact:
         align = min(align, math.gcd(x.stride(0) * itemsize, natural))
-    if align < natural and itree.stage_e:
+    if align < natural and (itree.stage_e or itree.stage_rows):
         # cp.async's 128-bit atom needs a statically `natural`-aligned source, so a misaligned base
         # cannot use the staged form at all -- it fails IR verification rather than the load. Serve
         # this call with the UNSTAGED form of the same plan: staging is bit-neutral, so the DAG and
@@ -764,7 +781,6 @@ def _run_itree(
                 N,
                 M,
                 x.element_size(),
-                kchunk=itree.kchunk,
                 stage=False,
                 device=x.device,
                 arch=arch,
@@ -906,10 +922,9 @@ def reduce_row_tile(
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
     if ragged_vector and order != "linear":
         raise ValueError("ragged vectors require explicit order='linear'")
+    gated = order is None and inner_tree_order_enabled()
     itree, arch = None, None
-    if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
-        final and threads_per_row is None
-    ):
+    if (order == "inner_tree" or gated) and (final and threads_per_row is None):
         arch = _full_itree_arch(trait, trait_key, x, out_dtypes[:nouts])
         itree = trait_itree_plan(
             trait, N, M, x.element_size(), device=x.device, arch=arch
@@ -920,6 +935,8 @@ def reduce_row_tile(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
             f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
         )
+    if gated and itree is None and final and threads_per_row is None:
+        inner_tree_fallback(f"no inner-tree plan for N={N}, M={M}")
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts, arch=arch)
     cfg = row_config(N, x.element_size() * 8)
