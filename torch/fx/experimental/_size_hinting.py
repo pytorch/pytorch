@@ -108,6 +108,16 @@ def _maybe_realize_expr(
     return None
 
 
+def _check_no_precomputed_float(expr: sympy.Basic) -> None:
+    from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+    if any(symbol_is_type(s, SymT.PRECOMPUTED_FLOAT) for s in expr.free_symbols):  # type: ignore[attr-defined]
+        raise AssertionError(
+            f"{expr} uses a float PRECOMPUTED_FLOAT symbol; use "
+            "SizeVarAllocator.size_arg_hint instead of an integer hint"
+        )
+
+
 def _guarding_hint_or_throw_base(
     shape_env: ShapeEnv,
     expr: sympy.Expr | sympy.Basic | int | bool,
@@ -160,6 +170,7 @@ def _guarding_hint_or_throw_base(
     if not isinstance(expr, sympy.Basic):
         raise RuntimeError("isinstance(expr, sympy.Basic)", expr, type(expr))
 
+    _check_no_precomputed_float(expr)
     if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
         expr = _sympy_subs(expr, precomputed_replacements)
 
@@ -700,6 +711,7 @@ def _optimization_hint_impl(
     if not isinstance(expr, sympy.Expr):
         raise RuntimeError("isinstance(expr, sympy.Expr)", expr)
 
+    _check_no_precomputed_float(expr)
     if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
         expr = _sympy_subs(expr, precomputed_replacements)
 

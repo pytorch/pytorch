@@ -34,7 +34,7 @@ from torch.utils._sympy.functions import (
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
 from . import config
@@ -306,6 +306,9 @@ class SizeVarAllocator:
         # on it, we are obligated to invert the precomputed replacements
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
+        # Float expressions (PRECOMPUTED_FLOAT) get their own forward map so
+        # integer index rewriting never substitutes them; the inverse is shared.
+        self.precomputed_float_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
         # optimization_hint is called with the same expression repeatedly
         # while lowering (on one model, 76k calls over 388 distinct
@@ -1051,7 +1054,8 @@ class SizeVarAllocator:
         return [self.guard_int(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
-        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
+        precomputed = (SymT.PRECOMPUTED_SIZE, SymT.PRECOMPUTED_FLOAT)
+        if any(symbol_is_type(s, precomputed) for s in expr.free_symbols):  # type: ignore[attr-defined]
             return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         return expr
 
@@ -1376,6 +1380,40 @@ class SizeVarAllocator:
             self.precomputed_replacements[expr] = sym
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
+
+    def lookup_precomputed_float(self, expr: Expr) -> sympy.Symbol:
+        """
+        Like lookup_precomputed_size, but for a float-valued expression of sizes,
+        which the wrapper computes on the host and passes to kernels as a scalar.
+        """
+        expr = self.remove_precomputed_replacements(expr)
+        if expr not in self.precomputed_float_replacements:
+            sym = make_symbol(
+                SymT.PRECOMPUTED_FLOAT,
+                len(self.precomputed_float_replacements),
+                real=True,
+            )
+            self.precomputed_float_replacements[expr] = sym
+            self.inv_precomputed_replacements[sym] = expr
+        return self.precomputed_float_replacements[expr]
+
+    def size_arg_hint(
+        self, expr: Expr | int, *, hint_override: int | None = None
+    ) -> int | float:
+        """
+        Hint for a kernel size arg. Unlike optimization_hint, a host-computed
+        float arg (PRECOMPUTED_FLOAT) is hinted as a float, not truncated.
+        """
+        if isinstance(expr, sympy.Symbol) and symbol_is_type(
+            expr, SymT.PRECOMPUTED_FLOAT
+        ):
+            float_expr = self.inv_precomputed_replacements[expr]
+            hints = {
+                s: self.optimization_hint_with_override(s, hint_override)
+                for s in float_expr.free_symbols
+            }
+            return float(float_expr.xreplace(hints))
+        return self.optimization_hint_with_override(expr, hint_override)
 
     def free_symbols(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet(self.backed_var_to_val.keys()) - OrderedSet(

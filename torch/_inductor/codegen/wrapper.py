@@ -3843,7 +3843,8 @@ class PythonWrapperCodegen(CodeGen):
             _verify_input_symbol_assignment(input_name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
-        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+        precomputed = (SymT.PRECOMPUTED_SIZE, SymT.PRECOMPUTED_FLOAT)
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, precomputed):
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
@@ -5204,6 +5205,10 @@ class PythonWrapperCodegen(CodeGen):
                 arg = raw_arg
             if isinstance(arg, SymbolicCallArg):
                 arg = arg.inner_expr
+            if isinstance(arg, sympy.Symbol) and symbol_is_type(
+                arg, SymT.PRECOMPUTED_FLOAT
+            ):
+                return repr(V.graph.sizevars.size_arg_hint(arg))
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 

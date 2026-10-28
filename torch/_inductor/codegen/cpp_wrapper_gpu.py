@@ -466,6 +466,10 @@ class DeferredTritonCallWrapper:
                 return f"{name}_type_ {name}"
             return f"const {name}_type_& {name}"
         elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+            # Host-computed float size expressions are fp32/fp64 kernel args.
+            sig = signature.get(name) if signature else None
+            if sig in ("fp32", "fp64"):
+                return f"{TRITON_SIGNATURE_TO_CPP[sig]} {name}"
             return f"int64_t {name}"
         elif arg_type is float:
             return f"float {name}"

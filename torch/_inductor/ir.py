@@ -6124,6 +6124,7 @@ class TemplateBuffer(OperationBuffer):
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
@@ -6148,6 +6149,9 @@ class TemplateBuffer(OperationBuffer):
 
         # Inputs that the kernel mutates in-place
         self.mutated_inputs = mutated_inputs
+        # Symbolic RuntimeFloat template kwargs. The wrapper computes them from
+        # size symbols, so those symbols count as uses of this buffer.
+        self.runtime_float_values = list(runtime_float_values)
         self.mutation_outputs: list[MutationOutput] = []
         if mutated_inputs is not None:
             first_input = self.inputs[0]
@@ -6171,6 +6175,13 @@ class TemplateBuffer(OperationBuffer):
         # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        res = super().get_free_symbol_uses(unbacked_only)
+        res.update(get_free_symbols(self.runtime_float_values, unbacked_only))
+        return res
 
     @property
     def dtype(self) -> torch.dtype:
@@ -6360,6 +6371,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         mutated_inputs: Iterable[IRNode] | None = None,
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6377,6 +6389,7 @@ class TritonTemplateBuffer(TemplateBuffer):
             mutated_inputs=mutated_inputs,
             load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
             store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
+            runtime_float_values=runtime_float_values,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6445,6 +6458,8 @@ class ChoiceCaller:
         # An additional description used to describe the choice (useful for
         # knowing what autotuning is choosing)
         self.description = description
+        # Symbolic RuntimeFloat template kwargs; see TemplateBuffer.
+        self.runtime_float_values: list[sympy.Expr] = []
         self.failed: bool = False
         # When True, benchmark using CUDA graph capture/replay
         self._benchmark_with_cudagraphs: bool = False
@@ -6539,12 +6554,19 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         load_input_fusion_allowed_inputs: OrderedSet[str],
         store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
+        # Any choice may be selected, so track every choice's RuntimeFloat symbols.
+        runtime_float_values = [
+            value
+            for choice in unfiltered_choices
+            for value in choice.runtime_float_values
+        ]
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
             load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
             store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
+            runtime_float_values=runtime_float_values,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}

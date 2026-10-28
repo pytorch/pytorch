@@ -2720,6 +2720,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     SymT.UNBACKED_INT,
                     SymT.SIZE,
                     SymT.PRECOMPUTED_SIZE,
+                    SymT.PRECOMPUTED_FLOAT,
                     SymT.UNBACKED_FLOAT,
                 ),
             )
