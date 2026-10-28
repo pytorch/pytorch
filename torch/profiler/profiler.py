@@ -731,14 +731,24 @@ class _KinetoProfile:
                 default_stream=default_stream,
             )
         elif path.endswith((".gz", ".zst")):
+            output_dir, output_name = os.path.split(path)
+            trace_name = os.path.splitext(output_name)[0]
             with tempfile.TemporaryDirectory() as tmpdir:
-                trace_path = os.path.join(tmpdir, "trace.json")
+                trace_path = os.path.join(tmpdir, trace_name)
                 self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
                 with (
                     open(trace_path, "rb") as fin,
                     trace_file_opener(path, "wb") as fout,
                 ):
                     shutil.copyfileobj(fin, fout)
+                # Kineto can write more files next to the JSON; move them out before `tmpdir` goes away.
+                for name in os.listdir(tmpdir):
+                    src = os.path.join(tmpdir, name)
+                    dst = os.path.join(output_dir, name)
+                    # `shutil.move` nests its source inside a destination directory.
+                    if name == trace_name or os.path.isdir(src) or os.path.isdir(dst):
+                        continue
+                    shutil.move(src, dst)
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 

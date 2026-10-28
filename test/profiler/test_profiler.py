@@ -4845,6 +4845,36 @@ class TestProfilerTraceCompression(TestCase):
                 trace = json.load(f)
             self.assertEqual(trace["compression_test"], value)
 
+    @parametrize("suffix", [".json.gz", ".json.zst"])
+    def test_export_keeps_kineto_sibling(self, suffix):
+        if suffix.endswith(".zst") and not (
+            try_import("pyzstd") or try_import("zstandard")
+        ):
+            self.skipTest("requires zstandard or pyzstd")
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+        kineto_export = prof.profiler.export_chrome_trace
+
+        def export_with_sibling(path, *args, **kwargs):
+            # Some Kineto builds write extra files next to the JSON.
+            kineto_export(path, *args, **kwargs)
+            with open(path.removesuffix(".json") + ".extra", "wb") as f:
+                f.write(b"extra")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            with patch.object(
+                prof.profiler, "export_chrome_trace", export_with_sibling
+            ):
+                prof.export_chrome_trace(path)
+            sibling = os.path.join(tmpdir, "trace.extra")
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue(os.path.exists(sibling))
+            with open(sibling, "rb") as f:
+                self.assertEqual(f.read(), b"extra")
+            # The uncompressed JSON stays in the temporary directory.
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "trace.json")))
+
     @parametrize("use_python_export", [False, True])
     def test_missing_zstd(self, use_python_export):
         with profile(activities=[ProfilerActivity.CPU]) as prof:
