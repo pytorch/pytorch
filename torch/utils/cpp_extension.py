@@ -537,17 +537,8 @@ def _windows_cuda_lib_dir() -> str:
 
 
 def _cuda_version_key(name: str) -> tuple[int, int] | None:
-    major, sep, minor = name.partition('.')
-    if (
-        not sep
-        or '.' in minor
-        or not major.isascii()
-        or not minor.isascii()
-        or not major.isdigit()
-        or not minor.isdigit()
-    ):
-        return None
-    return int(major), int(minor)
+    match = re.fullmatch(r'(\d+)\.(\d+)', name, re.ASCII)
+    return (int(match[1]), int(match[2])) if match else None
 
 
 class _CudnnDirs(NamedTuple):
@@ -620,9 +611,11 @@ def _resolve_cudnn_dirs() -> _CudnnDirs:
         names = []
     for name in names:
         key = _cuda_version_key(name)
+        if key is None:
+            continue
         library = _existing_cudnn_lib(home, name)
         header = os.path.join(include_root, name, 'cudnn.h')
-        if key is None or library is None or not os.path.isfile(header):
+        if library is None or not os.path.isfile(header):
             continue
         qualified.append((key, name, library))
     chosen = _pick_cudnn_version(qualified)
