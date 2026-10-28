@@ -304,7 +304,7 @@ class TestKernelGeneral(TestCase):
         # reduce-all has no flat view of a transposed input, so it ROUTES that through the general
         # path (which addresses via the TI decode) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
-        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1)
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(flat, xt.double().sum().float(), atol=1e-5, rtol=1e-5)
         # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
