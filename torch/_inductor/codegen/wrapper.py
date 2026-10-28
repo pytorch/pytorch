@@ -2397,6 +2397,10 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: dict[
             tuple[Any, ...], tuple[str, Any, dict[str, Any]]
         ] = {}
+        # User CuTeDSL kernels: cache key -> name, and name -> the launcher object
+        # the generated Python module is loaded with.
+        self.user_defined_cutedsl_kernel_cache: dict[tuple[Any, ...], str] = {}
+        self.user_defined_cutedsl_launchers: dict[str, Any] = {}
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol
@@ -5081,6 +5085,83 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
 
+    def define_user_defined_cutedsl_kernel(
+        self,
+        kernel,
+        arg_names: tuple[str, ...],
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+    ) -> str:
+        """Define a user CuTeDSL kernel (a ``CuteDSLKernel`` side-table record) and
+        return its name in the generated code: the counterpart of
+        define_user_defined_triton_kernel.
+
+        The host function cannot be written out as source, so the generated module
+        gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
+        (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
+        ``arg_names`` positionally, with ``constant_args`` bound here.
+        """
+        from ..runtime.cutedsl_user_kernel import CuteDSLKernelLauncher
+
+        cache_key = (
+            id(kernel),
+            arg_names,
+            tuple((k, type(v), repr(v)) for k, v in constant_args.items()),
+        )
+        if cache_key in self.user_defined_cutedsl_kernel_cache:
+            return self.user_defined_cutedsl_kernel_cache[cache_key]
+        name = f"cutedsl_{kernel.name}_{len(self.user_defined_cutedsl_kernel_cache)}"
+        self.user_defined_cutedsl_launchers[name] = CuteDSLKernelLauncher(
+            kernel.fn, arg_names, constant_args
+        )
+        fn = kernel.fn
+        self.header.writeline(
+            f"# {name}: CuTeDSL host function {fn.__module__}.{fn.__qualname__}, "
+            f"run(*{list(arg_names)}, stream) with constants {constant_args!r}, bound "
+            "when this module is loaded"
+        )
+        self.user_defined_cutedsl_kernel_cache[cache_key] = name
+        return name
+
+    def generate_user_defined_cutedsl_kernel_call(
+        self,
+        kernel_name: str,
+        kernel,
+        runtime_args: dict[str, Any],
+        constant_args: dict[str, Any],
+        device: torch.device,
+    ) -> None:
+        """Launch a kernel defined by define_user_defined_cutedsl_kernel on the
+        current stream."""
+
+        def arg_str(arg: Any) -> str:
+            if isinstance(arg, ir.IRNode):
+                return arg.codegen_reference()
+            if isinstance(arg, (int, float, bool)):
+                return str(arg)
+            if not isinstance(arg, sympy.Basic):
+                raise NotImplementedError(
+                    f"CuTeDSL kernel {kernel.name}: cannot pass a "
+                    f"{type(arg).__name__} as a runtime scalar"
+                )
+            return pexpr(V.graph.sizevars.simplify(arg))
+
+        current_stream_idx = V.graph.scheduler.current_stream_idx
+        if current_stream_idx is not None and current_stream_idx != DEFAULT_STREAM_IDX:
+            # Inside a user stream context: read the active stream at runtime, as
+            # _generate_kernel_call_helper does.
+            self.write_get_raw_stream_header()
+            stream_name = "raw_stream"
+            self.writeline(
+                f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
+            )
+        else:
+            stream_name = PythonWrapperCodegen.write_get_raw_stream(
+                self, device.index, V.graph.name
+            )
+        args = ", ".join(arg_str(arg) for arg in runtime_args.values())
+        self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
@@ -6778,6 +6859,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        # and user-defined CuTeDSL kernels, whose launchers the main module binds
+        self.user_defined_cutedsl_kernel_cache = root.user_defined_cutedsl_kernel_cache
+        self.user_defined_cutedsl_launchers = root.user_defined_cutedsl_launchers
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules

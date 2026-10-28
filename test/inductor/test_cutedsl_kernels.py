@@ -22,6 +22,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
 )
+from torch._dynamo.utils import ReinplaceCounters
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_functional,
@@ -29,7 +30,9 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     CuteDSLKernel,
     get_cutedsl_mutated_tensors,
 )
+from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_code
 from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -317,6 +320,29 @@ if HAS_CUTEDSL:
         stream: cuda.CUstream,
     ):
         _mul_const_k(mX, mOut, n, cfg.alpha).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    # An unannotated flag, which the DSL makes a runtime Boolean: out = x * 3 if
+    # flag else x * 5.
+    @cute.kernel
+    def _select_k(
+        gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32, flag: cutlass.Boolean
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 128 + tidx
+        if i < n:
+            if flag:
+                gOut[i] = gX[i] * 3.0
+            else:
+                gOut[i] = gX[i] * 5.0
+
+    @cute.jit
+    def select_kernel(
+        mX: cute.Tensor, mOut: cute.Tensor, n: cutlass.Int32, flag, stream: cuda.CUstream
+    ):
+        _select_k(mX, mOut, n, cutlass.Boolean(flag)).launch(
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
@@ -2142,7 +2168,7 @@ class CuteDSLDynamoTests(TestCase):
         self.assertEqual(gm(x, y), x + y)
         self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
-    @parametrize("backend", ["aot_eager"])
+    @parametrize("backend", ["aot_eager", "inductor"])
     def test_kernel_output_in_autograd_graph(self, backend):
         # The launch has no derivative: its output enters the autograd graph as a
         # constant, exactly as in eager.
@@ -2160,9 +2186,452 @@ class CuteDSLDynamoTests(TestCase):
         self.assertEqual(eager_grad, (x + y).detach())
 
 
+@requires_triton
+@requires_cutedsl
+class CuteDSLInductorTests(TestCase):
+    """Inductor: the HOP lowers to ir.UserDefinedCuteDSLKernel, launched from the
+    Python wrapper as `<launcher>.run(<args>, stream=raw_streamN)`."""
+
+    def test_cutedsl_kernel_symbolic_bool_scalar(self):
+        # A symbolic bool for an unannotated param is a runtime scalar, evaluated at
+        # each launch like a symbolic int.
+        w = wrap_cutedsl(select_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), x.shape[0] > 1500)
+            return out
+
+        cf = torch.compile(f, dynamic=True, fullgraph=True)
+        for n in (1000, 2000):
+            x = _rand(n)
+            self.assertEqual(cf(x), (3 if n > 1500 else 5) * x)
+
+    def test_cutedsl_kernel_numeric_scalar_values(self):
+        # A cutlass Numeric default, and a Numeric value passed for a Numeric param,
+        # reach the generated code as Python floats.
+        w = wrap_cutedsl(add_c_kernel, mutates_args=["mOut"])
+        c = cutlass.Float32(0.75)
+
+        def f(x):
+            a, b = torch.empty_like(x), torch.empty_like(x)
+            w(x, a, x.numel())
+            w(x, b, x.numel(), c=c)
+            return a, b
+
+        x = _rand(1000)
+        a, b = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(a, x + 0.25)
+        self.assertEqual(b, x + 0.75)
+
+    def test_cutedsl_kernel_graph_not_serializable(self):
+        # The generated module binds launchers of this process's host functions, so
+        # serializing the compiled graph (aot_compile) fails loudly.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out * 2
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(Exception, "cannot be serialized"):
+            torch.compile(f, fullgraph=True).aot_compile(((x, y), {}))
+
+    def test_cutedsl_kernel_toy_raw_call(self):
+        # The toy through Inductor: one launch of the captured raw call, from the
+        # Python wrapper.
+        x, y = _rand(2048), _rand(2048)
+        res, (code,) = run_and_get_code(torch.compile(toy, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y).relu())
+        self.assertEqual(len(_cutedsl_launches(code, "toy_add_kernel")), 1, code)
+
+    def test_cutedsl_kernel_inductor_basic(self):
+        from torch._inductor import ir
+
+        codegen_calls = []
+        orig_codegen = ir.UserDefinedCuteDSLKernel.codegen
+
+        def spy_codegen(self, wrapper):
+            codegen_calls.append(self)
+            return orig_codegen(self, wrapper)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(ir.UserDefinedCuteDSLKernel, "codegen", spy_codegen):
+            res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y).relu())
+        self.assertEqual(len(codegen_calls), 1)
+        launches = _cutedsl_launches(code, "add_kernel")
+        self.assertEqual(len(launches), 1, code)
+        # Launched on the stream Inductor fetched for the device (named
+        # `raw_stream0` or `stream0` depending on the version), never a constant.
+        self.assertRegex(launches[0][1], r"stream=(raw_)?stream\d+$")
+
+    @parametrize("grad", [False, True])
+    @parametrize("dynamic", [False, True])
+    @inductor_config.patch("implicit_fallbacks", False)
+    def test_cutedsl_kernel_no_clones(self, grad, dynamic):
+        # Mirrors test_triton_kernel_no_clones: with the right mutates_args the
+        # kernel writes the graph input in place, no clone or copy-back.
+        def call_cutedsl(x, y, output):
+            n_elements = output.numel()
+            tmp = torch.add(x, 1)
+            add_w(x, y, output, n_elements)
+            return output, tmp
+
+        t1 = _rand(5, requires_grad=grad)
+        t2 = _rand(5, requires_grad=grad)
+        o1 = torch.zeros_like(t1, requires_grad=grad)
+        torch_add = call_cutedsl(t1, t2, o1)
+        o2 = torch.zeros_like(t1, requires_grad=grad)
+        test, (code,) = run_and_get_code(
+            torch.compile(call_cutedsl, dynamic=dynamic), t1, t2, o2
+        )
+        self.assertEqual(torch_add, test)
+        # Like the Triton test, these rely on `Original ATen:` comments, so a clone
+        # fused into some kernel is caught too.
+        self.assertNotIn("aten.copy", code)
+        self.assertNotIn("aten.clone", code)
+        self.assertEqual(len(_cutedsl_launches(code, "add_kernel")), 1, code)
+        if not grad:
+            self.assertIn("return (buf0, )", code)
+
+    def test_cutedsl_kernel_reinplaces_intermediate(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(out, y, s, d, x.numel(), scale=0.5)
+            return s + d
+
+        x, y = _rand(1000), _rand(1000)
+        ReinplaceCounters.clear()
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y) * 0.5 * 2)
+        self.assertEqual(ReinplaceCounters.get_total_missed(), 0)
+        self.assertNotIn("aten.clone", code)
+        self.assertNotIn("aten.copy", code)
+
+    def test_cutedsl_kernel_mutates_graph_input(self):
+        def f(x):
+            scale_inplace_w(x, x.numel())
+            return x.sum()
+
+        x = _rand(1000)
+        x_ref = x.clone()
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(x, 2 * x_ref)
+        self.assertEqual(res, (2 * x_ref).sum())
+        self.assertNotIn("aten.clone", code)
+        self.assertNotIn("aten.copy", code)
+
+    @parametrize("view", ["offset", "gap"])
+    def test_cutedsl_kernel_mutates_graph_input_view(self, view):
+        def take_view(t):
+            return t[4:] if view == "offset" else t[::2]
+
+        def f(x):
+            v = take_view(x)
+            scale_inplace_w(v, v.numel())
+            return x + 1
+
+        x = torch.arange(1, 1001, device=DEVICE, dtype=torch.float32)
+        expected = x.clone()
+        take_view(expected).mul_(2)
+        res = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(x, expected)
+        self.assertEqual(res, expected + 1)
+
+    @parametrize("dynamic", [False, True])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_cutedsl_kernel_with_views(self, dynamic, backend):
+        # Mirrors test_triton_kernel_with_views.
+        def call_take_view(x):
+            output = torch.zeros_like(x)
+            mul_const_w(x, output, output.numel(), 2)
+            return output
+
+        def call_return_view(x):
+            output = torch.zeros_like(x)
+            mul_const_w(x.view(-1), output.view(-1), output.numel(), 2)
+            return output.view(4, 4)
+
+        t = _rand(4, 4)
+        t_view = t.view(16)
+        compiled = torch.compile(
+            call_take_view, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        self.assertEqual(2 * t_view, compiled(t_view))
+        self.assertEqual(2 * t, compiled(t_view).view(4, 4))
+        compiled = torch.compile(
+            call_return_view, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        self.assertEqual(2 * t_view, compiled(t).view(16))
+        self.assertEqual(2 * t, compiled(t))
+
+    @parametrize("which", ["left", "right", "slice_view", "transposed"])
+    def test_cutedsl_kernel_strided_input(self, which):
+        # Mirrors test_triton_kernel_strided_input{,_nonzero_offset} and
+        # test_triton_kernel_slice_and_view_input with a layout-indexing kernel.
+        def f(inp):
+            if which in ("left", "right"):
+                left, right = torch.split(inp, [128, 128], dim=1)
+                src = left if which == "left" else right  # strides (256, 1)
+            elif which == "slice_view":
+                src = inp[:, :128].reshape(64, 128)[:, ::2]
+            else:
+                src = inp.t()
+            out = torch.empty(src.shape, device=src.device)
+            add_one_2d_w(src, out)
+            return out + src
+
+        inp = _rand(64, 256)
+        self.assertEqual(torch.compile(f, fullgraph=True)(inp), f(inp))
+
+    @parametrize("gap", [1, 2])
+    def test_cutedsl_kernel_mutated_offset_view_not_miscompiled(self, gap):
+        # Mirrors test_triton_kernel_mutated_offset_view_not_miscompiled: the kernel
+        # writes a (possibly gapped) row view of an intermediate at a non-zero
+        # storage offset; elements it does not write must keep their values.
+        n_cols, n_rows, skipped_row = 64, 8, 7
+        width = n_cols * gap
+
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=DEVICE
+            ).reshape(n_rows, width)
+
+        def f(src):
+            base = make_base()
+            for i in range(n_rows):
+                if i != skipped_row:
+                    add_one_2d_w(src, base[i : i + 1, ::gap])
+            return base
+
+        src = _rand(1, n_cols)
+        expected = make_base()
+        for i in range(n_rows):
+            if i != skipped_row:
+                expected[i : i + 1, ::gap] = src + 1
+        self.assertEqual(f(src), expected)
+        self.assertEqual(torch.compile(f, fullgraph=True)(src), expected)
+
+    @parametrize("dynamic", [False, True])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_cutedsl_kernel_multiple_outputs(self, dynamic, backend):
+        # Mirrors test_triton_kernel_multiple_outputs (incl. a training graph).
+        @torch.compile(fullgraph=True, backend=backend, dynamic=dynamic)
+        def f(x, y, z):
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s, d, x.numel())
+            return s, d, z**2
+
+        x, y, z = (_rand(300, requires_grad=True) for _ in range(3))
+        s, d, z2 = f(x, y, z)
+        self.assertEqual(s, x + y)
+        self.assertEqual(d, x - y)
+        self.assertEqual(z2, z**2)
+        z2.sum().backward()
+        self.assertEqual(z.grad, 2 * z)
+
+    def test_cutedsl_kernel_dependencies(self):
+        # Mirrors test_triton_kernel_dependancies: kernel -> kernel -> aten op.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            out2 = torch.zeros_like(out)
+            add_w(out, y, out2, out.numel())
+            return torch.add(out2, 1)
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
+
+    def test_cutedsl_kernel_reinplace_inplaceable_pass(self):
+        # Mirrors test_triton_kernel_reinplace_inplaceable_pass: the second launch
+        # reads and writes the same buffer through two parameters (mX is mOut).
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_w(x, y, out, x.numel())
+            add_w(out, x, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), 2 * x + y)
+
+    def test_cutedsl_kernel_caching(self):
+        # Mirrors test_triton_kernel_caching: one kernel launched in a loop is
+        # defined once and launched four times.
+        def f(x, y):
+            for _ in range(4):
+                out = torch.zeros_like(x)
+                add_w(x, y, out, x.numel())
+                x = out
+            return x
+
+        x, y = torch.ones(1000, device=DEVICE), torch.ones(1000, device=DEVICE)
+        res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, 5 * torch.ones(1000, device=DEVICE))
+        launches = _cutedsl_launches(code, "add_kernel")
+        self.assertEqual(len(launches), 4, code)
+        self.assertEqual(len({name for name, _ in launches}), 1, launches)
+
+    def test_cutedsl_kernel_same_name_kernels(self):
+        # Mirrors test_triton_kernel_caching_duplicate: two different host
+        # functions with one name get two launchers.
+        def f(x, y):
+            o1, o2 = torch.empty_like(x), torch.empty_like(x)
+            same_name_add_w(x, y, o1, x.numel())
+            same_name_sub_w(x, y, o2, x.numel())
+            return o1, o2
+
+        x, y = _rand(1000), _rand(1000)
+        (o1, o2), (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+        launches = _cutedsl_launches(code, "binary_kernel")
+        self.assertEqual(len({name for name, _ in launches}), 2, launches)
+
+    def test_cutedsl_kernel_constants(self):
+        # Constexpr and unannotated-param values are baked in per launch site.
+        def f(x):
+            o1, o2, o3 = torch.empty_like(x), torch.empty_like(x), torch.empty_like(x)
+            mul_const_w(x, o1, x.numel(), 3)
+            mul_const_w(x, o2, x.numel(), 2.5)
+            add_scalar_w(x, o3, x.numel(), 5)
+            return o1, o2, o3
+
+        x = _rand(1000)
+        o1, o2, o3 = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual((o1, o2, o3), (3 * x, 2.5 * x, x + 5))
+
+    def test_cutedsl_kernel_dynamic_shapes(self):
+        # One dynamic graph serves every size: the kernels must be compiled with
+        # dynamic layouts, not specialized to the first shape seen.
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, y, m):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            out2 = torch.empty_like(m)
+            add_one_2d_w(m, out2)
+            return out, out2
+
+        for n, shape in ((1000, (4, 8)), (3000, (16, 32)), (77, (3, 300))):
+            x, y, m = _rand(n), _rand(n), _rand(*shape)
+            out, out2 = f(x, y, m)
+            self.assertEqual(out, x + y)
+            self.assertEqual(out2, m + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_cutedsl_kernel_dynamic_shapes_layout_change(self):
+        # Under dynamic shapes a compiled CuTeDSL layout still fixes which dim has
+        # stride 1: a transposed input must not reuse the row-major kernel.
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(m):
+            out = torch.empty(m.shape, device=m.device)
+            add_one_2d_w(m, out)
+            return out
+
+        for m in (_rand(4, 8), _rand(16, 32), _rand(8, 4).t(), _rand(32, 16).t()):
+            self.assertEqual(f(m), m + 1)
+
+    def test_cutedsl_kernel_unaligned_view(self):
+        def f(base, v):
+            x = base[:, 1:]  # data_ptr 4 bytes past a 16-byte boundary
+            out = torch.empty(x.shape, device=x.device)
+            add_one_2d_w(x, out)
+            out1 = torch.empty_like(v)
+            add_w(v, v, out1, v.numel())
+            return out, out1
+
+        base, v = _rand(4, 9), _rand(1001)[1:]
+        out, out1 = torch.compile(f, fullgraph=True)(base, v)
+        self.assertEqual(out, base[:, 1:] + 1)
+        self.assertEqual(out1, 2 * v)
+
+    def test_cutedsl_kernel_epilogue_and_prologue(self):
+        # Inductor ops around the user kernel (it is an extern launch: correctness
+        # only, no fusion expected).
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x.sin(), y * 2, out, x.numel())
+            return out.relu() + 1
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
+
+    def test_cutedsl_kernel_reduce_overhead(self):
+        # CUDA graphs (cudagraph trees) capture the launch on the capture stream.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out * 2
+
+        compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+        for _ in range(3):
+            x, y = _rand(1000), _rand(1000)
+            self.assertEqual(compiled(x, y), (x + y) * 2)
+
+    def test_cutedsl_kernel_inference_mode(self):
+        # inference_mode disables view tracking (cf. MutationTests'
+        # test_triton_kernel_inference_mode and the inference-mode offset-view test).
+        def f(x):
+            base = x * 1
+            v = base[4:]
+            scale_inplace_w(v, v.numel())
+            return base
+
+        x = _rand(1000)
+        expected = x.clone()
+        expected[4:] *= 2
+        with torch.inference_mode():
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), expected)
+
+    def test_cutedsl_kernel_specialized_constants_dynamic(self):
+        # Constexpr / unannotated values computed from a dynamic size are
+        # specialized (guarded); the generated code must bake each value in.
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            o1, o2 = torch.empty_like(x), torch.empty_like(x)
+            mul_const_w(x, o1, x.numel(), x.shape[0] // 8)
+            add_scalar_w(x, o2, x.numel(), x.shape[0])
+            return o1, o2
+
+        for n in (8, 16, 8):
+            x = _rand(n)
+            o1, o2 = f(x)
+            self.assertEqual(o1, (n // 8) * x)
+            self.assertEqual(o2, x + n)
+
+    @inductor_config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    def test_cutedsl_kernel_bypasses_fx_graph_cache(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        with fresh_cache():
+            counters.clear()
+            self.assertEqual(torch.compile(f)(x, y), (x + y).relu())
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f)(x, y), (x + y).relu())
+        # The generated module binds the launcher in-process: never cached.
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+
 instantiate_parametrized_tests(CuteDSLHOPTests)
 instantiate_parametrized_tests(CuteDSLWrapTests)
 instantiate_parametrized_tests(CuteDSLDynamoTests)
+instantiate_parametrized_tests(CuteDSLInductorTests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
