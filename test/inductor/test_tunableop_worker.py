@@ -175,6 +175,33 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(outcome.status, "crash")
         self.assertEqual(worker.process.kill.call_count, 1)
 
+    def test_unset_rotating_buffer_uses_the_current_devices_l2(self):
+        # GetRotatingBufferSize reports the *current* device's L2, while the job
+        # can target another. Comparing against the job's device would miss the
+        # "unset" case on a host whose GPUs have different L2 sizes.
+        current_l2 = 4 * 1024 * 1024
+        job_l2 = 6 * 1024 * 1024
+        bmreq = mock.Mock()
+        bmreq.output_tensor_meta = mock.Mock(device=torch.device("cuda", 1))
+        bmreq.input_tensor_meta = []
+        tunable = mock.Mock()
+        tunable.get_filename.return_value = "s.csv"
+        tunable.get_rotating_buffer_size.return_value = current_l2
+        job = tunableop.BenchmarkJob(bmreq, tuning=False)
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+            mock.patch(
+                "torch.cuda.get_device_properties",
+                side_effect=lambda i: mock.Mock(
+                    L2_cache_size=job_l2 if i == 1 else current_l2
+                ),
+            ),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(job.device, 1)
+        self.assertEqual(job.settings["set_rotating_buffer_size"], -1)
+
     def test_worker_device_comes_from_the_job_not_the_process(self):
         # Inductor does not set the CUDA current device while lowering, so a
         # graph on cuda:1 can be autotuned with current_device() == 0. Keying on
@@ -582,9 +609,8 @@ class BenchmarkJobCallTest(TestCase):
             mock.patch("torch.cuda.tunable", FakeTunable()),
         ):
             self.assertEqual(job(), 2.5)
-        # Every benchmark must run inside the scope, not before or after it.
-        # Asserted as a span rather than an exact sequence: a later diff splits
-        # __call__ into a warm plus a measured call, and both must stay inside.
+        # A span, not an exact sequence: __call__ may benchmark more than once,
+        # and every benchmark must fall inside the scope.
         self.assertEqual(calls[0], ("enter", (True, False, True, False)))
         self.assertEqual(calls[-1], ("exit",))
         self.assertIn(("benchmark",), calls[1:-1])
@@ -687,15 +713,10 @@ class TunableOpRealWorkerTest(TestCase):
         )
 
     def _submit(self, job, timeout):
-        # current_device is None (not 0): submit() stamps job.device with it,
-        # and _TestBenchmarkRequest.benchmark only asserts the visibility mask
-        # when device is not None. The stamping path itself is covered by the
-        # fake tests; here the jobs must run assertion-free in the child.
         with (
-            mock.patch("torch.cuda.current_device", return_value=None),
+            mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
-            # snapshot_settings reads L2 to tell "unset" from a real MB value,
-            # and current_device is None here, so give it something to read.
+            # snapshot_settings reads L2 to tell "unset" from a real MB value.
             mock.patch(
                 "torch.cuda.get_device_properties",
                 return_value=mock.Mock(L2_cache_size=4 * 1024 * 1024),
@@ -811,9 +832,7 @@ class TunableOpRocmWorkerTest(TestCase):
         parent_bytes = tunable.get_rotating_buffer_size()
         self.assertEqual(parent_bytes, 4 * 1024 * 1024)
 
-        stamped = tunableop.snapshot_settings(torch.cuda.current_device())[
-            "set_rotating_buffer_size"
-        ]
+        stamped = tunableop.snapshot_settings()["set_rotating_buffer_size"]
         tunable.set_rotating_buffer_size(stamped)  # what the worker does
         self.assertEqual(tunable.get_rotating_buffer_size(), parent_bytes)
 

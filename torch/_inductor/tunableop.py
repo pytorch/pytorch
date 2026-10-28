@@ -107,38 +107,22 @@ class BenchmarkJob:
 
     def __call__(self) -> float:
         tunable = torch.cuda.tunable
-        # The worker starts on device 0 of the inherited visibility mask, which
-        # is not necessarily the device being compiled for. TunableOp's results
-        # file is per device ordinal, so getting this wrong both benchmarks the
-        # wrong GPU and writes to the wrong file.
+        # The worker starts on device 0 of the inherited mask, not the job's.
         torch.cuda.set_device(self.device)
-        # The worker is a fresh process whose results manager initializes lazily
-        # from the env/default file -- not the parent's file. Re-enter the
-        # filename resolved in submit() before anything touches the manager, or
-        # the worker reads and appends to the wrong file.
+        # Before anything touches the manager: it initializes lazily from the
+        # env default, not the parent's file.
         if self.filename:
             tunable.set_filename(self.filename, insert_device_ordinal=False)
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
-        # Re-enter the parent's tuning knobs (snapshot_settings): process-global
-        # C++ state, not env vars, so the worker would otherwise silently use
-        # defaults. Numerical-check tolerances have no getter and are not
-        # propagated -- documented in snapshot_settings.
         for name, value in self.settings.items():
             getattr(tunable, name)(value)
-        # TunableOp cannot tune under graph capture, and benchmark_run_fn
-        # captures if either flag is set. config_cudagraph_benchmarking is
-        # snapshotted in the parent from max_autotune, so clearing only the
-        # other one still leaves the tuning in an eager warmup whose time is
-        # thrown away, and returns graph-replay time instead.
+        # benchmark_run_fn captures if either is set, and tuning cannot run
+        # under capture.
         self.bmreq.benchmark_with_cudagraphs = False
         self.bmreq.config_cudagraph_benchmarking = False
-        # The mask lives on a thread-local stack in whichever process sets it, so
-        # the caller's context manager does not reach this worker. Re-enter it here
-        # or every GEMM benchmarked through the worker registers only its concrete
-        # signature, losing the wildcard entry that dynamic shapes match against at
-        # runtime -- silently, and precisely in tune mode, which exists to record it.
+        # Thread-local in the setting process, so it does not cross the pipe.
         mask = self.dyn_dims_mask
         try:
             if mask is not None and any(mask):
@@ -256,11 +240,6 @@ def _shutdown_locked(graceful: bool = True) -> None:
         try:
             if graceful:
                 _worker.shutdown(wait=False)
-                # Bounded: TuningProcess.wait() blocks on process.wait() with no
-                # timeout, and this runs under _worker_lock on a key change and
-                # again from atexit. A child wedged in device teardown would
-                # otherwise stall every later submit(), or stop the compiling
-                # process from exiting at all.
                 try:
                     if _worker.alive():
                         _worker.process.wait(timeout=_SHUTDOWN_TIMEOUT_S)
@@ -306,9 +285,9 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 # inheritance; these are the knobs a caller can also set through the API, which
 # does not cross the pipe.
 #
-# Which operation to run is decided per job from the Inductor mode instead, so
-# tuning, nearest_match and record_borrowed are BenchmarkJob fields rather than
-# entries here. Deliberately absent for that reason:
+# Which operation to run is decided per job from the Inductor mode, and is
+# carried as BenchmarkJob fields rather than stamped here. Absent for that
+# reason:
 #   * record_untuned selects the offline-tuning workflow, which is an
 #     alternative to tuning here rather than a modifier of it. Stamping it
 #     would leave a tune-mode worker tuning every GEMM and then persisting
@@ -328,26 +307,28 @@ _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _rotating_buffer_mb(value: int, device: int) -> int:
+def _rotating_buffer_mb(value: int) -> int:
     """Convert get_rotating_buffer_size()'s bytes to the MB the setter wants.
 
-    The getter reports the device's L2 size when the knob is unset, so a plain
-    conversion would replace the "use L2" policy with a rounded-down constant --
-    and with 0, which TunableOp reads as no rotation at all, when L2 is under
-    1 MiB. Any negative value restores "use L2".
+    Unset, the getter reports an L2 size, and a plain conversion would turn
+    "use L2" into a rounded-down constant -- 0, meaning no rotation at all,
+    below 1 MiB. Any negative value restores "use L2". Compared against the
+    current device because that is the one GetRotatingBufferSize read, which
+    is not necessarily the job's device.
     """
-    if value == torch.cuda.get_device_properties(device).L2_cache_size:
+    current = torch.cuda.current_device()
+    if value == torch.cuda.get_device_properties(current).L2_cache_size:
         return -1
     return value // (1024 * 1024)
 
 
-# Getters whose units differ from the matching setter's: (value, device) -> value.
+# Getters whose units differ from the matching setter's.
 _SETTING_CONVERSIONS: dict[str, Any] = {
     "set_rotating_buffer_size": _rotating_buffer_mb,
 }
 
 
-def snapshot_settings(device: int) -> dict[str, Any]:
+def snapshot_settings() -> dict[str, Any]:
     """Read the parent's tuning knobs for stamping onto the job.
 
     The worker is long-lived and keyed only on (device, filename), so it never
@@ -361,7 +342,7 @@ def snapshot_settings(device: int) -> dict[str, Any]:
         try:
             value = getattr(tunable, getter)()
             convert = _SETTING_CONVERSIONS.get(setter)
-            settings[setter] = convert(value, device) if convert else value
+            settings[setter] = convert(value) if convert else value
         except Exception:
             log.debug("TunableOp setting snapshot failed for %s", getter)
     return settings
@@ -423,20 +404,14 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     if timeout is None:
         timeout = config.cuda.aten_tunableop_timeout
     try:
-        # Inside the try with everything else: the contract above is that this
-        # function reports faults rather than raising, and reading the device is
-        # as able to fail as the benchmark is.
+        # Inside the try: this reports faults rather than raising, and reading
+        # the device can fail just as the benchmark can.
         device = _job_device(job)
-        # The worker inherits this process's visibility mask rather than having
-        # it rewritten, so the same logical ordinal names the same GPU there.
+        # The visibility mask is inherited unrewritten, so the same logical
+        # ordinal names the same GPU in the worker.
         job.device = device
-        # Stamp the resolved filename so __call__ re-enters it via set_filename:
-        # the worker is a fresh process and would otherwise lazily initialize
-        # its manager from the env/default file, not the parent's file.
         job.filename = resolve_filename(device)
-        # Stamp the parent's tuning knobs for the same reason: process-global
-        # C++ state does not cross the pipe.
-        job.settings = snapshot_settings(device)
+        job.settings = snapshot_settings()
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker
