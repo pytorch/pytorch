@@ -270,6 +270,23 @@ class TestInnerTreeOrder(TestCase):
                     ref = self._run(T.SumOps, x)
                 self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
 
+    def test_misaligned_rows_skip_row_staging(self):
+        """Serve misaligned multirow inputs unstaged; cp.async needs aligned rows."""
+        with mock.patch.object(rt, "_itree_arch", return_value=rt._ITREE_ARCH[(9, 0)]):
+            self.assertTrue(rt.itree_plan(32, 4096, 4).stage_rows)
+            torch.manual_seed(0)
+            layouts = {
+                "row_stride": torch.randn(4096, 33, device="cuda")[:, :32],
+                "storage_offset": torch.randn(4096 * 32 + 1, device="cuda")[1:].view(
+                    4096, 32
+                ),
+            }
+            for name, x in layouts.items():
+                with self.subTest(layout=name):
+                    got = self._run(T.SumOps, x)
+                    ref = self._run(T.SumOps, x.contiguous())
+                    self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
+
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
         # Exact only covers the tile's N from column 0; a bound or offset invalidates its
         # unpredicated load. No plan may pair them because wrong columns can look plausible.
