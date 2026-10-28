@@ -1034,6 +1034,21 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
+    def guard_float(self, expr: Expr | float) -> float:
+        """
+        Like guard_int, but for a float-valued expression, e.g. a softmax scale
+        1/sqrt(head_dim) under dynamic shapes. Guards that expr equals its hint.
+        """
+        if not isinstance(expr, Expr):
+            return float(expr)
+        hinted = expr.xreplace(self.shape_env.backed_var_to_val)
+        if hinted.free_symbols:
+            raise NotImplementedError(
+                f"cannot specialize {expr}, which depends on data-dependent sizes"
+            )
+        # evaluate_expr's default hint is int-only and would guard expr == 0.
+        return float(self.shape_env.evaluate_expr(expr, hint=float(hinted)))
+
     def guard_int(self, expr: Expr | int) -> int:
         """
         Similar to guard_int in symbolic_shapes.py, except this function works with SymPy

@@ -207,6 +207,9 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.mutated_inputs = mutated_inputs
+        from torch._inductor.select_algorithm import RuntimeFloat
+
+        self.runtime_float_values = RuntimeFloat.symbolic_values(template_kwargs or {})
 
     def _build_description(
         self, name: str, template_kwargs: dict[str, Any] | None
@@ -231,6 +234,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
             make_kernel_render=self.make_kernel_render,
             template=self.template,
             mutated_inputs=self.mutated_inputs,
+            runtime_float_values=self.runtime_float_values,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
