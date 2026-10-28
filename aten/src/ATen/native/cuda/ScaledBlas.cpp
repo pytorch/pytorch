@@ -991,18 +991,6 @@ _check_deepseek_support() {
 #endif
 }
 
-void _check_mnk4_support() {
-#ifndef USE_ROCM
-  const auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      dprops->major == 10 || dprops->major == 11,
-      "packed MNxK4 scaling is only supported on SM10.x and SM11.0");
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      CUBLAS_VERSION >= 130801 && cublasLtGetVersion() >= 130801,
-      "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
-#endif
-}
-
 Tensor& _scaled_mnk4(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -1014,7 +1002,10 @@ Tensor& _scaled_mnk4(
     Tensor& out,
     const ScaledGemmEpilogue& epilogue = {}) {
 #ifndef USE_ROCM
-  _check_mnk4_support();
+  at::cuda::blas::detail::check_mnk4_support();
+  TORCH_CHECK_VALUE(
+      out.scalar_type() == kBFloat16 || out.scalar_type() == kHalf || out.scalar_type() == kFloat,
+      "packed MNxK4 output dtype must be BFloat16, Float16, or Float32, got ", out.scalar_type());
   TORCH_CHECK_VALUE(
       scaled_blas::is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
       "mat_a and mat_b must be float8_e4m3fn or float8_e5m2 tensors, with at least one float8_e4m3fn input, got: ",
