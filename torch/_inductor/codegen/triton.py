@@ -5101,7 +5101,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self._enable_pdl_codegen():
             return
-        current_node = V.kernel.current_node
         prev_node = (
             V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
         )
@@ -5109,14 +5108,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            real = V.graph.scheduler.mutation_real_name
             return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+                real.get(dep, dep) == real.get(w.name, w.name) for w in prev_deps
             )
 
         if not dependencies:
@@ -6896,7 +6893,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        self._handle_pdl_before_access(self.post_loop_store, var)
+        self._handle_pdl_before_access(self.post_loop_store, name)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
