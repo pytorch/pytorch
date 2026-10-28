@@ -195,16 +195,17 @@ def _launch(
     if (
         op.tile.order == "inner_tree"
         and itree.shape == "combine"
-        and itree.combine_tile
+        and itree.combine_grp > 1
     ):
-        # Async atoms require the partial buffers' proven alignment in the fake descriptors.
+        # Grouped and async folds need the partials' proven alignment in the fake descriptors,
+        # or autovec_copy narrows to element loads.
         alignments = tuple(itree.combine_grp * t.element_size() for t in ins)
         if any(
             _L.supported_alignment(t, align) < align
             for t, align in zip(ins, alignments)
         ):
             raise ValueError(
-                "inner-tree async combine requires aligned partial buffers"
+                "inner-tree grouped combine requires aligned partial buffers"
             )
         key += (("input_alignments", alignments),)
     key = (str(ins[0].device),) + key
@@ -481,11 +482,10 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
+    # General addressing cannot stage physically adjacent rows.
     plan = rt.itree_plan(count, num_o, x.element_size(), stage=False, device=x.device)
     if plan is None:
         return None
-    # General addressing cannot stage physically adjacent rows.
-    plan = plan._replace(stage_rows=False)
     nbatch = plan.split[0] if plan.shape == "split" else 1
     if num_o * nbatch >= 2**31:
         return None

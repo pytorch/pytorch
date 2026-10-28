@@ -51,8 +51,7 @@ class TestInnerTreeStagedIndex(TestCase):
             value = 1 if op == "argmax" else -1
             for row in range(rows):
                 first = (row + 1) * batch_size + 123
-                if pattern != "constant":
-                    x[row, first] = float("nan") if pattern == "nan" else value
+                x[row, first] = float("nan") if pattern == "nan" else value
                 if pattern in ("ties", "nan"):
                     # A later batch has a smaller local index but must lose the tie.
                     x[row, first + batch_size - 116] = x[row, first]
