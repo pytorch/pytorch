@@ -4585,7 +4585,11 @@ class TestConvolutionNNCUDA(NNTestCase):
         # The MIOpen algorithm cache is per process and not keyed on benchmark,
         # so give each variant its own capture shape to keep it a cache miss.
         size = 9 + 2 * benchmark + 4 * transposed
-        with cudnn.flags(enabled=True, benchmark=benchmark, allow_tf32=False):
+        # deterministic keeps MIOpen off its split-K weight-gradient kernels,
+        # whose results vary from run to run.
+        with cudnn.flags(
+            enabled=True, benchmark=benchmark, deterministic=True, allow_tf32=False
+        ):
             for _ in range(2):
                 step(make_input(2, 7))
             x = make_input(4, size)
