@@ -2877,11 +2877,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
 
-instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
-)
-
-
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
@@ -3003,14 +2998,6 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         # Confirms dynamic shapes were actually exercised: one compile
         # covering both sequence lengths, not a silent recompile.
         self.assertEqual(cnt.frame_count, 1)
-
-
-instantiate_device_type_tests(
-    ActivationCheckpointingSharedModuleTests,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True,
-)
 
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
@@ -3729,10 +3716,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 
 instantiate_device_type_tests(
-    RematerializeACNodesPassTests,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True,
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
 
 
@@ -4063,14 +4047,6 @@ def forward(self, arg0_1, arg1_1):
         )
 
 
-instantiate_device_type_tests(
-    ActivationCheckpointingNonStrictTracerTests,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True,
-)
-
-
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
     def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
         from torch._guards import tracing, TracingContext
@@ -4145,14 +4121,6 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
-
-
-instantiate_device_type_tests(
-    ActivationCheckpointingNestedCompileTests,
-    globals(),
-    except_for="cpu",
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":
