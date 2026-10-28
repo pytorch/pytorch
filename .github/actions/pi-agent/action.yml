@@ -58,6 +58,12 @@ runs:
       with:
         node-version: "22"
 
+    - name: Install pinned search tools
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "$ACTION_PATH/install-tools.sh"
+
     # Lockfile-pinned install with integrity hashes; no package install scripts run.
     - name: Install pi
       shell: bash
