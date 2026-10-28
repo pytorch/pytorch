@@ -909,9 +909,10 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     """
     Eliminates any integer factor from a given expression.
-    E.g., 6x + 4y reduces to 3x + 2y.
+    E.g., 6x + 4y reduces to 3x + 2y, and an integer reduces to its sign.
 
-    Useful when an expression is == or != to 0.
+    The factor is positive, so the result has the same sign as expr and is
+    zero exactly when expr is. This makes it safe for relations with 0.
     """
 
     def integer_coefficient(x: sympy.Expr) -> int:
@@ -949,7 +950,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
             sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative
         )
     elif expr.is_Integer:
-        return S.One
+        return sympy.sign(expr)
     elif expr.is_Mul:
         return div_by_factor(expr, integer_coefficient(expr))
     return expr
@@ -5000,7 +5001,9 @@ class ShapeEnv:
         If the tensor has symbolic sizes from a different ShapeEnv,
         delegates to transfer_symbols_from_foreign_shape_env.
         """
-        fake_mode = getattr(ex, "fake_mode", None)
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+
+        fake_mode = maybe_get_fake_mode(ex) if is_fake_tensor(ex) else None
         if fake_mode is not None and fake_mode.shape_env is not self:
             return self.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
