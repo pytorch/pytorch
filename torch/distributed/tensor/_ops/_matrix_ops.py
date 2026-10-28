@@ -33,7 +33,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
 
 aten = torch.ops.aten
@@ -320,16 +320,16 @@ def baddbmm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
-def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
+def _split_k_scaled_mm_shards(op: OpOverload, specs: Sequence[object]) -> int:
     """
-    Whether specs are _scaled_mm args with row-parallel sub-row-wise (split-k)
-    scales: scale_a (m, S) Shard(1) and scale_b (S, n) Shard(0), each split
-    into S shards with K divisible by S, so every rank holds row-wise (m, 1)
-    and (1, n) scales for its slice of the contracting dim. Only depends on
-    global specs, so all ranks agree.
+    Returns S if specs are _scaled_mm args with row-parallel sub-row-wise
+    (split-k) scales, else 0: scale_a (m, S) Shard(1) and scale_b (S, n)
+    Shard(0), each split into S shards with K divisible by S, so every rank
+    holds row-wise (m, 1) and (1, n) scales for its slice of the contracting
+    dim. Only depends on global specs, so all ranks agree.
     """
     if op != aten._scaled_mm.default or len(specs) < 4:
-        return False
+        return 0
     a, b, scale_a, scale_b = specs[:4]
     if not (
         isinstance(a, DTensorSpec)
@@ -337,7 +337,7 @@ def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
         and isinstance(scale_a, DTensorSpec)
         and isinstance(scale_b, DTensorSpec)
     ):
-        return False
+        return 0
 
     def num_shards(spec: DTensorSpec, dim: int) -> int:
         return prod(
@@ -348,15 +348,15 @@ def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
 
     shards = num_shards(scale_a, 1)
     if shards <= 1 or num_shards(scale_b, 0) != shards:
-        return False
+        return 0
     # Non-default shard orders would pair scale slices with other K slices.
     if any(
         s.shard_order != DTensorSpec.compute_default_shard_order(s.placements)
         for s in (a, b, scale_a, scale_b)
     ):
-        return False
+        return 0
     if any(s.tensor_meta is None or s.ndim != 2 for s in (a, b, scale_a, scale_b)):
-        return False
+        return 0
     k = a.shape[1]
     expected = (k, a.shape[0], shards, shards, b.shape[1])
     if not (
@@ -366,14 +366,30 @@ def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
             for x, y in zip((b.shape[0], *scale_a.shape, *scale_b.shape), expected)
         )
     ):
+        return 0
+    return shards
+
+
+def _is_ambiguous_split_k(specs: Sequence[DTensorSpec], shards: int) -> bool:
+    # Dense _scaled_mm treats split-k scale shapes as 1x128 blockwise scales
+    # when S == ceil(K / 128), which only matches split-k when K == 128 * S.
+    # Unbacked K counts as ambiguous unless provably not.
+    k = specs[0].shape[1]
+    return guard_or_true(shards == (k + 127) // 128) and guard_or_true(
+        k != 128 * shards
+    )
+
+
+def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
+    shards = _split_k_scaled_mm_shards(op, specs)
+    if not shards:
         return False
-    # Dense _scaled_mm treats these shapes as 1x128 blockwise scales when
-    # S == ceil(K / 128), which only matches split-k when K == 128 * S.
-    if guard_or_false(shards == (k + 127) // 128) and guard_or_false(k != 128 * shards):
+    a, _, scale_a, scale_b = cast(Sequence[DTensorSpec], specs[:4])
+    if _is_ambiguous_split_k(cast(Sequence[DTensorSpec], specs), shards):
         raise ValueError(
             f"_scaled_mm scales {tuple(scale_a.shape)} / {tuple(scale_b.shape)} with "
-            f"K={k} are ambiguous: dense _scaled_mm treats them as 1x128 blockwise "
-            "scales but DTensor as split-k row-wise scales"
+            f"K={a.shape[1]} are ambiguous: dense _scaled_mm treats them as 1x128 "
+            "blockwise scales but DTensor as split-k row-wise scales"
         )
     return True
 
@@ -386,14 +402,16 @@ def _keep_split_k_scales(
 ) -> bool:
     # Split-k scales are only valid while split S ways, so drop strategies
     # that reshard them (e.g. following mat1 onto another mesh dim). A/B are
-    # then redistributed to match the scales.
+    # then redistributed to match the scales. Also drop strategies that would
+    # shard replicated blockwise scales into an ambiguous split-k layout.
+    shards = _split_k_scaled_mm_shards(op_schema.op, input_specs)
+    if shards and _is_ambiguous_split_k(input_specs, shards):
+        return False
     current_specs = [
         s.strategies[0].output_spec if isinstance(s, OpStrategy) else s
         for s in op_schema.args_schema
     ]
-    if not _is_split_k_scaled_mm(op_schema.op, current_specs):
-        return True
-    return _is_split_k_scaled_mm(op_schema.op, input_specs)
+    return bool(shards) or not _is_split_k_scaled_mm(op_schema.op, current_specs)
 
 
 def _split_k_scaled_mm_fake_args(

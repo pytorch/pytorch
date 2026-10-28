@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._matrix_ops import (
     gen_single_dim_einsum_strategies,
     mm_single_dim_strategy,
@@ -1308,57 +1309,52 @@ class DistScaledMMSubRowWiseTest(LocalDTensorTestBase):
             self.assertEqual(out.full_tensor(), ref)
 
     @with_comms
-    def test_scaled_mm_sub_row_wise_mismatched_scales_raise(self):
-        # Split-k requires both scales to already be split S ways.
+    @parametrize(
+        "case",
+        [
+            # Split-k requires both scales to already be split S ways.
+            "mismatched_scales",
+            # k = 100 is not divisible by S = 3.
+            "uneven_k",
+            # Must raise on every rank rather than only on ranks whose local k
+            # slices mismatch.
+            "mismatched_k",
+            # mat1/mat2 split k in mesh dim order (1, 0) but the scales use the
+            # default (0, 1), so scale columns would pair with the wrong k slices.
+            "shard_order",
+        ],
+    )
+    def test_scaled_mm_sub_row_wise_raise(self, case):
+        row_parallel = [Shard(1), Replicate()]
+        args = {
+            "mismatched_scales": (
+                3,
+                row_parallel,
+                row_parallel,
+                (row_parallel, [Replicate(), Replicate()]),
+            ),
+            "uneven_k": (3, row_parallel, row_parallel, (row_parallel,) * 2, 100),
+            "mismatched_k": (
+                3,
+                row_parallel,
+                row_parallel,
+                (row_parallel,) * 2,
+                96,
+                98,
+            ),
+            "shard_order": (
+                6,
+                [Shard(1), Shard(1)],
+                [Shard(1), Shard(1)],
+                ([Shard(1), Shard(1)],) * 2,
+                96,
+                None,
+                _convert_shard_order_dict_to_ShardOrder({1: [1, 0]}),
+            ),
+        }[case]
         with LocalTensorMode(ranks=self.world_size):
             with self.assertRaisesRegex(RuntimeError, "Invalid scaling configuration"):
-                self._run_sub_row_wise(
-                    3,
-                    [Shard(1), Replicate()],
-                    [Shard(1), Replicate()],
-                    ([Shard(1), Replicate()], [Replicate(), Replicate()]),
-                )
-
-    @with_comms
-    def test_scaled_mm_sub_row_wise_uneven_k_raise(self):
-        # k = 100 is not divisible by S = 3.
-        with LocalTensorMode(ranks=self.world_size):
-            with self.assertRaisesRegex(RuntimeError, "Invalid scaling configuration"):
-                self._run_sub_row_wise(
-                    3,
-                    [Shard(1), Replicate()],
-                    [Shard(1), Replicate()],
-                    ([Shard(1), Replicate()], [Shard(1), Replicate()]),
-                    k=100,
-                )
-
-    @with_comms
-    def test_scaled_mm_sub_row_wise_mismatched_k_raise(self):
-        # Must raise on every rank rather than only on ranks whose local k
-        # slices mismatch.
-        with LocalTensorMode(ranks=self.world_size):
-            with self.assertRaisesRegex(RuntimeError, "Invalid scaling configuration"):
-                self._run_sub_row_wise(
-                    3,
-                    [Shard(1), Replicate()],
-                    [Shard(1), Replicate()],
-                    ([Shard(1), Replicate()], [Shard(1), Replicate()]),
-                    b_k=98,
-                )
-
-    @with_comms
-    def test_scaled_mm_sub_row_wise_shard_order_raise(self):
-        # mat1/mat2 split k in mesh dim order (1, 0) but the scales use the
-        # default (0, 1), so scale columns would pair with the wrong k slices.
-        with LocalTensorMode(ranks=self.world_size):
-            with self.assertRaisesRegex(RuntimeError, "Invalid scaling configuration"):
-                self._run_sub_row_wise(
-                    6,
-                    [Shard(1), Shard(1)],
-                    [Shard(1), Shard(1)],
-                    ([Shard(1), Shard(1)], [Shard(1), Shard(1)]),
-                    shard_order=_convert_shard_order_dict_to_ShardOrder({1: [1, 0]}),
-                )
+                self._run_sub_row_wise(*args)
 
     @with_comms
     def test_scaled_mm_sub_row_wise_blockwise_overlap(self):
@@ -1374,6 +1370,44 @@ class DistScaledMMSubRowWiseTest(LocalDTensorTestBase):
             self.assertEqual(out.full_tensor(), ref, atol=1e-4, rtol=1e-4)
             with self.assertRaisesRegex(RuntimeError, "ambiguous"):
                 self._run_sub_row_wise(3, *placements, k=288)
+            # Replicated blockwise scales must not be sharded into split-k. Checks
+            # propagation directly since the CPU kernel rejects blockwise scales.
+            mesh = init_device_mesh("cpu", (3, 2))
+            replicate = [Replicate(), Replicate()]
+            op_schema = OpSchema(
+                torch.ops.aten._scaled_mm.default,
+                (
+                    *(
+                        distribute_tensor(t, mesh, p)._spec
+                        for t, p in (
+                            (torch.randn(48, 288).to(e4m3_type), placements[0]),
+                            (
+                                torch.randn(32, 288).to(e4m3_type).t(),
+                                [Shard(0), Replicate()],
+                            ),
+                            (torch.rand(48, 3), replicate),
+                            (torch.rand(32, 3).t(), replicate),
+                        )
+                    ),
+                    None,  # bias
+                    None,  # scale_result
+                    torch.float32,  # out_dtype
+                    False,  # use_fast_accum
+                ),
+                {},
+            )
+            sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+                op_schema
+            )
+            schema = sharding.redistribute_schema or op_schema
+            # K must stay unsharded so each rank gets all 3 scale columns.
+            a_spec, _, scale_a_spec, scale_b_spec = schema.args_schema[:4]
+            self.assertNotIn(Shard(1), a_spec.placements)
+            self.assertNotIn(Shard(1), scale_a_spec.placements)
+            self.assertNotIn(Shard(0), scale_b_spec.placements)
+
+
+instantiate_parametrized_tests(DistScaledMMSubRowWiseTest)
 
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
