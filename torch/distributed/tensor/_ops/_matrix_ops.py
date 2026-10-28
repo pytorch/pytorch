@@ -338,12 +338,6 @@ def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
         and isinstance(scale_b, DTensorSpec)
     ):
         return False
-    # Non-default shard orders would pair scale slices with other K slices.
-    if any(
-        s.shard_order != DTensorSpec.compute_default_shard_order(s.placements)
-        for s in (a, b, scale_a, scale_b)
-    ):
-        return False
 
     def num_shards(spec: DTensorSpec, dim: int) -> int:
         return prod(
@@ -355,13 +349,33 @@ def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
     shards = num_shards(scale_a, 1)
     if shards <= 1 or num_shards(scale_b, 0) != shards:
         return False
+    # Non-default shard orders would pair scale slices with other K slices.
+    if any(
+        s.shard_order != DTensorSpec.compute_default_shard_order(s.placements)
+        for s in (a, b, scale_a, scale_b)
+    ):
+        return False
     if any(s.tensor_meta is None or s.ndim != 2 for s in (a, b, scale_a, scale_b)):
         return False
-    expected = (a.shape[1], a.shape[0], shards, shards, b.shape[1])
-    return guard_or_false(a.shape[1] % shards == 0) and all(
-        guard_or_false(x == y)
-        for x, y in zip((b.shape[0], *scale_a.shape, *scale_b.shape), expected)
-    )
+    k = a.shape[1]
+    expected = (k, a.shape[0], shards, shards, b.shape[1])
+    if not (
+        guard_or_false(k % shards == 0)
+        and all(
+            guard_or_false(x == y)
+            for x, y in zip((b.shape[0], *scale_a.shape, *scale_b.shape), expected)
+        )
+    ):
+        return False
+    # Dense _scaled_mm treats these shapes as 1x128 blockwise scales when
+    # S == ceil(K / 128), which only matches split-k when K == 128 * S.
+    if guard_or_false(shards == (k + 127) // 128) and guard_or_false(k != 128 * shards):
+        raise ValueError(
+            f"_scaled_mm scales {tuple(scale_a.shape)} / {tuple(scale_b.shape)} with "
+            f"K={k} are ambiguous: dense _scaled_mm treats them as 1x128 blockwise "
+            "scales but DTensor as split-k row-wise scales"
+        )
+    return True
 
 
 def _keep_split_k_scales(

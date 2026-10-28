@@ -1360,6 +1360,21 @@ class DistScaledMMSubRowWiseTest(LocalDTensorTestBase):
                     shard_order=_convert_shard_order_dict_to_ShardOrder({1: [1, 0]}),
                 )
 
+    @with_comms
+    def test_scaled_mm_sub_row_wise_blockwise_overlap(self):
+        # (m, 3) / (3, n) scales are also 1x128 blockwise scales for
+        # 256 < k <= 384; the two only agree for k = 384.
+        placements = (
+            [Shard(1), Replicate()],
+            [Shard(1), Replicate()],
+            ([Shard(1), Replicate()], [Shard(1), Replicate()]),
+        )
+        with LocalTensorMode(ranks=self.world_size):
+            out, ref, _ = self._run_sub_row_wise(3, *placements, k=384)
+            self.assertEqual(out.full_tensor(), ref, atol=1e-4, rtol=1e-4)
+            with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+                self._run_sub_row_wise(3, *placements, k=288)
+
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMatrixOpsTest, base_class=LocalDTensorContinuousTestBase
