@@ -110,10 +110,11 @@ module's hook to fire.
 
 The all-gather buffers are allocated on the AG streams. The CUDA caching
 allocator does not reuse memory freed on one stream for allocations on
-another, so this can fragment memory across streams. ``set_unshard_async_op``
-issues the all-gathers from the compute stream instead, keeping their buffers
-in the compute stream's memory. The copy-in and dtype cast before each
-all-gather then run on the compute stream, and forward needs
+another, so this can fragment memory across streams.
+``set_unshard_in_current_stream`` issues the all-gathers on the current stream
+instead, normally the one the forward and backward run on, keeping their
+buffers in that stream's memory. The copy-in and dtype cast before each
+all-gather then run on the current stream, and forward needs
 ``set_modules_to_forward_prefetch`` (or ``unshard(async_op=True)``) for the
 all-gathers to overlap with compute.
 
