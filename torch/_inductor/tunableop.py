@@ -398,16 +398,29 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
     return filename + ordinal
 
 
-# Tuning knobs propagated to the worker: (parent getter, worker setter) pairs.
-# Only programmatically set process-global C++ state needs stamping; anything
-# read from the environment reaches the worker by inheritance. Numerical-check
-# tolerances have no getter. The dynamic-dims mask is per call rather than per
-# process, so the job carries it (dyn_dims_mask) instead of snapshotting it.
+# Parameters of the search, stamped onto each job: (parent getter, worker
+# setter) pairs. Anything read from the environment reaches the worker by
+# inheritance; these are the knobs a caller can also set through the API, which
+# does not cross the pipe.
+#
+# Which operation to run is decided per job from the Inductor mode instead, so
+# tuning, nearest_match and record_borrowed are BenchmarkJob fields rather than
+# entries here. Deliberately absent for that reason:
+#   * record_untuned selects the offline-tuning workflow, which is an
+#     alternative to tuning here rather than a modifier of it. Stamping it
+#     would leave a tune-mode worker tuning every GEMM and then persisting
+#     none of them, since AddAndMaybePersist writes only when tuning is on and
+#     record-untuned is off.
+#   * the dynamic-dims mask is per call, not per process, so the job carries it
+#     (dyn_dims_mask).
+# Numerical-check tolerances are absent for a duller reason: no getter exists.
 _TUNABLE_SETTINGS: tuple[tuple[str, str], ...] = (
     ("get_max_tuning_duration", "set_max_tuning_duration"),
     ("get_max_tuning_iterations", "set_max_tuning_iterations"),
     ("get_rotating_buffer_size", "set_rotating_buffer_size"),
     ("get_cublaslt_requested_algo_count", "set_cublaslt_requested_algo_count"),
+    # Decides what a non-tuning lookup can find, so the worker must search the
+    # same catalogue the parent would.
     ("wildcard_fallback_is_enabled", "wildcard_fallback_enable"),
 )
 
