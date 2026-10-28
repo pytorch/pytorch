@@ -9361,6 +9361,44 @@ def _(x):
 """
 
 
+_CUSTOM_OP_LIBRARY_MODULE = """
+import torch
+
+lib = torch.library.Library("{ns}", "DEF")
+lib.define("triple(Tensor x) -> Tensor")
+lib.impl("triple", lambda x: x * 3, "CompositeExplicitAutograd")
+"""
+
+
+_CUSTOM_OP_LIBRARY_DRIVER = """
+import sys
+
+import torch
+from torch.compiler.precompile import capture, load, MakeFxTracer
+
+phase, directory, module, ns, artifact, cache = sys.argv[1:]
+sys.path.insert(0, directory)
+x = torch.arange(6, dtype=torch.float32)
+if phase == "capture":
+    __import__(module)
+    op = getattr(torch.ops, ns).triple.default
+    with capture(
+        lambda x: op(x.sin()) + 1,
+        artifact_path=artifact,
+        cache_path=cache,
+        tracer=MakeFxTracer(),
+        backend="eager",
+    ) as cap:
+        torch.save(cap(x), artifact + ".pt")
+else:
+    assert module not in sys.modules, module
+    loaded = load(artifact, cache)
+    torch.testing.assert_close(loaded(x), torch.load(artifact + ".pt"))
+    assert module in sys.modules, "the artifact did not import its op's module"
+print("library op phase ok:", phase)
+"""
+
+
 _CUSTOM_OP_DRIVER = """
 import os
 import sys
@@ -9586,6 +9624,23 @@ class TestPrecompileCustomOpModules(TestCase):
         with open(paths[0]) as f:
             self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
 
+    @skipIfCrossRef
+    def test_load_imports_the_user_module_defining_a_library_op(self):
+        tag = uuid.uuid4().hex
+        module, ns = f"precompile_library_op_{tag}", f"precompile_library_test_{tag}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        with open(os.path.join(directory, module + ".py"), "w") as f:
+            f.write(_CUSTOM_OP_LIBRARY_MODULE.replace("{ns}", ns))
+        artifact = os.path.join(directory, "artifact.py")
+        args = [directory, module, ns, artifact, os.path.join(directory, "c")]
+        for phase in ("capture", "load"):
+            cmd = [sys.executable, "-c", _CUSTOM_OP_LIBRARY_DRIVER, phase, *args]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn(f"library op phase ok: {phase}", out.stdout)
+        with open(artifact) as f:
+            self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
+
 
 def _decomposed_op_fn(x):
     return torch.ops.precompile_inductor_ops.decomposed.default(x.sin()) + 1
@@ -9676,7 +9731,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CompositeExplicitAutograd")
         names = {(f"{ns}::op", ""), ("aten::add", "Tensor")}
-        # A Library.define op has no module to import, but is still checked.
+        # A Library a torch helper created records no module, but is still checked.
         self.assertEqual(_custom_op_modules(names), ())
         self.assertEqual(_custom_ops(names), ((f"{ns}::op", ""),))
 
@@ -9848,10 +9903,11 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_no_op_torch_registers_is_reported(self):
         script = textwrap.dedent(
             """
+            import functools
             import json
             import torch
             import torch.onnx.ops
-            from torch._precompile import _TORCH_LAZY_OP_NAMESPACES, _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _torch_op_module
+            from torch._precompile import _TORCH_LAZY_OP_NAMESPACES, _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _file_modules, _torch_op_module
             if torch.distributed.is_available():
                 import torch.distributed.fsdp
                 import torch.distributed.pipelining
@@ -9859,6 +9915,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 import torch.distributed._ops.device_mesh
             reported = set()
             modules = {}
+            file_modules = functools.cache(_file_modules)
             for name in torch._C._dispatch_get_all_op_names():
                 op_name, _, overload = name.partition(".")
                 ns = op_name.split("::")[0]
@@ -9868,7 +9925,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 if ".py:" not in debug:
                     if ns not in _TORCH_OP_NAMESPACES:
                         reported.add(ns)
-                elif (module := _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload)) is None:
+                elif (module := _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload, file_modules)) is None:
                     reported.add(ns)
                 else:
                     modules.setdefault(module, []).append([op_name, overload])
