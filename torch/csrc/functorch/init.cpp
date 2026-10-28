@@ -22,6 +22,7 @@
 #include <c10/core/AutogradState.h>
 #include <c10/core/InferenceMode.h>
 
+#include <c10/util/irange.h>
 #include <iostream>
 #include <utility>
 
@@ -118,7 +119,7 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
   }
   VmapDimVector permutation;
   permutation.reserve(logical_dim);
-  for (int64_t dim = 0; dim < logical_dim; dim++) {
+  for (const auto dim : c10::irange(logical_dim)) {
     if (dim == src) {
       continue;
     }
@@ -507,7 +508,7 @@ PyObject* unwrap_dead_wrappers(PyObject* args) {
   // Lazily allocate only after finding a dead wrapper; otherwise return args.
   THPObjectPtr result;
 
-  for (Py_ssize_t idx = 0; idx < num_args; idx++) {
+  for (const auto idx : c10::irange(num_args)) {
     auto* item = PyTuple_GET_ITEM(args, idx);
     if (THPVariable_Check(item)) {
       const auto& tensor = THPVariable_Unpack(item);
@@ -524,7 +525,7 @@ PyObject* unwrap_dead_wrappers(PyObject* args) {
         if (!result) {
           return nullptr;
         }
-        for (Py_ssize_t copy_idx = 0; copy_idx < idx; copy_idx++) {
+        for (const auto copy_idx : c10::irange(idx)) {
           auto* copied_item = PyTuple_GET_ITEM(args, copy_idx);
           Py_INCREF(copied_item);
           PyTuple_SET_ITEM(result.get(), copy_idx, copied_item);

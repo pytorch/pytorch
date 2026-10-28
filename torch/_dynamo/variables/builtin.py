@@ -296,15 +296,28 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
+# Raising ops need a reject check in ComputedLazyConstantVariable.create, like division
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
-    # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
-    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
+    1: frozenset(
+        [
+            operator.neg,
+            operator.pos,
+            operator.abs,
+            operator.not_,
+            operator.invert,
+            len,
+            str,
+            bool,
+        ]
+    ),
     2: frozenset(
         [
             operator.add,
             operator.sub,
             operator.mul,
+            operator.truediv,
+            operator.floordiv,
+            operator.mod,
             operator.and_,
             operator.or_,
             operator.xor,
@@ -3975,10 +3988,15 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     input_node = obj.as_proxy().node
                     if input_node.op == "placeholder":
                         ev = input_node.meta.get("example_value")
-                        if ev is not None and hasattr(ev, "fake_mode"):
+                        from torch._subclasses.fake_tensor import (
+                            is_fake_tensor,
+                            maybe_get_fake_mode,
+                        )
+
+                        if is_fake_tensor(ev):
                             from torch._subclasses.fake_impls import fast_detach
 
-                            snapshot = fast_detach(ev.fake_mode, ev)
+                            snapshot = fast_detach(maybe_get_fake_mode(ev), ev)
                             tx.output._shallow_copy_placeholder_snapshots.setdefault(
                                 input_node, snapshot
                             )
