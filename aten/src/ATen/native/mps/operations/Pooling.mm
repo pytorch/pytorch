@@ -443,13 +443,13 @@ static void fill_pool_size_strides(PoolingParams<5>& params,
 }
 
 // Adaptive pooling window bounds need (in_size + 1) * (out_size + 1) to fit in the kernel index type
-static const char* adaptive_pool_index_suffix(const Tensor& input, const Tensor& output, const int32_t pooling_dims) {
+static bool adaptive_pool_needs_int64(const Tensor& input, const Tensor& output, const int32_t pooling_dims) {
   for (const auto dim : c10::irange(input.dim() - pooling_dims, input.dim())) {
     if ((input.size(dim) + 1) * (output.size(dim) + 1) > std::numeric_limits<int32_t>::max()) {
-      return "_i64";
+      return true;
     }
   }
-  return "_i32";
+  return false;
 }
 
 static void launch_max_pool_kernel(const Tensor& input,
@@ -487,8 +487,7 @@ static void launch_max_pool_kernel(const Tensor& input,
   } else {
     const bool use_32bit = canUse32BitIndexMath(input) && canUse32BitIndexMath(output) &&
         (!indices_opt || canUse32BitIndexMath(*indices_opt)) &&
-        (!params.adaptive ||
-         adaptive_pool_index_suffix(input, output, params.pooling_dims) == std::string_view("_i32"));
+        !(params.adaptive && adaptive_pool_needs_int64(input, output, params.pooling_dims));
     kernel_name = fmt::format("max_pool{}_{}", use_32bit ? "" : "_i64", scalarToMetalTypeString(input));
   }
 
@@ -1029,7 +1028,7 @@ static void adaptive_avg_pool_out_mps_template(const Tensor& output,
   fill_avg_pool_params(params, input, output, pooling_dims, op_name);
   params.adaptive = true;
   launch_avg_pool_kernel("avg_pool_",
-                         adaptive_pool_index_suffix(input, output, pooling_dims),
+                         adaptive_pool_needs_int64(input, output, pooling_dims) ? "_i64" : "_i32",
                          input,
                          output,
                          output.numel(),
@@ -1066,7 +1065,7 @@ static void adaptive_avg_pool_backward_out_mps_template(const Tensor& grad_input
   fill_avg_pool_params(params, grad_input, grad_output, pooling_dims, op_name);
   params.adaptive = true;
   launch_avg_pool_kernel("adaptive_avg_pool_backward_",
-                         adaptive_pool_index_suffix(grad_input, grad_output, pooling_dims),
+                         adaptive_pool_needs_int64(grad_input, grad_output, pooling_dims) ? "_i64" : "_i32",
                          grad_input,
                          grad_output,
                          grad_input.numel(),
