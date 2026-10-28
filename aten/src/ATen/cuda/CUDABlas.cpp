@@ -2359,6 +2359,9 @@ void grouped_gemm(
     const std::optional<GroupedGemmScaleOptions>& scales) {
   const bool scaled = scales.has_value();
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+#if CUDA_VERSION < 13040
+  TORCH_CHECK(!scaled, "scaled grouped cublasLtMatmul requires CUDA >= 13.4");
+#endif
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
   TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");

@@ -9084,7 +9084,12 @@ def meta_scaled_grouped_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    """Infer output shape without requiring concrete dimensions."""
+    r"""Infer output shape without requiring concrete dimensions.
+
+    This Python meta overrides the C++ validator under FakeTensor and compile.
+    It checks output dtype and offset contiguity; bias, offset dtype/rank, and
+    dimension alignment are validated by the eager C++ path at execution.
+    """
     _out_dtype = out_dtype or torch.bfloat16
     torch._check_value(
         _out_dtype in (torch.bfloat16, torch.float16, torch.float32),

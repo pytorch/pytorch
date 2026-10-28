@@ -7292,6 +7292,17 @@ def scaled_mm(
     Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    Packed MNxK4 scaling uses matching ``BlockWise1x32`` or ``BlockWise1x128`` recipes
+    with ``SWIZZLE_MNxK4`` on both inputs. It requires cuBLASLt 13.8.1 or later
+    (bundled with CUDA 13.4) on SM10.x/SM11.x, and supports bfloat16, float16, and
+    float32 outputs. Bias requires bfloat16 or float16 output with matching dtype.
+    Scales are contiguous ``float8_e8m0fnu`` tensors with 16-byte-aligned data pointers.
+    For block size ``B`` (32 or 128) and outer extent ``O`` (M for A, N for B),
+    the physical row-major byte order is ``[ceil(K / (4 * B)), round_up(O, 4), 4]``:
+    four consecutive K-block scales are packed together for each outer position.
+    Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
+    Outer extents need not be multiples of four; padding entries are ignored.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7494,11 +7505,19 @@ def scaled_grouped_mm(
     shape ``(groups, values_per_group)``; a 2D operand concatenates the flattened group scales
     in offset order, covering only the groups selected by ``offs``. M and N must be multiples
     of 4. These recipes support bfloat16, float16, and float32 outputs and require
-    ``use_fast_accum=False``.
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
 
-    Packed MNxK4 scaling requires CUDA 13.4 or later on SM10.x/SM11.x and accepts bfloat16,
-    float16, and float32 outputs. NVFP4 and MXFP8 on the cuBLASLt backend have the same requirements
-    and output dtypes; the MSLK backend requires bfloat16 output. Other recipes require bfloat16 output.
+    Packed MNxK4 scaling uses the recipes, byte order, element count, and alignment
+    described in :func:`scaled_mm`, independently for each group. A 3D operand uses
+    scale shape ``(groups, elements_per_group)``; a 2D operand concatenates each
+    group's flattened scale buffer in offset order. Each group starts at a 16-byte
+    boundary, and per-group M/N need not be multiples of four. It requires
+    cuBLASLt 13.8.1 or later (bundled with CUDA 13.4) on SM10.x/SM11.x and accepts
+    bfloat16, float16, and float32 outputs.
+
+    NVFP4 and MXFP8 on the cuBLASLt backend require CUDA 13.4 or later on SM10.x/SM11.x
+    and support bfloat16, float16, and float32 outputs; the MSLK backend requires
+    bfloat16 output. Other recipes require bfloat16 output.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
