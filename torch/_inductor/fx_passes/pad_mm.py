@@ -29,10 +29,13 @@ from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
 from ..pattern_matcher import (
+    CallFunction,
     fwd_only,
     gen_register_replacement,
     joint_fwd_bwd,
+    KeywordArg,
     Match,
+    register_graph_pattern,
     ReplaceFn,
     SearchFn,
 )
@@ -249,8 +252,15 @@ def pad_addmm(
             mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
         )
 
+    # the add broadcasts, so we only pad if the dimension != 1
     if input is not None:
-        input = pad_bias(input, m_padded_length, n_padded_length)
+        if n_padded_length != 0:
+            if input.dim() == 2 and input.shape[1] != 1:
+                input = pad_dim(input, n_padded_length, 1)
+            elif input.dim() == 1 and input.shape[0] != 1:
+                input = pad_dim(input, n_padded_length, 0)
+        if m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
+            input = pad_dim(input, m_padded_length, 0)
 
     res = aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
@@ -259,15 +269,6 @@ def pad_addmm(
     if n_padded_length != 0:
         res = res[:, :-n_padded_length]
     return res
-
-
-def pad_bias(input: Tensor, m_padded_length: int, n_padded_length: int) -> Tensor:
-    # Preserve singleton dimensions so the bias still broadcasts.
-    if n_padded_length and input.ndim >= 1 and input.shape[-1] != 1:
-        input = pad_dim(input, n_padded_length, input.ndim - 1)
-    if m_padded_length and input.ndim >= 2 and input.shape[-2] != 1:
-        input = pad_dim(input, m_padded_length, input.ndim - 2)
-    return input
 
 
 def addmm_replace(
@@ -971,13 +972,9 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
-def baddbmm_pattern(
-    input: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float
-) -> Tensor:
-    return aten.baddbmm(input, mat1, mat2, beta=beta, alpha=alpha)
-
-
 def should_pad_baddbmm(match: Match) -> bool:
+    if any(isinstance(match.kwargs[name], torch.fx.Node) for name in ("alpha", "beta")):
+        return False
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad(match, mat1, mat2, aten.baddbmm, input=input)
 
@@ -1008,7 +1005,11 @@ def pad_baddbmm(
             n_padded_length=n_padded_length,
             is_bmm=True,
         )
-    input = pad_bias(input, m_padded_length, n_padded_length)
+    # Preserve singleton dimensions so the bias still broadcasts.
+    if n_padded_length and input.ndim >= 1 and input.shape[-1] != 1:
+        input = pad_dim(input, n_padded_length, input.ndim - 1)
+    if m_padded_length and input.ndim >= 2 and input.shape[-2] != 1:
+        input = pad_dim(input, m_padded_length, input.ndim - 2)
     res = aten.baddbmm(input, mat1, mat2, beta=beta, alpha=alpha)
     if m_padded_length:
         res = res[:, :-m_padded_length, :]
@@ -1036,8 +1037,31 @@ def baddbmm_replace(
 
 
 @functools.cache
+def _pad_baddbmm_init() -> None:
+    from .joint_graph import patterns
+
+    @register_graph_pattern(
+        CallFunction(
+            aten.baddbmm.default,
+            KeywordArg("input"),
+            KeywordArg("mat1"),
+            KeywordArg("mat2"),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+        ),
+        pass_dict=patterns,
+        extra_check=should_pad_baddbmm,
+    )
+    def pad_baddbmm_pattern(match, input, mat1, mat2, beta, alpha):
+        # Keep the original backward graph; its BMMs can be padded independently.
+        match.replace_by_example(baddbmm_replace, [input, mat1, mat2, beta, alpha])
+
+
+@functools.cache
 def _pad_mm_init(input_device: torch.device | None = None) -> None:
     from .joint_graph import patterns
+
+    _pad_baddbmm_init()
 
     if input_device:
         device = str(input_device)
@@ -1123,20 +1147,3 @@ def _pad_mm_init(input_device: torch.device | None = None) -> None:
             scalar_workaround=workaround,
             skip_duplicates=True,
         )
-
-    # Rewrite only the forward node in both training and inference graphs.
-    # Keep the original bias reduction and operand gradients; backward BMMs
-    # can be padded independently by the existing rules.
-    gen_register_replacement(
-        "baddbmm_pattern_inference",
-        typing.cast(SearchFn, baddbmm_pattern),
-        typing.cast(ReplaceFn, baddbmm_replace),
-        [dim1a(), dim3a(), dim3b()],
-        # pyrefly: ignore [bad-argument-type]
-        fwd_only,
-        # pyrefly: ignore [bad-argument-type]
-        patterns,
-        extra_check=should_pad_baddbmm,
-        scalar_workaround=rep,
-        skip_duplicates=True,
-    )

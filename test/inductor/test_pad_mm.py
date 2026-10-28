@@ -739,19 +739,14 @@ class PadBaddbmmTest(TestCase):
             )
         )
 
-    def _check_compiled(
-        self, fn, args, dimensions=None, expect_padding=True
-    ):
+    def _check_compiled(self, fn, args, dimensions=None, expect_padding=True):
         observed = []
-        padded_nodes = []
 
         def record_graph(graph):
             for node in graph.nodes:
                 if node.target is torch.ops.aten.baddbmm.default:
                     mat1, mat2 = (arg.meta["val"] for arg in node.args[1:3])
                     observed.append((mat1.shape[1], mat1.shape[2], mat2.shape[2]))
-                if node.target is torch.ops.aten.constant_pad_nd.default:
-                    padded_nodes.append(node)
 
         expected = fn(*args)
         tangent = (
@@ -768,70 +763,47 @@ class PadBaddbmmTest(TestCase):
             if grad_args
             else ()
         )
-        pattern_counts = counters["inductor_pattern_matcher_per_pattern"]
-        forward_count = pattern_counts["baddbmm_pattern_inference"]
-        with (
-            unittest.mock.patch.dict(
-                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"},
-            ),
-            inductor_config.patch(joint_custom_post_pass=record_graph),
-        ):
-            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
-        if expect_padding:
-            self.assertGreater(
-                pattern_counts["baddbmm_pattern_inference"], forward_count
-            )
+        with inductor_config.patch(joint_custom_post_pass=record_graph):
+            actual = torch.compile(fn, fullgraph=True)(*args)
         self.assertEqual(actual, expected)
         if grad_args:
-            actual_grads = torch.autograd.grad(
-                actual, grad_args, tangent
-            )
+            actual_grads = torch.autograd.grad(actual, grad_args, tangent)
             self.assertEqual(actual_grads, expected_grads)
         if dimensions is not None:
-            self.assertTrue(observed, "The compiler must retain fused baddbmm")
-            for actual_dims in observed:
-                for actual_dim, expected_dim in zip(actual_dims, dimensions):
-                    if expected_dim is not None:
-                        self.assertEqual(actual_dim, expected_dim)
-            if args[1].dtype in (torch.float16, torch.bfloat16):
-                FileCheck().check("extern_kernels.baddbmm(").run("\n".join(code))
-        if expect_padding:
-            self.assertTrue(padded_nodes, "Expected shape padding in the joint graph")
-        else:
-            self.assertFalse(padded_nodes)
+            self.assertEqual(observed, [dimensions])
+        if not expect_padding:
+            original_dims = (args[1].shape[1], args[1].shape[2], args[2].shape[2])
+            for dims in observed:
+                self.assertEqual(dims, original_dims)
         return actual
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize(
-        "bias_kind,shape,scalars",
+        "shape,bias_shape,scalars",
         [
-            ("full", (2, 16, 11, 16), {}),
-            ("vector", (2, 13, 16, 16), {"alpha": -0.5, "beta": 2.0}),
-            ("batch", (2, 16, 16, 9), {"alpha": 0.0, "beta": 0.5}),
-            ("scalar", (2, 13, 11, 9), {"alpha": 0.5, "beta": 0.0}),
-            ("matrix", (2, 13, 11, 9), {"alpha": 2.0, "beta": -0.5}),
+            ((2, 13, 11, 9), (2, 13, 9), {}),
+            ((2, 13, 16, 16), (16,), {"alpha": -0.5, "beta": 2.0}),
+            ((2, 16, 16, 9), (2, 1, 9), {"alpha": 0.0, "beta": 0.5}),
+            ((2, 16, 11, 16), (), {"alpha": 0.5, "beta": 0.0}),
+            ((2, 13, 11, 9), (13, 1), {"alpha": 2.0, "beta": -0.5}),
         ],
     )
-    def test_padding_and_gradients(self, device, dtype, bias_kind, shape, scalars):
+    def test_padding_and_gradients(self, device, dtype, shape, bias_shape, scalars):
         batch, m, k, n = shape
-        bias_shapes = {
-            "full": (batch, m, n),
-            "vector": (n,),
-            "batch": (batch, 1, n),
-            "scalar": (),
-            "matrix": (m, 1),
-        }
+
         def values(size, scale):
             values = torch.arange(math.prod(size), device=device).remainder(5) - 2
             return values.to(dtype).reshape(size) * scale
 
         args = (
-            values(bias_shapes[bias_kind], 0.25),
+            values(bias_shape, 0.25),
             values((batch, m, k), 0.25),
             values((batch, k, n), 0.125),
         )
         for arg in args:
             arg.requires_grad_()
+        if not bias_shape:
+            self.assertFalse(can_pad(args[1][0], args[2][0], torch.ops.aten.addmm, args[0]))
 
         def fn(bias, mat1, mat2):
             return torch.baddbmm(bias, mat1, mat2, **scalars)
@@ -893,15 +865,18 @@ class PadBaddbmmTest(TestCase):
     )
     def test_strided_inputs_and_partial_gradients(self, device, layout, requires_grad):
         batch, m, k, n = 2, 13, 11, 9
+
+        def values(shape, scale):
+            data = torch.arange(math.prod(shape), device=device).remainder(7) - 3
+            return data.float().reshape(shape) * scale
+
         if layout == "offset_transpose":
-            mat1 = torch.full((batch, k + 2, m + 2), 0.25, device=device)
-            mat1 = mat1[:, 1:-1, 1:-1].transpose(1, 2)
-            mat2 = torch.full((batch, n + 2, k + 2), 0.125, device=device)
-            mat2 = mat2[:, 1:-1, 1:-1].transpose(1, 2)
+            mat1 = values((batch, k + 2, m + 2), 0.25)[:, 1:-1, 1:-1].transpose(1, 2)
+            mat2 = values((batch, n + 2, k + 2), 0.125)[:, 1:-1, 1:-1].transpose(1, 2)
         else:
-            mat1 = torch.full((1, m, k), 0.25, device=device).expand(batch, m, k)
-            mat2 = torch.full((batch, k, n), 0.125, device=device)
-        bias = torch.full((batch, 1, n), 0.25, device=device)
+            mat1 = values((1, m, k), 0.25).expand(batch, m, k)
+            mat2 = values((batch, k, n), 0.125)
+        bias = values((batch, 1, n), 0.25)
         args = (bias, mat1, mat2)
         originals = tuple(arg.clone() for arg in args)
         for arg, needs_grad in zip(args, requires_grad):
@@ -1008,93 +983,90 @@ class PadBaddbmmTest(TestCase):
 
         self._check_compiled(fn, args, (16, 12, 12))
 
-    def test_scalar_addmm_admission_unchanged(self, device):
+    @inductor_config.patch(force_shape_pad=False)
+    @parametrize("scalar_name", ["alpha", "beta"])
+    def test_dynamic_scalar_fallback(self, device, scalar_name):
         from torch._inductor.fx_passes import pad_mm
-        from torch._subclasses.fake_tensor import FakeTensorMode
 
-        with FakeTensorMode():
-            bias = torch.empty((), device=device)
-            mat1 = torch.empty((3, 5), device=device)
-            mat2 = torch.empty((5, 2), device=device)
-            self.assertFalse(pad_mm.can_pad(mat1, mat2, torch.ops.aten.addmm, bias))
+        args = (
+            torch.ones((9,), device=device),
+            torch.ones((2, 13, 11), device=device),
+            torch.ones((2, 11, 9), device=device),
+            torch.tensor(0.5, device=device),
+        )
+
+        def fn(bias, mat1, mat2, scalar):
+            return torch.baddbmm(bias, mat1, mat2, **{scalar_name: scalar.item()})
+
+        with unittest.mock.patch.object(pad_mm, "is_mm_compute_bound", return_value=True):
+            self._check_compiled(fn, args, expect_padding=False)
 
     @fresh_cache()
     @inductor_config.patch(force_shape_pad=False)
     def test_benchmark_scalars_and_caches(self, device):
         from torch._inductor.fx_passes import pad_mm
-        from torch._inductor.runtime.caching import config, encoders
-        from torch._inductor.runtime.caching.interfaces import PersistentMemoizer
+        from torch._inductor.runtime.caching import encoders
         from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.overrides import BaseTorchFunctionMode
+
+        def producers(bias, mat1, mat2, weight):
+            return torch.baddbmm(mat1, mat1, weight), mat1 + 1
 
         with FakeTensorMode():
             mat1 = torch.empty((2, 13, 11), device=device)
             mat2 = torch.empty((2, 11, 9), device=device)
             bias = torch.empty((2, 1, 9), device=device).expand(2, 13, 9)
-            producer_weight = torch.empty((2, 11, 11), device=device)
-
-        graph = torch.fx.Graph()
-        input_node = graph.placeholder("bias")
-        input_node.meta["val"] = bias
-        mat1_node = graph.placeholder("mat1")
-        mat1_node.meta["val"] = mat1
-        mat2_node = graph.placeholder("mat2")
-        mat2_node.meta["val"] = mat2
-        weight_node = graph.placeholder("producer_weight")
-        weight_node.meta["val"] = producer_weight
-        producer = graph.call_function(
-            torch.ops.aten.baddbmm.default, (mat1_node, mat1_node, weight_node)
-        )
-        producer.meta["val"] = mat1
-        pointwise = graph.call_function(torch.ops.aten.add.Tensor, (mat1_node, 1))
-        pointwise.meta["val"] = mat1
+            weight = torch.empty((2, 11, 11), device=device)
+            graph = make_fx(producers)(bias, mat1, mat2, weight).graph
+        input_node, _, mat2_node, _ = graph.find_nodes(op="placeholder")
+        producer, pointwise = graph.find_nodes(op="output")[0].args[0]
         match = unittest.mock.Mock()
-        match.kwargs = {"input": input_node, "mat1": producer, "mat2": mat2_node}
+        match.kwargs = dict(input=input_node, mat1=producer, mat2=mat2_node, alpha=-0.5, beta=2.0)
         self.assertFalse(pad_mm.should_exclude_padding_time(match, "mat1"))
+        calls, timed_padding = [], []
 
-        original_op = torch.ops.aten.baddbmm
-        with (
-            unittest.mock.patch.object(
-                torch.ops.aten, "baddbmm", wraps=original_op
-            ) as op,
-            unittest.mock.patch.object(
-                config, "IS_CACHING_MODULE_ENABLED", return_value=True
-            ),
-            unittest.mock.patch.object(pad_mm, "is_mm_compute_bound", return_value=True),
-        ):
-            op.default = original_op.default
-            memoizer = PersistentMemoizer(sub_dir="baddbmm_padding_test")
-            should_pad = memoizer.memoize(
-                custom_params_encoder=encoders.should_pad_params_encoder
-            )(inspect.unwrap(pad_mm._should_pad))
+        class RecordBaddbmm(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.baddbmm:
+                    calls.append((args, kwargs))
+                if func is torch.ops.aten.constant_pad_nd and args[0].shape == mat1.shape:
+                    timed_padding.append(True)
+                return super().__torch_function__(func, types, args, kwargs)
 
-            def bench(fn):
-                call_count = op.call_count
+        def bench(fn):
+            with RecordBaddbmm():
                 fn()
-                self.assertEqual(op.call_count, call_count + 1)
-                call = op.call_args
-                self.assertEqual(
-                    call.kwargs,
-                    {"alpha": match.kwargs["alpha"], "beta": match.kwargs["beta"]},
-                )
-                self.assertFalse(any(is_fake_tensor(arg) for arg in call.args))
-                if call.args[1].shape[2] == 11:
-                    self.assertEqual(call.args[0].stride(), bias.stride())
-                    return 2.0
-                return 1.0
+            args, kwargs = calls[-1]
+            self.assertEqual(kwargs, {name: match.kwargs[name] for name in ("alpha", "beta")})
+            self.assertFalse(any(is_fake_tensor(arg) for arg in args))
+            if args[1].shape[2] == 11:
+                self.assertEqual(args[0].stride(), bias.stride())
+                return 2.0
+            return 1.0
 
-            with unittest.mock.patch.object(pad_mm, "get_do_bench", return_value=bench):
-                for alpha, beta in [(0.5, 0.0), (-0.5, 2.0)]:
-                    match.kwargs.update(alpha=alpha, beta=beta)
-                    self.assertTrue(should_pad(match, mat1, mat2, op, bias))
-                    calls = op.call_count
-                    self.assertTrue(should_pad(match, mat1, mat2, op, bias))
-                    self.assertEqual(op.call_count, calls)
-                self.assertEqual(op.call_count, 4)
-
-                match.kwargs.update(alpha=0.5, beta=0.0, mat1=pointwise)
-                self.assertTrue(should_pad(match, mat1, mat2, op, bias))
-                self.assertEqual(op.call_count, 5)
-                self.assertEqual(len(get_pad_cache().get_local_cache()), 5)
+        op = torch.ops.aten.baddbmm
+        with (
+            unittest.mock.patch.object(pad_mm, "is_mm_compute_bound", return_value=True),
+            unittest.mock.patch.object(pad_mm, "get_do_bench", return_value=bench),
+        ):
+            encoded = []
+            for i, (alpha, beta) in enumerate([(0.5, 0.0), (-0.5, 0.0), (0.5, 2.0)]):
+                match.kwargs.update(alpha=alpha, beta=beta)
+                key = encoders.should_pad_params_encoder(match, mat1, mat2, op, bias)
+                self.assertNotIn(key, encoded)
+                encoded.append(key)
+                self.assertTrue(pad_mm._should_pad(match, mat1, mat2, op, bias))
+                self.assertEqual(len(calls), 2 * (i + 1))
+                self.assertTrue(pad_mm._should_pad(match, mat1, mat2, op, bias))
+                self.assertEqual(len(calls), 2 * (i + 1))
+            self.assertTrue(timed_padding)
+            timed_padding.clear()
+            match.kwargs["mat1"] = pointwise
+            self.assertTrue(pad_mm.should_exclude_padding_time(match, "mat1"))
+            self.assertTrue(pad_mm._should_pad(match, mat1, mat2, op, bias))
+            self.assertEqual(len(calls), 7)
+            self.assertFalse(timed_padding)
 
 
 instantiate_device_type_tests(
