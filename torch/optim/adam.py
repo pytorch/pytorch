@@ -632,7 +632,7 @@ def _multi_tensor_adam(
     # treating it as a scalar.
     beta1_dict: DeviceDict | None = (  # type: ignore[attr-defined]
         {beta1.device: beta1}
-        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        if isinstance(beta1, Tensor) and not beta1.is_cpu
         else None
     )
 
