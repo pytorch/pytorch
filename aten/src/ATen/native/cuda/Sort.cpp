@@ -57,10 +57,10 @@ void sort_cuda_kernel(
   TORCH_CHECK_TYPE(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
     "Sort currently does not support complex dtypes on CUDA.");
 #if defined(USE_ROCM)
-  // ROCm has undefined behavior for non-standard bools. Sort a standard-bool copy (the round trip
-  // through uint8 maps any non-zero value to 1) instead of normalizing the input in place, which
-  // would write to the caller's tensor and fails when the input has overlapping (e.g. expanded) memory.
-  const Tensor self = self_dtype == ScalarType::Bool ? self_in.to(at::kByte).to(at::kBool) : self_in;
+  // ROCm has undefined behavior for non-standard bools. Sort a standard-bool copy built from the raw
+  // bytes instead of normalizing the input in place, which would write to the caller's tensor and
+  // fails when the input has overlapping (e.g. expanded) memory.
+  const Tensor self = self_dtype == ScalarType::Bool ? self_in.view(at::kByte).ne(0) : self_in;
 #else
   const Tensor& self = self_in;
 #endif

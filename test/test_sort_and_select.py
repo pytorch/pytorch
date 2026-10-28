@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -248,15 +249,21 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(vm, torch.arange(8192, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices, exact_dtype=False)
 
+    @onlyAccelerator
     def test_sort_expanded_bool(self, device):
         # https://github.com/pytorch/pytorch/issues/202005
         # The short row takes the in-place small sort, the long one the segmented sort.
+        # On ROCm also use non-standard bools (true stored as 2), which ROCm sort normalizes.
+        true_byte = 2 if TEST_WITH_ROCM else 1
         for n, descending, stable in product((68, 5000), (True, False), (True, False)):
-            row = torch.arange(n, device=device) % 7 == 0
-            x = row[None, :].expand(64, n)
+            row = (torch.arange(n, device=device) % 7 == 0).to(torch.uint8) * true_byte
+            x = row.view(torch.bool)[None, :].expand(64, n)
             values, indices = x.sort(dim=-1, descending=descending, stable=stable)
-            ref_values, ref_indices = x.cpu().sort(
-                dim=-1, descending=descending, stable=stable
+            ref_values, ref_indices = (
+                (row != 0)
+                .cpu()[None, :]
+                .expand(64, n)
+                .sort(dim=-1, descending=descending, stable=stable)
             )
             self.assertEqual(values, ref_values)
             self.assertEqual(x.gather(-1, indices), values)
