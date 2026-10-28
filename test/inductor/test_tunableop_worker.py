@@ -213,16 +213,18 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(self._stamped().device, 1)
         self.assertEqual(self._stamped().settings["set_rotating_buffer_size"], -1)
 
-    def test_worker_device_comes_from_the_job_not_the_process(self):
-        # Inductor does not set the CUDA current device while lowering, so a
-        # graph on cuda:1 can be autotuned with current_device() == 0. Keying on
-        # 0 would tune GPU 1 while writing the file GPU 0's runtime reads.
+    def _cuda1_job(self, parent_filename):
         bmreq = mock.Mock()
         bmreq.output_tensor_meta = mock.Mock(device=torch.device("cuda", 1))
         bmreq.input_tensor_meta = []
         tunable = mock.Mock()
-        tunable.get_filename.return_value = ""
-        job = tunableop.BenchmarkJob(bmreq, tuning=False)
+        tunable.get_filename.return_value = parent_filename
+        return tunableop.BenchmarkJob(bmreq, tuning=False), tunable
+
+    def test_worker_device_comes_from_the_job_not_the_process(self):
+        # Inductor does not set the CUDA current device while lowering, so a
+        # graph on cuda:1 can be autotuned with current_device() == 0.
+        job, tunable = self._cuda1_job("")
         env = {k: v for k, v in os.environ.items() if k != "PYTORCH_TUNABLEOP_FILENAME"}
         with (
             mock.patch("torch.cuda.current_device", return_value=0),
@@ -231,7 +233,23 @@ class TunableOpWorkerTest(TestCase):
         ):
             tunableop.submit(job)
         self.assertEqual(self._stamped().device, 1)
-        self.assertEqual(self._stamped().filename, "tunableop_results1.csv")
+        # The file follows the parent's manager, not the job: filename_ is
+        # process-global, so the runtime reads one file whatever device a GEMM
+        # ran on.
+        self.assertEqual(self._stamped().filename, "tunableop_results0.csv")
+
+    def test_a_set_parent_filename_wins_over_the_job_device(self):
+        # The branch the empty-filename test cannot reach: SetFilename has
+        # already baked an ordinal in, so re-deriving one here would disagree
+        # with the file the runtime opens.
+        job, tunable = self._cuda1_job("parent0.csv")
+        with (
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch("torch.cuda.tunable", tunable),
+        ):
+            tunableop.submit(job)
+        self.assertEqual(self._stamped().device, 1)
+        self.assertEqual(self._stamped().filename, "parent0.csv")
 
     def test_worker_is_reused_when_device_and_file_are_unchanged(self):
         self._submit(device=2, filename="a.csv")
@@ -540,11 +558,7 @@ class BenchmarkJobCallTest(TestCase):
         self.assertEqual(seen, [])
 
     def test_call_applies_the_stamped_settings_after_the_flags(self):
-        """The re-entry loop is the only thing carrying the parent's knobs.
-
-        They are process-global C++ state that does not cross the pipe, so if
-        the loop stops running the worker silently tunes with defaults.
-        """
+        """Without the re-entry loop the worker silently tunes with defaults."""
         calls = []
 
         class FakeTunable(_NoopTunable):
@@ -711,17 +725,9 @@ class TunableopModeValidationTest(TestCase):
 class TunableOpRealWorkerTest(TestCase):
     """Runs jobs in a real TuningProcess.
 
-    _FakeProcess above cannot model get() killing or closing the process, or
-    put() restarting it, so the central claim -- a hang or crash leaves the
-    worker restartable and the next submission succeeds -- has no coverage
-    without this. No GPU needed: the jobs never touch CUDA, and only
-    current_device/get_filename are patched in the parent.
-
-    Jobs are real BenchmarkJobs wrapped in _TestTunableOpJob, which stubs
-    torch.cuda in the child; both it and _TestBenchmarkRequest live in
-    autotune_process.py because the child has only torch on its path, so
-    test-file classes cannot be used. submit() stamps device/filename/settings
-    onto the wrapper, which forwards them to the job.
+    _FakeProcess cannot model get() killing the process or put() restarting it,
+    so the restart claim has no coverage without this. The job and the stubs it
+    needs live in autotune_process.py: the child has only torch on its path.
     """
 
     hw_classification = HardwareClassification.GENERIC
@@ -841,13 +847,8 @@ class TunableOpRealWorkerTest(TestCase):
 class TunableOpRocmWorkerTest(TestCase):
     """Real BenchmarkJob through a real worker on ROCm hardware.
 
-    Covers what the fake and _TestBenchmarkRequest tests cannot: the job and
-    its bmreq surviving the pickle round trip, set_device/set_filename/flag
-    ordering against lazy results-manager init in the child, and the worker
-    appending to the file the parent's runtime reads. Needs ROCm CI (a GPU and
-    a subprocess torch import that works); skipped elsewhere. Only
-    current_device is patched -- the filename flows through the real
-    set_filename so resolve_filename takes the parent's file.
+    Covers what the stubbed tests cannot: the pickle round trip, and the worker
+    appending to the file the parent's runtime reads.
     """
 
     hw_classification = HardwareClassification.ACCELERATOR
