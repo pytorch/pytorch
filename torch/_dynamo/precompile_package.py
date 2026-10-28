@@ -29,6 +29,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import logging
 import os
 import re
 import site
@@ -78,6 +79,8 @@ if TYPE_CHECKING:
     from .variables.builder import FrameStateSizeEntry
 
 
+log = logging.getLogger(__name__)
+
 # Built once: config.patch() allocates a class and a ContextVar each time it is
 # called, and this runs on every frame Dynamo compiles for a package.
 _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
@@ -98,6 +101,15 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
+    Triton kernels autotune while their graph lowers, on generated example
+    inputs, as standalone_compile does: a backward no captured call runs would
+    otherwise keep every candidate config, and the artifact can only freeze a
+    kernel tuned down to one. This covers forward kernels too, which tune on
+    synthetic inputs at capture rather than on first launch: replay runs
+    frozen configs, so every kernel's config must be chosen before replay
+    anyway. Each kernel's synthetic arguments are allocated while the captured
+    forward's tensors are still live, so peak device memory during capture
+    grows by roughly the backward's working set.
     The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
     bundle per compile context, left open on a remote-cache miss until the
     first compiled call, but eager lowering compiles the forward and the
@@ -141,12 +153,22 @@ def _capture_config() -> Iterator[None]:
         functorch_patch["strict_autograd_cache"] = True
     import torch._inductor.config as inductor_config
 
+    if inductor_config.triton.autotune_at_compile_time is False:
+        log.info(
+            "precompile capture overrides triton.autotune_at_compile_time=False: "
+            "a frozen artifact needs every kernel tuned before replay"
+        )
     # TODO: drop the bundled_autotune_remote_cache patch once
     # AutotuneCacheBundler keeps one bundle per compiled module rather than one
     # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
-        inductor_config.patch(bundled_autotune_remote_cache=False),
+        inductor_config.patch(
+            {
+                "bundled_autotune_remote_cache": False,
+                "triton.autotune_at_compile_time": True,
+            }
+        ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
@@ -1593,6 +1615,12 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
+        # The operators each backend graph calls, by backend id, and those run
+        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function or a
+        # frame Dynamo falls back on, and ops only AOTAutograd traces (a custom
+        # op's backward formula), are not recorded.
+        self.op_names: dict[str, set[tuple[str, str]]] = {}
+        self.graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1603,6 +1631,14 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         self.note_compute()
         super()._add_backend_id(backend_id, backend)
+
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        from torch._precompile import _op_names
+
+        self.op_names[backend_id] = _op_names(gm)
+
+    def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
+        self.graph_break_op_names.add((op._schema.name, op._schema.overload_name))
 
     def add_resume_function(
         self,
@@ -2111,15 +2147,28 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import _build_multigraph_artifact
+        from torch._precompile import (
+            _build_multigraph_artifact,
+            _custom_op_modules,
+            _custom_ops,
+        )
 
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
+        op_names = self._package.graph_break_op_names.union(
+            *(self._package.op_names.get(b, ()) for b in backends)
+        )
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend, self._fn
+            self._served_entry()[0],
+            backends,
+            summary,
+            self._backend,
+            self._fn,
+            _custom_op_modules(op_names),
+            _custom_ops(op_names),
         )
 
 

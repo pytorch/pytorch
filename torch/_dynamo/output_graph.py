@@ -2993,6 +2993,7 @@ class OutputGraph(OutputGraphCommon):
 
             if self.package is not None:
                 gm._backend_id = name  # pyrefly: ignore[bad-argument-type]
+                self.package.add_backend_graph(name, gm)
 
             # pyrefly: ignore[bad-argument-type]
             gm.compile_subgraph_reason = self.compile_subgraph_reason
