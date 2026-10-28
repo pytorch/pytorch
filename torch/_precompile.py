@@ -271,6 +271,7 @@ import types
 import uuid
 from collections.abc import (
     Callable,  # noqa: TC003
+    Iterable,  # noqa: TC003
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
@@ -1886,6 +1887,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
+        "CUSTOM_OP_MODULES",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -1915,6 +1917,80 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
+    call, directly or passed to a higher-order op."""
+    names: set[tuple[str, str]] = set()
+    for module in gm.modules():
+        graph = getattr(module, "graph", None)
+        if not isinstance(graph, torch.fx.Graph):
+            continue
+        for node in graph.nodes:
+            if node.op != "call_function":
+                continue
+            for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
+                if isinstance(op, torch._ops.OpOverloadPacket):
+                    ops = [getattr(op, name) for name in op.overloads()]
+                else:
+                    ops = [op]
+                for overload in ops:
+                    if isinstance(overload, torch._ops.OpOverload):
+                        schema = overload._schema
+                        names.add((schema.name, schema.overload_name))
+    return names
+
+
+def _custom_op_module(op_name: str, overload: str) -> str | None:
+    """The importable module that registers ``op_name``, if one is known: the one
+    defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
+    names with ``m.set_python_module``."""
+    from torch._library.custom_ops import OPDEFS
+
+    if (opdef := OPDEFS.get(op_name)) is not None:
+        name = getattr(opdef._init_fn, "__module__", None)
+    else:
+        pystub = torch._C._dispatch_pystub(op_name, overload)
+        name = pystub[0] if pystub is not None else None
+    if name is None or name == "__main__":
+        return None
+    module = sys.modules.get(name)
+    return name if getattr(module, "__spec__", None) is not None else None
+
+
+def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
+    """The modules registering the ops among ``op_names``."""
+    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
+    return tuple(sorted(m for m in modules if m is not None))
+
+
+def _write_custom_op_imports(buf: Any, modules: tuple[str, ...]) -> None:
+    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
+    # path imports the module whose torch.library.custom_op registers the op.
+    if not modules:
+        return
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 0. The modules registering the custom ops the graphs call")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
+    buf.writeline("import importlib as _importlib")
+    buf.writeline("import torch as _torch")
+    buf.writeline("for _module in CUSTOM_OP_MODULES:")
+    buf.writeline("    try:")
+    buf.writeline("        _importlib.import_module(_module)")
+    buf.writeline("    except ImportError as _e:")
+    buf.writeline("        raise _torch.compiler.PrecompileError(")
+    buf.writeline(
+        '            f"this artifact calls custom ops that module {_module!r} '
+        'registers, "'
+    )
+    buf.writeline(
+        '            "which cannot be imported here. Make it importable wherever the "'
+    )
+    buf.writeline('            "artifact is served."')
+    buf.writeline("        ) from _e")
+    buf.writeline("")
+
+
 def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
@@ -1924,6 +2000,9 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
+    if compiled._gm is None:
+        raise PrecompileError("internal: graph missing before _compile()")
+    _write_custom_op_imports(buf, _custom_op_modules(_op_names(compiled._gm)))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -1977,6 +2056,7 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
+    _write_custom_op_imports(buf, _custom_op_modules(_op_names(gm)))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
