@@ -4422,7 +4422,8 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_with_docstring(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_docstring(self, quotes, cpp_wrapper):
         kernel = (
             kernel_with_docstring_single_quotes
             if quotes == "single"
@@ -4438,12 +4439,18 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            # Only a wrapper that consumes string kernels carries the escaped block.
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    def test_kernel_with_backslash_in_docstring(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_backslash_in_docstring(self, cpp_wrapper):
         # https://github.com/pytorch/pytorch/issues/183420
         # Backslash escapes in the kernel source text must be doubled before
         # the source is spliced into the generated triple-quoted wrapper,
@@ -4457,8 +4464,12 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @skipIfXpu(
@@ -4467,7 +4478,8 @@ def forward(self, arg0_1, arg1_1):
     )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_inline_asm(self, quotes, cpp_wrapper):
         if torch.version.cuda:
             kernel = (
                 kernel_inline_asm_single_quotes
@@ -4492,8 +4504,12 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.randn(345, device=GPU_TYPE)
         actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, inp)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
