@@ -138,7 +138,7 @@ class TestNativeUtils(TestCase):
         from types import SimpleNamespace
         from unittest.mock import MagicMock, patch
 
-        from torch._native.utils import capability as cap
+        from torch._native.utils.device import cuda_device_guard
 
         calls = []
 
@@ -146,7 +146,7 @@ class TestNativeUtils(TestCase):
             calls.append((self, args, kwargs))
             return "result"
 
-        guarded = cap.cuda_device_guard(fn)
+        guarded = cuda_device_guard(fn)
         x = SimpleNamespace(device=torch.device("cuda", 1))
         for current, switched in ((1, False), (0, True)):
             calls.clear()
