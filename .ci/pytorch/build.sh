@@ -311,13 +311,11 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
-  # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
   # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
-  # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -327,9 +325,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
     WERROR=1 python -m build --wheel --no-isolation
   else
-    if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
-      source .ci/pytorch/install_cache_xla.sh
-    fi
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
