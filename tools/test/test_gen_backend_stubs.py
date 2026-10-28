@@ -381,6 +381,40 @@ supported:
     device_guard: false"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
+    # Structured kernels are only generated for PrivateUse1; other keys fail early instead of
+    # at codegen with an opaque dispatch-key assertion.
+    def test_structured_rejected_for_non_privateuse1(self) -> None:
+        yaml_str = """\
+backend: XLA
+cpp_namespace: torch_xla
+use_out_as_primary: true
+supported:
+- mul.out:
+    structured: true"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'mul.out' sets 'structured: True', which is only supported for backend PrivateUse1 (got XLA).""",
+        )
+
+    # A structured kernel always guards set_output (as in-tree), so a per-op
+    # device_guard: false on it would only be half-honored; reject the combination.
+    def test_structured_with_device_guard_false_rejected(self) -> None:
+        yaml_str = """\
+backend: PrivateUse1
+cpp_namespace: at::priv1::native
+use_out_as_primary: true
+device_guard: true
+supported:
+- mul.out:
+    structured: true
+    device_guard: false"""
+        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
+        self.assertExpectedInline(
+            output_error,
+            """Operator 'mul.out' sets 'structured: True' with 'device_guard: False'. A structured kernel always guards set_output to place its outputs on the input's device, as in-tree; remove device_guard for this op.""",
+        )
+
     # A quoted YAML scalar parses to a truthy str (not a bool), which would silently be treated
     # as structured; per-op option values must be real booleans.
     def test_per_op_option_non_bool(self) -> None:
@@ -636,8 +670,8 @@ supported:
         ]
         return groups, backend_index, class_name
 
-    def anonymous_definitions(self, supported: str) -> str:
-        groups, backend_index, class_name = self._parse(supported)
+    def anonymous_definitions(self, supported: str, header: str | None = None) -> str:
+        groups, backend_index, class_name = self._parse(supported, header)
         gen = dest.RegisterDispatchKey(
             backend_index,
             Target.ANONYMOUS_DEFINITION,
@@ -660,17 +694,17 @@ supported:
             )
         )
 
-    # use_out_as_primary: a structured op (div.out) generates an out wrapper that returns the
-    # impl _out call directly (note the at::priv1::native 3-level namespace) and an inplace
-    # wrapper that feeds self into the out slot -- the old at::_copy_from_and_resize temp-copy is
-    # gone. The functional is NOT derived here: div is natively structured, so it defers to the
-    # in-tree CompositeExplicitAutogradNonFunctional kernel (op.meta() + at::div_outf), which
-    # computes the correct output dtype and redispatches to this backend's div_out.
+    # use_out_as_primary: div.out registered as a plain .out kernel generates an out wrapper that
+    # returns the _out call directly (note the at::priv1::native 3-level namespace). Neither the
+    # functional nor the inplace is derived: div is natively structured, so both stay with aten's
+    # CompositeExplicitAutogradNonFunctional kernels (op.meta() + at::div_outf), which validate
+    # and size the output and then redispatch to this backend's div_out -- as on main.
     def test_out_as_primary_wrappers(self) -> None:
         anon = self.anonymous_definitions("- div.out")
         self.assertNotIn("at::_copy_from_and_resize", anon)
-        # functional defers to the composite -- no PrivateUse1 functional wrapper is emitted
+        # functional and inplace defer to the composite -- no PrivateUse1 wrapper is emitted
         self.assertNotIn("wrapper_PrivateUse1_Tensor_div(", anon)
+        self.assertNotIn("wrapper_PrivateUse1_Tensor_div_(", anon)
         self.assertExpectedInline(
             anon,
             """\
@@ -686,14 +720,42 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 }
 
 } // anonymous namespace
+""",
+        )
 
-at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
+    # An inplace aten already provides is left to it like the functional (structured div_,
+    # composite abs_); one aten has no kernel for (_add_relu_) is derived from the .out and
+    # checks devices like any generated wrapper.
+    def test_inplace_derived_only_without_aten_kernel(self) -> None:
+        anon = self.anonymous_definitions("- div.out\n- abs.out\n- _add_relu.out")
+        self.assertNotIn("wrapper_PrivateUse1_Tensor_div_(", anon)
+        self.assertNotIn("wrapper_PrivateUse1__abs_(", anon)
+        self.assertIn(
+            """\
+at::Tensor & wrapper_PrivateUse1_Tensor__add_relu_(at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  std::optional<Device> common_device = std::nullopt;
+  (void)common_device; // Suppress unused variable warning
+  c10::impl::check_and_update_common_device(common_device, self, "wrapper_PrivateUse1_Tensor__add_relu_", "self");
+  c10::impl::check_and_update_common_device(common_device, other, "wrapper_PrivateUse1_Tensor__add_relu_", "other");
   const OptionalDeviceGuard device_guard(device_of(self));
-  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
+  at::priv1::native::PrivateUse1NativeFunctions::_add_relu_out(self, other, alpha, self);
   return self;
 }
 """,
+            anon,
         )
+
+    # use_out_as_primary only turns off derivation for other external keys, as on main; only
+    # PrivateUse1 derives the missing variants from whichever variant it registered.
+    def test_use_out_as_primary_derives_nothing_for_other_keys(self) -> None:
+        xla = "backend: XLA\ncpp_namespace: torch_xla\nuse_out_as_primary: true\nsupported:\n"
+        anon = self.anonymous_definitions("- abs", header=xla)
+        self.assertIn("wrapper_XLA__abs(", anon)
+        self.assertNotIn("abs_out(", anon)
+        self.assertNotIn("abs_(", anon)
+        anon = self.anonymous_definitions("- abs")
+        self.assertIn("wrapper_PrivateUse1_out_abs_out(", anon)
+        self.assertIn("wrapper_PrivateUse1__abs_(", anon)
 
     # create_out / maybe_create_proxy are only consumed by the structured set_output path, so
     # they are emitted only when a structured op is registered -- not for a default backend,
@@ -739,6 +801,12 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & 
     def test_per_op_device_guard_override(self) -> None:
         guard = "const OptionalDeviceGuard device_guard(device_of(self));"
         self.assertIn(guard, self.anonymous_definitions("- div.out"))
+        # a derived inplace follows the op's device_guard too: no guard and no device check
+        derived = self.anonymous_definitions(
+            "- _add_relu.out:\n    device_guard: false"
+        )
+        self.assertNotIn(guard, derived)
+        self.assertNotIn("check_and_update_common_device", derived)
         off = self.anonymous_definitions("- div.out:\n    device_guard: false")
         self.assertNotIn(guard, off)
         self.assertExpectedInline(
@@ -756,12 +824,6 @@ at::Tensor & wrapper_PrivateUse1_out_div_out(const at::Tensor & self, const at::
 }
 
 } // anonymous namespace
-
-at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor & other) {
-  // DeviceGuard omitted
-  at::priv1::native::PrivateUse1NativeFunctions::div_out(self, other, self);
-  return self;
-}
 """,
         )
 
@@ -790,6 +852,7 @@ at::Tensor & wrapper_PrivateUse1_Tensor_div_(at::Tensor & self, const at::Tensor
         self.assertIn(
             """\
 at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
+  // No device check
   const OptionalDeviceGuard device_guard(device_of(self));
   at::Tensor out;
   at::priv1::native::PrivateUse1NativeFunctions::angle_out(self, out);
@@ -802,6 +865,9 @@ at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
         self.assertIn(
             """\
 ::std::tuple<at::Tensor,at::Tensor> wrapper_PrivateUse1__native_dropout(const at::Tensor & input, double p, ::std::optional<bool> train) {
+  std::optional<Device> common_device = std::nullopt;
+  (void)common_device; // Suppress unused variable warning
+  c10::impl::check_and_update_common_device(common_device, input, "wrapper_PrivateUse1__native_dropout", "input");
   const OptionalDeviceGuard device_guard(device_of(input));
   at::Tensor out0;
   at::Tensor out1;
@@ -817,7 +883,8 @@ at::Tensor wrapper_PrivateUse1__angle(const at::Tensor & self) {
         anon = self.anonymous_definitions("- where.self_out")
         self.assertIn(
             "wrapper_PrivateUse1_self_where(const at::Tensor & condition, const at::Tensor & self, "
-            "const at::Tensor & other) {\n  const OptionalDeviceGuard device_guard(device_of(self));",
+            "const at::Tensor & other) {\n  // No device check\n"
+            "  const OptionalDeviceGuard device_guard(device_of(self));",
             anon,
         )
 

@@ -468,7 +468,20 @@ class RegisterDispatchKey:
                     f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
                 )
 
+        # Check devices like gen_unstructured, so a mixed-device call is rejected before
+        # reaching the kernel. f's own arguments: an inplace's self is its out.
+        device_check: list[str] = []
+        if self.backend_index.device_guard and out_meta.device_guard:
+            device_check = [
+                line.strip()
+                for line in RegisterDispatchKey.gen_device_check(
+                    f.device_check, list(f.func.arguments.flat_positional), sig.name()
+                ).splitlines()
+                if line.strip()
+            ]
+
         body = [
+            *device_check,
             device_guard,
             *decls,
             f"{impl_name}({', '.join(call_args)});",
@@ -545,15 +558,16 @@ class RegisterDispatchKey:
                     # functional, so leave it to the composite like in-tree (split_with_sizes_copy.out).
                     and not any(a.type.is_list_like() for a in g.out.func.arguments.out)
                 ):
-                    # A functional that aten already provides -- the structured composite
-                    # (op.meta() + redispatch to this .out) or any other composite kernel --
-                    # is left to it: it computes the output metadata and reaches this .out
-                    # with a defined out, and registering a PrivateUse1 functional would
-                    # shadow it (and, for CompositeImplicitAutograd, bypass autograd).
-                    # Everything else is delegated to the kernel by gen_func_inplace_wrapper.
+                    # A functional or inplace that aten already provides -- the structured
+                    # composite (op.meta() + redispatch to this .out) or any other composite
+                    # kernel -- is left to it, as on main where nothing is derived here: its
+                    # meta() validates and sizes the output before reaching this .out, and a
+                    # PrivateUse1 kernel would shadow it (and, for CompositeImplicitAutograd,
+                    # bypass autograd). Everything else is delegated to the kernel by
+                    # gen_func_inplace_wrapper.
+                    if g.structured or f.has_composite_kernel:
+                        return None
                     if f.func.kind() is SchemaKind.functional:
-                        if g.structured or f.has_composite_kernel:
-                            return None
                         reason = None
                         if f.func.arguments.tensor_options is not None:
                             reason = (
@@ -575,6 +589,11 @@ class RegisterDispatchKey:
                 elif (
                     # Out-of-tree only; in-tree keys register their out/inplace explicitly.
                     self.backend_index.external
+                    # Other keys keep main's behavior: use_out_as_primary turns this off.
+                    and (
+                        not self.backend_index.use_out_as_primary
+                        or self.backend_index.dispatch_key == DispatchKey.PrivateUse1
+                    )
                     and g is not None
                     and gets_generated_out_inplace_wrapper(f, g, self.backend_index)
                 ):
@@ -1031,11 +1050,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
-            if (
-                self.backend_index.device_guard
-                and metadata is not None
-                and metadata.device_guard
-            ):
+            if self.backend_index.device_guard:
                 device_check_args = itertools.chain(
                     f.func.arguments.out, f.func.arguments.flat_positional
                 )

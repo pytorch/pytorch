@@ -203,6 +203,17 @@ def parse_backend_yaml(
                         "backend-level guard, not enable it; set the backend-level "
                         "device_guard: True and disable it per-op where unwanted."
                     )
+                if structured and backend != "PrivateUse1":
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'structured: True', which is only supported "
+                        f"for backend PrivateUse1 (got {backend})."
+                    )
+                if structured and use_device_guard and not device_guard:
+                    raise AssertionError(
+                        f"Operator '{_op}' sets 'structured: True' with 'device_guard: False'. "
+                        "A structured kernel always guards set_output to place its outputs on "
+                        "the input's device, as in-tree; remove device_guard for this op."
+                    )
                 if structured and not use_out_as_primary:
                     raise AssertionError(
                         f"Operator '{_op}' has 'structured: True' but the backend sets "
