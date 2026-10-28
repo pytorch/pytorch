@@ -13,6 +13,7 @@ import torch
 
 from ... import cutedsl_utils as cu
 from ...utils import capability as cap
+from ...utils.device import cuda_device_guard
 from ...utils.lazy import LazyModule
 
 
@@ -243,5 +244,5 @@ def register_reduction_overrides() -> None:
         ("prod.dim_int", _make_dtype_cond("prod"), _prod_impl),
     )
     for op, cond, impl in overrides:
-        impl = cap.cuda_device_guard(impl)
+        impl = cuda_device_guard(impl)
         cu.register_op_override("aten", op, "CUDA", cond=cond, impl=impl)
