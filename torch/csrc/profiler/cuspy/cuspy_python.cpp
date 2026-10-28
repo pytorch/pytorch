@@ -565,8 +565,7 @@ void initCuspyBindings(py::module& m) {
       py::arg("render") = py::none(),
       py::arg("counters") = py::none(),
       py::arg("compression_level") = 1,
-      py::arg("metadata") =
-          std::vector<std::pair<std::string, std::string>>{});
+      py::arg("metadata") = std::vector<std::pair<std::string, std::string>>{});
 }
 
 } // namespace torch::profiler::impl
