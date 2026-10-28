@@ -174,9 +174,9 @@ When a PR changes code that runs in a Linux CI build or test job (anything under
 
 - [ ] **No package resolution at test time** — PR adds an install that resolves packages from an index while a Linux CI job runs, instead of adding them to the CI image. Apply [ci-dependencies.md](ci-dependencies.md) for what counts, the fix, and the exemptions. A non-exempt install always means **Request Changes**
 
-When a PR changes what the CI images install (a requirements file, install script or Dockerfile under `.ci/docker/`):
+When a PR changes what the CI test images install (a requirements file, install script or Dockerfile under `.ci/docker/`, except the binary builder images under `manywheel/`, `almalinux/` and `libtorch/`):
 
-- [ ] **Floating versions in the image are intended** — Do not ask for an exact `==` pin, or an upper bound, on an image requirement only because it is unpinned or has just a lower bound, or because the tests that use it skip when it is missing. Images are rebuilt only when `.ci/docker` changes and PR CI runs on the rebuilt image, so a floating requirement upgrades in a controlled, revertable way; that is how CI picks up new releases. Ask for a pin only when a specific release is known to break, or the PR exists to test one exact version
+- [ ] **Floating versions in the image are intended** — Do not ask for an exact `==` pin, or an upper bound, on a package resolved from an index (a pip or conda version specifier) only because it is unpinned or has just a lower bound, or because the tests that use it skip when it is missing. `docker-builds.yml` builds these images only when `.ci/docker` changes and PR CI runs on the rebuilt image, so a floating requirement upgrades in a controlled, revertable way; that is how CI picks up new releases. Ask for a pin only when a specific release is known to break, or the PR exists to test one exact version. This does not relax **Third-party code pinned by commit SHA** for git clones, `git+` URLs or pin files
 
 ### Miscellaneous
 
