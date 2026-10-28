@@ -32,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
-    prefer_cublaslt_grouped_gemm,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -3671,7 +3670,21 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
-    @prefer_cublaslt_grouped_gemm(False)
+    @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
+    def test_scaled_grouped_mm_mslk_rejects_group_count(self, device, format):
+        offs = torch.tensor([128], device=device, dtype=torch.int32)
+        value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
+        _, a, block_scale, global_scale = _2d_grouped_tensor_to_blocked_scaled(
+            value, 128, 1, offs, format=format
+        )
+        scale = [block_scale, global_scale] if format == "nvfp4" else block_scale
+        kwargs = _build_scaled_grouped_mm_kwargs(scale, scale, offs.repeat(1025), format)
+        with self.assertRaisesRegex(ValueError, r"batchCount must be in \[1, 1024\]"):
+            scaled_grouped_mm_wrap(a, a.t(), **kwargs)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
     @parametrize("out_dtype", [torch.float16, torch.float32])
     def test_scaled_grouped_mm_mslk_rejects_out_dtype(self, device, format, out_dtype):
