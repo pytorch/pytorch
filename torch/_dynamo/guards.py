@@ -121,13 +121,18 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -365,10 +370,11 @@ dunder_attrs_assumed_constants = (
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
-    # NOTE: we need to find the LAST matching index because <= 3.10 contains
-    # duplicate names in the case of cells: a name can be both local and cell
-    # and will take up 2 slots of the frame's localsplus. The correct behavior
-    # is to refer to the cell, which has a higher index.
+    # NOTE: we need to find the LAST matching index because localsplus can
+    # contain duplicate names in the case of cells (e.g. in Dynamo's resume
+    # functions): a name can be both local and cell and will take up 2 slots of
+    # the frame's localsplus. The correct behavior is to refer to the cell,
+    # which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
@@ -1123,6 +1129,23 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
+
+
+def convert_sizes_to_concrete_values(sizes: Sequence[Any]) -> list[int | None]:
+    # Preserve the same size wildcards before serialization loses SymInt provenance.
+    concrete_sizes = convert_to_concrete_values(sizes)
+    for i, dim in enumerate(sizes):
+        if (
+            concrete_sizes[i] in (0, 1)
+            and isinstance(dim, torch.SymInt)
+            and isinstance(dim.node, SymNode)
+            and dim.node.shape_env is not None
+        ):
+            expr = _get_placeholder_expr(dim.node)
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                # Runtime checks, not input guards, enforce this refinement.
+                concrete_sizes[i] = None
+    return concrete_sizes
 
 
 def _guard_device_index_is_current(
@@ -2998,18 +3021,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
-
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [
@@ -4200,14 +4225,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4295,7 +4320,7 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
-                size = convert_to_concrete_values(metadata["size"])
+                size = convert_sizes_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
                     value, output_graph.compile_on_one_rank
@@ -4914,10 +4939,20 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _restore_ordered_dict_state(
         cls,
         value: collections.OrderedDict[Any, Any],
-        state: tuple[dict[str, Any], tuple[Any, ...]],
+        state: tuple[Any, tuple[Any, ...]],
     ) -> None:
         attrs, keys = state
-        value.__dict__ = attrs
+        if hasattr(value, "__setstate__"):
+            value.__setstate__(attrs)
+        else:
+            slots = None
+            if isinstance(attrs, tuple):
+                attrs, slots = attrs
+            if attrs is not None:
+                value.__dict__ = attrs
+            if slots:
+                for name, item in slots.items():
+                    setattr(value, name, item)
         for key in keys:
             collections.OrderedDict.move_to_end(value, key)
 
@@ -5164,7 +5199,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                getattr(code, "co_qualname", code.co_name),
+                code.co_qualname,
                 code.co_filename,
                 code.co_firstlineno,
                 e,
@@ -5236,13 +5271,23 @@ class GuardsStatePickler(FunctionPicklerBase):
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
 
-        if type(obj) is collections.OrderedDict:
+        if (
+            issubclass(type(obj), collections.OrderedDict)
+            and type(obj) not in copyreg.dispatch_table
+            and type(obj).__reduce__ is collections.OrderedDict.__reduce__
+            and type(obj).__reduce_ex__ is collections.OrderedDict.__reduce_ex__
+        ):
             # Native pickle normalizes storage to linked order, invalidating
             # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
+            state = (
+                vars(obj)
+                if type(obj) is collections.OrderedDict
+                else obj.__reduce__()[2]
+            )
             return (
-                collections.OrderedDict,
+                type(obj),
                 (),
-                (vars(obj), tuple(collections.OrderedDict.keys(obj))),
+                (state, tuple(collections.OrderedDict.keys(obj))),
                 None,
                 iter(dict.items(obj)),
                 type(self)._restore_ordered_dict_state,
@@ -5276,22 +5321,22 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
             # For FakeTensors, use pytype if set, otherwise default to
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
@@ -6303,7 +6348,15 @@ class CheckFunctionManager:
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
-                output_graph_guards_state.input_source_to_sizes_strides,
+                {
+                    source: {
+                        **metadata,
+                        "size": convert_sizes_to_concrete_values(metadata["size"]),
+                    }
+                    for source, metadata in (
+                        output_graph_guards_state.input_source_to_sizes_strides.items()
+                    )
+                },
             ),
             skip_guards_check=True,
         )
