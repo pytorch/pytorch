@@ -9149,6 +9149,100 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    def test_sourceless_inherited_class_attr_metaclass_shadow_recompiles(self):
+        class Meta(type):
+            @property
+            def scale(cls):
+                return 100
+
+        class Base:
+            scale = 2
+
+        class Child(Base, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return x + Child().scale
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+
+        self.assertEqual(Child.scale, 100)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+
+        Base.scale = 3
+        self.assertEqual(compiled(x), x + 3)
+        self.assertEqual(compiled(x), x + 3)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_locally_instantiated_init_staticmethod_inline_closure_mutation(self):
+        # __init__ runs through UserDefinedObjectVariable.call_method; the
+        # staticmethod and _torchdynamo_inline paths go through resolve_type_attr.
+        log = []
+
+        def meth_inline(self, x):
+            log.append("inline")
+            return x + 1
+
+        class Helper:
+            def __init__(self):
+                log.append("init")
+
+            @staticmethod
+            def touch():
+                log.append("static")
+
+            def meth(self, x):
+                return x + 100
+
+        Helper.meth._torchdynamo_inline = meth_inline
+
+        def fn(x):
+            h = Helper()
+            h.touch()
+            return h.meth(x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(log, ["init", "static", "inline"] * 2)
+
+    def test_locally_instantiated_init_staticmethod_rebind(self):
+        class Helper:
+            def __init__(self):
+                self.v = 1
+
+            @staticmethod
+            def w():
+                return 10
+
+        def new_init(self):
+            self.v = 2
+
+        def new_w():
+            return 20
+
+        def fn(x):
+            return x + Helper().v + Helper().w()
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        self.assertEqual(compiled(x), x + 11)
+        self.assertEqual(compiled(x), x + 11)
+        self.assertEqual(counter.frame_count, 1)
+
+        Helper.__init__ = new_init
+        self.assertEqual(compiled(x), x + 12)
+        self.assertEqual(counter.frame_count, 2)
+
+        Helper.w = staticmethod(new_w)
+        self.assertEqual(compiled(x), x + 22)
+        self.assertEqual(counter.frame_count, 3)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
