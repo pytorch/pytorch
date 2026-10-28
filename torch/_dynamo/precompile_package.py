@@ -1593,8 +1593,12 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        # The operators each backend graph calls, by backend id.
+        # The operators each backend graph calls, by backend id, and those run
+        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function or a
+        # frame Dynamo falls back on, and ops only AOTAutograd traces (a custom
+        # op's backward formula), are not recorded.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
+        self.graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1610,6 +1614,9 @@ class _CapturePackage(CompilePackage):
         from torch._precompile import _op_names
 
         self.op_names[backend_id] = _op_names(gm)
+
+    def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
+        self.graph_break_op_names.add((op._schema.name, op._schema.overload_name))
 
     def add_resume_function(
         self,
@@ -2129,7 +2136,9 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = set().union(*(self._package.op_names.get(b, ()) for b in backends))
+        op_names = self._package.graph_break_op_names.union(
+            *(self._package.op_names.get(b, ()) for b in backends)
+        )
         return _build_multigraph_artifact(
             self._served_entry()[0],
             backends,

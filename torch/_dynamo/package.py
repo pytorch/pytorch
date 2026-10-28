@@ -1418,6 +1418,10 @@ class CompilePackage:
         """Called with each graph registered under ``backend_id``, before its backend
         compiles it."""
 
+    def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
+        """Called with an op Dynamo graph-breaks on because it has no fake kernel,
+        so the op runs eagerly between graphs."""
+
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
 

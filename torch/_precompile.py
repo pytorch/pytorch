@@ -1994,7 +1994,7 @@ def _write_custom_op_imports(
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
-    buf.writeline("    except ImportError as _e:")
+    buf.writeline("    except Exception as _e:")
     buf.writeline("        _import_errors[_module] = _e")
     buf.writeline("_missing = []")
     buf.writeline("for _name, _overload in CUSTOM_OPS:")
@@ -2546,8 +2546,8 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_modules: tuple[str, ...] = (),
-    custom_ops: tuple[tuple[str, str], ...] = (),
+    custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
