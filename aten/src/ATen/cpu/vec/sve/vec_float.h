@@ -253,7 +253,8 @@ class Vectorized<float> {
     const auto nan_mask = svcmpuo_f32(ptrue, values, ZERO_F32);
     const auto pi = svdup_n_f32(c10::pi<float>);
 
-    const auto neg_mask = svcmplt_f32(ptrue, values, ZERO_F32);
+    const auto neg_mask =
+        svcmplt_n_s32(ptrue, svreinterpret_s32_f32(values), 0);
     auto angle = svsel_f32(neg_mask, pi, ZERO_F32);
     angle = svsel_f32(nan_mask, nan_vec, angle);
     return angle;
