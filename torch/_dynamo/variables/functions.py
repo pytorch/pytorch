@@ -488,26 +488,6 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in ("__setattr__", "__delattr__"):
-            # Data descriptors from tp_getset/tp_members win over the instance
-            # dict, as in PyObject_GenericSetAttr.
-            value = args[1] if name == "__setattr__" else None
-            if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
-            dict_method = "__setitem__" if value is not None else "__delitem__"
-            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
-
     def get_filename(self) -> str:
         return self.get_code().co_filename
 
@@ -647,9 +627,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(
         self,
@@ -2828,12 +2805,6 @@ class SkipFunctionVariable(VariableTracker):
         self.value = value
         self.reason = reason
 
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
-
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -4114,9 +4085,6 @@ class PolyfilledFunctionVariable(VariableTracker):
 
         return cls(value, source=source)
 
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
-
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         # pyrefly: ignore[invalid-type-var]
@@ -5299,8 +5267,13 @@ class MethodWrapperVariable(VariableTracker):
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
@@ -5761,6 +5734,8 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(

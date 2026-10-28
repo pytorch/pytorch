@@ -392,8 +392,9 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            from .object_protocol import object_generic_setattr
+
+            return object_generic_setattr(tx, self.objvar, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
