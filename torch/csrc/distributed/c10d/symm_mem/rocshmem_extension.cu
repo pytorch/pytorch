@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <vector>
 #include <ATen/ceil_div.h>
+#include <ATen/hip/HIPContext.h>
 #include <c10/hip/HIPGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/env.hpp>
@@ -41,7 +42,11 @@ using namespace rocshmem;
 namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512
-#define WARP_SIZE 64
+// Device code only: 64 on gfx9 and 32 on other targets. Host code must use
+// a2av_tile_size() instead. It must be a compile-time constant (array sizes,
+// WarpScan width). amdgcnspirv is not supported because rocSHMEM has no
+// SPIR-V device code.
+#define WARP_SIZE C10_WARP_SIZE
 
 namespace {
 
@@ -81,6 +86,11 @@ bool parse_rocshmem_version_ge(
     return false;
   }
   return patch >= min_patch;
+}
+
+// Host-side value of A2AV_TILE_SIZE: the warp size of the device.
+int a2av_tile_size(c10::DeviceIndex device_index) {
+  return at::cuda::getDeviceProperties(device_index)->warpSize;
 }
 
 } // namespace
@@ -404,7 +414,7 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   CUDA_KERNEL_ASSERT(n <= WARP_SIZE);
 
   // Specialize WarpScan for type int
-  using WarpScan = ROCM_HIPCUB(at_cuda_detail::cub)::WarpScan<int64_t>;
+  using WarpScan = ROCM_HIPCUB(at_cuda_detail::cub)::WarpScan<int64_t, WARP_SIZE>;
   // Allocate WarpScan shared memory for N warps
   __shared__ typename WarpScan::TempStorage temp_storage[NUM_WARPS];
 
@@ -682,7 +692,8 @@ void all_to_all_vdev_2d(
   auto out_splits_offsets_hdl = c10d::symmetric_memory::rendezvous(out_splits_offsets, group_name);
   int world_size = input_hdl->get_world_size();
   // TODO: world_size is currently limited by the number of elements in a WarpScan.
-  TORCH_CHECK(world_size <= A2AV_TILE_SIZE, "world_size must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
+  const int tile_size = a2av_tile_size(input.device().index());
+  TORCH_CHECK(world_size <= tile_size, "world_size must be smaller than A2AV_TILE_SIZE", tile_size);
 
   // If `major_align` is not provided, use 1 as the default value.
   int64_t major_align_val = major_align.value_or(1);
@@ -718,8 +729,8 @@ void all_to_all_vdev_2d(
 
   // Number of experts per rank
   int ne = in_split_shape[0] / world_size;
-  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
-  TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
+  const int num_tiles = THREADS_PER_BLOCK / tile_size;
+  TORCH_CHECK(ne <= num_tiles, "Number of experts must be smaller than NUM_TILES", num_tiles);
 
   // Set device context for getting the stream and launching kernels below
   auto device = input.device();
@@ -802,8 +813,9 @@ void all_to_all_vdev_2d_offset(
   auto in_splits_offsets_hdl = c10d::symmetric_memory::rendezvous(in_splits_offsets, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
-  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
-  TORCH_CHECK(world_size <= NUM_TILES, "world_size must be smaller than NUM_TILES", NUM_TILES);
+  const int tile_size = a2av_tile_size(input.device().index());
+  const int num_tiles = THREADS_PER_BLOCK / tile_size;
+  TORCH_CHECK(world_size <= num_tiles, "world_size must be smaller than NUM_TILES", num_tiles);
 
   int64_t major_align_val = 0;
 
@@ -837,7 +849,7 @@ void all_to_all_vdev_2d_offset(
   // Number of experts per rank
   int ne = in_split_shape[1] / world_size;
   // TODO: number of experts is currently limited by the number of elements in a WarpScan.
-  TORCH_CHECK(ne <= A2AV_TILE_SIZE, "Number of experts must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
+  TORCH_CHECK(ne <= tile_size, "Number of experts must be smaller than A2AV_TILE_SIZE", tile_size);
 
   // Set device context for getting the stream and launching kernels below
   auto device = input.device();
