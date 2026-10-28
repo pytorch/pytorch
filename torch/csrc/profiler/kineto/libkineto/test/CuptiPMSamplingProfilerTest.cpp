@@ -24,9 +24,9 @@ using namespace KINETO_NAMESPACE;
 
 namespace {
 
-class FakeCuptiPMSamplingController final : public ICuptiPMSamplingController {
+class MockCuptiPMSamplingController final : public ICuptiPMSamplingController {
  public:
-  FakeCuptiPMSamplingController(
+  MockCuptiPMSamplingController(
       int32_t deviceId,
       std::vector<std::string> metricNames,
       std::vector<CuptiPMSample> samples = {})
@@ -103,7 +103,7 @@ TEST(CuptiPMSamplingProfilerTest, RequiresMetricsAndDevice) {
 
 TEST(CuptiPMSamplingSessionTest, ReportsPreparationFailure) {
   configureCuptiTimestampSource(false);
-  auto controller = std::make_unique<FakeCuptiPMSamplingController>(
+  auto controller = std::make_unique<MockCuptiPMSamplingController>(
       0, std::vector<std::string>{"sm__cycles_active.avg"});
   controller->prepareResult = false;
   auto* controllerPtr = controller.get();
@@ -114,7 +114,7 @@ TEST(CuptiPMSamplingSessionTest, ReportsPreparationFailure) {
 }
 
 TEST(CuptiPMSamplingSessionTest, InactiveStopDoesNotBuildTrace) {
-  auto controller = std::make_unique<FakeCuptiPMSamplingController>(
+  auto controller = std::make_unique<MockCuptiPMSamplingController>(
       0,
       std::vector<std::string>{"sm__cycles_active.avg"},
       std::vector<CuptiPMSample>{CuptiPMSample{100, 120, {1.25}}});
@@ -136,7 +136,7 @@ TEST(CuptiPMSamplingSessionTest, InactiveStopDoesNotBuildTrace) {
 
 TEST(CuptiPMSamplingSessionTest, BuildsHardwareCounterActivities) {
   configureCuptiTimestampSource(false);
-  auto controller = std::make_unique<FakeCuptiPMSamplingController>(
+  auto controller = std::make_unique<MockCuptiPMSamplingController>(
       2,
       std::vector<std::string>{"sm__cycles_active.avg", "dram__bytes_read.sum"},
       std::vector<CuptiPMSample>{
@@ -190,7 +190,7 @@ TEST(CuptiPMSamplingSessionTest, BuildsHardwareCounterActivities) {
 
 TEST(CuptiPMSamplingSessionTest, TrimsSamplesToTraceWindow) {
   configureCuptiTimestampSource(false);
-  auto controller = std::make_unique<FakeCuptiPMSamplingController>(
+  auto controller = std::make_unique<MockCuptiPMSamplingController>(
       0,
       std::vector<std::string>{"sm__cycles_active.avg"},
       std::vector<CuptiPMSample>{
