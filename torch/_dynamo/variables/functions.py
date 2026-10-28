@@ -2902,13 +2902,17 @@ class SkipFunctionVariable(VariableTracker):
             )
         else:
             if config.dont_skip_tracing:
-                from .builder import SourcelessBuilder
+                from .. import trace_rules
 
-                # re-build the function, attempting to not skip
-                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # Re-run the trace rules under the patched config. Not
+                # SourcelessBuilder.create: it would return the VT side effects
+                # already track for this function, i.e. this skipped VT.
+                fn = cast(Callable[..., Any], self.value)
+                rule = trace_rules.lookup_callable(fn) or trace_rules.lookup(fn)
                 # if we still get SkipFunctionVariable, then we *really* should skip this function
-                if not isinstance(rebuilt_fn, SkipFunctionVariable):
-                    return rebuilt_fn.call_function(tx, args, kwargs)
+                if rule is not None and not issubclass(rule, SkipFunctionVariable):
+                    # pyrefly: ignore[bad-argument-count]
+                    return rule(self.value).call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             module_or = getattr(self.value, "__module__", None)
             module_name = "<unknown module>" if module_or is None else str(module_or)
