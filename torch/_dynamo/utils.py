@@ -4381,6 +4381,7 @@ def _get_fake_value_impl(
             if isinstance(op, torch._ops.OpOverload):
                 if tx.output.package is not None:
                     tx.output.package.add_graph_break_op(op)
+                    tx.output.package.add_graph_break_op(node.target)
                 maybe_pystub = torch._C._dispatch_pystub(
                     op._schema.name, op._schema.overload_name
                 )
