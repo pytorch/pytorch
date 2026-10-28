@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <string>
 
@@ -1099,7 +1100,7 @@ py::object apply_output_convert(
   if (py::isinstance<py::tuple>(result)) {
     py::tuple tup = result.cast<py::tuple>();
     py::tuple converted(tup.size());
-    for (size_t i = 0; i < tup.size(); i++) {
+    for (const auto i : c10::irange(tup.size())) {
       converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
     }
     return converted;
