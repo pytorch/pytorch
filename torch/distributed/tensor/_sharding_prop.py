@@ -426,6 +426,14 @@ class ShardingPropagator:
             OpOverload,
             Callable[[list[DTensorSpec], OpSchema], OpSchema],
         ] = {}
+        # ops whose global fake args need adjustment before meta propagation
+        # maps op -> callable(schema, fake_args) -> adjusted fake_args
+        # populated by op modules (e.g. _matrix_ops.py) at registration time
+        # adjusters must not change the output meta (shape, stride, dtype)
+        self.op_to_fake_args_adjuster: dict[
+            OpOverload,
+            Callable[[OpSchema, tuple[object, ...]], tuple[object, ...]],
+        ] = {}
         # squeeze ops that need dim arg rewritten to only globally-singleton dims
         self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
             aten.squeeze.default: aten.squeeze.dims,
@@ -547,6 +555,8 @@ class ShardingPropagator:
             with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
+                if adjuster := self.op_to_fake_args_adjuster.get(op_schema.op):
+                    fake_args = adjuster(op_schema, fake_args)
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
 
         if isinstance(fake_out, torch.Tensor):

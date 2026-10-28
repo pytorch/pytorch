@@ -9,6 +9,7 @@ from typing import cast
 import torch
 import torch.nn.functional as F
 from torch.distributed import init_device_mesh
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -17,6 +18,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._matrix_ops import (
     gen_single_dim_einsum_strategies,
     mm_single_dim_strategy,
@@ -41,10 +43,13 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    _convert_shard_order_dict_to_ShardOrder,
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     LocalDTensorContinuousTestBase,
+    LocalDTensorTestBase,
     NUM_DEVICES,
+    patched_distribute_tensor,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -505,6 +510,9 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
             # Row-parallel
             (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
+            # Row-parallel with sub-row-wise scaling: each rank gets its own
+            # (m, 1) and (n, 1) scale for its slice of the contracting dim.
+            (part, shrd1, shrd1, (m, ws), (n, ws), shrd1, shrd1),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -535,6 +543,39 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_sub_row_wise_compile_dynamic(self):
+        # Split-k detection must hold with symbolic shapes. k / ws != 128 so
+        # the scales are not also a valid 1x128 blockwise config.
+        device_mesh = self.build_device_mesh()
+        ws = self.world_size
+        n, k = 32, 32 * ws
+
+        def f(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b.t(), scale_a=scale_a, scale_b=scale_b.t(), out_dtype=torch.bfloat16
+            )
+
+        compiled_f = torch.compile(f, backend="aot_eager", dynamic=True)
+        for m in (32, 48):
+            t1 = torch.randn(m, k, device=self.device_type, dtype=torch.bfloat16)
+            t2 = torch.randn(n, k, device=self.device_type, dtype=torch.bfloat16)
+            t1_fp8, scale1 = scale_for_fp8(t1, (m, ws))
+            t2_fp8, scale2 = scale_for_fp8(t2, (n, ws))
+            args = [
+                distribute_tensor(t, device_mesh, [Shard(1)])
+                for t in (t1_fp8, t2_fp8, scale1, scale2)
+            ]
+            out = compiled_f(*args)
+            self.assertEqual(out.placements, (Partial(),))
+            self.assertEqual(out.full_tensor(), f(*args).full_tensor())
 
     def test_scaled_mm_blockwise_1d_scale_placement(self):
         """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
@@ -1175,6 +1216,199 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)
+
+
+class DistScaledMMSubRowWiseTest(LocalDTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 6
+
+    def _run_sub_row_wise(
+        self,
+        s,
+        a_placements,
+        b_placements,
+        scale_placements,
+        k=96,
+        b_k=None,
+        shard_order=None,
+    ):
+        mesh = init_device_mesh("cpu", (3, 2))
+        m, n = 48, 32
+        torch.manual_seed(0)
+        a = torch.randn(m, k).to(e4m3_type)
+        b = torch.randn(n, k if b_k is None else b_k).to(e4m3_type)
+        scale_a = torch.rand(m, s) + 0.5
+        scale_b = torch.rand(n, s) + 0.5
+        # Split-k reference: each slice of k has its own row-wise scales.
+        kk = k // s
+        ref = sum(
+            (a[:, i * kk : (i + 1) * kk].float() * scale_a[:, i : i + 1])
+            @ (b[:, i * kk : (i + 1) * kk].float() * scale_b[:, i : i + 1]).t()
+            for i in range(s)
+        )
+        if shard_order is None:
+            dist_a = distribute_tensor(a, mesh, a_placements)
+            dist_b = distribute_tensor(b, mesh, b_placements)
+        else:
+            dist_a = patched_distribute_tensor(a, mesh, a_placements, shard_order)
+            dist_b = patched_distribute_tensor(b, mesh, b_placements, shard_order)
+        dist_scale_a = distribute_tensor(scale_a, mesh, scale_placements[0])
+        dist_scale_b = distribute_tensor(scale_b, mesh, scale_placements[1])
+        with CommDebugMode() as comm_mode:
+            out = torch._scaled_mm(
+                dist_a,
+                dist_b.t(),
+                scale_a=dist_scale_a,
+                scale_b=dist_scale_b.t(),
+                out_dtype=torch.float32,
+            )
+        return out, ref, comm_mode.get_total_counts()
+
+    @with_comms
+    def test_scaled_mm_sub_row_wise_2d(self):
+        # Row-parallel on mesh dim 0, sequence-parallel on mesh dim 1.
+        with LocalTensorMode(ranks=self.world_size):
+            out, ref, comms = self._run_sub_row_wise(
+                3,
+                [Shard(1), Shard(0)],
+                [Shard(1), Replicate()],
+                ([Shard(1), Shard(0)], [Shard(1), Replicate()]),
+            )
+            self.assertEqual(out.placements, (Partial(), Shard(0)))
+            self.assertEqual(comms, 0)
+            self.assertEqual(out.full_tensor(), ref)
+
+    @with_comms
+    def test_scaled_mm_sub_row_wise_both_mesh_dims(self):
+        # S = 6 scale columns split across both mesh dims.
+        with LocalTensorMode(ranks=self.world_size):
+            out, ref, comms = self._run_sub_row_wise(
+                6,
+                [Shard(1), Shard(1)],
+                [Shard(1), Shard(1)],
+                ([Shard(1), Shard(1)], [Shard(1), Shard(1)]),
+            )
+            self.assertEqual(out.placements, (Partial(), Partial()))
+            self.assertEqual(comms, 0)
+            self.assertEqual(out.full_tensor(), ref)
+
+    @with_comms
+    def test_scaled_mm_sub_row_wise_reshards_inputs(self):
+        # The scales are split 3 ways on mesh dim 0. Following mat1's Shard(1)
+        # on the size 2 mesh dim would give ranks 2 or 1 scale columns, so
+        # mat1/mat2 must be resharded to match the scales instead.
+        with LocalTensorMode(ranks=self.world_size):
+            out, ref, comms = self._run_sub_row_wise(
+                3,
+                [Shard(0), Shard(1)],
+                [Replicate(), Shard(1)],
+                ([Shard(1), Replicate()], [Shard(1), Replicate()]),
+            )
+            self.assertEqual(comms, 3)
+            self.assertEqual(out.full_tensor(), ref)
+
+    @with_comms
+    @parametrize(
+        "case",
+        [
+            # Split-k requires both scales to already be split S ways.
+            "mismatched_scales",
+            # k = 100 is not divisible by S = 3.
+            "uneven_k",
+            # Must raise on every rank rather than only on ranks whose local k
+            # slices mismatch.
+            "mismatched_k",
+            # mat1/mat2 split k in mesh dim order (1, 0) but the scales use the
+            # default (0, 1), so scale columns would pair with the wrong k slices.
+            "shard_order",
+        ],
+    )
+    def test_scaled_mm_sub_row_wise_raise(self, case):
+        row_parallel = [Shard(1), Replicate()]
+        args = {
+            "mismatched_scales": (
+                3,
+                row_parallel,
+                row_parallel,
+                (row_parallel, [Replicate(), Replicate()]),
+            ),
+            "uneven_k": (3, row_parallel, row_parallel, (row_parallel,) * 2, 100),
+            "mismatched_k": (
+                3,
+                row_parallel,
+                row_parallel,
+                (row_parallel,) * 2,
+                96,
+                98,
+            ),
+            "shard_order": (
+                6,
+                [Shard(1), Shard(1)],
+                [Shard(1), Shard(1)],
+                ([Shard(1), Shard(1)],) * 2,
+                96,
+                None,
+                _convert_shard_order_dict_to_ShardOrder({1: [1, 0]}),
+            ),
+        }[case]
+        with LocalTensorMode(ranks=self.world_size):
+            with self.assertRaisesRegex(RuntimeError, "Invalid scaling configuration"):
+                self._run_sub_row_wise(*args)
+
+    @with_comms
+    def test_scaled_mm_sub_row_wise_blockwise_overlap(self):
+        # (m, 3) / (3, n) scales are also 1x128 blockwise scales for
+        # 256 < k <= 384; the two only agree for k = 384.
+        placements = (
+            [Shard(1), Replicate()],
+            [Shard(1), Replicate()],
+            ([Shard(1), Replicate()], [Shard(1), Replicate()]),
+        )
+        with LocalTensorMode(ranks=self.world_size):
+            out, ref, _ = self._run_sub_row_wise(3, *placements, k=384)
+            self.assertEqual(out.full_tensor(), ref, atol=1e-4, rtol=1e-4)
+            with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+                self._run_sub_row_wise(3, *placements, k=288)
+            # Replicated blockwise scales must not be sharded into split-k. Checks
+            # propagation directly since the CPU kernel rejects blockwise scales.
+            mesh = init_device_mesh("cpu", (3, 2))
+            replicate = [Replicate(), Replicate()]
+            op_schema = OpSchema(
+                torch.ops.aten._scaled_mm.default,
+                (
+                    *(
+                        distribute_tensor(t, mesh, p)._spec
+                        for t, p in (
+                            (torch.randn(48, 288).to(e4m3_type), placements[0]),
+                            (
+                                torch.randn(32, 288).to(e4m3_type).t(),
+                                [Shard(0), Replicate()],
+                            ),
+                            (torch.rand(48, 3), replicate),
+                            (torch.rand(32, 3).t(), replicate),
+                        )
+                    ),
+                    None,  # bias
+                    None,  # scale_result
+                    torch.float32,  # out_dtype
+                    False,  # use_fast_accum
+                ),
+                {},
+            )
+            sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+                op_schema
+            )
+            schema = sharding.redistribute_schema or op_schema
+            # K must stay unsharded so each rank gets all 3 scale columns.
+            a_spec, _, scale_a_spec, scale_b_spec = schema.args_schema[:4]
+            self.assertNotIn(Shard(1), a_spec.placements)
+            self.assertNotIn(Shard(1), scale_a_spec.placements)
+            self.assertNotIn(Shard(0), scale_b_spec.placements)
+
+
+instantiate_parametrized_tests(DistScaledMMSubRowWiseTest)
+
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistMatrixOpsTest, base_class=LocalDTensorContinuousTestBase
