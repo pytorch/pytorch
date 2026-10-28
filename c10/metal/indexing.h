@@ -1573,18 +1573,18 @@ inline long4 ternary_offsets(
   // `ndim` lives in a constant buffer, so these branches are uniform across the
   // threadgroup. Up to 3 dims the coordinates come straight from the dispatch
   // grid and no division is needed at all; only dims past the third pay for it.
-  if (ndim == 3) {
-    const int p2 = int(thread_pos.z);
-    return long4(
-        offs +
-        int4(
-            p2 * int(strides0[2]),
-            p2 * int(strides1[2]),
-            p2 * int(strides2[2]),
-            p2 * int(strides3[2])));
-  }
   int idx = int(thread_pos.z);
-  for (uint i = 2; i < ndim; ++i) {
+  if (ndim > 3) {
+    const int sz2 = int(sizes[2]);
+    const int p2 = idx % sz2;
+    idx /= sz2;
+    offs += int4(
+        p2 * int(strides0[2]),
+        p2 * int(strides1[2]),
+        p2 * int(strides2[2]),
+        p2 * int(strides3[2]));
+  }
+  for (uint i = 3; i + 1 < ndim; ++i) {
     const int sz = int(sizes[i]);
     const int p = idx % sz;
     idx /= sz;
@@ -1594,6 +1594,11 @@ inline long4 ternary_offsets(
         p * int(strides2[i]),
         p * int(strides3[i]));
   }
+  offs += int4(
+      idx * int(strides0[ndim - 1]),
+      idx * int(strides1[ndim - 1]),
+      idx * int(strides2[ndim - 1]),
+      idx * int(strides3[ndim - 1]));
   return long4(offs);
 }
 
