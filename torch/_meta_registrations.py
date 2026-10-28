@@ -575,6 +575,12 @@ def meta_randint_low(
 @register_meta([aten.rand.default, aten.rand.out])
 @out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is not None:
+        torch._check_not_implemented(
+            dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+            or dtype.is_complex,
+            lambda: f'"check_uniform_bounds" not implemented for {dtype}',
+        )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
