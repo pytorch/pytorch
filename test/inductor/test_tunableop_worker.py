@@ -303,25 +303,23 @@ class TunableOpWorkerTest(TestCase):
         return worker, outcome
 
     def test_faults_are_reported_rather_than_raised(self):
-        # A compile must continue when a GEMM cannot be benchmarked.
+        # A compile must continue when a GEMM cannot be benchmarked, but a
+        # fault repeating for every GEMM must still be visible by default.
+        tunableop._warned_faults.clear()
+        self.addCleanup(tunableop._warned_faults.clear)
         for exc, status in (
             (TimeoutError(), "timeout"),
             (EOFError(), "crash"),
             (RuntimeError("boom"), "error"),
         ):
-            _, outcome = self._submit_with_fault(exc)
+            with self.assertLogs(tunableop.log, level="WARNING") as logs:
+                _, outcome = self._submit_with_fault(exc)
             self.assertEqual(outcome.status, status)
             self.assertIsNone(outcome.time)
-
-    def test_a_fault_warns_once_then_drops_to_debug(self):
-        # A fault that repeats for every GEMM would otherwise leave tune mode
-        # recording nothing with no sign of it at the default log level.
-        tunableop._fault_warned = False
-        self.addCleanup(setattr, tunableop, "_fault_warned", False)
-        with self.assertLogs(tunableop.log, level="WARNING"):
-            self._submit_with_fault(RuntimeError("boom"))
-        with self.assertNoLogs(tunableop.log, level="WARNING"):
-            self._submit_with_fault(RuntimeError("boom"))
+            self.assertIn(status, "".join(logs.output))
+            # Warned once per kind; a repeat drops to debug.
+            with self.assertNoLogs(tunableop.log, level="WARNING"):
+                self._submit_with_fault(exc)
 
     def test_job_raised_pipe_exception_is_an_error_not_a_timeout(self):
         # The discriminator is running, which a real pipe fault clears and a
