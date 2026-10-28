@@ -9792,6 +9792,26 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn("torch.cuda.init()", message)
         self.assertNotIn("set_python_module", message)
 
+    def test_an_op_a_torch_function_defines_is_reported_with_its_setup(self):
+        from torch._precompile import _custom_op_module, _custom_op_modules
+
+        name = f"semi_structured::precompile_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(name, mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        self.addCleanup(op._lib._destroy)
+        # As cusparselt_mm, defined inside a function of a module `import torch` loads.
+        op._init_fn.__module__ = "torch.sparse.semi_structured"
+        self.assertEqual(_custom_op_module(name, ""), "torch.sparse.semi_structured")
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules([(name, "")]), ())
+        (message,) = logs.output
+        self.assertIn(name, message)
+        self.assertIn("_ensure_cusparselt_mm_registered()", message)
+        self.assertNotIn("set_python_module", message)
+
     def test_a_prim_a_lazy_module_defines_is_imported_and_checked(self):
         from torch._functorch._aot_autograd.codegen import PySourceBuilder
         from torch._precompile import (
