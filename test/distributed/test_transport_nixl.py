@@ -6,6 +6,7 @@ import json
 import threading
 import weakref
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -651,6 +652,46 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             first.close()
         self.assertEqual(agent.registrations, [])
         self.assertEqual(calls, 3)
+
+    @parametrize("state", ["DONE", "ERR"])
+    def test_completed_work_does_not_require_native_lock(self, state):
+        first, second, source, remote = self.registered_pair()
+        with patch.object(first._agent, "transfer_state", state):
+            work = first.write(source.to_view(), remote, async_op=True)
+            self.assertTrue(work.is_completed())
+        future = work.get_future()
+        error = work.exception()
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                locked.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(locked.wait(5))
+            self.assertTrue(work.is_completed())
+            self.assertEqual(work.is_success(), state == "DONE")
+            self.assertIs(work.exception(), error)
+            self.assertIs(work.get_future(), future)
+            self.assertTrue(future.done())
+            if state == "DONE":
+                self.assertTrue(work.wait(timedelta(milliseconds=1)))
+                self.assertEqual(future.wait(), [])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    work.wait(timedelta(milliseconds=1))
+                with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed: ERR"):
+                    future.wait()
+            self.assertEqual(first._pending, {})
+            self.assertEqual(first._transfers, {})
+            self.assertEqual(first._agent.released, 1)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
 
     def test_async_poll_does_not_block_on_native_lock(self):
         first, second, source, remote = self.registered_pair()
