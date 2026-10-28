@@ -1,10 +1,12 @@
 """Behavior of the trusted plan-to-effects mapping for pi distributed triage."""
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from apply_distributed_plan import plan_effects
+from apply_distributed_plan import DECISION_STATUS, main, plan_effects
 from labels import DISTRIBUTED_SKILL, load_labels, load_templates
 
 
@@ -32,6 +34,71 @@ def effects(decision, labels=(), templates=(), existing=ROUTED, bot_comments=())
 
 
 class DistributedPlanEffectsTest(unittest.TestCase):
+    def test_decision_requires_its_status_even_with_missing_or_conflicting_labels(self):
+        for decision, required in (
+            ("low_confidence", "triage review"),
+            ("not_distributed", "triage review"),
+            ("needs_reproduction", "needs reproduction"),
+            ("high_priority", "triage review"),
+        ):
+            for labels in (
+                [],
+                ["oncall: distributed infra", "triaged"],
+                ["triage-review"],
+            ):
+                with self.subTest(decision=decision, labels=labels):
+                    result = effects(decision, labels)
+                    self.assertIn(required, result.add_labels)
+                    self.assertNotIn("triaged", result.add_labels)
+                    self.assertEqual(
+                        MARKER in result.add_labels, decision != "high_priority"
+                    )
+                    self.assertFalse(result.close)
+
+    def test_confident_decisions_complete_only_valid_classifications(self):
+        for decision in ("route", "classify", "already_classified"):
+            with self.subTest(decision=decision):
+                complete = effects(
+                    decision, ["oncall: distributed parallelisms", "module: fsdp"]
+                )
+                self.assertIn("triaged", complete.add_labels)
+                incomplete = effects(decision, ["oncall: distributed parallelisms"])
+                self.assertNotIn("triaged", incomplete.add_labels)
+                self.assertIn("triage review", incomplete.add_labels)
+                missing_queue = effects(decision, ["module: fsdp"])
+                self.assertNotIn("triaged", missing_queue.add_labels)
+                self.assertIn("triage review", missing_queue.add_labels)
+
+    def test_existing_triaged_does_not_hide_pending_outcome(self):
+        for decision, outcome in (
+            ("low_confidence", "review"),
+            ("needs_reproduction", "waiting_on_reporter"),
+        ):
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as temp:
+                plan = Path(temp) / "plan.json"
+                plan.write_text(json.dumps({"decision": decision, "labels": []}))
+                issue = {"labels": [{"name": label} for label in ROUTED | {"triaged"}]}
+                with (
+                    patch(
+                        "sys.argv",
+                        [
+                            "apply_distributed_plan",
+                            "pytorch/ciforge",
+                            "123",
+                            str(plan),
+                            "--apply",
+                        ],
+                    ),
+                    patch(
+                        "apply_distributed_plan.fetch_issue", return_value=(issue, [])
+                    ),
+                    patch("apply_distributed_plan.apply_effects") as apply,
+                    patch("apply_distributed_plan.publish") as publish,
+                ):
+                    self.assertEqual(main(), 0)
+                    self.assertEqual(apply.call_count, 1)
+                    self.assertIn(f"→ {outcome}", publish.call_args.args[0])
+
     def test_classification_adds_sub_queue_and_modules(self):
         result = effects(
             "classify",
@@ -58,15 +125,14 @@ class DistributedPlanEffectsTest(unittest.TestCase):
         result = effects(
             "classify", ["module: fsdp", "high priority", "module: inductor"]
         )
-        self.assertEqual(result.add_labels, ["module: fsdp", MARKER])
+        self.assertEqual(result.add_labels, ["module: fsdp", "triage review", MARKER])
 
     def test_an_existing_sub_queue_is_kept(self):
         existing = ROUTED | {"oncall: distributed infra"}
         result = effects(
             "route", ["oncall: distributed checkpointing"], existing=existing
         )
-        # Only the marker, so the daily sweep does not re-dispatch the issue.
-        self.assertEqual(result.add_labels, [MARKER])
+        self.assertEqual(result.add_labels, ["triaged", MARKER])
 
     def test_infra_and_checkpointing_routes_can_complete_without_modules(self):
         for queue in ("oncall: distributed infra", "oncall: distributed checkpointing"):
@@ -167,7 +233,7 @@ class DistributedPlanEffectsTest(unittest.TestCase):
 
     def test_schema_matches_the_templates_and_the_high_priority_decision(self):
         self.assertEqual(set(SCHEMA["templates"]["items"]["enum"]), set(TEMPLATES))
-        self.assertIn("high_priority", SCHEMA["decision"]["enum"])
+        self.assertEqual(set(DECISION_STATUS), set(SCHEMA["decision"]["enum"]))
 
     def test_nothing_is_ever_closed(self):
         self.assertFalse(

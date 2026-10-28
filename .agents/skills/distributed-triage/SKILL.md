@@ -46,7 +46,9 @@ the `templates` to post, and your `reasoning`. The apply step enforces it:
 
 - Labels are only added, never removed, and only from [distributed-labels.json](distributed-labels.json).
 - An issue keeps at most one sub-oncall label: an existing one is never replaced, and a plan with two goes to `triage review`.
-- `triaged` is dropped whenever the issue would also carry `triage review` or `needs reproduction`.
+- Status comes from `decision`: uncertain/non-distributed/high-priority decisions require `triage review`, and `needs_reproduction` requires `needs reproduction`.
+- Confident decisions add `triaged` only with a valid sub-oncall (and a distributed module for parallelisms). Incomplete classifications go to `triage review`.
+- The apply step never adds `triaged` alongside `triage review` or `needs reproduction`; existing human labels are preserved.
 - `templates` are [templates.json](templates.json) keys posted verbatim; a template the bot already posted is not posted again.
 - `ptd-bot-triaged` is added automatically (except for `high_priority`); do not list it.
 - Nothing is ever closed.

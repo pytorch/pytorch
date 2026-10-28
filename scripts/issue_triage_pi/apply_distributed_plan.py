@@ -41,6 +41,15 @@ from labels import (
 
 TRIAGED = "triaged"
 NEEDS_REPRODUCTION = "needs reproduction"
+DECISION_STATUS = {
+    "already_classified": TRIAGED,
+    "route": TRIAGED,
+    "classify": TRIAGED,
+    "low_confidence": TRIAGE_REVIEW,
+    "not_distributed": TRIAGE_REVIEW,
+    "high_priority": TRIAGE_REVIEW,
+    "needs_reproduction": NEEDS_REPRODUCTION,
+}
 
 
 def plan_effects(
@@ -85,13 +94,17 @@ def plan_effects(
             TRIAGE_REVIEW
         ]
 
-    if decision == "high_priority" and TRIAGE_REVIEW not in labels:
-        labels.append(TRIAGE_REVIEW)
+    # Status comes from the decision; model-suggested labels cannot override it.
+    required_status = DECISION_STATUS[decision]
+    if required_status != TRIAGED:
+        labels = [label for label in labels if label != TRIAGED]
+    if required_status not in labels:
+        labels.append(required_status)
     # Performance describes the issue type, not a distributed module.
     if (
         decision == "classify"
         or (
-            "triaged" in labels
+            TRIAGED in labels
             and "oncall: distributed parallelisms" in existing_labels | set(labels)
         )
     ) and not any(
@@ -112,7 +125,7 @@ def plan_effects(
         effects.notes.append("no allowlisted sub-queue; flagging for review")
         labels = [label for label in labels if label != TRIAGED] + [TRIAGE_REVIEW]
 
-    effects.comment, posted = template_comment(
+    effects.comment, _ = template_comment(
         list(dict.fromkeys(plan.get("templates", []))),
         templates,
         bot_comments,
@@ -155,12 +168,12 @@ def main() -> int:
         apply_effects(args.repo, args.issue, effects)
 
     labels_after = existing | set(effects.add_labels)
-    if TRIAGED in labels_after:
-        outcome = "triaged"
-    elif TRIAGE_REVIEW in labels_after:
+    if TRIAGE_REVIEW in labels_after:
         outcome = "review"
     elif NEEDS_REPRODUCTION in labels_after:
         outcome = "waiting_on_reporter"
+    elif TRIAGED in labels_after:
+        outcome = "triaged"
     elif any(is_sub_queue(label) for label in labels_after):
         outcome = "routed"
     else:
