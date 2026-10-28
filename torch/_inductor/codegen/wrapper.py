@@ -3617,8 +3617,9 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-        else:
-            self.header.splice(kernel_defs)
+            if V.graph.cpp_wrapper:
+                return
+        self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
         if config.profile_bandwidth:
