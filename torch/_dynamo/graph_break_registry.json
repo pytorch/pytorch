@@ -2698,6 +2698,25 @@
       "Hints": []
     }
   ],
+  "GB3795": [
+    {
+      "Gb_type": "unsupported torch._library.cutedsl.wrap_cutedsl call",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) where host_fn is a @cute.jit function and mutates_args is a constant.",
+      "Hints": [
+        "Pass a @cute.jit function and a constant mutates_args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9356": [
+    {
+      "Gb_type": "CuTeDSL kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Encountered CuTeDSL kernel unsupported feature: {msg}",
+      "Hints": []
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
