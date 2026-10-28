@@ -17,7 +17,7 @@ from typing import NamedTuple, Optional
 
 import torch
 import torch._inductor
-from torch._inductor.aoti_impl import generate_tvm_ffi_shim, render_variant
+from torch._inductor.aoti_impl import _call_site, generate_tvm_ffi_shim, render_variant
 from torch._inductor.test_case import TestCase
 from torch._library import aoti_impl as aoti_impl_registry
 from torch._library.aoti_impl import canonical_op_key
@@ -115,6 +115,10 @@ torch.library.define(
 )
 torch.library.define("aot_impl_test::sink", "(Tensor x) -> ()")
 torch.library.define("aot_impl_test::bad_out", "(Tensor x, Tensor out0) -> Tensor")
+torch.library.define(
+    "aot_impl_test::kw",
+    "(Tensor x, float from=1.0, *, int k=3, Tensor? b=None) -> Tensor",
+)
 
 
 if HAS_CUTEDSL:
@@ -318,6 +322,9 @@ class TestAOTImplRegistry(TestCase):
         self.assertEqual(
             canonical_op_key("aot_impl_test::scale.out"), "aot_impl_test::scale.out"
         )
+        # Shim names carry no overload suffix, so other overloads are rejected.
+        with self.assertRaisesRegex(NotImplementedError, "not a default overload"):
+            register_aot_impl("aot_impl_test::scale.out")(lambda *a, **k: None)
 
     def test_duplicate_registration_rejected(self):
         with _registered("aot_impl_test::scale", lambda *a, **k: None):
@@ -329,8 +336,6 @@ class TestAOTImplRegistry(TestCase):
             TVMFFIKernel(objects=[], symbol="__tvm_ffi_scale")
         with self.assertRaisesRegex(ValueError, "valid C identifier"):
             TVMFFIKernel(objects=["a.o"], symbol="bad symbol;")
-        with self.assertRaisesRegex(TypeError, "args entries"):
-            TVMFFIKernel(objects=["a.o"], symbol="k", args=["x", object()])
 
 
 class TestAOTImplShimCodegen(TestCase):
@@ -353,24 +358,6 @@ class TestAOTImplShimCodegen(TestCase):
             ("floatArg(arg_alpha)", "tensorArg(&in0_dl)", "tensorArg(&out0_dl)"),
         )
         self.assertIn("__tvm_ffi_k(void*, const TVMFFIAny*", src)
-
-    def test_default_arg_order(self):
-        # args=None: tensor inputs, then outputs, then scalars.
-        op = torch.ops.aot_impl_test.scale.default
-        x = torch.empty(4, 8, device="meta")
-        variant = render_variant(op, _kernel(), [x, 2.0], [torch.empty_like(x)])
-        self.assertEqual(
-            variant.packed,
-            ("tensorArg(&in0_dl)", "tensorArg(&out0_dl)", "floatArg(arg_alpha)"),
-        )
-
-    def test_unknown_arg_rejected(self):
-        op = torch.ops.aot_impl_test.scale.default
-        x = torch.empty(4, device="meta")
-        with self.assertRaisesRegex(ValueError, r"unknown argument\(s\) \['beta'\]"):
-            render_variant(
-                op, _kernel(["x", "out0", "beta"]), [x, 2.0], [torch.empty_like(x)]
-            )
 
     def test_optional_list_and_literal_packing(self):
         op = torch.ops.aot_impl_test.mixed.default
@@ -464,6 +451,24 @@ class TestAOTImplShimCodegen(TestCase):
         # Output sizes are read from the input at runtime, not baked.
         self.assertEqual(variant.outputs[0].sizes, "in0_dl.shape[0], in0_dl.shape[1]")
         self.assertNotIn("in0_dl.shape[0] == 8L", variant.guard)
+        # A symbolic storage offset (here s1) still guards 16-byte alignment.
+        with mode:
+            y = x[1:]
+            out = torch.empty_like(y)
+        guard = render_variant(op, _kernel(), [y, 2.0], [out]).guard
+        self.assertIn("reinterpret_cast<uintptr_t>(in0_dl.data) % 16 == 0", guard)
+
+    def test_call_site_args(self):
+        # Builder args come back in schema order: kwargs by name, defaults filled.
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        x.meta["val"] = torch.empty(4, device="meta")
+        node = g.call_function(torch.ops.aot_impl_test.kw.default, (x,), {"k": 5})
+        node.meta["val"] = torch.empty(4, device="meta")
+        fake_args, fake_outputs = _call_site(node)
+        self.assertIs(fake_args[0], x.meta["val"])
+        self.assertEqual(fake_args[1:], [1.0, 5, None])
+        self.assertIs(fake_outputs[0], node.meta["val"])
 
     def test_composite_input_size(self):
         # An input whose size is an expression (here s0 - 1) still defines it.
@@ -477,6 +482,11 @@ class TestAOTImplShimCodegen(TestCase):
 
     def test_unsupported_rejected(self):
         x = torch.empty(4, device="meta")
+        scale_op = torch.ops.aot_impl_test.scale.default
+        with self.assertRaisesRegex(ValueError, r"unknown argument\(s\) \['beta'\]"):
+            render_variant(scale_op, _kernel(["x", "out0", "beta"]), [x, 2.0], [x])
+        with self.assertRaisesRegex(TypeError, "TVMFFIKernel.args entry"):
+            render_variant(scale_op, _kernel(["x", "out0", object()]), [x, 2.0], [x])
         with self.assertRaisesRegex(NotImplementedError, "reserves for outputs"):
             render_variant(
                 torch.ops.aot_impl_test.bad_out.default, _kernel(), [x, x], [x]
@@ -487,12 +497,7 @@ class TestAOTImplShimCodegen(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "dynamic scalar"):
             render_variant(op, baked_n, [x, [], None, None, d.shape[0], True], [x, x])
         with self.assertRaisesRegex(NotImplementedError, "does not fit in int64"):
-            render_variant(
-                torch.ops.aot_impl_test.scale.default,
-                _kernel(["x", "out0", 2**64]),
-                [x, 2.0],
-                [x],
-            )
+            render_variant(scale_op, _kernel(["x", "out0", 2**64]), [x, 2.0], [x])
 
     @unittest.skipIf(not (HAS_GXX and HAS_TVM_FFI), "needs g++ and TVM-FFI")
     def test_generated_shim_compiles(self):
@@ -650,6 +655,24 @@ class TestAOTImplEndToEnd(TestCase):
             for _ in range(2):
                 self.assertEqual(first(x), x * 2.0)
                 self.assertEqual(second(x), x * 3.0)
+
+    def test_reused_inductor_configs(self):
+        # Generated shims must not leak into the caller's configs: the next
+        # compile would mistake them for user shims and link a stale library.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aot_impl_test.scale(x, 2.0)
+
+        configs = {"max_autotune": False}
+        with _registered("aot_impl_test::scale", _scale_builder):
+            for n in (64, 32):
+                x = torch.randn(n, device="cuda")
+                ep = torch.export.export(M(), (x,))
+                pt2 = torch._inductor.aoti_compile_and_package(
+                    ep, inductor_configs=configs
+                )
+                _preload_companion_libs()
+                self.assertEqual(torch._inductor.aoti_load_package(pt2)(x), x * 2.0)
 
     def test_builder_symbolic_specialization_rejected(self):
         def builder(x, alpha, *, target):

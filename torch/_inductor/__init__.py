@@ -154,7 +154,7 @@ def aoti_compile_and_package(
     # emits a direct shim call instead of the proxy executor.
     from .aoti_impl import resolve_aot_impls
 
-    resolve_aot_impls(exported_program, inductor_configs)
+    inductor_configs = resolve_aot_impls(exported_program, inductor_configs)
 
     # a wrapper around aoti_compile_and_package_inner.
     return aot_inductor_minifier_wrapper(

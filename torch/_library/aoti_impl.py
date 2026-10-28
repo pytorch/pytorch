@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Union
 
 from torch._ops import OpOverload
+from torch.utils._exposed_in import exposed_in
 
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
 ]
 
 
+@exposed_in("torch.library")
 @dataclass(frozen=True)
 class AOTTarget:
     """Compile target handed to a ``register_aot_impl`` builder.
@@ -44,9 +46,9 @@ class AOTTarget:
     arch: str  # e.g. "sm_90"
     workdir: Path
     name: str
-    device: str = "cuda"
 
 
+@exposed_in("torch.library")
 @dataclass(frozen=True)
 class TVMFFIKernel:
     """A kernel compiled to the TVM-FFI ABI (what CuTeDSL ``export_to_c`` emits).
@@ -72,21 +74,14 @@ class TVMFFIKernel:
     link_libs: list[Union[str, Path]] = field(default_factory=list)
 
     def __post_init__(self):
+        # Without objects the link still succeeds (shared libraries may have
+        # undefined symbols) and the failure only shows up at load time.
         if not self.objects:
             raise ValueError("TVMFFIKernel requires at least one object file")
-        for o in self.objects:
-            if not isinstance(o, (str, Path)):
-                raise TypeError(f"TVMFFIKernel objects must be str/Path, got {o!r}")
+        # The symbol is pasted into generated C++.
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.symbol or ""):
             raise ValueError(
                 f"TVMFFIKernel symbol must be a valid C identifier, got {self.symbol!r}"
-            )
-        if self.args is not None and not all(
-            a is None or isinstance(a, (str, bool, int, float)) for a in self.args
-        ):
-            raise TypeError(
-                "TVMFFIKernel args entries must be argument names (str) or "
-                "None / bool / int / float literals"
             )
 
 
@@ -94,39 +89,28 @@ _AOT_IMPLS: dict[str, Callable[..., Any]] = {}
 
 
 def canonical_op_key(op: Any) -> str:
-    """Canonical registry key for an op: ``ns::op`` for the default overload,
-    ``ns::op.<overload>`` otherwise.
-
-    The same canonicalization is used for string registration
-    (``"ns::op"``, ``"ns::op.default"``, ``"ns::op.foo"``), ``OpOverload``
-    (whose ``name()`` keeps the overload suffix whenever it is non-empty),
-    and ``CustomOpDef`` (always the default overload), so a registered
-    builder can never silently miss because of an overload spelling.
-    """
+    """Registry key: ``ns::op`` for an op's default overload (however it is
+    spelled: ``"ns::op"``, ``"ns::op.default"``, an ``OpOverload`` or a
+    ``CustomOpDef``), ``ns::op.<overload>`` for any other overload."""
     if isinstance(op, str):
         name = op
-        if "::" in name:
-            ns, rest = name.split("::", 1)
-            base, _, suffix = rest.partition(".")
-            if suffix in ("", "default"):
-                return f"{ns}::{base}"
-            return f"{ns}::{base}.{suffix}"
-        return name
-    if isinstance(op, OpOverload):
-        schema = op._schema
-        overload = schema.overload_name
-        if overload in ("", "default"):
-            return schema.name
-        return f"{schema.name}.{overload}"
-    # CustomOpDef
-    qualname = getattr(op, "_qualname", None)
-    if isinstance(qualname, str):
-        return qualname
-    raise TypeError(f"Cannot identify op from {type(op)}")
+    elif isinstance(op, OpOverload):
+        name = op.name()
+    elif isinstance(getattr(op, "_qualname", None), str):  # CustomOpDef
+        name = op._qualname
+    else:
+        raise TypeError(f"Cannot identify op from {type(op)}")
+    return name.removesuffix(".default")
 
 
+@exposed_in("torch.library")
 def register_aot_impl(op: Any, func: Callable[..., Any] | None = None, /):
-    """Register an AOTI builder for a custom op.
+    """Register an AOTI builder for a custom op (prototype).
+
+    The builder receives every schema argument positionally (keyword-only
+    ones included, defaults filled in), tensors as FakeTensors, plus
+    ``target=`` (an :class:`AOTTarget`), and returns a :class:`TVMFFIKernel`.
+    Only an op's default overload can be registered.
 
     Usage::
 
@@ -138,6 +122,12 @@ def register_aot_impl(op: Any, func: Callable[..., Any] | None = None, /):
 
     def _register(fn: Callable[..., Any]) -> Callable[..., Any]:
         key = canonical_op_key(op)
+        if "." in key.partition("::")[2]:
+            raise NotImplementedError(
+                f"register_aot_impl: {key} is not a default overload; the AOTI "
+                "wrapper names C shims without an overload suffix, so only "
+                "default overloads are supported"
+            )
         if key in _AOT_IMPLS:
             raise RuntimeError(f"register_aot_impl: {key} already has an AOT impl")
         _AOT_IMPLS[key] = fn
