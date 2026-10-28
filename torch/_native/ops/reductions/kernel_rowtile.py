@@ -648,6 +648,9 @@ def itree_combine_plan(
         combine_weights = arch.combine_weights
     if arch.combine_unroll < 0:
         raise ValueError("combine_unroll must be nonnegative")
+    if arch.combine_async and arch.combine_rpb > WARP:
+        # The async copy maps one warp's lanes onto a row's partials.
+        raise ValueError("combine_async requires combine_rpb <= WARP")
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb

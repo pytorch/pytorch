@@ -140,7 +140,6 @@ def _base_cond(self: torch.Tensor, dim: _Dim, key: str) -> bool:
         not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
         and self.dtype in _env(key).inputs
-        and cap.on_current_device(self)
         and not self.is_neg()
         and not self.is_conj()
         and self.const_data_ptr() % 16 == 0  # type: ignore[attr-defined]
@@ -244,4 +243,5 @@ def register_reduction_overrides() -> None:
         ("prod.dim_int", _make_dtype_cond("prod"), _prod_impl),
     )
     for op, cond, impl in overrides:
+        impl = cap.cuda_device_guard(impl)
         cu.register_op_override("aten", op, "CUDA", cond=cond, impl=impl)
