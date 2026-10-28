@@ -9530,6 +9530,41 @@ class TestPrecompileCustomOpModules(TestCase):
         with self.assertRaisesRegex(PrecompileError, f"{ns}::inserted"):
             load(artifact, cache)
 
+    @skipIfCrossRef
+    def test_load_imports_the_torch_module_defining_a_library_op(self):
+        # torch.ao.quantization.fx._decomposed defines quantized_decomposed with
+        # Library.define, and a plain `import torch` does not import it.
+        module = "torch.ao.quantization.fx._decomposed"
+        script = textwrap.dedent(
+            f"""
+            import sys
+            import torch
+            from torch.compiler.precompile import capture, load, MakeFxTracer
+            phase, artifact, cache = sys.argv[1:]
+            x = torch.linspace(-20, 20, 8)
+            if phase == "capture":
+                import {module}
+                def fn(x):
+                    q = torch.ops.quantized_decomposed.quantize_per_tensor.default
+                    return q(x, 0.1, 0, -128, 127, torch.int8)
+                with capture(fn, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
+                    torch.save(cap(x), artifact + ".pt")
+            else:
+                assert "{module}" not in sys.modules
+                torch.testing.assert_close(load(artifact, cache)(x), torch.load(artifact + ".pt"))
+            print("ok", phase)
+            """
+        )
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
+        for phase in ("capture", "load"):
+            cmd = [sys.executable, "-c", script, phase, *paths]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn(f"ok {phase}", out.stdout)
+        with open(paths[0]) as f:
+            self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
+
 
 def _no_fake_op_fn(x):
     # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
