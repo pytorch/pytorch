@@ -637,30 +637,32 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-// CUDA graph capture for generated code. These wrap at::cuda::MemPool and
-// at::cuda::CUDAGraph, so a capture allocates from a private pool, and random
-// number generators advance on every replay.
-//
-// A graph handle captures once: after capture_end it can only be replayed,
-// if it was instantiated, and deleted. Deleting it frees the graph and its
-// reference to the pool's memory.
-//
-// A pool and the graphs captured into it must be used by one thread at a time.
-// AOTI runs each inference thread on its own model instance and stream, and
-// each instance has its own pool and graphs; thread-local capture mode lets
-// other threads keep launching work while one captures. A pool takes one
-// capture at a time, and graphs captured into it one after another share its
-// memory. Once every graph captured into a pool is deleted, the pool can't take
-// another capture. A graph whose capture_begin failed counts too, unless the
-// call was rejected for its arguments: a null handle, a blocking stream or one
-// that is already capturing, a pool that is already capturing, or a graph that
-// already captured.
-//
-// Graphs captured into one pool reuse each other's memory: a graph captured
-// later can place its outputs in memory an earlier graph uses for temporaries.
-// So replays on different streams must be ordered, and a replay's outputs must
-// be used or copied before another graph in the pool replays, unless the
-// graphs are replayed in the order they were captured.
+// CUDA graph capture. These are thin wrappers over at::cuda::MemPool and
+// at::cuda::CUDAGraph with the same contract as that C++ API: unlike
+// torch.cuda.graph, they don't warm up, synchronize or manage tensor
+// lifetimes. capture_begin and capture_end work on the current CUDA stream
+// (see aoti_torch_create_cuda_stream_guard), which must belong to the pool's
+// device, and replay on the current stream of the capture's device. Captures
+// record in thread-local mode, and random number generators advance on every
+// replay. The caller must:
+// - capture on a stream created with cudaStreamNonBlocking: while a blocking
+//   stream captures, work any thread launches on the legacy default stream
+//   invalidates the capture;
+// - end every capture with capture_end, on the thread and stream that began
+//   it, before deleting its graph, also when the captured work failed;
+//   capture_end ends the capture even when it returns an error;
+// - use a pool and its graphs from one thread at a time, capture into a pool
+//   one graph at a time, and use a new pool once every graph that began a
+//   capture into a pool, successfully or not, is deleted;
+// - order replays on different streams, and use or copy a replay's outputs
+//   before another graph in the pool replays, unless the graphs replay in the
+//   order they were captured: a graph captured later can place its outputs in
+//   memory an earlier graph uses for temporaries;
+// - order work queued on the capture stream before capture_begin ahead of a
+//   replay on another stream, and wait for a graph's replays to finish before
+//   deleting it, since the graph's random number state lives in memory from
+//   the capture stream.
+// A graph captures once; capture_end instantiates it for replay.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 
@@ -680,36 +682,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_graph(
     CUDAGraphHandle* ret_graph // returns new reference
 );
 
-// Deleting a graph that is being captured abandons the capture: the stream
-// stops capturing and the graph isn't instantiated. The graph is deleted even
-// if ending the capture reports an error, e.g. for an invalidated capture. On
-// another thread than the capture's, it fails and the handle stays valid.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
 
-// Starts capturing the work enqueued on `stream`, which must belong to the
-// pool's device and be created with cudaStreamNonBlocking, in thread-local
-// capture mode. While a blocking stream captures, work that other threads
-// launch on the legacy default stream would invalidate the capture, so a
-// blocking stream is rejected. Memory allocated on `stream`
-// during the capture comes from `pool`. The capture must end on the thread
-// that began it; capture_end on another thread fails and leaves the capture
-// running.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
-    CUDAMemPoolHandle pool,
-    void* stream);
+    CUDAMemPoolHandle pool);
 
-// Ends the capture and instantiates the graph for replay. The stream stops
-// capturing even when this returns an error, e.g. for an invalidated capture.
-// To abandon a capture, e.g. because the captured work failed, delete the
-// graph instead.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
 
-// `stream` must belong to the device the graph was captured on.
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cuda_graph_replay(CUDAGraphHandle graph, void* stream);
+aoti_torch_cuda_graph_replay(CUDAGraphHandle graph);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #endif // USE_CUDA

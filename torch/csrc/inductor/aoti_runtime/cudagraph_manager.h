@@ -61,7 +61,7 @@ class CudaGraphManager {
       : device_index_(device_index), options_(checked(options)) {
     AOTICudaGuard device_guard(device_index_);
     // Owned rather than taken from the stream pool, so no other thread can
-    // enqueue work into a capture. Non-blocking, as capture_begin requires:
+    // enqueue work into a capture. Non-blocking, as the shim requires:
     // while a blocking stream captures, work that other threads launch on the
     // legacy default stream would invalidate the capture.
     AOTI_RUNTIME_CUDA_CHECK(
@@ -398,8 +398,9 @@ class CudaGraphManager {
       // ATen allocates on the current stream, so this puts the input buffers
       // below, allocated during the capture, into the capture's pool.
       AOTICudaStreamGuard stream_guard(capture_stream_, device_index_);
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_capture_begin(
-          graph_handle, pool_.get(), capture_stream_));
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_cuda_graph_capture_begin(graph_handle, pool_.get()));
+      bool capturing = true;
       try {
         std::vector<AtenTensorHandle> input_handles;
         input_handles.reserve(num_inputs);
@@ -426,12 +427,15 @@ class CudaGraphManager {
           input_handles.push_back(view);
         }
         fn(input_handles.data(), raw_outputs.data(), capture_stream_);
+        capturing = false;
         AOTI_TORCH_ERROR_CODE_CHECK(
             aoti_torch_cuda_graph_capture_end(graph_handle));
       } catch (...) {
-        // Deleting the graph abandons the capture if it is still running. The
-        // region's error explains the failure, so an error ending the capture
-        // adds nothing.
+        // A capture must end before its graph is deleted. The region's error
+        // explains the failure, so an error ending the capture adds nothing.
+        if (capturing) {
+          (void)aoti_torch_cuda_graph_capture_end(graph_handle);
+        }
         (void)aoti_torch_delete_cuda_graph(graph->graph.release());
         Graph discarded;
         steal_outputs(raw_outputs, discarded);
@@ -465,7 +469,7 @@ class CudaGraphManager {
         copy_input(graph, i, inputs[i]);
       }
       AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_cuda_graph_replay(graph.graph.get(), stream));
+          aoti_torch_cuda_graph_replay(graph.graph.get()));
       // Clones, so that later replays can't overwrite the outputs. Aliasing
       // between different outputs is not preserved.
       std::vector<RAIIAtenTensorHandle> clones;
