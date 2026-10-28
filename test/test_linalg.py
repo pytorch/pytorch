@@ -11110,6 +11110,44 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float)
+    def test_addmm_lt_follows_blas_backend_switch(self, device, dtype):
+        # The first addmm in a process ran under rocBLAS; switching to hipBLASLt afterwards must still route
+        # linear+bias through the Lt GemmAndBias path (#186873). Run in a fresh process so this addmm is the first.
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        script = textwrap.dedent(
+            f"""
+            import torch
+
+            x = torch.rand(4, 2, device={device!r}, dtype={dtype})
+            w = torch.rand(8, 2, device={device!r}, dtype={dtype})
+            bias = torch.rand(8, device={device!r}, dtype={dtype})
+            torch.backends.cuda.preferred_blas_library("cublas")
+            torch.nn.functional.linear(x, w, bias)
+
+            torch.backends.cuda.preferred_blas_library("cublaslt")
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.enable(True)
+            torch.nn.functional.linear(x, w, bias)
+            torch.cuda.tunable.enable(False)
+            for result in torch.cuda.tunable.get_results():
+                print(result[0])
+            """
+        )
+        # TunableOp writes its results file into the cwd at exit.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run([sys.executable, "-c", script], cwd=tmpdir, capture_output=True, text=True, check=True)
+        op_sigs = result.stdout.split()
+        self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
+
     @dtypes(torch.float)
     def test_mm_submatrix_leading_dim_alias_offline_tunableop(self, device, dtype):
         # Regression test for https://github.com/ROCm/TheRock/issues/5553
