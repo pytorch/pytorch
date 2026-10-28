@@ -4,17 +4,9 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._subclasses.fake_tensor
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-R = TypeVar("R")
 
 
 def is_traced(t: torch.Tensor) -> bool:
@@ -49,17 +41,3 @@ def device_ok(x: torch.Tensor, majors: tuple[int, ...]) -> bool:
     if x.device.type != "cuda" or torch.version.hip is not None:
         return False
     return _arch_ok(x.device.index, tuple(majors))
-
-
-def cuda_device_guard(fn: Callable[..., R]) -> Callable[..., R]:
-    """Run a CUDA override on its first tensor argument's device."""
-
-    @functools.wraps(fn)
-    def guarded(self: torch.Tensor, *args: Any, **kwargs: Any) -> R:
-        index = self.device.index
-        if index == torch.cuda.current_device():
-            return fn(self, *args, **kwargs)
-        with torch.cuda.device(index):
-            return fn(self, *args, **kwargs)
-
-    return guarded
