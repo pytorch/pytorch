@@ -131,7 +131,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::chrono::milliseconds& timeout);
 
   void barrier(const std::string& key, int64_t world_size) {
-    barrier(key, world_size, timeout_);
+    barrier(key, world_size, getTimeout());
   }
 
  protected:
