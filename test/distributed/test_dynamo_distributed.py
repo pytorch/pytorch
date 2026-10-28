@@ -1712,13 +1712,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             if self.rank != 0:
                 # test fails with NCCL timeout without this line
                 dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                    timedelta(seconds=sleep_time)
+                    timedelta(seconds=30)
                 )
 
             w = pg.allreduce(x)
             w.wait()
             torch.accelerator.synchronize(device)
-            dist.set_timeout(dist.default_pg_timeout, pg)
+            dist.set_timeout(dist.constants.default_pg_nccl_timeout, pg)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
