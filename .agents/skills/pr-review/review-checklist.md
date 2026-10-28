@@ -168,6 +168,12 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 
 - [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
 
+### CI Dependencies
+
+When a PR changes what Linux CI jobs install (`.ci/pytorch/`, `.github/workflows/`, `.github/actions/`, `.github/scripts/`):
+
+- [ ] **No package resolution at test time** - PR adds a `pip install` (or `pip_install`, `uv pip install`, `conda install`, `pip install -e .` of a checked-out project, `pip install --upgrade pip`) that resolves packages from an index while a Linux build or test job runs, instead of adding them to the CI image via `.ci/docker/requirements-ci.txt` or a script under `.ci/docker/common/`. A test-time install picks up whatever was released that day, so CI can break with no PyTorch commit to blame or revert. Image contents change only when `.ci/docker` changes, and ciflow/docker tests that image on the PR before it lands. Image requirements may float (a lower bound is fine); an exact `==` pin at the call site is not a substitute, because the package's own dependencies still resolve fresh. Exempt: installing wheels built earlier in the same workflow whose dependencies the image already has; deliberately testing an alternative version (e.g. the einops version matrix or `numpy_2_x`); jobs with no CI image (macOS, Windows, s390x). A job that needs its own venv should layer it over the image with `create_venv_over_image` (`.ci/pytorch/common_utils.sh`) rather than resolve everything again
+
 ### Miscellaneous
 
 - [ ] **torch._check** — PR uses `assert` or `if not cond: raise` in Python op implementations instead of `torch._check()` / `torch._check_is_size()` which work correctly with meta tensors and symbolic shapes
