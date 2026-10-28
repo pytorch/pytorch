@@ -444,27 +444,24 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("__setattr__", "__delattr__") and args[0].is_python_constant():
-            # func_setattro is PyObject_GenericSetAttr, so a read-only member
-            # like __closure__ raises AttributeError instead of being written
-            # into __dict__.
+            # func_setattro is PyObject_GenericSetAttr: tp_getset/tp_members entries
+            # are data descriptors, so their setter (value=None for delete) wins
+            # over the instance __dict__.
             # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
             attr = args[0].as_python_constant()
             entry = (
                 self.lookup_tp_getset_member(attr) if isinstance(attr, str) else None
             )
-            if entry is not None and entry.setter is readonly_setter:
-                readonly_setter(self, tx, None)
+            if entry is not None:
+                value = args[1] if name == "__setattr__" else None
+                result = entry.setter(self, tx, value)
+                if result is not None:
+                    return result
         if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
-                return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
         elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
-                return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
