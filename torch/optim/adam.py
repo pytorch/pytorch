@@ -702,9 +702,16 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(
-            device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
-        )
+        if beta1_dict is not None:
+            torch._foreach_lerp_(
+                device_exp_avgs,
+                device_grads,
+                [1 - beta1_dict[device]] * len(device_params),
+            )
+        else:
+            torch._foreach_lerp_(
+                device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
+            )
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
@@ -732,8 +739,19 @@ def _multi_tensor_adam(
         bias_correction2_sqrt: tuple[Tensor, ...] | list[Tensor]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
+            # Keep Tensor betas in tensor arguments to avoid scalar extraction during capture.
+            if beta1_dict is not None:
+                bias_correction1 = torch._foreach_pow(
+                    [beta1_dict[device]] * len(device_state_steps), device_state_steps
+                )
+            else:
+                bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
+            if isinstance(beta2, Tensor) and not beta2.is_cpu:
+                bias_correction2 = torch._foreach_pow(
+                    [beta2] * len(device_state_steps), device_state_steps
+                )
+            else:
+                bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
