@@ -580,7 +580,7 @@ def run_meta_crossref(
             flat_meta_args, spec = tree_flatten(meta_args[1])
             flat_new_args = []
             for a, ma in zip(flat_args, flat_meta_args):
-                flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.int8, torch.bool] else ma)
+                flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.uint8, torch.bool] else ma)
             meta_args = (meta_args[0], tree_unflatten(flat_new_args, spec))
         elif func in (torch.ops.aten.repeat_interleave.Tensor, torch.ops.aten.repeat_interleave.Tensor_out):
             if kwargs.get("output_size", None) is None:
@@ -592,7 +592,7 @@ def run_meta_crossref(
             # called on them
             indices = []
             for meta_index, real_index in zip(meta_args[1], args[1]):
-                if meta_index is not None and meta_index.dtype in [torch.int8, torch.bool]:
+                if meta_index is not None and meta_index.dtype in [torch.uint8, torch.bool]:
                     indices.append(real_index)
                 else:
                     indices.append(meta_index)
