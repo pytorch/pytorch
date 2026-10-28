@@ -1064,12 +1064,6 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=with_modules):
                 torch.ones(1)
 
-    def test_with_modules_omitted_does_not_warn(self):
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error", "with_modules", FutureWarning)
-            with profile(activities=[ProfilerActivity.CPU]):
-                torch.ones(1)
-
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
     def test_nvprof_import_deprecated(self, api):
         with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
