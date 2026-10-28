@@ -214,9 +214,9 @@ class TuningProcess:
             # Some internal usages need a modified LD_LIBRARY_PATH.
             "LD_LIBRARY_PATH": get_ld_library_path(),
             # This will cause the subprocs to profile using the profiler.
-            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
-            if config.profile_bandwidth_with_do_bench_using_profiling
-            else "0",
+            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": (
+                "1" if config.profile_bandwidth_with_do_bench_using_profiling else "0"
+            ),
         }
         if self.device is not None:
             env[get_visible_devices_env_var()] = str(self.device)
@@ -774,32 +774,23 @@ class _TestTunableOpJob:
     def __init__(self, job: Any, record_path: str | None = None) -> None:
         self.job = job
         self.record_path = record_path
-        # submit() stamps these onto the object it is handed and reads them back,
-        # so the wrapper carries them and __call__ copies them onto the job.
-        self.device = 0
-        self.filename = ""
-        self.settings: dict[str, Any] = {}
 
     @property
     def bmreq(self) -> Any:
-        # submit() inspects the job's request to pick the device; the wrapper
-        # has to look like the job it stands in for.
+        # submit() reads the request to pick the device.
         return self.job.bmreq
 
-    def __call__(self) -> float:
+    def __call__(self, device: int, filename: str, settings: dict[str, Any]) -> float:
         import json
         from unittest import mock
 
-        self.job.device = self.device
-        self.job.filename = self.filename
-        self.job.settings = self.settings
         tunable = mock.MagicMock()
         with (
             mock.patch("torch.cuda.set_device"),
             mock.patch("torch.cuda.tunable", tunable),
             mock.patch("torch.cuda.empty_cache"),
         ):
-            result = self.job()
+            result = self.job(device, filename, settings)
         if self.record_path is not None:
             calls = [[n, list(a), k] for n, a, k in tunable.mock_calls]
             with open(self.record_path, "w") as f:
