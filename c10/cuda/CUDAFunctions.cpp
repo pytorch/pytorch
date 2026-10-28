@@ -76,7 +76,6 @@ int device_count_impl(bool fail_if_no_driver) {
           "CUDA with nvcc does not work well with ASAN and it's probably "
           "the reason. We will simply shut down CUDA support. If you "
           "would like to use GPUs, turn off ASAN.");
-      break;
 #endif // C10_ASAN_ENABLED
 #if defined(_WIN32) && CUDA_VERSION >= 13000
     // Workaround for CUDA-13.0 error handling on Windows, see
