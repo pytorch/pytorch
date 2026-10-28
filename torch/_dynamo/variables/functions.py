@@ -411,6 +411,7 @@ def _create_nested_fn(
     closure: tuple[CellType] | None,
     kwdefaults: dict[str, Any] | None,
     annotations: dict[str, Any] | None,
+    annotate: Callable[[int], dict[str, Any]] | None,
 ) -> types.FunctionType:
     from types import FunctionType
 
@@ -428,6 +429,9 @@ def _create_nested_fn(
             f"annotations must be None or a dict, got {type(annotations)}"
         )
     func.__annotations__ = annotations  # type: ignore[assignment]
+    if sys.version_info >= (3, 14):
+        # After __annotations__, whose assignment clears __annotate__.
+        func.__annotate__ = annotate  # type: ignore[attr-defined]
 
     return func
 
@@ -2316,7 +2320,9 @@ class ContextWrappedFunctionMixin(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return super().call_function(tx, args, kwargs)
+        # Call the wrapped VT, not this copy of it, so writes to the wrapped
+        # function's slots (e.g. __defaults__) after wrapping are seen.
+        return self.wrapped.call_function(tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.context))
@@ -2413,9 +2419,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         defaults: VariableTracker | None,
         kwdefaults: VariableTracker | None,
         closure: VariableTracker | None,
+        annotations: VariableTracker | None = None,
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn: VariableTracker | None = None,
+        annotate: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         if kwargs.get("mutation_type") is None:
@@ -2437,7 +2445,164 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.defaults = defaults
         self.kwdefaults = kwdefaults
         self.closure = closure
+        self.annotations = annotations
         self.wrapped_fn: VariableTracker | None = wrapped_fn
+        # func_annotate (3.14+); None is the NULL slot.
+        self.annotate = annotate
+
+    def _set_defaults(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_defaults accepts None as well as a tuple.
+        if (
+            value is not None
+            and not value.is_constant_match(None)
+            and not issubclass(maybe_get_python_type(value), tuple)
+        ):
+            raise_type_error(tx, "__defaults__ must be set to a tuple object")
+        # None and del both clear the slot; keep the field None, not a None VT.
+        if value is not None and value.is_constant_match(None):
+            value = None
+        self.defaults = value
+        return ConstantVariable.create(None)
+
+    def _set_kwdefaults(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_kwdefaults accepts None as well as a dict.
+        if (
+            value is not None
+            and not value.is_constant_match(None)
+            and not issubclass(maybe_get_python_type(value), dict)
+        ):
+            raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
+        # None and del both clear the slot; keep the field None, not a None VT.
+        if value is not None and value.is_constant_match(None):
+            value = None
+        self.kwdefaults = value
+        return ConstantVariable.create(None)
+
+    # No pre-existing object to write back to: reconstruct rebuilds the function
+    # from these fields via _create_nested_fn, so the field is the mutation record.
+    def _get_defaults(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        d = self.defaults
+        return d if d is not None else ConstantVariable.create(None)
+
+    def _get_kwdefaults(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        d = self.kwdefaults
+        return d if d is not None else ConstantVariable.create(None)
+
+    def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # func_get_annotations lazily creates and stores an empty dict. The dict
+        # is a fresh value (ValueMutationNew), so it must carry no source.
+        if (
+            sys.version_info >= (3, 14)
+            and self.annotations is None
+            and self.annotate is not None
+        ):
+            ann = self.annotate.call_function(tx, [ConstantVariable.create(1)], {})
+            if not issubclass(ann.python_type(), dict):
+                raise_type_error(
+                    tx,
+                    f"__annotate__ returned non-dict of type '{ann.python_type_name()}'",
+                )
+            self.annotations = ann
+        if self.annotations is None:
+            self.annotations = variables.ConstDictVariable(
+                {}, mutation_type=ValueMutationNew()
+            )
+        return self.annotations
+
+    def _set_annotations(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_annotations: deletion and None both clear the slot, so the
+        # next read lazily rebuilds an empty dict; any other non-dict is a
+        # TypeError.
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
+            raise_type_error(tx, "__annotations__ must be set to a dict object")
+        self.annotations = value
+        # function___annotations___set_impl also clears func_annotate.
+        self.annotate = None
+        return ConstantVariable.create(None)
+
+    def _get_type_params(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.TupleVariable([], mutation_type=ValueMutationNew())
+
+    def _get_annotate(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        a = self.annotate
+        return a if a is not None else ConstantVariable.create(None)
+
+    def _set_annotate(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # function___annotate___set_impl
+        from .object_protocol import pycallable_check
+
+        if value is None:
+            raise_type_error(tx, "__annotate__ cannot be deleted")
+        if value.is_constant_match(None):
+            self.annotate = None
+        elif pycallable_check(maybe_get_python_type(value)):
+            self.annotate = value
+            self.annotations = None
+        else:
+            raise_type_error(tx, "__annotate__ must be callable or None")
+        return ConstantVariable.create(None)
+
+    def _set_type_params(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: "VariableTracker | None",
+    ) -> None:
+        # func_set_type_params: del (NULL) is rejected too.
+        if value is None or not issubclass(maybe_get_python_type(value), tuple):
+            raise_type_error(tx, "__type_params__ must be set to a tuple")
+        store_attr_mutation(tx, self, "__type_params__", value)
+
+    def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        c = self.closure
+        return c if c is not None else ConstantVariable.create(None)
+
+    tp_members = {
+        "__doc__": Member(
+            getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
+            getset_set("__doc__"),
+        ),
+        "__module__": Member(
+            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
+            getset_set("__module__"),
+        ),
+        "__closure__": Member(_get_closure, readonly_setter),
+    }
+
+    tp_getset = {
+        "__defaults__": GetSet(_get_defaults, _set_defaults),
+        "__name__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_name(), "__name__"),
+            _set_name,
+        ),
+        "__qualname__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_qualname(), "__qualname__"),
+            _set_qualname,
+        ),
+        "__code__": GetSet(
+            getset_load_or_build(lambda vt: vt.get_code(), "__code__"),
+            unmodeled_setter,
+        ),
+        "__dict__": GetSet(
+            lambda s, tx: s.get_dict_vt(tx),
+            unmodeled_setter,
+        ),
+        "__kwdefaults__": GetSet(_get_kwdefaults, _set_kwdefaults),
+        "__annotations__": GetSet(_get_annotations, _set_annotations),
+        "__type_params__": GetSet(_get_type_params, _set_type_params),
+    }
+
+    if sys.version_info >= (3, 14):
+        tp_getset["__annotate__"] = GetSet(_get_annotate, _set_annotate)
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -2649,11 +2814,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         code = self.get_code()
+        defaults = tuple(self.defaults.items) if self.defaults else ()  # type: ignore[attr-defined]
+        # inspect.signature mis-binds more defaults than parameters; CPython
+        # only uses the last co_argcount of them.
+        defaults = defaults[max(0, len(defaults) - code.co_argcount) :]
         func = types.FunctionType(
             code,
             self.f_globals,
             self.fn_name.as_python_constant(),
-            tuple(self.defaults.items) if self.defaults else None,  # type: ignore[attr-defined]
+            defaults or None,
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
@@ -2709,7 +2878,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        codegen.extend_output(create_call_function(7, False))
+        if sys.version_info >= (3, 14) and self.annotate is not None:
+            codegen(self.annotate)
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
+        codegen.extend_output(create_call_function(8, False))
 
         if self.wrapped_fn:
             codegen.add_push_null(
@@ -2756,9 +2930,10 @@ class WrappedNestedUserFunctionVariable(
             wrapped.defaults,
             wrapped.kwdefaults,
             wrapped.closure,
-            wrapped.wrapped_fn,
+            wrapped.annotations,
+            wrapped_fn=wrapped.wrapped_fn,
         )
-        self.annotations = wrapped.annotations
+        self.annotate = wrapped.annotate
         self.wrapped = wrapped
         self.context = context
 
