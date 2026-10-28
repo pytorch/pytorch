@@ -65,6 +65,7 @@ from .base import (
     Member,
     Method,
     MutationType,
+    NO_SUCH_SUBOBJ,
     readonly_setter,
     ValueMutationNew,
     VariableTracker,
@@ -182,6 +183,9 @@ class BaseListVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def is_python_constant(self) -> bool:
+        return all(x.is_python_constant() for x in self.items)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         return VariableTracker.build(tx, self.debug_repr())
@@ -1697,6 +1701,9 @@ class DequeVariable(BaseListVariable):
             maxlen=self.maxlen.as_python_constant(),
         )
 
+    def is_python_constant(self) -> bool:
+        return super().is_python_constant() and self.maxlen.is_python_constant()
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
         codegen.add_push_null(
@@ -2817,6 +2824,14 @@ class SliceVariable(VariableTracker):
 
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
+
+    def is_python_constant(self) -> bool:
+        return all(x.is_python_constant() for x in self.items)
+
+    def get_real_python_backed_value(self) -> object:
+        if not self.is_python_constant():
+            return NO_SUCH_SUBOBJ
+        return self.as_python_constant()
 
     def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
         # PySlice_Unpack -> evaluate_slice_index: each non-None member is
