@@ -9540,17 +9540,28 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(_custom_op_modules(names), ())
         self.assertEqual(_custom_ops(names), ((f"{ns}::op", ""),))
 
+        # A module that imports but raises is collected like a missing one.
+        broken = f"precompile_broken_{uuid.uuid4().hex}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        with open(os.path.join(directory, broken + ".py"), "w") as f:
+            f.write("raise RuntimeError('half registered')\n")
+        self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
+        modules = (broken, "precompile_no_such_module")
+
         def run(ops):
             buf = PySourceBuilder()
-            _write_custom_op_imports(buf, ("precompile_no_such_module",), ops)
+            _write_custom_op_imports(buf, modules, ops)
             exec(buf.getvalue(), {})
 
-        run(((f"{ns}::op", ""),))
+        with self.assertWarnsRegex(UserWarning, rf"'{broken}' raised RuntimeError"):
+            run(((f"{ns}::op", ""),))
         with self.assertRaisesRegex(
             torch.compiler.PrecompileError,
             rf"{ns}::missing\.out'\]\..*'precompile_no_such_module'",
-        ):
+        ) as raised:
             run(((f"{ns}::op", ""), (f"{ns}::missing", "out")))
+        # Chained to the first module's error.
+        self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
         try:
@@ -9608,9 +9619,11 @@ class TestPrecompileCustomOpRecording(TestCase):
         module = "torch.distributed._ops.device_mesh"
         self.assertEqual(_custom_op_modules([op]), (module,))
 
+    @unittest.skipIf(IS_WINDOWS, "forks")
     def test_no_op_torch_registers_is_reported(self):
         script = textwrap.dedent(
             """
+            import json
             import torch
             import torch.onnx.ops
             from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _torch_op_module
@@ -9620,6 +9633,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 import torch.distributed.tensor
                 import torch.distributed._ops.device_mesh
             reported = set()
+            modules = {}
             for name in torch._C._dispatch_get_all_op_names():
                 op_name, _, overload = name.partition(".")
                 ns = op_name.split("::")[0]
@@ -9627,9 +9641,11 @@ class TestPrecompileCustomOpRecording(TestCase):
                 if ".py:" not in debug:
                     if ns not in _TORCH_OP_NAMESPACES:
                         reported.add(ns)
-                elif _custom_op_module(op_name, overload) is None and _torch_op_module(op_name, overload) is None:
+                elif (module := _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload)) is None:
                     reported.add(ns)
-            print(*reported)
+                else:
+                    modules.setdefault(module, []).append([op_name, overload])
+            print(json.dumps({"reported": sorted(reported), "modules": modules}))
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
@@ -9637,8 +9653,42 @@ class TestPrecompileCustomOpRecording(TestCase):
         # register ops on import. Namespaces this build does not register (vulkan,
         # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        scan = json.loads(out)
         # "_test" holds TorchScript's own test ops.
-        self.assertEqual(set(out.split()) - {"_test"}, set())
+        self.assertEqual(set(scan["reported"]) - {"_test"}, set())
+
+        # Each recorded module must register its ops when imported alone, as on a fresh
+        # host. A child forked from a process that imported only torch imports each one.
+        check = textwrap.dedent(
+            """
+            import importlib, json, os, sys
+            import torch
+            modules = json.load(sys.stdin)
+            for module, ops in sorted(modules.items()):
+                sys.stdout.flush()
+                if os.fork() != 0:
+                    os.wait()
+                    continue
+                try:
+                    if module == "torch.distributed._ops.device_mesh":
+                        importlib.import_module("torch.distributed.tensor")
+                    importlib.import_module(module)
+                    for op_name, overload in ops:
+                        try:
+                            torch._C._dispatch_find_schema_or_throw(op_name, overload)
+                        except RuntimeError:
+                            print(module, op_name, overload)
+                except BaseException as e:
+                    print(module, repr(e))
+                finally:
+                    sys.stdout.flush()
+                    os._exit(0)
+            """
+        )
+        self.assertGreater(len(scan["modules"]), 1)
+        modules = json.dumps(scan["modules"])
+        cmd = [sys.executable, "-c", check]
+        self.assertEqual(subprocess.check_output(cmd, input=modules, text=True), "")
 
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage
@@ -9667,6 +9717,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CPU")
+        lib.define("bypassed(Tensor x) -> Tensor")
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "artifact.py")
             with capture(
@@ -9677,6 +9728,13 @@ class TestPrecompileCustomOpRecording(TestCase):
                 backend="eager",
             ) as cap:
                 cap(torch.ones(4))
+                # A compile that graph-broke on an op and was then bypassed.
+                package = cap._session._package
+                with package.code_context(_no_fake_op_fn.__code__):
+                    package.add_graph_break_op(
+                        torch.ops.precompile_no_fake.bypassed.default
+                    )
+                    package.bypass_current_compile()
             with open(artifact) as f:
                 python_code = f.read()
         self.assertIn("CUSTOM_OPS = (('precompile_no_fake::op', ''),)", python_code)
