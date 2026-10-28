@@ -3520,8 +3520,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         # satisfies those isinstance checks, but its __bool__/__len__ override
         # has to win.
         if isinstance(a, UserDefinedObjectVariable):
-            bool_result = self.call_bool(tx, a)
-            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
+            bool_result = generic_is_true(tx, a)
+            if isinstance(bool_result, SymNodeVariable):
+                return self.call_not_(tx, bool_result)
+            return VariableTracker.build(tx, not bool_result.as_python_constant())
         if isinstance(a, ConstDictVariable):
             return VariableTracker.build(
                 tx, not generic_is_true(tx, a).as_python_constant()
