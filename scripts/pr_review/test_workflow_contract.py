@@ -1643,6 +1643,11 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "stage A does not install exactly INSTALLED_SKILLS",
         )
         skills = REPO / ".agents" / "skills"
+        uninstalled = sorted(
+            d.name
+            for d in skills.iterdir()
+            if d.is_dir() and d.name not in INSTALLED_SKILLS
+        )
         for name in INSTALLED_SKILLS:
             # `find -type f` skips a symlink that `cp -rT` copies into stage
             # A's reach, so one would be readable without moving the hash;
@@ -1664,6 +1669,16 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                     f"{md.relative_to(REPO)} names a skill by its repo path, "
                     "which stage A reads from the PR; use ../<name>/",
                 )
+                # Named in prose, an uninstalled skill is one the `Skill` tool
+                # cannot load, and the model's fallback is the PR's copy.
+                for other in uninstalled:
+                    self.assertIsNone(
+                        re.search(
+                            rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text
+                        ),
+                        f"{md.relative_to(REPO)} names the {other} skill, "
+                        "which stage A does not install",
+                    )
                 # A sibling skill is read from beside the installed copy, so it
                 # must be installed too; otherwise the only copy the model can
                 # reach is the PR's. Any mention counts, not just a Markdown
