@@ -358,7 +358,8 @@ class DefaultXcclApi : public XcclApi {
   [[nodiscard]] onecclResult_t commDeregister(onecclComm_t comm, void* handle)
       override;
 
-  [[nodiscard]] onecclResult_t commSuspend(onecclComm_t comm, int flags) override;
+  [[nodiscard]] onecclResult_t commSuspend(onecclComm_t comm, int flags)
+      override;
 
   [[nodiscard]] onecclResult_t commResume(onecclComm_t comm) override;
 
@@ -508,7 +509,7 @@ class DefaultXcclApi : public XcclApi {
       onecclComm_t comm,
       c10::xpu::XPUStream stream) override;
 
-    [[nodiscard]] onecclResult_t waitSignal(
+  [[nodiscard]] onecclResult_t waitSignal(
       int peer,
       int sigIdx,
       int ctx,

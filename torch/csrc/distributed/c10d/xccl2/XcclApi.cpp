@@ -57,7 +57,8 @@ onecclResult_t DefaultXcclApi::commRevoke([[maybe_unused]] onecclComm_t comm) {
   return onecclNotImplemented;
 }
 
-onecclResult_t DefaultXcclApi::commGrow([[maybe_unused]] onecclComm_t comm,
+onecclResult_t DefaultXcclApi::commGrow(
+    [[maybe_unused]] onecclComm_t comm,
     [[maybe_unused]] int nRanks,
     [[maybe_unused]] const onecclUniqueId* uniqueId,
     [[maybe_unused]] int rank,
@@ -67,7 +68,8 @@ onecclResult_t DefaultXcclApi::commGrow([[maybe_unused]] onecclComm_t comm,
   return onecclNotImplemented;
 }
 
-onecclResult_t DefaultXcclApi::commShrink([[maybe_unused]] onecclComm_t comm,
+onecclResult_t DefaultXcclApi::commShrink(
+    [[maybe_unused]] onecclComm_t comm,
     [[maybe_unused]] int* excludeRanksList,
     [[maybe_unused]] int excludeRanksCount,
     [[maybe_unused]] onecclComm_t* newcomm,
@@ -292,8 +294,8 @@ onecclResult_t DefaultXcclApi::memFree(void* buff) {
 // Uncomment the calls (and drop the [[maybe_unused]])
 // once it does.
 onecclResult_t DefaultXcclApi::commSuspend(
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] int flags) {
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] int flags) {
   // return onecclCommSuspend(comm, flags);
   return onecclNotImplemented;
 }
@@ -304,10 +306,11 @@ onecclResult_t DefaultXcclApi::commResume([[maybe_unused]] onecclComm_t comm) {
 }
 
 onecclResult_t DefaultXcclApi::commMemStats(
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] int stat,
-  [[maybe_unused]] uint64_t* value) {
-  // return onecclCommMemStats(comm, static_cast<onecclCommMemStat_t>(stat), value);
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] int stat,
+    [[maybe_unused]] uint64_t* value) {
+  // return onecclCommMemStats(comm, static_cast<onecclCommMemStat_t>(stat),
+  // value);
   return onecclNotImplemented;
 }
 
@@ -316,42 +319,42 @@ onecclResult_t DefaultXcclApi::commMemStats(
 // Uncomment the calls (and drop the [[maybe_unused]])
 // once it does.
 onecclResult_t DefaultXcclApi::commWindowRegister(
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] void* buffer,
-  [[maybe_unused]] size_t size,
-  [[maybe_unused]] onecclWindow_t* win,
-  [[maybe_unused]] int winFlags) {
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] void* buffer,
+    [[maybe_unused]] size_t size,
+    [[maybe_unused]] onecclWindow_t* win,
+    [[maybe_unused]] int winFlags) {
   // return onecclCommWindowRegister(comm, buffer, size, win, winFlags);
   return onecclNotImplemented;
 }
 
 onecclResult_t DefaultXcclApi::commWindowDeregister(
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] onecclWindow_t win) {
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] onecclWindow_t win) {
   // return onecclCommWindowDeregister(comm, win);
   return onecclNotImplemented;
 }
 
 onecclResult_t DefaultXcclApi::winGetUserPtr(
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] onecclWindow_t win,
-  [[maybe_unused]] void** outUserPtr) {
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] onecclWindow_t win,
+    [[maybe_unused]] void** outUserPtr) {
   // return onecclWinGetUserPtr(comm, win, outUserPtr);
   return onecclNotImplemented;
 }
 
 onecclResult_t DefaultXcclApi::putSignal(
-  [[maybe_unused]] const void* localbuff,
-  [[maybe_unused]] size_t count,
-  [[maybe_unused]] onecclDataType_t datatype,
-  [[maybe_unused]] int peer,
-  [[maybe_unused]] onecclWindow_t peerWin,
-  [[maybe_unused]] size_t peerWinOffset,
-  [[maybe_unused]] int sigIdx,
-  [[maybe_unused]] int ctx,
-  [[maybe_unused]] unsigned int flags,
-  [[maybe_unused]] onecclComm_t comm,
-  [[maybe_unused]] c10::xpu::XPUStream stream) {
+    [[maybe_unused]] const void* localbuff,
+    [[maybe_unused]] size_t count,
+    [[maybe_unused]] onecclDataType_t datatype,
+    [[maybe_unused]] int peer,
+    [[maybe_unused]] onecclWindow_t peerWin,
+    [[maybe_unused]] size_t peerWinOffset,
+    [[maybe_unused]] int sigIdx,
+    [[maybe_unused]] int ctx,
+    [[maybe_unused]] unsigned int flags,
+    [[maybe_unused]] onecclComm_t comm,
+    [[maybe_unused]] c10::xpu::XPUStream stream) {
   // return onecclPutSignal(
   //    localbuff,
   //    count,
