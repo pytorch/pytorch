@@ -72,7 +72,7 @@ class TestReductionConfig(TestCase):
 
     @parametrize("cc", [(9, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
-        """Prevent Rubin tuning tables from changing other architecture defaults."""
+        """Return the generic defaults until an architecture adds its own rules."""
         self.assertEqual(self.general(cc=cc), kg._GeneralConfig())
         self.assertEqual(
             rt.select_row_order(
@@ -262,7 +262,11 @@ class TestReductionConfigDevice(TestCase):
                 block=64,
                 order="unordered",
             )
-            row_select.assert_not_called()
+            # block overrides only the general kernel; rows still select their order.
+            if stride == 1:
+                row_select.assert_called_once()
+            else:
+                row_select.assert_not_called()
             general_select.assert_not_called()
             indexed.assert_not_called()
             row_tree.assert_not_called()
@@ -366,29 +370,25 @@ class TestReductionConfigDevice(TestCase):
         self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
 
     @parametrize("entry", ["reduce_dim", "reduce_all"])
-    def test_empty_reduction_has_no_inner_tree_order(self, device, entry):
-        """Treat an empty reduction as geometry the inner-tree order cannot serve."""
+    def test_empty_reduction_satisfies_any_order(self, device, entry):
+        """Return the identity for an empty reduction under any order, silently."""
         import cutlass
 
         from torch._native.ops.reductions import traits
 
         trait = traits.SumOps(acc=cutlass.Float32)
         f32 = torch.float32
+        x = torch.empty(0, device=device)
         calls = {
-            "reduce_dim": lambda **kw: kg.reduce_dim(
-                trait, "sum", torch.empty(4, 0, device=device), [1], f32, **kw
-            ),
-            "reduce_all": lambda **kw: kg.reduce_all(
-                trait, "sum", torch.empty(0, device=device), f32, **kw
-            ),
+            "reduce_dim": lambda **kw: kg.reduce_dim(trait, "sum", x, [0], f32, **kw),
+            "reduce_all": lambda **kw: kg.reduce_all(trait, "sum", x, f32, **kw),
         }
-        with self.assertRaisesRegex(ValueError, "empty reduction"):
-            calls[entry](order="inner_tree")
-        with (
-            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
-            self.assertRaisesRegex(ValueError, "empty reduction"),
-        ):
-            calls[entry]()
+        expected = torch.zeros((), device=device)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            self.assertEqual(calls[entry](order="inner_tree"), expected)
+            with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}):
+                self.assertEqual(calls[entry](), expected)
 
     @parametrize("block", [None, 64])
     def test_reduce_all_tunes_unless_block_is_given(self, device, block):
