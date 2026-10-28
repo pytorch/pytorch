@@ -18,7 +18,7 @@ import typing_extensions
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     cast,
@@ -363,7 +363,7 @@ def set_proxy_slot(
 
             if isinstance(obj.node.expr, sympy.Symbol):
                 tracer.sympy_expr_tracker[obj.node.expr] = _SympyExprTrackerValue(
-                    proxy, obj
+                    proxy, obj, tracer.sympy_expr_tracker.get(obj.node.expr)
                 )
 
 
@@ -488,7 +488,7 @@ def get_proxy_slot(
         if obj.node.is_symbolic():
             # Last ditch - we found a SymInt (SymBool, etc) we don't know
             # about.
-            if (tmp := tracer.sympy_expr_tracker.get(obj.node.expr)) is not None:
+            if (tmp := _lookup_sympy_expr(tracer, obj.node.expr)) is not None:
                 value = tmp.proxy
 
             else:
@@ -539,19 +539,6 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
-# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
-# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
-# rebuild flattened expressions as nested binary ops. These are module-level
-# (not lambdas) so they have a qualified name and survive FX codegen/pickling
-# when used as a graph node target.
-def _nary_sym_max(*args: Any) -> Any:
-    return functools.reduce(torch.sym_max, args)
-
-
-def _nary_sym_min(*args: Any) -> Any:
-    return functools.reduce(torch.sym_min, args)
-
-
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -567,15 +554,14 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
-        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
-        # wrappers over torch.sym_max/sym_min. Without this,
+        # sympy Max/Min have no operator.* equivalent. Without these,
         # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
         # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
         # propagation size inference).
         elif v == "maximum":
-            handlers[k] = _nary_sym_max
+            handlers[k] = torch.sym_max
         elif v == "minimum":
-            handlers[k] = _nary_sym_min
+            handlers[k] = torch.sym_min
         # sympy.Pow / PowByNatural map to the interp name "pow_by_natural",
         # which has no operator.* equivalent. sympy canonicalizes x * x into
         # Pow(x, 2), so without this _build_proxy_for_sym_expr cannot rebuild
@@ -663,7 +649,7 @@ def _build_proxy_for_sym_expr(
       having the inputs available at all - which isn't a guarantee.
     """
 
-    if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
+    if (value := _lookup_sympy_expr(tracer, expr)) is not None:
         if out:
             raise AssertionError(
                 "out should be empty when expr is in sympy_expr_tracker"
@@ -687,11 +673,12 @@ def _build_proxy_for_sym_expr(
     if not func:
         return None
 
-    # sympy Mul and Add are n-ary, but the handlers they map to (operator.mul,
-    # operator.add) take exactly two arguments, so an expression like s0*s1*s2
-    # has to be folded into a chain of binary ops. Fold rather than passing a
-    # variadic wrapper: the handler becomes the fx node's target, and that has
-    # to stay a real operator for downstream consumers.
+    # sympy Mul, Max and Min are n-ary, but the handlers they map to
+    # (operator.mul, torch.sym_max, torch.sym_min) take exactly two arguments,
+    # so an expression like s0*s1*s2 has to be folded into a chain of binary
+    # ops. Fold rather than passing a variadic wrapper: the handler becomes the
+    # fx node's target, and that has to stay a real operator for downstream
+    # consumers.
     if out is None:
         if len(args) > 2:
             return functools.reduce(func, args)
@@ -1616,6 +1603,23 @@ class _SymNodeDict:
 class _SympyExprTrackerValue:
     proxy: _PySymProxyType
     value: PySymType
+    prev: _SympyExprTrackerValue | None = field(default=None, repr=False, compare=False)
+
+
+def _lookup_sympy_expr(
+    tracer: _ProxyTracer, expr: sympy.Expr
+) -> _SympyExprTrackerValue | None:
+    """
+    Look up the SymNode that provides ``expr`` in ``sympy_expr_tracker``,
+    skipping SymNodes whose lazy proxy is being computed: resolving through one
+    of them would recurse back into it (e.g. sym_max(s0, 1) == s0 computed from
+    an untracked s0 on DTensor's global sizes), so fall back to the provider it
+    replaced.
+    """
+    entry = tracer.sympy_expr_tracker.get(expr)
+    while entry is not None and entry.value.node in tracer.symnodes_being_forced:
+        entry = entry.prev
+    return entry
 
 
 def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> None:
@@ -1626,6 +1630,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
+    tracer.symnodes_being_forced = set()
     tracer._current_device_node = None
     tracer._coor_current_accelerator = None
     # Stores the torch function that was called during tracing
@@ -1648,6 +1653,7 @@ class PythonKeyTracer(Tracer):
     _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    symnodes_being_forced: set[SymNode]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
@@ -2335,28 +2341,32 @@ def _sym_register(
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
-    # Handle torch.sym_sum
-    n_args: tuple[object, ...]
-    if len(args) == 1 and isinstance(args[0], (list, tuple)):
-        n_args = (
-            tuple(
+    tracer.symnodes_being_forced.add(out.node)
+    try:
+        # Handle torch.sym_sum
+        n_args: tuple[object, ...]
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            n_args = (
+                tuple(
+                    (
+                        get_proxy_slot(a, tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                    )
+                    for a in args[0]
+                ),
+            )
+        else:
+            n_args = tuple(
                 (
                     get_proxy_slot(a, tracer).force().node
                     if isinstance(a, py_sym_types)
                     else a
                 )
-                for a in args[0]
-            ),
-        )
-    else:
-        n_args = tuple(
-            (
-                get_proxy_slot(a, tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
+                for a in args
             )
-            for a in args
-        )
+    finally:
+        tracer.symnodes_being_forced.discard(out.node)
 
     # func doesn't have a __torch_function__ that Proxy can interpose, so
     # we gotta do it manually
@@ -2375,6 +2385,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    symnodes_being_forced: set[SymNode]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
     # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
