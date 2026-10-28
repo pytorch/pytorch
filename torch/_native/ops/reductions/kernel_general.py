@@ -195,16 +195,17 @@ def _launch(
     if (
         op.tile.order == "inner_tree"
         and itree.shape == "combine"
-        and itree.combine_tile
+        and itree.combine_grp > 1
     ):
-        # Async atoms require the partial buffers' proven alignment in the fake descriptors.
+        # Grouped and async folds need the partials' proven alignment in the fake descriptors,
+        # or autovec_copy narrows to element loads.
         alignments = tuple(itree.combine_grp * t.element_size() for t in ins)
         if any(
             _L.supported_alignment(t, align) < align
             for t, align in zip(ins, alignments)
         ):
             raise ValueError(
-                "inner-tree async combine requires aligned partial buffers"
+                "inner-tree grouped combine requires aligned partial buffers"
             )
         key += (("input_alignments", alignments),)
     key = (str(ins[0].device),) + key
@@ -540,11 +541,10 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
+    # General addressing cannot stage physically adjacent rows.
     plan = rt.itree_plan(count, num_o, x.element_size(), stage=False, device=x.device)
     if plan is None:
         return None
-    # General addressing cannot stage physically adjacent rows.
-    plan = plan._replace(stage_rows=False)
     nbatch = plan.split[0] if plan.shape == "split" else 1
     if num_o * nbatch >= 2**31:
         return None
@@ -645,10 +645,11 @@ def _reduce(
     explicit = order == "inner_tree"
     order = rt.reduction_order(order)
     tune = block is None
-    block = _K0_BLOCK if block is None else block
-    if order == "inner_tree" and count > 0:
+    if order == "inner_tree":
         ordered = None
-        if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
+        if count == 0:
+            reason = "an empty reduction has no inner-tree order"
+        elif count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
             reason = "inner-tree reduction requires 32-bit logical extents"
         else:
             reason = "inner-tree reduction cannot serve this geometry"
@@ -684,8 +685,6 @@ def _reduce(
         if explicit:
             raise ValueError(reason)
         rt.inner_tree_fallback(reason)
-    if order == "inner_tree":
-        # Empty reductions have no accumulation order; gated fallbacks were reported above.
         order = "unordered"
 
     # Route one-element outputs through the reduce-all split instead of one general block.
@@ -726,7 +725,7 @@ def _reduce(
             out = ct.reduce_col_tile(trait, trait_key, x2, out_dtypes[0])
             return (_as_shape(out, out_shape),)
 
-    config = _GeneralConfig(block=block)
+    config = _GeneralConfig() if block is None else _GeneralConfig(block=block)
     if tune:
         config = select_general_config(
             _hw.caps(x.device).cc,
@@ -833,7 +832,7 @@ def reduce_all(
     trait_key: str,
     x: torch.Tensor,
     out_dtype: torch.dtype,
-    block: int = _K0_ALL_BLOCK,
+    block: int | None = None,
     grid_mult: int = _K0_ALL_GRID_MULT,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
@@ -848,7 +847,7 @@ def reduce_all2(
     trait_key: str,
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
-    block: int = _K0_ALL_BLOCK,
+    block: int | None = None,
     grid_mult: int = _K0_ALL_GRID_MULT,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
@@ -864,7 +863,7 @@ def _reduce_all(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
-    block: int,
+    block: int | None,
     grid_mult: int,
     *,
     order: Literal["unordered", "inner_tree"] | None = None,
@@ -899,8 +898,8 @@ def _reduce_all(
     # Direct routing measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
 
-    if order == "inner_tree" and L > 0:
-        if L < _INT32_LIMIT:
+    if order == "inner_tree":
+        if 0 < L < _INT32_LIMIT:
             outs = rt.reduce_row_tile(
                 trait,
                 trait_key,
@@ -910,11 +909,13 @@ def _reduce_all(
                 order="inner_tree",
             )
             return tuple(_as_shape(o, ()) for o in outs)
-        reason = "inner-tree reduction requires 32-bit logical extents"
+        if L == 0:
+            reason = "an empty reduction has no inner-tree order"
+        else:
+            reason = "inner-tree reduction requires 32-bit logical extents"
         if requested == "inner_tree":
             raise ValueError(reason)
         rt.inner_tree_fallback(reason)
-    if order == "inner_tree":
         order = "unordered"
     if _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
@@ -940,6 +941,7 @@ def _reduce_all(
     if res is not None:
         return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
+    block = _K0_ALL_BLOCK if block is None else block
     sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
