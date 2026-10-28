@@ -209,6 +209,31 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        if cuda_version:
+            try:
+                # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+                # by NVIDIA's PyPI packages on Windows.
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cupti",
+                    "cudnn",
+                ):
+                    load_nvidia_dynamic_lib(lib)
+            except Exception:
+                warnings.warn(
+                    "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
+                    stacklevel=2,
+                )
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -406,28 +431,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1811,6 +1823,15 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1845,19 +1866,12 @@ def use_deterministic_algorithms(
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
-        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
-          when called on an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
-          when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
-          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2167,8 +2181,8 @@ def _check(
 
 
 @_deprecated(
-    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
-    Use _check(i >= 0) instead.",
+    "_check_is_size will be removed in a future PyTorch release. "
+    "Use _check(i >= 0) instead.",
     category=FutureWarning,
 )
 def _check_is_size(
@@ -2177,23 +2191,12 @@ def _check_is_size(
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
-    """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over ``_check(i >= 0)`` because it can prevent
-    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
-    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
-    equivalently to all other values.
+    """Checks that an integer is non-negative, with an optional upper bound.
 
-    When max is not None, this specifies an upper bound equivalent to
-    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
-    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
-    treated equivalently to all other values.  Symbolic max bounds are not yet
-    supported.
-
-    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
-    to infer the size from context, or if you should wrap-around or truncate).
-    Only use this if the only valid value is an honest to goodness size.
+    This deprecated compatibility helper also advises symbolic range analysis
+    that the integer represents a size. Prefer ``_check(i >= 0)`` and, when
+    needed, ``_check(i <= max)`` in new code.
     """
-    # This is responsible for the expect_true
     _check(i >= 0, message)
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
@@ -2987,18 +2990,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3328,11 +3325,6 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
-        # Start the one-time source hashing for Inductor's cache keys now, so
-        # it overlaps with whatever runs before the first compile.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 

@@ -526,10 +526,11 @@ def scatter_mm_meta(
     SPLIT_N=None,
     num_warps=None,
     num_stages=None,
+    device=None,
     **extra,
 ):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
-        device_name = _get_device_name()
+        device_name = _get_device_name(device)
         meta = get_meta(
             "scatter_mm",
             (M, K, N, Ms, Ks),
@@ -773,6 +774,7 @@ def bsr_dense_addmm_meta(
     dtype=None,
     out_dtype=None,
     _version=0,
+    device=None,
     **extra,
 ):
     # Specifying _version is useful for situations when one wants to
@@ -785,7 +787,7 @@ def bsr_dense_addmm_meta(
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        device_name = _get_device_name()
+        device_name = _get_device_name(device)
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         if dtype is out_dtype:
             version_dtype = dtype
@@ -1053,7 +1055,7 @@ def bsr_scatter_mm_indices_data(
         raise AssertionError(f"other K ({K_}) != bsr K ({K})")
     nbatches = other.shape[:-2].numel()
 
-    meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
+    meta = scatter_mm_meta(M, K, N, Ms, Ks, device=bsr.device, **meta_input)
     if "allow_tf32" not in meta_input:
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
     SPLIT_N = meta["SPLIT_N"]
@@ -1276,6 +1278,7 @@ def bsr_dense_addmm(
             sparsity=sparsity,
             dtype=dense.dtype,
             out_dtype=out.dtype,
+            device=bsr.device,
         )
     out_backup = out
 
