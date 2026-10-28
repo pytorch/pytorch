@@ -874,13 +874,15 @@ static void fill_avg_pool_params(AvgPoolingParams<5>& params,
   }
 }
 
+template <typename... ExtraArgs>
 static void launch_avg_pool_kernel(const std::string& kernel_name,
                                    const std::string& index_suffix,
                                    const Tensor& arg0,
                                    const Tensor& arg1,
                                    const int64_t numThreads,
                                    const AvgPoolingParams<5>& params,
-                                   const std::string& op_name) {
+                                   const std::string& op_name,
+                                   const ExtraArgs&... extra_args) {
   if (numThreads == 0) {
     return;
   }
@@ -892,7 +894,7 @@ static void launch_avg_pool_kernel(const std::string& kernel_name,
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {arg0, arg1}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, arg0, arg1, params);
+      mtl_setArgs(computeEncoder, arg0, arg1, params, extra_args...);
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
       getMPSProfiler().endProfileKernel(PSO, mpsStream);
@@ -1011,13 +1013,21 @@ static void adaptive_avg_pool2d_out_mps_template(const Tensor& output, const Ten
   AvgPoolingParams<5> params{};
   fill_avg_pool_params(params, input, output, /*pooling_dims=*/2, "adaptive_avg_pool2d");
   params.adaptive = true;
-  launch_avg_pool_kernel("avg_pool_",
-                         adaptive_pool_needs_int64(input, output, /*pooling_dims=*/2) ? "_i64" : "_i32",
-                         input,
-                         output,
-                         output.numel(),
-                         params,
-                         "adaptive_avg_pool2d");
+  const auto index_suffix = adaptive_pool_needs_int64(input, output, /*pooling_dims=*/2) ? "_i64" : "_i32";
+  // A simdgroup per output pays off for windows large enough to amortize it and wide enough to keep its lanes busy
+  const auto window_size = c10::metal::ceil_div(isizeH, osizeH) * c10::metal::ceil_div(isizeW, osizeW);
+  constexpr int64_t simd_width = 32;
+  if (isizeW >= 16 * osizeW && window_size >= 1024) {
+    launch_avg_pool_kernel("adaptive_avg_pool_simd_",
+                           index_suffix,
+                           input,
+                           output,
+                           output.numel() * simd_width,
+                           params,
+                           "adaptive_avg_pool2d");
+    return;
+  }
+  launch_avg_pool_kernel("avg_pool_", index_suffix, input, output, output.numel(), params, "adaptive_avg_pool2d");
 }
 
 static void adaptive_avg_pool2d_backward_out_mps_template(const Tensor& grad_input,
@@ -1043,13 +1053,29 @@ static void adaptive_avg_pool2d_backward_out_mps_template(const Tensor& grad_inp
   AvgPoolingParams<5> params{};
   fill_avg_pool_params(params, grad_input, grad_output, /*pooling_dims=*/2, "adaptive_avg_pool2d_backward");
   params.adaptive = true;
-  launch_avg_pool_kernel("adaptive_avg_pool_backward_",
-                         adaptive_pool_needs_int64(grad_input, grad_output, /*pooling_dims=*/2) ? "_i64" : "_i32",
-                         grad_input,
+  const auto index_suffix = adaptive_pool_needs_int64(grad_input, grad_output, /*pooling_dims=*/2) ? "_i64" : "_i32";
+  auto scaled_grad = at::empty(grad_output.sizes(), grad_output.options().dtype(kFloat));
+  const auto num_ranges = isizeH + isizeW;
+  auto out_ranges = at::empty({num_ranges, 2}, grad_output.options().dtype(kInt));
+  launch_avg_pool_kernel("adaptive_avg_pool_backward_scale_",
+                         index_suffix,
                          grad_output,
+                         scaled_grad,
+                         std::max(grad_output.numel(), num_ranges),
+                         params,
+                         "adaptive_avg_pool2d_backward",
+                         out_ranges);
+  for (const auto dim : c10::irange(grad_output.dim())) {
+    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(scaled_grad.stride(dim));
+  }
+  launch_avg_pool_kernel("adaptive_avg_pool_backward_",
+                         index_suffix,
+                         grad_input,
+                         scaled_grad,
                          grad_input.numel(),
                          params,
-                         "adaptive_avg_pool2d_backward");
+                         "adaptive_avg_pool2d_backward",
+                         out_ranges);
 }
 
 } // namespace mps
