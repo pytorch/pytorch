@@ -3267,7 +3267,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
     @skipXPUIf(
         True,
         "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
@@ -4596,7 +4595,6 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
@@ -5496,7 +5494,6 @@ class TestMetadataJsonFormatCUDA(TestCase):
                     ),
                 )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
     def test_graph_kernel_events_have_dims(self):
         # Graph replays issue no per-kernel launch API records; dims must
         # still be reported for the kernels they dispatch.
