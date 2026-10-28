@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyNativeDeviceTypes,
     skipCUDAIf,
-    skipMPS,
     skipXLA,
     skipXPUIf,
     tol,
@@ -1130,7 +1129,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1202,7 +1201,7 @@ class TestIndexingDevice(TestCase):
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1388,6 +1387,7 @@ class TestIndexingDevice(TestCase):
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfXPU(torch.half, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfMPS(torch.float, torch.half, torch.long, torch.bfloat16, torch.bool)
     def test_index_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         # test index
@@ -1802,7 +1802,7 @@ class TestIndexingDevice(TestCase):
             torch.take_along_dim(t, indices, dim=7)
 
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -2318,7 +2318,7 @@ class TestIndexingDevice(TestCase):
 
     @serialTest()
     @onlyAccelerator
-    @skipMPS
+    @expectedFailureMPS
     @toleranceOverride(
         {
             # Tolerances follow test_index_add_copy_fast_path: this shape does
