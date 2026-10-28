@@ -59,6 +59,18 @@ via PyTorch's C++ operator registration APIs).
 .. autofunction:: get_kernel
 ```
 
+## Compiling custom ops into AOTInductor (prototype)
+
+{func}`torch.library.register_aot_impl` registers a builder that compiles a
+custom op's kernel ahead of time, so {func}`torch._inductor.aoti_compile_and_package`
+calls it directly from the generated wrapper.
+
+```{eval-rst}
+.. autofunction:: register_aot_impl
+.. autoclass:: TVMFFIKernel
+.. autoclass:: AOTTarget
+```
+
 ## Low-level APIs
 
 The following APIs are direct bindings to PyTorch's C++ low-level
