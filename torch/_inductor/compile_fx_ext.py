@@ -46,25 +46,19 @@ if TYPE_CHECKING:
     from torch.fx import GraphModule
 
 
-def _graph_contains_triton_kernel_wrappers(gm: GraphModule) -> bool:
+def _graph_contains_user_kernel_wrappers(gm: GraphModule) -> bool:
     """
-    Check if the graph contains triton kernel wrapper nodes. These nodes contain
-    references to the kernel_side_table which is process-local and can't be
-    serialized across processes.
+    Check if the graph contains user-kernel wrapper nodes (triton_kernel_wrapper_*,
+    ...). These nodes contain references to a kernel side table which is
+    process-local and can't be serialized across processes.
     """
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_functional,
-        triton_kernel_wrapper_mutation,
-    )
+    from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if node.target in (
-                triton_kernel_wrapper_functional,
-                triton_kernel_wrapper_mutation,
-            ):
+            if get_user_kernel_hop_info(node.target) is not None:
                 return True
     return False
 
@@ -489,11 +483,11 @@ class _SerializedFxCompile(FxCompile):
             log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
-        # Triton kernel wrapper nodes contain references to the kernel_side_table
+        # User-kernel wrapper nodes contain references to a kernel side table
         # which is process-local and can't be serialized across processes.
-        if _graph_contains_triton_kernel_wrappers(gm):
+        if _graph_contains_user_kernel_wrappers(gm):
             log.debug(
-                "Skipping %s compile: graph contains triton kernel wrappers", type(self)
+                "Skipping %s compile: graph contains user kernel wrappers", type(self)
             )
             return None
 
