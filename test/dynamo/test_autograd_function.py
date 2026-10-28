@@ -1946,6 +1946,8 @@ class GraphModule(torch.nn.Module):
                 seen["after_none"] = ctx.needs_input_grad
                 ctx.needs_input_grad = seen["original"]
                 seen["after_restore"] = ctx.needs_input_grad
+                del ctx.needs_input_grad
+                seen["after_del"] = ctx.needs_input_grad
                 return grad_output, None
 
         x = torch.randn(3, requires_grad=True)
@@ -1954,6 +1956,7 @@ class GraphModule(torch.nn.Module):
         self.assertIs(seen["after_set"], sentinel)
         self.assertIsNone(seen["after_none"])
         self.assertIs(seen["after_restore"], seen["original"])
+        self.assertIsNone(seen["after_del"])
         self.assertEqual(x.grad, torch.ones_like(x))
 
     def test_repeated_save_for_backward_calls(self):

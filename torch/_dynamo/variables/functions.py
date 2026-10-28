@@ -457,7 +457,7 @@ def _set_name(
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
 ) -> None:
-    if value is not None and not issubclass(maybe_get_python_type(value), str):
+    if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__name__ must be set to a string object")
     store_attr_mutation(tx, vt, "__name__", value)
 
@@ -467,7 +467,7 @@ def _set_qualname(
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
 ) -> None:
-    if value is not None and not issubclass(maybe_get_python_type(value), str):
+    if value is None or not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__qualname__ must be set to a string object")
     store_attr_mutation(tx, vt, "__qualname__", value)
 
@@ -819,11 +819,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _set_defaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
-        # func_set_defaults accepts None as well as a tuple.
-        if (
-            value is not None
-            and not value.is_constant_match(None)
-            and not issubclass(maybe_get_python_type(value), tuple)
+        # func_set_defaults accepts None as well as a tuple; del is the same as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        if not value.is_constant_match(None) and not issubclass(
+            maybe_get_python_type(value), tuple
         ):
             raise_type_error(tx, "__defaults__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__defaults__", value)
@@ -832,11 +832,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _set_kwdefaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
-        # func_set_kwdefaults accepts None as well as a dict.
-        if (
-            value is not None
-            and not value.is_constant_match(None)
-            and not issubclass(maybe_get_python_type(value), dict)
+        # func_set_kwdefaults accepts None as well as a dict; del is the same as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        if not value.is_constant_match(None) and not issubclass(
+            maybe_get_python_type(value), dict
         ):
             raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
         store_attr_mutation(tx, self, "__kwdefaults__", value)
@@ -2178,7 +2178,9 @@ class ContextWrappedFunctionMixin(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return super().call_function(tx, args, kwargs)
+        # Call the wrapped VT, not this copy of it, so writes to the wrapped
+        # function's slots (e.g. __defaults__) after wrapping are seen.
+        return self.wrapped.call_function(tx, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.context))
@@ -2786,9 +2788,9 @@ class WrappedNestedUserFunctionVariable(
             wrapped.defaults,
             wrapped.kwdefaults,
             wrapped.closure,
-            wrapped.wrapped_fn,
+            wrapped.annotations,
+            wrapped_fn=wrapped.wrapped_fn,
         )
-        self.annotations = wrapped.annotations
         self.annotate = wrapped.annotate
         self.wrapped = wrapped
         self.context = context
@@ -3104,7 +3106,8 @@ class SkipFunctionVariable(VariableTracker):
                 # Re-run the trace rules under the patched config. Not
                 # SourcelessBuilder.create: it would return the VT side effects
                 # already track for this function, i.e. this skipped VT.
-                rule = trace_rules.lookup(self.value)
+                fn = cast(Callable[..., Any], self.value)
+                rule = trace_rules.lookup_callable(fn) or trace_rules.lookup(fn)
                 # if we still get SkipFunctionVariable, then we *really* should skip this function
                 if rule is not None and not issubclass(rule, SkipFunctionVariable):
                     # pyrefly: ignore[bad-argument-count]
@@ -5085,6 +5088,14 @@ DescriptorTypes: TypeAlias = (
 )
 
 
+def _is_c_struct_member(descriptor: types.MemberDescriptorType) -> bool:
+    """A member of a C type: may be T_OBJECT (del, then reads give None) or a
+    numeric field (del raises). __slots__ members live on heap types and are
+    always T_OBJECT_EX."""
+    Py_TPFLAGS_HEAPTYPE = 1 << 9
+    return not descriptor.__objclass__.__flags__ & Py_TPFLAGS_HEAPTYPE
+
+
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
     descriptor: DescriptorTypes,
@@ -6130,6 +6141,13 @@ class MemberDescriptorVariable(DescriptorVariable):
             # what PyMember_SetOne raises.
             entry.setter(obj, tx, value)
             return ConstantVariable.create(None)
+        if value is None and _is_c_struct_member(self.descriptor):
+            unimplemented(
+                gb_type="Delete of an unmodeled C member",
+                context=f"del {obj}.{name}",
+                explanation=f"Dynamo does not model deleting the C struct member '{name}'.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # No model for this member. STORE_ATTR itself applies the descriptor, so
         # replay via store_attr on the target (mirrors the __slots__ path in
         # UserDefinedObjectVariable).
@@ -6380,9 +6398,9 @@ class PropertyVariable(VariableTracker):
 
         if fn is None:
             if sys.version_info >= (3, 13):
-                display_name = getattr(self.descriptor, "__name__", "?")
+                display_name = getattr(self.descriptor, "__name__", None)
             else:
-                display_name = getattr(self.descriptor.fget, "__name__", "?")
+                display_name = getattr(self.descriptor.fget, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
                 # property_descr_set formats %R of the owner's *type*, whose
