@@ -64,9 +64,37 @@ def _mode() -> str:
     return mode
 
 
+# PYTORCH_TUNABLEOP_TUNING=0 and PYTORCH_TUNABLEOP_RECORD_UNTUNED=1 are read
+# through static env checks that win over the setters (Tunable.cpp), and the
+# worker inherits the parent's environment, so tune mode would benchmark every
+# GEMM, report success, and persist nothing.
+_BLOCKING_ENV = (
+    ("PYTORCH_TUNABLEOP_TUNING", "0"),
+    ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
+)
+_env_warned = False
+
+
+def _warn_if_env_blocks_recording() -> None:
+    global _env_warned
+    if _env_warned:
+        return
+    blocking = [name for name, bad in _BLOCKING_ENV if os.environ.get(name) == bad]
+    if blocking:
+        _env_warned = True
+        log.warning(
+            "TunableOp tune mode will record nothing: %s overrides the tuning "
+            "flags the worker sets, so no result is written. Unset it to tune.",
+            " and ".join(blocking),
+        )
+
+
 def is_tune_mode() -> bool:
     """True while building the results file: tune GEMMs and record solutions."""
-    return _mode() == "tune" and torch.cuda.is_available()
+    if _mode() != "tune" or not torch.cuda.is_available():
+        return False
+    _warn_if_env_blocks_recording()
+    return True
 
 
 def is_reuse_mode() -> bool:
@@ -101,29 +129,19 @@ class BenchmarkJob:
         # settings it cannot be snapshotted -- the caller passes it explicitly
         # and __call__ re-enters it around the benchmark.
         self.dyn_dims_mask = dyn_dims_mask
-        # Stamped by submit() with the parent's tuning knobs (see
-        # snapshot_settings): the worker is a long-lived fresh process that
-        # would otherwise tune with defaults.
-        self.settings: dict[str, Any] = {}
-        # Stamped by submit() with the submitting process's logical device.
-        self.device = 0
-        # Stamped by submit() with the resolved results filename (see
-        # resolve_filename): the worker re-enters it via set_filename so it
-        # reads and appends to the same file the parent's key names.
-        self.filename = ""
 
-    def __call__(self) -> float:
+    def __call__(self, device: int, filename: str, settings: dict[str, Any]) -> float:
         tunable = torch.cuda.tunable
         # The worker starts on device 0 of the inherited mask, not the job's.
-        torch.cuda.set_device(self.device)
+        torch.cuda.set_device(device)
         # Before anything touches the manager: it initializes lazily from the
         # env default, not the parent's file.
-        if self.filename:
-            tunable.set_filename(self.filename, insert_device_ordinal=False)
+        if filename:
+            tunable.set_filename(filename, insert_device_ordinal=False)
         tunable.enable(True)
         tunable.tuning_enable(self.tuning)
         tunable._nearest_match_enable(self.nearest_match)
-        for name, value in self.settings.items():
+        for name, value in settings.items():
             getattr(tunable, name)(value)
         # benchmark_run_fn captures if either is set, and tuning cannot run
         # under capture.
@@ -285,9 +303,9 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 
 
 # Parameters of the search, stamped onto each job: (parent getter, worker
-# setter) pairs. Anything read from the environment reaches the worker by
-# inheritance; these are the knobs a caller can also set through the API, which
-# does not cross the pipe.
+# setter) pairs. These are the knobs a caller can set through the API, which
+# does not cross the pipe. Env-sourced values reach the worker by inheritance
+# instead -- which is not always benign, see _warn_if_env_blocks_recording.
 #
 # Which operation to run is decided per job from the Inductor mode, and is
 # carried as BenchmarkJob fields rather than stamped here. Absent for that
@@ -397,6 +415,25 @@ def _job_device(job: BenchmarkJob) -> int:
     return torch.cuda.current_device()
 
 
+class _StampedJob:
+    """What crosses the pipe: a job plus the state submit() resolved for it.
+
+    Keeping it here rather than on BenchmarkJob means submit() does not mutate
+    its argument, and a job carries only what its caller chose.
+    """
+
+    def __init__(
+        self, job: Any, device: int, filename: str, settings: dict[str, Any]
+    ) -> None:
+        self.job = job
+        self.device = device
+        self.filename = filename
+        self.settings = settings
+
+    def __call__(self) -> float:
+        return self.job(self.device, self.filename, self.settings)
+
+
 def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
     """Run one job in the worker, bounding how long we wait for it.
 
@@ -413,9 +450,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         device = _job_device(job)
         # The visibility mask is inherited unrewritten, so the same logical
         # ordinal names the same GPU in the worker.
-        job.device = device
-        job.filename = resolve_filename(device)
-        job.settings = snapshot_settings()
+        stamped = _StampedJob(
+            job, device, resolve_filename(device), snapshot_settings()
+        )
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker
@@ -425,9 +462,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "error")
     try:
         with _worker_lock:
-            worker = _get_worker_locked((device, job.filename))
+            worker = _get_worker_locked((device, stamped.filename))
             try:
-                worker.put(job)
+                worker.put(stamped)
                 return Outcome(worker.get(timeout=timeout), "ok")
             except (TimeoutError, EOFError) as e:
                 # running is cleared only by a real pipe fault; a job that
