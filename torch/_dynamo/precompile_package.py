@@ -98,10 +98,6 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
-    Triton kernels autotune while their graph lowers, on generated example
-    inputs, as standalone_compile does: a backward no captured call runs would
-    otherwise keep every candidate config, and the artifact can only freeze a
-    kernel tuned down to one.
     The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
     bundle per compile context, left open on a remote-cache miss until the
     first compiled call, but eager lowering compiles the forward and the
@@ -150,12 +146,7 @@ def _capture_config() -> Iterator[None]:
     # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
-        inductor_config.patch(
-            {
-                "bundled_autotune_remote_cache": False,
-                "triton.autotune_at_compile_time": True,
-            }
-        ),
+        inductor_config.patch(bundled_autotune_remote_cache=False),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
