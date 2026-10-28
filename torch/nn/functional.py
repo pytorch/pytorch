@@ -7312,6 +7312,21 @@ def quantize_tensor(
     ``swizzle_type=SwizzleType.SWIZZLE_32_4_4``, the output scale shape will be
     ``(B, 1, ceil_div(M, 128) * ceil_div(K, 128) * 32 * 16)``.
 
+    Both outputs preserve the axis positions of the input. For both outputs,
+    the quantization axes from ``dim`` form contiguous slices when viewed
+    in ``dim=(outer, inner)`` order, with the inner dim varying the fastest
+    and outer next-fastest. For example:
+
+    - ``mxfp8`` unswizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(K, 1)``, and ``scale`` with
+      shape ``(M, K // 32)`` and strides ``(K // 32, 1)``.
+    - ``mxfp8`` swizzled quantization of input shaped ``(B, K, N)`` with
+      strides ``(K * N, N, 1)`` and ``dim=(2, 1)`` will result in ``qdata``
+      with shape ``(B, K, N)`` and strides ``(K * N, 1, K)`` and ``scale``
+      with shape ``(B, L, 1)`` and strides ``(L, 1, L)``, with ``L`` being
+      swizzle-specific (see above).
+
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
 
