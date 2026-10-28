@@ -54,6 +54,15 @@ class TestInnerTreeCombineUnroll(TestCase):
             with self.assertRaisesRegex(ValueError, "combine_unroll"):
                 rt.itree_combine_plan(None, 4)
 
+    def test_async_combine_requires_one_warp_of_rows(self):
+        """Reject async staging when a block's rows exceed the lanes that copy them."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        policy = rt._ITREE_ARCH[(10, 0)]._replace(combine_rpb=64)
+        with mock.patch.object(rt, "_itree_arch", return_value=policy):
+            with self.assertRaisesRegex(ValueError, "combine_rpb"):
+                rt.itree_combine_plan(None, 4)
+
 
 @unittest.skipUnless(
     TEST_CUDA and SM90OrLater and TEST_CUTEDSL, "requires CUDA and CuTeDSL"
