@@ -852,7 +852,7 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
 class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
     def _cache_tensors(self, model):
         return [
-            (layer.conv_states, layer.recurrent_states)
+            (layer.conv_states[0], layer.recurrent_states[0])
             if is_linear
             else (layer.keys, layer.values)
             for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
@@ -874,8 +874,8 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             starting_lengths.append(int(cache.get_seq_length()))
             for layer, is_linear in zip(cache.layers, cache.is_linear):
                 if is_linear:
-                    self.assertFalse(layer.has_previous_state)
-                    for states in (layer.conv_states, layer.recurrent_states):
+                    self.assertFalse(layer.has_previous_state[0])
+                    for states in (layer.conv_states[0], layer.recurrent_states[0]):
                         self.assertEqual(states, torch.zeros_like(states))
             return original_forward(*args, **kwargs)
 
@@ -1226,8 +1226,8 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
                 key_dim = config.linear_num_key_heads * config.linear_key_head_dim
                 value_dim = config.linear_num_value_heads * config.linear_value_head_dim
                 conv_shape = (2, 2 * key_dim + value_dim, config.linear_conv_kernel_dim)
-                self.assertEqual(layer.conv_states.shape, conv_shape)
-                self.assertEqual(layer.recurrent_states.shape, (2, 4, 8, 8))
+                self.assertEqual(layer.conv_states[0].shape, conv_shape)
+                self.assertEqual(layer.recurrent_states[0].shape, (2, 4, 8, 8))
             else:
                 # One of two KV heads per rank, not divided by the TP size twice.
                 self.assertEqual(layer.keys.shape, (2, 1, model.cache_capacity, 8))
