@@ -10,25 +10,41 @@ import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-def _fused_attention_available() -> bool:
-    # Out-of-tree accelerator backends provide fused SDPA not covered by
-    # PLATFORM_SUPPORTS_FUSED_ATTENTION.
-    return PLATFORM_SUPPORTS_FUSED_ATTENTION or _is_privateuse1_backend_available()
+def _fused_attention_available(device: str) -> bool:
+    if device == "cuda":
+        return bool(PLATFORM_SUPPORTS_FUSED_ATTENTION)
+    # Out-of-tree accelerator backends do not report fused SDPA through
+    # PLATFORM_SUPPORTS_FUSED_ATTENTION, and fused attention is intentionally
+    # not a registered Capability (see #194039), so probe the actual device
+    # instead of assuming support.
+    try:
+        q = torch.randn(2, 2, 8, 16, device=device, dtype=torch.float16)
+        with torch.nn.attention.sdpa_kernel(
+            [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+            ]
+        ):
+            torch.nn.functional.scaled_dot_product_attention(q, q, q)
+        return True
+    except Exception:
+        return False
 
 
 class TestGraphTransformObserver(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIf(not HAS_TRITON, "requires triton")
-    @skipIf(not _fused_attention_available(), "requires fused attention support")
     def test_sdpa_rewriter(self, device):
+        if not _fused_attention_available(device):
+            self.skipTest("requires fused attention support")
         if shutil.which("dot") is None:
             self.skipTest("Requires dot")
         try:
