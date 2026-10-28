@@ -1346,7 +1346,7 @@ def _patch_wrapped_functions(patcher: _Patcher) -> None:
     """
     # Resolving a lazy import may run a body that registers more wraps.
     patched: set[tuple[int, str]] = set()
-    while pending := [k for k in _wrapped_fns_to_patch if k not in patched]:
+    while pending := [k for k in list(_wrapped_fns_to_patch) if k not in patched]:
         for key in pending:
             patched.add(key)
             frame_dict = _wrapped_fns_to_patch[key]
