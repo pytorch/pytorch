@@ -2054,7 +2054,8 @@ _TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
     {
         "triton": "CUDA initialization (torch.cuda.init())",
         "_inductor_debug": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
-        "_native": "the torch._native register_op_override call that defines the op",
+        # The op name comes from a process-global counter.
+        "_native": "the same sequence of torch._native register_op_override calls",
     }
 )
 
@@ -2082,8 +2083,9 @@ def _torch_op_module(op_name: str, overload: str) -> str | None:
 
 
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``, warning once about the
-    ops torch does not register and no importable module is known to register."""
+    """The modules registering the ops among ``op_names``, warning about the ops
+    torch defines only at runtime and the ops no importable module is known to
+    register."""
     modules: set[str] = set()
     unrecorded: set[str] = set()
     lazy: dict[str, set[str]] = {}
