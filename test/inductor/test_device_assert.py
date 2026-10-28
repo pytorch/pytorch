@@ -57,6 +57,37 @@ class TestTorchDeviceAssertTrigger(TestCase):
         f_c = torch.compile(func_inline, backend=backend)
         f_c()
 
+    @parametrize("backend", ["aot_eager_decomp_partition", "inductor"])
+    @parametrize("invalid", ["input", "target"])
+    def test_binary_cross_entropy_should_throw(self, backend, invalid):
+        # Eager rejects values outside [0, 1] from inside its ATen kernel. The
+        # pointwise decomposition the compilers use has to reject them too
+        # instead of clamping the log terms to -100, which returns a finite
+        # loss (e.g. -50 for a target of 1.5) instead of raising.
+        # https://github.com/pytorch/pytorch/issues/193757
+        def func(input, target):
+            return torch.nn.functional.binary_cross_entropy(input, target)
+
+        ones = torch.ones(4, 4, device="cpu")
+        bad = ones * 1.5
+        args = (bad, ones) if invalid == "input" else (ones, bad)
+        msg = f"all elements of {invalid} should be between 0 and 1"
+
+        # in-domain values are still accepted
+        good = ones * 0.25
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(func, backend=backend, fullgraph=True)(good, good),
+            func(good, good),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            func(*args)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch._dynamo.reset()
+            torch.compile(func, backend=backend, fullgraph=True)(*args)
+
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_assert_fusion(self):
