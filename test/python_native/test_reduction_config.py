@@ -317,7 +317,15 @@ class TestReductionConfigDevice(TestCase):
             ordered = calls[entry]("inner_tree")
         orders = [c.kwargs.get("order") for c in row.call_args_list]
         self.assertIn("inner_tree", orders)
-        for got, ref in zip(ordered, calls[entry]("unordered")):
+        # An explicit unordered request overrides the env gate.
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
+            mock.patch.object(rt, "reduce_row_tile", wraps=rt.reduce_row_tile) as row,
+        ):
+            unordered = calls[entry]("unordered")
+        orders = {c.kwargs.get("order") for c in row.call_args_list}
+        self.assertEqual(orders, {"linear"})
+        for got, ref in zip(ordered, unordered):
             self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
 
     def test_inner_tree_rejects_64bit_extents(self, device):
@@ -337,6 +345,67 @@ class TestReductionConfigDevice(TestCase):
                 torch.float32,
                 order="inner_tree",
             )
+
+    def test_reduce_all_rejects_64bit_extents(self, device):
+        """Raise for explicit order beyond 32-bit extents; fall back under the gate."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn(4096, device=device)
+        trait = traits.SumOps(acc=cutlass.Float32)
+        with mock.patch.object(kg, "_INT32_LIMIT", 1024):
+            with self.assertRaisesRegex(ValueError, "32-bit logical extents"):
+                kg.reduce_all(trait, "sum", x, torch.float32, order="inner_tree")
+            with (
+                mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
+                mock.patch.object(rt, "_warned_inner_tree_fallback", False),
+                self.assertWarnsRegex(UserWarning, "32-bit logical extents"),
+            ):
+                got = kg.reduce_all(trait, "sum", x, torch.float32)
+        self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize("entry", ["reduce_dim", "reduce_all"])
+    def test_empty_reduction_has_no_inner_tree_order(self, device, entry):
+        """Treat an empty reduction as geometry the inner-tree order cannot serve."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        trait = traits.SumOps(acc=cutlass.Float32)
+        f32 = torch.float32
+        calls = {
+            "reduce_dim": lambda **kw: kg.reduce_dim(
+                trait, "sum", torch.empty(4, 0, device=device), [1], f32, **kw
+            ),
+            "reduce_all": lambda **kw: kg.reduce_all(
+                trait, "sum", torch.empty(0, device=device), f32, **kw
+            ),
+        }
+        with self.assertRaisesRegex(ValueError, "empty reduction"):
+            calls[entry](order="inner_tree")
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
+            self.assertRaisesRegex(ValueError, "empty reduction"),
+        ):
+            calls[entry]()
+
+    @parametrize("block", [None, 64])
+    def test_reduce_all_tunes_unless_block_is_given(self, device, block):
+        """Tune strided reduce-all with the general selector unless block is given."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn(64, 128, device=device)[:, ::2]
+        with mock.patch.object(
+            kg, "select_general_config", wraps=kg.select_general_config
+        ) as select:
+            got = kg.reduce_all(
+                traits.SumOps(acc=cutlass.Float32), "sum", x, torch.float32, block=block
+            )
+        self.assertEqual(select.called, block is None)
+        self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
 
     def test_env_gate_falls_back_with_one_warning(self, device):
         """Serve unservable geometry unordered under the env gate, warning only once."""
