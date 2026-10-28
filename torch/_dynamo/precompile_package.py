@@ -1593,12 +1593,14 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        # The operators each backend graph calls, by backend id, and those run
-        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function, ops
-        # past the point where Dynamo gave up on a frame it falls back on, and ops
-        # only AOTAutograd traces (a custom op's backward formula), are not
-        # recorded, nor are those of a bypassed compile, whose frame serving
-        # re-traces under allow_serve_time_compiles=True.
+        # The operators each backend graph calls, by backend id, and those Dynamo
+        # graph-breaks on and runs eagerly because fake tensors cannot run them (no
+        # fake kernel, or a data-dependent output value or shape). Ops in a
+        # torch._dynamo.disable'd function, ops past the point where Dynamo gave
+        # up on a frame it falls back on, and ops only AOTAutograd traces (a custom
+        # op's backward formula), are not recorded, nor are those of a bypassed
+        # compile, whose frame serving re-traces under
+        # allow_serve_time_compiles=True.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
