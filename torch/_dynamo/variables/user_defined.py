@@ -3201,8 +3201,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and name not in self._slotdefs
                 and not trace_rules.is_polyfilled_callable(method)
             ):
-                # Inherited C methods, including aliases such as `copy = dict.copy`,
-                # dispatch through their defining descriptor, not the receiver type.
+                # All inherited non-slot C methods without Torch/polyfill handling
+                # dispatch through their defining descriptor. This includes both
+                # ordinary inheritance and aliases such as `copy = dict.copy`.
                 return variables.MethodDescriptorVariable(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
                 ).call_function(tx, [self, *args], kwargs)
@@ -3218,10 +3219,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Non-overridden base-class methods dispatch to the base VT via super()
-            # (self is-a base VT under multiple inheritance).  Skip comparison ops:
-            # they go through tp_richcompare_impl on the UserDefined*Variable
-            # subclass, which avoids tracing tensor elements via list_cmp.
+            # Remaining non-slot base methods (polyfilled C descriptors and methods
+            # of other types) use the base VT. Slot names stay on the subclass's
+            # protocol path, including comparisons of tensor elements.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -5538,9 +5538,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
         # them. See the generated list___init__ wrapper's tp_new comparison:
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
-        # 3.10 predates that comparison and only rejects keyword args for exact
-        # list, so every subclass tolerates them there.
-        if sys.version_info >= (3, 11) and type(self.value).__new__ is list.__new__:
+        if type(self.value).__new__ is list.__new__:
             no_keywords(tx, "list", kwargs)
         # UDOV.tp_init_impl would vectorcall the C list.__init__. Route to
         # ListVariable's, which populates this object's storage in place.
