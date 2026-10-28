@@ -9524,6 +9524,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         def op(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
+        self.addCleanup(op._lib._destroy)
         return op, f"{ns}::{name}"
 
     def test_op_names_include_ops_passed_to_higher_order_ops(self):
@@ -9609,7 +9610,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             self.assertIsNone(_custom_op_module(name, ""))
 
     def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
-        from torch._native.registry import _define_native_op_once
+        from torch._native import registry as native_registry
         from torch._precompile import _custom_op_modules
 
         op, qualname = self._op("in_main")
@@ -9630,7 +9631,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         importlib.import_module("torch.export.custom_ops")
         # A register_op_override op, which only that call defines.
         native = f"precompile_{uuid.uuid4().hex}"
-        _define_native_op_once(native, "aten", "neg")
+        # Scope the op's definition and its register_fake library to this test.
+        nlib = self.enterContext(torch.library._scoped_library("_native", "FRAGMENT"))
+        self.enterContext(mock.patch.dict(native_registry._def_libs, {"_native": nlib}))
+        self.addCleanup(native_registry._defined_native_ops.discard, native)
+        fakes = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
+        self.addCleanup(lambda: [fake._destroy() for fake in fakes])
+        native_registry._define_native_op_once(native, "aten", "neg")
         names.append((f"_native::{native}", ""))
 
         # Torch's own ops, registered from C++ and from Python inside torch.
@@ -9667,6 +9674,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         from torch._precompile import _custom_op_modules
 
         name = f"precompile_{uuid.uuid4().hex}"
+        lib = self.enterContext(torch.library._scoped_library("triton", "FRAGMENT"))
+        self.enterContext(mock.patch.object(torch._TritonLibrary, "lib", lib))
+        self.enterContext(mock.patch.dict(torch._TritonLibrary.ops_table))
         torch._TritonLibrary.registerOp(
             name, f"{name}(Tensor x) -> Tensor", lambda x: x.clone(), "CPU"
         )
