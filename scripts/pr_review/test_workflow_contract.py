@@ -5290,6 +5290,24 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertIsNotNone(m, "stage B no longer states a message budget")
         self.assertLessEqual(int(m.group(1)), MAX_MESSAGE * 0.8)
 
+    def test_a_blocking_point_is_major_and_changes_requested(self):
+        # The sanitizer refuses ready_for_human_review with a major finding, so
+        # whatever makes a finding major must also make the verdict
+        # changes_requested, even under Needs Discussion (pytorch#202251).
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        self.assertIn(
+            'unless the review names a point as blocking: then it is "changes_requested"',
+            prompt,
+        )
+        self.assertIn("reason for Request Changes or names as blocking", prompt)
+
+    def test_the_prompt_names_every_file_kind_that_cannot_anchor(self):
+        # parse_diff's KNOWN LIMITS: findings on these files are discarded,
+        # and a change request left with none is refused.
+        prompt = " ".join(prompt_scalar(self.stage_b).split())
+        for kind in ("deletion", "pure rename", "mode-only change", "binary file"):
+            self.assertIn(kind, prompt)
+
     def test_the_findings_file_comes_from_the_structured_output(self):
         names = re.findall(r"(?m)^      - name: (.+)$", self.review)
         write = "Write stage B's result to the findings file"
