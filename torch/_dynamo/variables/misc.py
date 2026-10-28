@@ -1234,10 +1234,13 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def _set_needs_input_grad(
         self, tx: "InstructionTranslatorBase", value: VariableTracker | None
-    ) -> None:
-        stored = variables.DeletedVariable() if value is None else value
+    ) -> VariableTracker:
+        # setNeedsInputGrad stores NULL for del, which the getter reads as None.
+        if value is None:
+            value = ConstantVariable.create(None)
         se = tx.output.side_effects
-        se.store_instance_dict_attr(self, "needs_input_grad", stored)
+        se.store_instance_dict_attr(self, "needs_input_grad", value)
+        return ConstantVariable.create(None)
 
     tp_getset = {
         "needs_input_grad": GetSet(_get_needs_input_grad, _set_needs_input_grad)

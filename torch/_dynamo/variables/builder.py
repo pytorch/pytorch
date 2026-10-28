@@ -2018,20 +2018,12 @@ class VariableBuilder:
             "__script_if_tracing_wrapper", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return FunctionWrapperVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = FunctionWrapperVariable(value, "__original_fn", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return LruCacheWrapperVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = LruCacheWrapperVariable(value, "__wrapped__", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
