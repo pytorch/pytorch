@@ -15,6 +15,7 @@
 #include <c10/util/env.h>
 #include <c10/util/error.h>
 
+#include <c10/util/irange.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -600,7 +601,7 @@ void validate_rendezvous_requests(
         "from different ranks.");
   }
 
-  for (int r = 1; r < world_size; ++r) {
+  for (const auto r : c10::irange(1, world_size)) {
     TORCH_CHECK(reqs[r].block_size == reqs[0].block_size);
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
     TORCH_CHECK(reqs[r].buffer_offset == reqs[0].buffer_offset);
@@ -624,7 +625,7 @@ static void validate_nvlink_fabric_support(
         << "ranks have mismatched NVLink clique_ids. "
         << "All ranks using fabric handles must be in the same NVLink domain. "
         << "Per-rank info: ";
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       if (r > 0) {
         oss << ", ";
       }
@@ -639,7 +640,7 @@ static void validate_nvlink_fabric_support(
 static bool check_group_multicast_support(
     const std::vector<RendezvousRequest>& reqs) {
   std::vector<size_t> ranks_with_multicast_support;
-  for (size_t r = 0; r < reqs.size(); ++r) {
+  for (const auto r : c10::irange(reqs.size())) {
     if (reqs[r].has_multicast_support) {
       ranks_with_multicast_support.push_back(r);
     }
@@ -886,7 +887,7 @@ static void init_multicast_for_block(
         ? pg_all_gather(group, block->device_idx, flag)
         : storeExchange.all_gather(store, rank, world_size, flag);
     bool all_succeed = true;
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       all_succeed &= (rank_flags[r] != 0);
     }
     return all_succeed;
@@ -1034,7 +1035,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     validate_nvlink_fabric_support(reqs, world_size);
     validate_rendezvous_requests(reqs, world_size);
 
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       pids[r] = reqs[r].pid;
     }
 
@@ -1047,7 +1048,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           : storeExchange.all_gather(store, rank, world_size, block_handle);
     }
 
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       if (r == rank) {
         // Derive pointers from the allocation base (not the rendezvous ptr,
         // which may be an interior MemPool pointer): this pai is shared by
@@ -1125,7 +1126,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   }
 
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
-  for (int r = 0; r < world_size; ++r) {
+  for (const auto r : c10::irange(world_size)) {
     if (r == rank) {
       if (mc_addr != nullptr) {
         alloc_refs.push_back(

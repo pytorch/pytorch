@@ -322,7 +322,7 @@ inline ZeModulePtr _createModule(
 inline LoadedKernel _createKernel(
     ZeModulePtr module,
     const char* kernelName,
-    uint32_t* nSpillsPtr) {
+    uint32_t& nSpills) {
   assert(module);
   assert(kernelName);
   auto& syclContext = c10::xpu::get_device_context();
@@ -367,8 +367,8 @@ inline LoadedKernel _createKernel(
   // allocation.
   const uint32_t spillSimd =
       requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
-  *nSpillsPtr = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
-                               : props.spillMemSize;
+  nSpills = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
+                           : props.spillMemSize;
   auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
       {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
@@ -380,7 +380,7 @@ std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
     uint32_t sharedMemBytes,
-    uint32_t* nSpillsPtr,
+    uint32_t& nSpills,
     int device_idx) {
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
@@ -390,7 +390,7 @@ std::unique_ptr<LoadedKernel> loadKernel(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
   return std::make_unique<LoadedKernel>(
-      _createKernel(std::move(mod), funcName, nSpillsPtr));
+      _createKernel(std::move(mod), funcName, nSpills));
 }
 
 template <typename T>
@@ -546,7 +546,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
   std::unique_ptr<LoadedKernel> func =
-      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
+      loadKernel(filePath, funcName, sharedMemBytes, n_spills, device);
 
   PyObject* kernel_py = PyCapsule_New(
       reinterpret_cast<void*>(func.get()),
