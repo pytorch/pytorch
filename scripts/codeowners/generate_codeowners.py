@@ -22,7 +22,13 @@ import yaml
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
-TOP_LEVEL_KEYS = {"oncall_queues", "planned_labels", "sections", "section_notes", "ownership"}
+TOP_LEVEL_KEYS = {
+    "oncall_queues",
+    "planned_labels",
+    "sections",
+    "section_notes",
+    "ownership",
+}
 GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
 
 
@@ -76,7 +82,9 @@ def parse_path_rule(entry, *, where: str) -> PathRule:
         if not notify:
             raise ValueError(f"{where} {path}: write a quiet path as a bare string")
     else:
-        raise ValueError(f"{where}: expected '/path' or '/path: [handles]', got {entry!r}")
+        raise ValueError(
+            f"{where}: expected '/path' or '/path: [handles]', got {entry!r}"
+        )
     if not isinstance(path, str) or not path.startswith("/"):
         raise ValueError(f"{where}: path must start with '/', got {path!r}")
     return PathRule(path, notify)
@@ -136,7 +144,9 @@ def check_consistency(ownership: OwnershipFile) -> None:
     used_labels = {label for group in ownership.groups for label in group.labels}
     stale = sorted(set(oncall_of) - used_labels)
     if stale:
-        raise ValueError(f"oncall_queues lists labels no entry uses: {', '.join(stale)}")
+        raise ValueError(
+            f"oncall_queues lists labels no entry uses: {', '.join(stale)}"
+        )
     for group in ownership.groups:
         implied = {oncall_of[label] for label in group.labels if label in oncall_of}
         redundant = sorted(implied & set(group.labels))
@@ -155,26 +165,36 @@ def load_ownership(path: Path) -> OwnershipFile:
         raise ValueError(f"not valid YAML: {error}") from error
     document = mapping(document, where="OWNERSHIP.yaml")
     if set(document) != TOP_LEVEL_KEYS:
-        raise ValueError(f"top-level keys must be {sorted(TOP_LEVEL_KEYS)}, got {sorted(document)}")
+        raise ValueError(
+            f"top-level keys must be {sorted(TOP_LEVEL_KEYS)}, got {sorted(document)}"
+        )
     sections = string_list(document["sections"], where="sections")
     section_notes = {
         section: string_list(notes, where=f"section_notes {section}")
-        for section, notes in mapping(document["section_notes"], where="section_notes").items()
+        for section, notes in mapping(
+            document["section_notes"], where="section_notes"
+        ).items()
     }
     unknown_notes = sorted(set(section_notes) - set(sections))
     if unknown_notes:
-        raise ValueError(f"section_notes for sections not in `sections`: {unknown_notes}")
+        raise ValueError(
+            f"section_notes for sections not in `sections`: {unknown_notes}"
+        )
     if not isinstance(document["ownership"], list):
         raise ValueError("ownership must be a list")
     ownership = OwnershipFile(
         oncall_queues={
             oncall: string_list(modules, where=f"oncall_queues {oncall}")
-            for oncall, modules in mapping(document["oncall_queues"], where="oncall_queues").items()
+            for oncall, modules in mapping(
+                document["oncall_queues"], where="oncall_queues"
+            ).items()
         },
         planned_labels=string_list(document["planned_labels"], where="planned_labels"),
         sections=sections,
         section_notes=section_notes,
-        groups=tuple(parse_group(entry, sections=sections) for entry in document["ownership"]),
+        groups=tuple(
+            parse_group(entry, sections=sections) for entry in document["ownership"]
+        ),
     )
     check_consistency(ownership)
     return ownership
@@ -291,7 +311,9 @@ def order_blocks(groups: list[LabelGroup]) -> list[LabelGroup]:
             (
                 group
                 for group in remaining
-                if not any(precedes(other, group) for other in remaining if other is not group)
+                if not any(
+                    precedes(other, group) for other in remaining if other is not group
+                )
             ),
             None,
         )
@@ -311,7 +333,9 @@ def check_unlabeled_order(groups: list[LabelGroup]) -> None:
             continue
         for rule in group.paths:
             for other in labeled:
-                broader = next((r for r in other.paths if contains(r.path, rule.path)), None)
+                broader = next(
+                    (r for r in other.paths if contains(r.path, rule.path)), None
+                )
                 if broader:
                     raise ValueError(
                         f"{rule.path} in {group.name!r} sits inside {broader.path} in "
@@ -359,7 +383,9 @@ def emit_lint_error(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="fail if CODEOWNERS is stale")
+    mode.add_argument(
+        "--check", action="store_true", help="fail if CODEOWNERS is stale"
+    )
     mode.add_argument("--lintrunner", action="store_true")
     args = parser.parse_args()
     repo = Path(
@@ -400,7 +426,9 @@ def main() -> int:
         return 0
     if args.check:
         if current != generated:
-            print("CODEOWNERS is out of date; run scripts/codeowners/generate_codeowners.py")
+            print(
+                "CODEOWNERS is out of date; run scripts/codeowners/generate_codeowners.py"
+            )
             return 1
         return 0
     codeowners.write_text(generated)

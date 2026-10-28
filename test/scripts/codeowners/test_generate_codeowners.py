@@ -9,7 +9,9 @@ from pathlib import Path
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts/codeowners/generate_codeowners.py"
+SCRIPT = (
+    Path(__file__).resolve().parents[3] / "scripts/codeowners/generate_codeowners.py"
+)
 sys.path.insert(0, str(SCRIPT.parent))
 from generate_codeowners import load_ownership, render_codeowners, SECTION_MARKER
 
@@ -131,7 +133,10 @@ class TestGenerateCodeowners(TestCase):
                 "owners: [bob]\n    section: python_nn_api",
                 "owners: [bob]\n    section: python_api",
             ),
-            "must be a list of non-empty strings": ("/torch/nn/: [bob]", "/torch/nn/: bob"),
+            "must be a list of non-empty strings": (
+                "/torch/nn/: [bob]",
+                "/torch/nn/: bob",
+            ),
             "a group without labels can't have owners": (
                 "  - name: compiler_dynamo\n    owners: []",
                 "  - name: compiler_dynamo\n    owners: [carol]",
@@ -148,7 +153,10 @@ class TestGenerateCodeowners(TestCase):
                 '["module: dynamo"]\nplanned',
                 '["module: dynamo", "module: inductor"]\nplanned',
             ),
-            "unknown keys \\['owner'\\]": ("owners: [pearu]", "owners: [pearu]\n    owner: pearu"),
+            "unknown keys \\['owner'\\]": (
+                "owners: [pearu]",
+                "owners: [pearu]\n    owner: pearu",
+            ),
             "not valid YAML": ("planned_labels:", "planned_labels: [\n"),
             "sits inside /torch/_dynamo/ in 'dynamo'": (
                 "/torch/_dynamo_unlabeled.py",
@@ -186,7 +194,10 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
         Path(repo, "CODEOWNERS").write_text(codeowners)
         subprocess.check_output(["git", "init", "-q"], cwd=repo)
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), *args], cwd=repo, capture_output=True, text=True
+            [sys.executable, str(SCRIPT), *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
         )
         return result, Path(repo, "CODEOWNERS").read_text()
 
@@ -194,23 +205,38 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
 class TestGeneratorModes(TestCase):
     def test_up_to_date(self):
         generated = render(OWNERSHIP)
-        result, _ = run_generator(ownership=OWNERSHIP, codeowners=generated, args=["--check"])
+        result, _ = run_generator(
+            ownership=OWNERSHIP, codeowners=generated, args=["--check"]
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        result, _ = run_generator(ownership=OWNERSHIP, codeowners=generated, args=["--lintrunner"])
+        result, _ = run_generator(
+            ownership=OWNERSHIP, codeowners=generated, args=["--lintrunner"]
+        )
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
     def test_stale_codeowners(self):
         generated = render(OWNERSHIP)
-        result, _ = run_generator(ownership=OWNERSHIP, codeowners="stale\n", args=["--check"])
+        result, _ = run_generator(
+            ownership=OWNERSHIP, codeowners="stale\n", args=["--check"]
+        )
         self.assertEqual(result.returncode, 1)
-        result, _ = run_generator(ownership=OWNERSHIP, codeowners="stale\n", args=["--lintrunner"])
+        result, _ = run_generator(
+            ownership=OWNERSHIP, codeowners="stale\n", args=["--lintrunner"]
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         message = json.loads(result.stdout)
         self.assertEqual(
-            (message["path"], message["code"], message["original"], message["replacement"]),
+            (
+                message["path"],
+                message["code"],
+                message["original"],
+                message["replacement"],
+            ),
             ("CODEOWNERS", "CODEOWNERS_GENERATED", "stale\n", generated),
         )
-        result, codeowners = run_generator(ownership=OWNERSHIP, codeowners="stale\n", args=[])
+        result, codeowners = run_generator(
+            ownership=OWNERSHIP, codeowners="stale\n", args=[]
+        )
         self.assertEqual((result.returncode, codeowners), (0, generated))
 
     def test_invalid_ownership(self):
@@ -218,10 +244,14 @@ class TestGeneratorModes(TestCase):
         result, _ = run_generator(ownership=invalid, codeowners="x\n", args=["--check"])
         self.assertEqual(result.returncode, 1)
         self.assertIn("duplicate OWNERSHIP.yaml names", result.stderr)
-        result, _ = run_generator(ownership=invalid, codeowners="x\n", args=["--lintrunner"])
+        result, _ = run_generator(
+            ownership=invalid, codeowners="x\n", args=["--lintrunner"]
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         message = json.loads(result.stdout)
-        self.assertEqual((message["path"], message["replacement"]), ("OWNERSHIP.yaml", None))
+        self.assertEqual(
+            (message["path"], message["replacement"]), ("OWNERSHIP.yaml", None)
+        )
         self.assertIn("duplicate OWNERSHIP.yaml names", message["description"])
 
 

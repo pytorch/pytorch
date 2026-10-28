@@ -77,8 +77,8 @@ FAILURE_GUIDANCE = {
     ),
     "Unneeded reviewer exceptions": (
         "Remove the reported entries from REVIEWERS_NOT_OWNERS in "
-        "scripts/codeowners/check_taxonomy.py; their handles are owners now or no "
-        "longer on the rule."
+        "scripts/codeowners/check_taxonomy.py; their handles are owners now, no "
+        "longer on the rule, or the rule is gone."
     ),
 }
 
@@ -247,7 +247,9 @@ def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
         elif line.startswith(OWNER_PREFIX):
             follows_label = lines[line_number - 2].strip().startswith(LABEL_PREFIX)
             owner_lines.append(OwnerLine(line_number, line, follows_label))
-            block_owners = owner_handles(line)
+            # A misplaced owner line is reported, not used as the block's owners.
+            if follows_label:
+                block_owners = owner_handles(line)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -328,14 +330,18 @@ def find_ownership_errors(
         for labels, numbers in label_line_numbers.items()
         if len(numbers) > 1
     ]
+    # GitHub handles are case-insensitive, so exceptions are too.
+    exceptions = {
+        path: {handle.casefold() for handle in handles}
+        for path, handles in reviewers_not_owners.items()
+    }
     missing_reviewers = []
     used_exceptions = set()
-    rule_paths = {pattern.path for pattern in parsed.patterns}
     for pattern in parsed.patterns:
         if not pattern.labels or pattern.owners is None:
             continue
         owners = {owner.casefold() for owner in pattern.owners}
-        allowed = reviewers_not_owners.get(pattern.path, frozenset())
+        allowed = exceptions.get(pattern.path, set())
         missing = []
         for reviewer in pattern.reviewers:
             if reviewer.casefold() in owners:
@@ -349,18 +355,19 @@ def find_ownership_errors(
                 f"CODEOWNERS:{pattern.line_number} /{pattern.path}: "
                 f"{' '.join(missing)} not on the block's owner line"
             )
-    # An exception whose rule still exists but no longer needs it should go; one
-    # whose rule was removed is harmless.
+    # Every exception must still be needed, including ones whose rule was removed
+    # or renamed, so a stale entry can't later exempt a new rule unreviewed.
     unneeded_exceptions = [
         f"/{path}: {handle}"
-        for path, handles in sorted(reviewers_not_owners.items())
-        if path in rule_paths
+        for path, handles in sorted(exceptions.items())
         for handle in sorted(handles)
         if (path, handle) not in used_exceptions
     ]
     conflicting_lists = [
         f"{', '.join(sorted(labels))}: "
-        + " | ".join(" ".join(owners) or "none" for owners in sorted(map(sorted, lists)))
+        + " | ".join(
+            " ".join(owners) or "none" for owners in sorted(map(sorted, lists))
+        )
         for labels, lists in owner_lists.items()
         if len(lists) > 1
     ]
@@ -509,7 +516,9 @@ def print_report(report: Report) -> None:
     percentage = 100 * covered / report.tracked if report.tracked else 100.0
     print("CODEOWNERS taxonomy summary")
     print("  CODEOWNERS is generated: fix failures in OWNERSHIP.yaml, then run")
-    print("  scripts/codeowners/generate_codeowners.py. Line numbers refer to CODEOWNERS.")
+    print(
+        "  scripts/codeowners/generate_codeowners.py. Line numbers refer to CODEOWNERS."
+    )
     print("  Use `/path/ @owner` for active ownership or `# /path/` when unresolved.")
     print(f"  Tracked paths: {report.tracked} (committed paths checked)")
     print(f"  Covered paths: {covered} (matched by at least one pattern)")
@@ -606,7 +615,9 @@ def main() -> int:
         patterns = parsed.patterns
         section_groups = parsed.section_groups
         report = analyze(tracked_paths(repo), patterns)
-        ownership_errors = find_ownership_errors(parsed)
+        ownership_errors = find_ownership_errors(
+            parsed, reviewers_not_owners=REVIEWERS_NOT_OWNERS
+        )
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
@@ -623,15 +634,17 @@ def main() -> int:
     missing_groups = sorted(declared_group_set - report.groups)
     missing_sections = sorted(declared_group_set - section_group_set)
     undeclared_sections = sorted(section_group_set - declared_group_set)
-    has_errors = bool(missing_groups or missing_sections or undeclared_sections) or any(
-        ownership_errors.values()
-    ) or any(
-        (
-            report.uncovered,
-            report.duplicates,
-            report.stale,
-            report.ineffective,
-            report.source_order_mismatches,
+    has_errors = (
+        bool(missing_groups or missing_sections or undeclared_sections)
+        or any(ownership_errors.values())
+        or any(
+            (
+                report.uncovered,
+                report.duplicates,
+                report.stale,
+                report.ineffective,
+                report.source_order_mismatches,
+            )
         )
     )
     if not args.lintrunner:
@@ -652,7 +665,10 @@ def main() -> int:
             (len(missing_groups), "missing effective surfaces"),
             (len(missing_sections), "missing grouped sections"),
             (len(undeclared_sections), "undeclared grouped sections"),
-            *((len(entries), title.lower()) for title, entries in ownership_errors.items()),
+            *(
+                (len(entries), title.lower())
+                for title, entries in ownership_errors.items()
+            ),
         ]
         failures = [f"{count} {name}" for count, name in failure_counts if count]
         emit_lint_error(
