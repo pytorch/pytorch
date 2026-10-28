@@ -9164,6 +9164,42 @@ def bump(x: torch.Tensor) -> None:
 @bump.register_fake
 def _(x):
     return None
+
+
+lib = torch.library.Library("{ns}", "FRAGMENT")
+lib.define("cpu_only(Tensor x) -> Tensor")
+lib.impl("cpu_only", lambda x: x * 2, "CPU")
+
+
+# Dynamo graph-breaks on each of these and runs it eagerly, outside every graph.
+@torch.library.custom_op("{ns}::unfakeable", mutates_args=())
+def unfakeable(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@unfakeable.register_fake
+def _(x):
+    return torch.ops.{ns}.cpu_only.default(x)
+
+
+@torch.library.custom_op("{ns}::data_dependent", mutates_args=())
+def data_dependent(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@data_dependent.register_fake
+def _(x):
+    return x.new_empty(int(x.sum().item()))
+
+
+@torch.library.custom_op("{ns}::dynamic_shape", mutates_args=())
+def dynamic_shape(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@dynamic_shape.register_fake
+def _(x):
+    return x.new_empty(torch.library.get_ctx().new_dynamic_size())
 """
 
 
@@ -9207,6 +9243,17 @@ def cond_fn(x):
         lambda y: y.cos(),
         (x,),
     )
+
+def unfakeable_fn(x):
+    return torch.ops.{ns}.unfakeable.default(x.sin()) + 1
+
+
+def data_dependent_fn(x):
+    return torch.ops.{ns}.data_dependent.default(x.sin()) + 1
+
+
+def dynamic_shape_fn(x):
+    return torch.ops.{ns}.dynamic_shape.default(x.sin()) + 1
 """
 
 
@@ -9315,6 +9362,9 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "cond_fn", "standalone"),
             ("dynamo", "inductor", "train_fn", "standalone"),
+            ("dynamo", "eager", "unfakeable_fn", "standalone"),
+            ("dynamo", "eager", "data_dependent_fn", "standalone"),
+            ("dynamo", "eager", "dynamic_shape_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9366,38 +9416,6 @@ class TestPrecompileCustomOpModules(TestCase):
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
-
-def _no_fake_op_fn(x):
-    # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
-    return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
-
-
-def _composite_impl(x):
-    return torch.ops.precompile_no_fake.op.default(x) * 2
-
-
-def _composite_op_fn(x):
-    # Fake mode fails on the decomposed op, but the graph break runs this one.
-    return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
-
-
-class _UserContext:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-def _eager_fallback_op_fn(x):
-    x = x.sin()
-    torch._dynamo.graph_break()
-    # Dynamo cannot graph-break under a user context manager, so it falls back
-    # to eager on the resume frame, which serving then runs eagerly.
-    with _UserContext():
-        x = torch.ops.precompile_no_fake.op.default(x)
-    return x + 1
-
     def test_inductor_records_the_custom_ops_its_code_calls(self):
         from torch._inductor import decomposition
         from torch.library import _scoped_library
@@ -9448,6 +9466,38 @@ def _eager_fallback_op_fn(x):
             self.assertEqual(load(artifact, cache)(x), expected)
         with self.assertRaisesRegex(PrecompileError, f"{ns}::inserted"):
             load(artifact, cache)
+
+
+def _no_fake_op_fn(x):
+    # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
+    return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
+
+
+def _composite_impl(x):
+    return torch.ops.precompile_no_fake.op.default(x) * 2
+
+
+def _composite_op_fn(x):
+    # Fake mode fails on the decomposed op, but the graph break runs this one.
+    return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
+
+
+class _UserContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _eager_fallback_op_fn(x):
+    x = x.sin()
+    torch._dynamo.graph_break()
+    # Dynamo cannot graph-break under a user context manager, so it falls back
+    # to eager on the resume frame, which serving then runs eagerly.
+    with _UserContext():
+        x = torch.ops.precompile_no_fake.op.default(x)
+    return x + 1
 
 
 def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
