@@ -67,6 +67,7 @@ paths = [
   'third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0',
   'third_party/ideep/mkl-dnn/LICENSE',
   'third_party/ideep/mkl-dnn/third_party/opencl/LICENSE',
+  'third_party/nccl_ep/LICENSE.txt',
   'third_party/onnx/LICENSE',
   'third_party/perfetto/LICENSE',
   'third_party/tensorpipe/third_party/libnop/LICENSE',
@@ -136,6 +137,7 @@ paths = [
   'third_party/composable_kernel/LICENSE',
   'third_party/cpp-httplib/LICENSE',
   'third_party/cudnn_frontend/LICENSE-MIT.txt',
+  'third_party/dynolog_headers/LICENSE',
   'third_party/fbgemm/external/composable_kernel/LICENSE',
   'third_party/flash-attention/csrc/composable_kernel/LICENSE',
   'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/LICENSE',
@@ -149,7 +151,6 @@ paths = [
   'third_party/nlohmann/LICENSE.MIT',
   'third_party/psimd/LICENSE',
   'third_party/tensorpipe/third_party/libuv/LICENSE',
-  'torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE',
 ]
 
 [[spdx]]
@@ -162,4 +163,10 @@ paths = [
 expression = 'Zlib'
 paths = [
   'third_party/fbgemm/external/asmjit/LICENSE.md',
+]
+
+[[spdx]]
+expression = 'Apache-2.0 WITH LLVM-exception AND MIT'
+paths = [
+  'third_party/nccl_ep/ThirdPartyNotices.txt',
 ]
