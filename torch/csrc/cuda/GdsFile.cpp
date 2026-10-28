@@ -200,14 +200,8 @@ void initGdsBindings(PyObject* module) {
   m.def("_gds_deregister_buffer", &gds_deregister_buffer);
   m.def("_gds_load_storage", &gds_load_storage);
   m.def("_gds_save_storage", &gds_save_storage);
-  m.def(
-      "_gds_load_storage_async",
-      &gds_load_storage_async,
-      py::call_guard<py::gil_scoped_release>());
-  m.def(
-      "_gds_save_storage_async",
-      &gds_save_storage_async,
-      py::call_guard<py::gil_scoped_release>());
+  m.def("_gds_load_storage_async", &gds_load_storage_async);
+  m.def("_gds_save_storage_async", &gds_save_storage_async);
 #endif
 }
 
