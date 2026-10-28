@@ -14,6 +14,7 @@ import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
 from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -59,6 +60,8 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 
 aten = torch.ops.aten
 
+_benchmark_cpu = benchmarker.benchmark_cpu
+
 
 def should_reduce_range(device: torch.device) -> bool:
     """
@@ -70,6 +73,11 @@ def should_reduce_range(device: torch.device) -> bool:
 
 
 def patches(fn):
+    def benchmark_cpu(fn, *args, **kwargs):
+        # The tests force template selection and verify every choice; short
+        # samples avoid timing choices for production performance.
+        return _benchmark_cpu(fn, warmup=1, rep=1)
+
     def skip_cache(self, choices, name, key, benchmark, hint_override=None):
         if benchmark is None:
             return {}
@@ -95,6 +103,7 @@ def patches(fn):
         ),
         patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+        patch.object(benchmarker, "benchmark_cpu", benchmark_cpu),
     ]:
         fn = patcher(fn)
 
