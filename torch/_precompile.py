@@ -1920,6 +1920,20 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+def _overload_names(op: object) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of ``op`` if it is an operator: its own,
+    or every overload's for an ``OpOverloadPacket``."""
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        ops = [getattr(op, name) for name in op.overloads()]
+    else:
+        ops = [op]
+    return {
+        (o._schema.name, o._schema.overload_name)
+        for o in ops
+        if isinstance(o, torch._ops.OpOverload)
+    }
+
+
 def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
     call, directly or passed to a higher-order op."""
@@ -1932,14 +1946,7 @@ def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
             if node.op != "call_function":
                 continue
             for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                if isinstance(op, torch._ops.OpOverloadPacket):
-                    ops = [getattr(op, name) for name in op.overloads()]
-                else:
-                    ops = [op]
-                for overload in ops:
-                    if isinstance(overload, torch._ops.OpOverload):
-                        schema = overload._schema
-                        names.add((schema.name, schema.overload_name))
+                names |= _overload_names(op)
     return names
 
 
@@ -3701,11 +3708,18 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
+    Before anything else runs, the artifact imports the modules in its
+    ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
+    and then checks that every op in ``CUSTOM_OPS`` is registered. A module that
+    fails to import only warns when its ops are registered anyway, e.g. by a
+    module the server imported under another name.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture), or if a custom op the
+    artifact calls is not registered once its imports ran. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
