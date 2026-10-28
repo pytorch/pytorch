@@ -79,6 +79,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -2025,9 +2026,7 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=AttributeMutationExisting(),
             )
-        elif value is sys.exc_info or (
-            sys.version_info >= (3, 11) and value is sys.exception
-        ):
+        elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
@@ -3899,10 +3898,10 @@ class VariableBuilder:
             )
 
         fake_tensor_value = example_value
-        # type: ignore[attr-defined]
-        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+        fake_mode = maybe_get_fake_mode(fake_tensor_value)
+        if fake_mode is not self.tx.fake_mode:
             raise AssertionError(
-                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                 "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
@@ -4004,10 +4003,10 @@ class VariableBuilder:
                 )
 
             fake_tensor_value = example_value
-            # type: ignore[attr-defined]
-            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
+            fake_mode = maybe_get_fake_mode(fake_tensor_value)
+            if fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
-                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
                     "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
@@ -5477,11 +5476,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             )
         if tensor_spec is not None:
             _wire_tensor_spec_dims(tensor_spec, fake_e)
-        if (
-            source is not None
-            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            and (sym_val := fake_e.item_memo) is not None
-        ):
+        if source is not None and (sym_val := maybe_get_item_memo(fake_e)) is not None:
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
             # this, the tracked fake source name won't match source_to_var and
@@ -5490,6 +5485,8 @@ def _wrap_to_fake_tensor_and_record_impl(
                 item_source = source.base
             else:
                 item_source = CallMethodItemSource(source)
+            # Typed like FakeTensor.item_memo (SymNumberMemoDescriptor.__get__)
+            sym_val = cast(torch.SymInt | torch.SymFloat, sym_val)
             tx.output.tracked_fakes.append(
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
@@ -5755,9 +5752,8 @@ class SourcelessBuilder:
             (
                 types.GenericAlias,
                 types.UnionType,
-                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
-                # `typing._UnionGenericAlias` on Python <= 3.10, not a
-                # `types.UnionType`
+                # `typing.Union[...]` evaluates to a `typing._UnionGenericAlias`
+                # on Python <= 3.13, not a `types.UnionType`
                 typing._UnionGenericAlias,  # type: ignore[attr-defined]
             ),
         ):
