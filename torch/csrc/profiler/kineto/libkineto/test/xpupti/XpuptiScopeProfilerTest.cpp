@@ -27,7 +27,7 @@ namespace KN = KINETO_NAMESPACE;
 class XpuptiScopeProfilerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-#if !PTI_VERSION_AT_LEAST(1, 2)
+#if not PTI_VERSION_AT_LEAST(1, 2)
     const char* zet = std::getenv("ZET_ENABLE_METRICS");
     if (zet == nullptr || std::string_view(zet) != "1") {
       GTEST_SKIP() << "PTI < 1.2 requires ZET_ENABLE_METRICS=1";
