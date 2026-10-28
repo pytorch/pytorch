@@ -1512,4 +1512,19 @@ bool could_pack(ScalarType dt_in) {
 #endif
 }
 
+bool can_use_brgemm(ScalarType dt_in) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  // Not delegated to Brgemm::device_check: its BFloat16 floor is avx512_core,
+  // but oneDNN set_isa_impl() has no bf16:bf16 kernel below avx512_core_bf16
+  // and throws on construction. Do not replace this with device_check.
+  static bool bf16_ok = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_bf16;
+  return dt_in == ScalarType::BFloat16 && bf16_ok;
+#else
+  return false;
+#endif
+}
+
 } // namespace at::native::cpublas
