@@ -2391,9 +2391,9 @@ class ByteArrayVariable(VariableTracker):
         # without a code object; inlining them raises an internal AttributeError
         # instead of a graph break. Decline so dispatch falls through to
         # unimplemented(), the same fallback bytearray_hex/bytearray_decode use
-        # below.
+        # below. Keyword arguments are already rejected by MethodFlags before
+        # the handler runs, so only the positional count needs checking here.
         check_positional(tx, name, len(args), 1, 3)
-        no_keywords(tx, name, kwargs)
         try:
             const_args = [arg.as_python_constant() for arg in args]
         except AsPythonConstantNotImplementedError:

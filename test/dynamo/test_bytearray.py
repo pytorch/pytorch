@@ -305,6 +305,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.count("i")
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.count(256)
+        with self.assertRaisesRegex(TypeError, r"^count expected at least 1 argument"):
+            b.count()
+        with self.assertRaisesRegex(TypeError, r"^count expected at most 3 arguments"):
+            b.count(b"i", None, None, None)
 
     @make_dynamo_test
     def test_rindex(self):
@@ -519,6 +523,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.find(-1)
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.find(256)
+        with self.assertRaisesRegex(TypeError, r"^find expected at least 1 argument"):
+            b.find()
+        with self.assertRaisesRegex(TypeError, r"^find expected at most 3 arguments"):
+            b.find(b"i", None, None, None)
 
     def test_rfind(self):
         b = self.type2test(b"mississippi")
@@ -532,6 +540,10 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.rfind("i")
         with self.assertRaisesRegex(ValueError, "byte must be in range"):
             b.rfind(256)
+        with self.assertRaisesRegex(TypeError, r"^rfind expected at least 1 argument"):
+            b.rfind()
+        with self.assertRaisesRegex(TypeError, r"^rfind expected at most 3 arguments"):
+            b.rfind(b"i", None, None, None)
 
 
     def test_input_bytearray_hex_decode(self):
