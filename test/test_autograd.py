@@ -13755,21 +13755,28 @@ class TestAutogradDeviceType(TestCase):
         t4 = t1 * t1
         t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
-        # Child gpu graph (much longer than parent graph).
+        # Child gpu graph.
         prev = t2 * t2
         for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
 
-        # The engine does not cancel a running child graph when the parent
-        # errors, so hold the child until the parent's error has been checked.
-        child_can_finish = threading.Event()
+        # The parent's error does not cancel a reentrant child graph that has
+        # already started, so start the child before the parent errors and
+        # hold it until the parent has raised.
+        child_started = threading.Event()
+        parent_errored = threading.Event()
         child_done = threading.Event()
 
-        def wait_for_parent_error(grad):
-            child_can_finish.wait(timeout=60)
+        def hold_child(grad):
+            child_started.set()
+            parent_errored.wait(timeout=60)
 
-        reentrant_root.register_hook(wait_for_parent_error)
+        def wait_for_child(grad):
+            child_started.wait(timeout=60)
+
+        reentrant_root.register_hook(hold_child)
+        t5.register_hook(wait_for_child)
 
         class ReentrantFunc(Function):
             @staticmethod
@@ -13778,7 +13785,6 @@ class TestAutogradDeviceType(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
                 reentrant_root.backward(grad)
                 child_done.set()
                 return grad
@@ -13788,15 +13794,18 @@ class TestAutogradDeviceType(TestCase):
         t7 = t6 * t6
 
         try:
-            # The hook holds the child graph, so the parent graph errors out first.
+            # The parent raises without waiting for the held child.
             with self.assertRaisesRegex(Exception, "Simulate error"):
                 torch.autograd.backward([t5.sum(), t7.sum()])
+            self.assertFalse(child_done.is_set())
         finally:
-            child_can_finish.set()
+            parent_errored.set()
 
-        # The parent errored, so the engine must not run the rest of its graph
-        # once the child returns.
+        self.assertTrue(child_started.is_set())
+        # The child is its own graph task and runs to completion.
         self.assertTrue(child_done.wait(timeout=60))
+        self.assertIsNotNone(t2.grad)
+        # The parent errored, so it must not run the rest of its graph.
         self.assertIsNone(t3.grad)
         self.assertIsNone(t1.grad)
 
