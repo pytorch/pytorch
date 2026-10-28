@@ -104,7 +104,8 @@ void XPUGeneratorCaptureState::initialize() {
     queue = std::make_unique<sycl::queue>(
         c10::xpu::get_device_context(),
         c10::xpu::get_raw_device(device),
-        sycl::property_list{sycl::property::queue::in_order{}});
+        c10::xpu::asyncHandler,
+        {sycl::property::queue::in_order()});
   }
   auto stream = c10::xpu::getStreamFromExternal(queue.get(), device);
   c10::StreamGuard stream_guard(stream);
