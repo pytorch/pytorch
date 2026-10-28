@@ -2731,12 +2731,12 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 instantiate_parametrized_tests(ActivationCheckpointingViaTagsGenericTests)
 
 
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
 class ActivationCheckpointingViaTagsCUDAOnlyTests(
     ActivationCheckpointingViaTagsTestBase
 ):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_reduces_act_mem(self):
         N, NUM_LAYERS = 1000, 4
 
@@ -2782,7 +2782,6 @@ class ActivationCheckpointingViaTagsCUDAOnlyTests(
         compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
         self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_per_region(self):
         """Different graphs (separated by a graph break) can have different
         memory budgets."""
@@ -2849,7 +2848,6 @@ class ActivationCheckpointingViaTagsCUDAOnlyTests(
         self.assertGreater(mem_a_recomp, mem_both_recomp)
         self.assertGreater(mem_b_recomp, mem_both_recomp)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_region_activation_memory_budget_covers_invoke_subgraph(self):
         """A budget covering a forward that contains an invoke_subgraph
@@ -3666,10 +3664,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
 class RematerializeACNodesPassCUDAOnlyTests(RematerializeACNodesPassTestBase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_with_sdpa_dropout_zero(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
@@ -4089,7 +4087,9 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
 
-        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        compiled_f = torch.compile(
+            lambda x: x.sin().cos(), backend="eager", fullgraph=True
+        )
 
         @contextlib.contextmanager
         def skip_nested_compile():
