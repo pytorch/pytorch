@@ -1082,7 +1082,7 @@ _RENDER_STAGES = (
     ("gpu_memcpy", 2, "Memcpy", 0),
     ("gpu_memset", 3, "Memset", 0),
     # GPU-side user annotations (collective/phase ranges) on the stream lane; not a kernel
-    # (no launch), so they render as a range nesting over the kernels they span.
+    # (no launch), so they render as a range on the row above the kernels they span.
     ("gpu_annotation", 4, "Annotation", 0),
     # CUDA-graph event-record / host-callback nodes on their stream lane. Rendered as render
     # stages (not kernels: no launch) so they carry graph id/node/annotation and become
@@ -1438,10 +1438,11 @@ def _build_render_stages(
     # (gpu_id, stream_iid). Interning on the same (gpu, stream) key keeps each device's names
     # its own -- the iid table is global, so interning on the bare stream would let one device's
     # resolver name ("DP") relabel another device's identically-numbered CUDA stream.
-    # Durations are CUPTI's, unclamped. Perfetto does not nest render stages: any stage that
-    # overlaps another on its lane (the spanning annotation, PDL, graph-replay timestamps) goes
-    # on an extra track of the same lane name, so a lane shows as one track per overlap level
-    # and no stage is dropped or cut short. Perfetto sorts lanes lexicographically by name, so
+    # Durations are CUPTI's, unclamped. trace_processor puts a stage that overlaps another on
+    # its lane (the spanning annotation, PDL, graph-replay timestamps) on a spill track of the
+    # same track group, and the UI draws the group as one lane: the annotation on the top row,
+    # its kernels below, and each further level of overlap on one more row. No stage is dropped
+    # or cut short. Perfetto sorts lanes lexicographically by name, so
     # prefix every lane (resolver-named or "stream N") with a bracketed zero-padded lane id ->
     # the lane order matches the chrome path's numeric lane-id order (otherwise "stream 7"
     # sorts after "stream 26674", and resolver-named lanes like "DP" interleave
