@@ -19,6 +19,7 @@ from torch._inductor.lowering import lowerings, register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -87,6 +88,29 @@ def _exact_inputs(*shape: int, dtype: torch.dtype) -> torch.Tensor:
 class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()
+
+    def test_subgraph_policy_cache_identity(self):
+        from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+
+        caller = object.__new__(SubgraphChoiceCaller)
+        caller.name = "subgraph_3"
+        caller.input_nodes = []
+        graph = torch.fx.Graph()
+        graph.output(graph.placeholder("a"))
+        caller.gm = torch.fx.GraphModule({}, graph)
+        caller.config_patches = {}
+        self.assertEqual(caller.hash_key(), "subgraph-" + str(graph))
+        default = caller.hash_key()
+        caller.config_patches = {
+            "coordinate_descent_tuning": True,
+            "max_autotune_gemm": True,
+        }
+        patched = caller.hash_key()
+        self.assertNotEqual(patched, default)
+        caller.config_patches = dict(reversed(list(caller.config_patches.items())))
+        self.assertEqual(caller.hash_key(), patched)
+        caller.config_patches["coordinate_descent_tuning"] = False
+        self.assertNotEqual(caller.hash_key(), patched)
 
     def _create_buffer(self, name, shape, dtype):
         return Buffer(
@@ -321,6 +345,95 @@ class TestSubgraphChoice(TestCase):
             compiled_func = torch.compile(func, mode="max-autotune", dynamic=False)
 
             compiled_func(a_in, b_in)
+
+
+class TestSubgraphPolicy(TestCase):
+    @parametrize("pipeline", (False, True))
+    def test_custom_op_policy(self, device, pipeline):
+        from torch._inductor.codegen.subgraph import (
+            SubgraphChoiceCaller,
+            SubgraphTemplate,
+        )
+        from torch._inductor.virtualized import V
+
+        library = self.enterContext(
+            torch.library._scoped_library("inductor_test", "FRAGMENT")
+        )
+        library.define("subgraph_policy_mm(Tensor a, Tensor b) -> Tensor")
+        library.impl("subgraph_policy_mm", torch.mm, "CompositeExplicitAutograd")
+        torch.library.register_fake(
+            "inductor_test::subgraph_policy_mm", torch.mm, lib=library
+        )
+        target = torch.ops.inductor_test.subgraph_policy_mm.default
+        is_cuda = torch.device(device).type == "cuda"
+        policy = {
+            "coordinate_descent_tuning": True,
+            "max_autotune_gemm": is_cuda,
+            "max_autotune_gemm_backends": "TRITON" if is_cuda else "ATEN",
+            "pipeline_max_autotune_gemm": False,
+            "benchmark_template_fusion": False,
+        }
+        original_compile = SubgraphChoiceCaller._compile_for_benchmarking
+        benchmark_sources = []
+
+        def checked_compile(choice):
+            self.assertEqual(choice.config_patches, policy)
+            self.assertIsNone(
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+            )
+            self.assertIs(V.fake_mode, choice.example_inputs[0].fake_mode)
+            module = original_compile(choice)
+            with open(module.__file__) as handle:
+                benchmark_sources.append(handle.read())
+            return module
+
+        def lowering(a, b):
+            _, _, _, _, a, b = mm_args(a, b)
+            (choice,) = SubgraphTemplate("subgraph_policy_mm").generate_custom_op_choices(
+                name="subgraph_policy_mm",
+                decompositions=[torch.mm],
+                input_nodes=[a, b],
+                non_tensor_args=[{}],
+                config_patches_list=[policy],
+            )
+            self.assertIs(
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
+                V.fake_mode,
+            )
+            policy["coordinate_descent_tuning"] = False
+            self.assertTrue(choice.config_patches["coordinate_descent_tuning"])
+            return choice.output_node()
+
+        a = torch.randint(-1, 2, (257, 64), device=device).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (64, 96), device=device).to(torch.bfloat16)
+        with (
+            mock.patch.dict(lowerings, {target: lowering}),
+            config.patch(
+                {
+                    "max_autotune_gemm": False,
+                    "max_autotune_gemm_backends": "ATEN",
+                    "pipeline_max_autotune_gemm": pipeline,
+                    "benchmark_template_fusion": False,
+                    "fx_graph_cache": False,
+                    "compile_threads": 1,
+                }
+            ),
+            mock.patch.object(
+                SubgraphChoiceCaller, "_compile_for_benchmarking", checked_compile
+            ),
+        ):
+            compiled = torch.compile(lambda a, b: target(a, b), fullgraph=True)
+            actual, sources = run_and_get_code(compiled, a, b)
+            self.assertEqual(actual, torch.mm(a, b), atol=0, rtol=0)
+            self.assertEqual(compiled(-a, b), torch.mm(-a, b), atol=0, rtol=0)
+        self.assertEqual(len(benchmark_sources), int(pipeline))
+        if is_cuda:
+            self.assertTrue(any("triton_tem" in source for source in sources))
+            for source in benchmark_sources:
+                self.assertIn("triton_tem", source)
+
+
+instantiate_device_type_tests(TestSubgraphPolicy, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":
