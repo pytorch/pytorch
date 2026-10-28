@@ -114,7 +114,6 @@ class TestFindOwnershipErrors(TestCase):
             },
         )
 
-
     def test_owner_none_and_blocks_without_paths(self):
         # `none` is compared like any other owner list, and a label block with no
         # paths under it is still compared.
@@ -178,7 +177,10 @@ class TestLintWiring(TestCase):
         self.assertIn("1 label lines without an owner line", message["description"])
 
     def test_clean_file_passes(self):
-        codeowners = LINT_HEADER + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @alice\n#\n"
+        codeowners = (
+            LINT_HEADER
+            + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @alice\n#\n"
+        )
         result = run_lint(codeowners)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(run_lint(codeowners, "--lintrunner").stdout, "")
