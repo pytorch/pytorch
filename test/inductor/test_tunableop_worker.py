@@ -313,6 +313,16 @@ class TunableOpWorkerTest(TestCase):
             self.assertEqual(outcome.status, status)
             self.assertIsNone(outcome.time)
 
+    def test_a_fault_warns_once_then_drops_to_debug(self):
+        # A fault that repeats for every GEMM would otherwise leave tune mode
+        # recording nothing with no sign of it at the default log level.
+        tunableop._fault_warned = False
+        self.addCleanup(setattr, tunableop, "_fault_warned", False)
+        with self.assertLogs(tunableop.log, level="WARNING"):
+            self._submit_with_fault(RuntimeError("boom"))
+        with self.assertNoLogs(tunableop.log, level="WARNING"):
+            self._submit_with_fault(RuntimeError("boom"))
+
     def test_job_raised_pipe_exception_is_an_error_not_a_timeout(self):
         # The discriminator is running, which a real pipe fault clears and a
         # child-raised exception does not.
@@ -865,16 +875,17 @@ class TunableOpSettingsRoundTripTest(TestCase):
         self.assertEqual(tunable.get_rotating_buffer_size(), parent_bytes)
 
 
-class TunableOpRocmWorkerTest(TestCase):
-    """Real BenchmarkJob through a real worker on ROCm hardware.
+class TunableOpRealGpuWorkerTest(TestCase):
+    """Real BenchmarkJob through a real worker on a GPU.
 
     Covers what the stubbed tests cannot: the pickle round trip, and the worker
-    appending to the file the parent's runtime reads.
+    appending to the file the parent's runtime reads. Not ROCm-gated -- the
+    TunableOp GEMM dispatch and its signature are the same on cuBLASLt.
     """
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_real_job_tunes_and_appends_to_shared_file(self):
         from torch._inductor.autotune_process import _TestTunableMatmulRequest
@@ -887,7 +898,7 @@ class TunableOpRocmWorkerTest(TestCase):
 
         was_enabled = torch.cuda.tunable.is_enabled()
         previous_filename = torch.cuda.tunable.get_filename()
-        with tempfile.TemporaryDirectory(prefix="tunableop_worker_roc_") as d:
+        with tempfile.TemporaryDirectory(prefix="tunableop_worker_gpu_") as d:
             results_file = os.path.join(d, "results.csv")
             torch.cuda.tunable.set_filename(results_file, False)
             try:

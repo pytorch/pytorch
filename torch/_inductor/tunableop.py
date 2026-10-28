@@ -78,6 +78,15 @@ _TUNE_BLOCKING_ENV = (
 # worker with an empty results map and nothing to borrow.
 _REUSE_BLOCKING_ENV = (("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),)
 _env_warned = False
+_fault_warned = False
+
+
+def _warn_fault_once(msg: str) -> None:
+    """Faults repeat per GEMM; warn on the first so a systematic one is seen."""
+    global _fault_warned
+    report = log.debug if _fault_warned else log.warning
+    _fault_warned = True
+    report(msg, exc_info=True)
 
 
 def _warn_if_env_blocks(
@@ -192,11 +201,8 @@ _worker_key: tuple[int, str] | None = None
 _atexit_registered = False
 # How long a graceful shutdown waits for the child before resorting to SIGKILL.
 _SHUTDOWN_TIMEOUT_S = 10.0
-# One worker, one pipe. Extern kernels are benchmarked sequentially today
-# (select_algorithm routes them to benchmark_in_current_process, not the thread
-# pool), but nothing structural enforces that, and interleaved put/get would
-# either corrupt the pickle stream or hand a caller another job's timing.
-# TuningProcessPool guards its processes with a queue for the same reason.
+# One worker, one pipe: interleaved put/get would corrupt the pickle stream or
+# hand a caller another job's timing. TuningProcessPool uses a queue likewise.
 _worker_lock = threading.Lock()
 
 
@@ -223,9 +229,7 @@ def _get_worker_locked(key: tuple[int, str]) -> TuningProcess:
         # device=None on purpose. TuningProcess.start() *replaces* the inherited
         # CUDA_VISIBLE_DEVICES with str(device), so a logical ordinal would point
         # the worker at a different physical GPU: with CUDA_VISIBLE_DEVICES=4,7
-        # and logical 1, the parent uses physical 7 and the worker takes physical
-        # 1. Leaving the mask alone keeps UUID/MIG tokens intact; BenchmarkJob
-        # selects the logical device on arrival.
+        # and logical 1, the parent uses physical 7 and the worker takes 1.
         _worker = TuningProcess(device=None)
         _worker_key = key
         if not _atexit_registered:
@@ -279,11 +283,9 @@ def _shutdown_locked(graceful: bool = True) -> None:
                 else:
                     _worker.close()
             else:
-                # kill() signals only when alive() is true, and alive() is gated
-                # on running, which close() already cleared on the EOF path. A
-                # child that closed its pipes and then wedged in device teardown
-                # would never be signalled, and would hold its context and
-                # allocator memory on the GPU with no handle left to reach it.
+                # kill() signals only when alive() is true, which close() has
+                # already falsified on the EOF path -- so a child that wedged in
+                # teardown would never be signalled, and would hold the GPU.
                 process = _worker.process
                 if process is not None and process.poll() is None:
                     process.kill()
@@ -457,11 +459,10 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         device = _job_device(job)
         settings = snapshot_settings()
     except Exception as e:  # resolve before the worker: no restart
-        # Failed before the worker was involved (no device, no filename): report
-        # without touching it. Shutting down here would kill a healthy worker
-        # another thread is using, and -- worse -- write the None sentinel into
-        # the pipe mid-stream after _worker_lock is released.
-        log.debug("TunableOp benchmark setup failed: %s", e)
+        # Report without touching the worker: shutting down here would kill a
+        # healthy one another thread is using, and write the None sentinel into
+        # the pipe mid-stream once _worker_lock is released.
+        log.warning("TunableOp benchmark setup failed", exc_info=True)
         return Outcome(None, "error")
     try:
         with _worker_lock:
@@ -483,19 +484,18 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                     # get() killed or closed it but never waited; reap it.
                     _shutdown_locked(graceful=False)
                     return Outcome(None, status)
-                log.debug("TunableOp job raised %r; treating as an error", e)
+                _warn_fault_once("TunableOp job raised; treating as an error")
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
             except Exception as e:  # a failed benchmark must not fail the compile
-                log.debug("TunableOp benchmark failed: %s", e)
+                _warn_fault_once("TunableOp benchmark failed")
                 # A caught exception can leave a sticky GPU fault behind, so
-                # every later GEMM would fail the same way. Kill rather than
-                # ask: a child wedged in device teardown never acts on the
-                # sentinel. Recorded solutions survive via the results file.
+                # every later GEMM would fail alike. Kill rather than ask: a
+                # child wedged in teardown never acts on the sentinel.
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
     except Exception as e:  # lock/restart machinery itself failed
-        log.debug("TunableOp worker machinery failed: %s", e)
+        log.warning("TunableOp worker machinery failed", exc_info=True)
         return Outcome(None, "error")
 
 
