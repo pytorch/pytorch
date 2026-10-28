@@ -1138,15 +1138,25 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload[_P, _T]):
     def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
-        if (
-            key == DispatchKey.Fake
-            and key not in self.py_kernels
-            and DispatchKey.Meta in self.py_kernels
-        ):
-            handler = self.py_kernels[DispatchKey.Meta]
-            self._dispatch_cache[key] = handler
-            add_cached_op(self)
-            return handler
+        # Without a Fake kernel, use the op's register_fake impl as Python
+        # FakeTensorMode does, else its Meta kernel.
+        if key == DispatchKey.Fake and key not in self.py_kernels:
+            fake_impl = torch._library.simple_registry.singleton.find(
+                self.name()
+            ).fake_impl
+            if fake_impl.kernel is not None:
+
+                def run_fake_impl(*args, **kwargs):
+                    fake_mode = torch._guards.detect_fake_mode((args, kwargs))
+                    if fake_mode is None:
+                        raise AssertionError("expected an active fake mode")
+                    return torch._library.fake_impl.run_fake_impl(
+                        fake_mode, self, args, kwargs
+                    )
+
+                return run_fake_impl
+            if DispatchKey.Meta in self.py_kernels:
+                return self.py_kernels[DispatchKey.Meta]
         return super()._get_dispatch(key)
 
     def _fallthrough_keys(self) -> list[DispatchKey]:
