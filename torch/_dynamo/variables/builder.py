@@ -250,9 +250,11 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
+    LruCacheWrapperVariable,
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
@@ -2012,27 +2014,24 @@ class VariableBuilder:
             "__script_if_tracing_wrapper", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = FunctionWrapperVariable(value, "__original_fn", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = LruCacheWrapperVariable(value, "__wrapped__", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
+            wrapper_cls = (
+                FunctionWrapperVariable
+                if isinstance(value, types.FunctionType)
+                else WrapperUserFunctionVariable
+            )
+            return wrapper_cls(
                 value,
                 "_torchdynamo_inline",
                 source=self.source,

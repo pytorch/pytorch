@@ -4074,7 +4074,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
-            fn_vt = variables.WrapperUserFunctionVariable(
+            fn_vt = variables.LruCacheWrapperVariable(
                 type_attr, "__wrapped__", source=source
             )
             return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
@@ -4082,7 +4082,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
                 if can_use_mro_source:
                     source = self.get_source_by_walking_mro(tx, name)
-                fn_vt = variables.WrapperUserFunctionVariable(
+                fn_vt = variables.FunctionWrapperVariable(
                     type_attr, "_torchdynamo_inline", source=source
                 )
                 return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
