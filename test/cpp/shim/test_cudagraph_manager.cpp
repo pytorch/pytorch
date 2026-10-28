@@ -127,6 +127,23 @@ TEST_F(CudaGraphManagerTest, ThreadsRunEagerlyBeforeCapturing) {
   EXPECT_EQ(region.calls, 3);
 }
 
+TEST_F(CudaGraphManagerTest, ThreadIsWarmOnlyAfterASuccessfulCall) {
+  CudaGraphManager manager(0);
+  Region region(affine);
+  auto x = at::randn({16}, at::kCUDA);
+  run(manager, region, x);
+  std::thread([&] {
+    region.fail = true;
+    EXPECT_THROW(run(manager, region, x), c10::Error);
+    region.fail = false;
+    // The failed call doesn't count, so this one runs eagerly too.
+    EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+    EXPECT_EQ(manager.num_graphs(), 0);
+    EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+    EXPECT_EQ(manager.num_graphs(), 1);
+  }).join();
+}
+
 TEST_F(CudaGraphManagerTest, KeysOnShapes) {
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
