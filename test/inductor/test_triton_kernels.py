@@ -2225,7 +2225,7 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("bind", ["slice", "set_"])
     def test_triton_kernel_mutated_no_base_arg(self, bind):
         # The other test's views are built inside the graph, so they always have a
-        # _base. A mutated arg reaches _clone_mutated_arg's base=None fallback when
+        # _base. A mutated arg reaches clone_mutated_arg's base=None fallback when
         # it is a graph input instead: a placeholder is rebuilt from metadata, which
         # drops whatever _base the caller's tensor had. Tensor.set_() gets there too,
         # but only from the caller -- inside a compiled region it graph breaks.
@@ -2259,11 +2259,13 @@ def forward(self, x_1, output_1):
         expected[..., : n_cols // 2] = 1.0
         self.assertEqual(f(make_arg()), expected)
 
-        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops import user_kernel_hop
         from torch._prims_common import is_non_overlapping_and_dense_or_false
 
         with mock.patch.object(
-            tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+            user_kernel_hop,
+            "clone_mutated_arg",
+            wraps=user_kernel_hop.clone_mutated_arg,
         ) as clone_mock:
             self.assertEqual(torch.compile(f, fullgraph=True)(make_arg()), expected)
         # A dense arg, or one at offset 0, would take a different branch and leave
@@ -2310,7 +2312,7 @@ def forward(self, x_1, output_1):
                 base[i : i + 1, ::gap] = row
             return base
 
-        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops import user_kernel_hop
 
         with torch.inference_mode():
             expected = make_base()
@@ -2318,7 +2320,9 @@ def forward(self, x_1, output_1):
                 if i != skipped_row:
                     expected[i, ::gap] = 1.0
             with mock.patch.object(
-                tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+                user_kernel_hop,
+                "clone_mutated_arg",
+                wraps=user_kernel_hop.clone_mutated_arg,
             ) as clone_mock:
                 self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
         # Numerics are the contract; this pins the mechanism, so a change that stops
@@ -4600,6 +4604,42 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("BLOCK_SIZE", ttir_str)
         self.assertNotIn("maybe_param", ttir_str)
 
+    @requires_gpu
+    @skipIfXpu
+    def test_toy_raw_call_compile_and_aoti(self):
+        # A raw kernel call, no wrap_triton: Dynamo captures it in torch.compile and
+        # in strict export, whose program AOTInductor compiles.
+        @triton.jit
+        def toy_add_kernel(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            offs = pid * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            x = tl.load(x_ptr + offs, mask=mask)
+            y = tl.load(y_ptr + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def launch_add(x, y, out):
+            n = out.numel()
+            toy_add_kernel[(triton.cdiv(n, 1024),)](x, y, out, n, BLOCK=1024)
+
+        def toy(x, y):
+            out = torch.empty_like(x)
+            launch_add(x, y, out)
+            return out.relu()
+
+        class Toy(torch.nn.Module):
+            def forward(self, x, y):
+                return toy(x, y)
+
+        x = torch.randn(2048, device=GPU_TYPE)
+        y = torch.randn(2048, device=GPU_TYPE)
+        expected = (x + y).relu()
+        self.assertEqual(toy(x, y), expected)
+        self.assertEqual(torch.compile(toy, fullgraph=True)(x, y), expected)
+        ep = torch.export.export(Toy(), (x, y), strict=True)
+        package = torch._inductor.aoti_compile_and_package(ep)
+        self.assertEqual(torch._inductor.aoti_load_package(package)(x, y), expected)
+
 
 def make_mutation_test(fn):
     @requires_gpu
@@ -5539,6 +5579,13 @@ class MutationTests(torch._inductor.test_case.TestCase):
             tkw.unregister_kernel_access_op(custom_store)
             analyze_kernel_access.reset()
             get_tma_stores.reset()
+
+    def test_clone_preserve_strides_still_importable(self):
+        # Dispatch modes outside torch import it from triton_kernel_wrap.
+        from torch._higher_order_ops.triton_kernel_wrap import clone_preserve_strides
+        from torch._prims_common import clone_preserve_strides as expected
+
+        self.assertIs(clone_preserve_strides, expected)
 
     def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
         from torch._higher_order_ops import triton_kernel_wrap as tkw
