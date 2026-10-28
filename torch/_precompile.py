@@ -1920,6 +1920,20 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+def _overload_names(op: object) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of ``op`` if it is an operator: its own,
+    or every overload's for an ``OpOverloadPacket``."""
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        ops = [getattr(op, name) for name in op.overloads()]
+    else:
+        ops = [op]
+    return {
+        (o._schema.name, o._schema.overload_name)
+        for o in ops
+        if isinstance(o, torch._ops.OpOverload)
+    }
+
+
 def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
     call, directly or passed to a higher-order op."""
@@ -1932,14 +1946,7 @@ def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
             if node.op != "call_function":
                 continue
             for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                if isinstance(op, torch._ops.OpOverloadPacket):
-                    ops = [getattr(op, name) for name in op.overloads()]
-                else:
-                    ops = [op]
-                for overload in ops:
-                    if isinstance(overload, torch._ops.OpOverload):
-                        schema = overload._schema
-                        names.add((schema.name, schema.overload_name))
+                names |= _overload_names(op)
     return names
 
 
@@ -1949,6 +1956,9 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     names with ``m.set_python_module``."""
     from torch._library.custom_ops import OPDEFS
 
+    if op_name.startswith("prims::"):
+        # torch._prims._make_prim defines every prim from its own function.
+        return None
     if (opdef := OPDEFS.get(op_name)) is not None:
         name = getattr(opdef._init_fn, "__module__", None)
     else:
@@ -1998,7 +2008,13 @@ _TORCH_DIR = os.path.dirname(torch.__file__)
 # torch's helpers that build a Library for the caller's namespace record themselves,
 # so the torch modules defining ops through them are listed by namespace.
 _TORCH_OP_HELPERS = tuple(
-    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
+    os.path.join(_TORCH_DIR, name)
+    for name in (
+        "library.py",
+        "_library",
+        "_custom_op",
+        os.path.join("_native", "registry.py"),
+    )
 )
 _TORCH_HELPER_OP_MODULES = MappingProxyType(
     {
@@ -2008,6 +2024,17 @@ _TORCH_HELPER_OP_MODULES = MappingProxyType(
         "onnx": "torch.onnx.ops._impl",
         "pippy": "torch.distributed.pipelining._IR",
     }
+)
+# torch.distributed._ops.device_mesh imports only once torch.distributed.tensor has
+# registered DeviceMesh as an opaque type.
+_TORCH_OP_MODULE_PREREQUISITES = MappingProxyType(
+    {"torch.distributed._ops.device_mesh": "torch.distributed.tensor"}
+)
+# The modules defining prims with torch._prims._make_prim, which records itself.
+_TORCH_PRIM_MODULES = (
+    "torch._prims",
+    "torch._inductor.inductor_prims",
+    "torch._dynamo.tensor_version_op",
 )
 # Torch namespaces defined only when a function runs (CUDA lazy init, inductor's
 # memory-check debug mode), so no module import registers them.
@@ -2020,6 +2047,12 @@ def _torch_op_module(op_name: str, overload: str) -> str | None:
     ns = op_name.split("::")[0]
     if ns in _TORCH_LAZY_OP_NAMESPACES:
         return None
+    if ns == "prims":
+        packet = getattr(torch.ops.prims, op_name.split("::")[1])
+        op = getattr(packet, overload or "default")
+        modules = (sys.modules.get(name) for name in _TORCH_PRIM_MODULES)
+        owners = (m for m in modules if m and any(v is op for v in vars(m).values()))
+        return next((m.__name__ for m in owners), None)
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
     if path.startswith(_TORCH_OP_HELPERS):
@@ -2055,7 +2088,10 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
             "loading the artifact.",
             ", ".join(sorted(unrecorded)),
         )
-    return tuple(sorted(modules))
+    prerequisites = {
+        p for m in modules if (p := _TORCH_OP_MODULE_PREREQUISITES.get(m)) is not None
+    }
+    return tuple(sorted(prerequisites)) + tuple(sorted(modules - prerequisites))
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -3793,11 +3829,18 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
+    Before anything else runs, the artifact imports the modules in its
+    ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
+    and then checks that every op in ``CUSTOM_OPS`` is registered. A module that
+    fails to import only warns when its ops are registered anyway, e.g. by a
+    module the server imported under another name.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture), or if a custom op the
+    artifact calls is not registered once its imports ran. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """

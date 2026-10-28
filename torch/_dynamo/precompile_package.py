@@ -1596,7 +1596,8 @@ class _CapturePackage(CompilePackage):
         # The operators each backend graph calls, by backend id, and those run
         # eagerly at a graph break. Ops in a torch._dynamo.disable'd function or a
         # frame Dynamo falls back on, and ops only AOTAutograd traces (a custom
-        # op's backward formula), are not recorded.
+        # op's backward formula), are not recorded, nor are those of a bypassed
+        # compile, whose frame serving re-traces under allow_serve_time_compiles=True.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
@@ -1618,9 +1619,10 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
 
-    def add_graph_break_op(self, op: torch._ops.OpOverload) -> None:
-        name = (op._schema.name, op._schema.overload_name)
-        self._compile_graph_break_op_names.add(name)
+    def add_graph_break_op(self, op: object) -> None:
+        from torch._precompile import _overload_names
+
+        self._compile_graph_break_op_names |= _overload_names(op)
 
     @contextlib.contextmanager
     def code_context(
