@@ -290,20 +290,29 @@ class TestSumCuteDSLOverride(TestCase):
         previous = torch.cuda.current_device()
         try:
             torch.cuda.set_device(0)
-            x = torch.ones(17, 8192, device="cuda:1")
-            x[:, 0] = 2
+            x0 = torch.ones(17, 8192, device="cuda:0")
+            x0[:, 0] = 2
+            # Compile on cuda:0 first so the cuda:1 calls never depend on test order.
+            x0.sum(dim=1)
+            torch.prod(x0, dim=1, out=torch.empty(17, device="cuda:0"))
+            x = x0.to("cuda:1")
             with torch.backends.python_native.cutedsl.disabled():
                 expected_sum = x.sum(dim=1)
                 expected_prod = x.prod(dim=1)
 
-            with mock.patch.object(
-                rt, "reduce_row_itree", wraps=rt.reduce_row_itree
-            ) as run:
+            reduce_row_itree = rt.reduce_row_itree
+            launch_devices = []
+
+            def record(*args, **kwargs):
+                launch_devices.append(torch.cuda.current_device())
+                return reduce_row_itree(*args, **kwargs)
+
+            with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
                 got_sum = x.sum(dim=1)
                 got_prod = torch.empty(17, device="cuda:1")
                 torch.prod(x, dim=1, out=got_prod)
 
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(launch_devices, [1, 1])
             self.assertEqual(torch.cuda.current_device(), 0)
             self.assertEqual(got_sum.device, torch.device("cuda:1"))
             self.assertEqual(got_prod.device, torch.device("cuda:1"))
