@@ -9360,6 +9360,8 @@ class TestPrecompileCustomOpModules(TestCase):
             traced_bw = tracer == "make_fx" and entry == "train_fn"
             modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
+            if traced_bw:
+                self.assertIn(repr((f"{bwns}::scale", "")), python_code)
             if mode is not None:
                 self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
 
@@ -9367,6 +9369,15 @@ class TestPrecompileCustomOpModules(TestCase):
 def _no_fake_op_fn(x):
     # Without a fake kernel the op graph-breaks and runs eagerly, outside every graph.
     return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
+
+
+def _composite_impl(x):
+    return torch.ops.precompile_no_fake.op.default(x) * 2
+
+
+def _composite_op_fn(x):
+    # Fake mode fails on the decomposed op, but the graph break runs this one.
+    return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
 
 
 def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
@@ -9454,18 +9465,18 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
-        try:
-            import libtorch_agn_2_13  # noqa: F401
-        except ImportError:
-            self.skipTest("requires the libtorch_agn_2_13 cpp extension")
         from torch._precompile import _custom_op_module
 
-        name = "libtorch_agn_2_13::identity_with_fake_module"
-        self.assertEqual(_custom_op_module(name, ""), "libtorch_agn_2_13")
-        missing = "libtorch_agn_2_13::identity_w_nonexistent_fake_module"
-        self.assertIsNone(_custom_op_module(missing, ""))
+        # As a C++ op that names its module with m.set_python_module.
+        name = f"precompile_pystub_{uuid.uuid4().hex}::op"
+        with mock.patch.object(torch._C, "_dispatch_pystub") as dispatch_pystub:
+            dispatch_pystub.return_value = ("unittest", "context")
+            self.assertEqual(_custom_op_module(name, ""), "unittest")
+            dispatch_pystub.return_value = None
+            self.assertIsNone(_custom_op_module(name, ""))
 
     def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+        from torch._native.registry import _define_native_op_once
         from torch._precompile import _custom_op_modules
 
         op, qualname = self._op("in_main")
@@ -9484,6 +9495,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         names = [(qualname, ""), (f"{ns}::f", ""), (f"{ns}::legacy_op", "")]
         names.append((recorded._qualname, ""))
         importlib.import_module("torch.export.custom_ops")
+        # A register_op_override op, which only that call defines.
+        native = f"precompile_{uuid.uuid4().hex}"
+        _define_native_op_once(native, "aten", "neg")
+        names.append((f"_native::{native}", ""))
 
         # Torch's own ops, registered from C++ and from Python inside torch.
         names += [("aten::add", "Tensor"), ("export::access_subclass_inner_tensor", "")]
@@ -9494,6 +9509,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(qualname, message)
         self.assertIn(f"{ns}::f", message)
         self.assertIn(f"{ns}::legacy_op", message)
+        self.assertIn(f"_native::{native}", message)
         self.assertNotIn(recorded._qualname, message)
         self.assertNotIn("aten::add", message)
         self.assertNotIn("export::", message)
@@ -9502,12 +9518,29 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_a_torch_submodule_registers_records_that_module(self):
         from torch._precompile import _custom_op_modules
 
-        # device_mesh needs DeviceMesh registered as an opaque type first.
-        importlib.import_module("torch.distributed.tensor")
-        importlib.import_module("torch.distributed._ops.device_mesh")
-        op = ("device_mesh::_runtime_compute_coordinate_on_dim", "")
-        module = "torch.distributed._ops.device_mesh"
-        self.assertEqual(_custom_op_modules([op]), (module,))
+        # Registers the ops here; the recorded modules must import in this order.
+        modules = ("torch.distributed.tensor", "torch.distributed._ops.device_mesh")
+        for module in modules:
+            importlib.import_module(module)
+        ops = [
+            ("device_mesh::_runtime_compute_coordinate_on_dim", ""),
+            ("device_mesh::_get_submesh", ""),
+        ]
+        self.assertEqual(_custom_op_modules(ops), modules)
+
+    def test_a_prim_records_the_module_defining_it(self):
+        from torch._precompile import _custom_op_modules
+
+        importlib.import_module("torch._inductor.inductor_prims")
+        importlib.import_module("torch._dynamo.tensor_version_op")
+        expected = {
+            "add": "torch._prims",
+            "inductor_random": "torch._inductor.inductor_prims",
+            "_tensor_version": "torch._dynamo.tensor_version_op",
+            "_unsafe_set_version_counter": "torch._dynamo.tensor_version_op",
+        }
+        for name, module in expected.items():
+            self.assertEqual(_custom_op_modules([(f"prims::{name}", "")]), (module,))
 
     @unittest.skipIf(IS_WINDOWS, "forks")
     def test_no_op_torch_registers_is_reported(self):
@@ -9516,7 +9549,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             import json
             import torch
             import torch.onnx.ops
-            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _torch_op_module
+            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _torch_op_module
             if torch.distributed.is_available():
                 import torch.distributed.fsdp
                 import torch.distributed.pipelining
@@ -9535,7 +9568,8 @@ class TestPrecompileCustomOpRecording(TestCase):
                     reported.add(ns)
                 else:
                     modules.setdefault(module, []).append([op_name, overload])
-            print(json.dumps({"reported": sorted(reported), "modules": modules}))
+            chains = {m: [_custom_op_modules(ops), ops] for m, ops in modules.items()}
+            print(json.dumps({"reported": sorted(reported), "modules": chains}))
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
@@ -9544,8 +9578,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         # metal, nnapi, ...) are not checked.
         out = subprocess.check_output([sys.executable, "-c", script], text=True)
         scan = json.loads(out)
-        # "_test" holds TorchScript's own test ops.
-        self.assertEqual(set(scan["reported"]) - {"_test"}, set())
+        # "_test" holds TorchScript's own test ops, and "_native" register_op_override's
+        # ops, which only that call defines.
+        self.assertEqual(set(scan["reported"]) - {"_test", "_native"}, set())
 
         # Each recorded module must register its ops when imported alone, as on a fresh
         # host. A child forked from a process that imported only torch imports each one.
@@ -9554,15 +9589,14 @@ class TestPrecompileCustomOpRecording(TestCase):
             import importlib, json, os, sys
             import torch
             modules = json.load(sys.stdin)
-            for module, ops in sorted(modules.items()):
+            for module, (chain, ops) in sorted(modules.items()):
                 sys.stdout.flush()
                 if os.fork() != 0:
                     os.wait()
                     continue
                 try:
-                    if module == "torch.distributed._ops.device_mesh":
-                        importlib.import_module("torch.distributed.tensor")
-                    importlib.import_module(module)
+                    for name in chain:
+                        importlib.import_module(name)
                     for op_name, overload in ops:
                         try:
                             torch._C._dispatch_find_schema_or_throw(op_name, overload)
@@ -9607,11 +9641,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CPU")
+        lib.define("composite(Tensor x) -> Tensor")
+        lib.impl("composite", _composite_impl, "CompositeImplicitAutograd")
         lib.define("bypassed(Tensor x) -> Tensor")
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "artifact.py")
             with capture(
-                _no_fake_op_fn,
+                _composite_op_fn,
                 artifact_path=artifact,
                 cache_path=os.path.join(directory, "artifact.cache"),
                 tracer=DynamoTracer(),
@@ -9620,14 +9656,20 @@ class TestPrecompileCustomOpRecording(TestCase):
                 cap(torch.ones(4))
                 # A compile that graph-broke on an op and was then bypassed.
                 package = cap._session._package
-                with package.code_context(_no_fake_op_fn.__code__):
+                with package.code_context(_composite_op_fn.__code__):
                     package.add_graph_break_op(
                         torch.ops.precompile_no_fake.bypassed.default
                     )
                     package.bypass_current_compile()
+                # A recompile that records a guarded code must not keep its ops.
+                cap(torch.ones(4, 4))
             with open(artifact) as f:
                 python_code = f.read()
-        self.assertIn("CUSTOM_OPS = (('precompile_no_fake::op', ''),)", python_code)
+        expected = (
+            ("precompile_no_fake::composite", ""),
+            ("precompile_no_fake::op", ""),
+        )
+        self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
         served, served_name = self._op("served")
