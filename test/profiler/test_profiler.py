@@ -1064,6 +1064,18 @@ class TestProfiler(TestCase):
             with profile(activities=[ProfilerActivity.CPU], with_modules=with_modules):
                 torch.ones(1)
 
+    def test_with_modules_omitted_does_not_warn(self):
+        # The with_modules warning fires for any value other than None, but it
+        # lives in the autograd profiler, two layers below profile. profile
+        # passes the value to _KinetoProfile, whose prepare_trace hands it to
+        # the autograd profiler. If profile defaulted to False, or a layer
+        # turned None into False on the way down, every profiler user would see
+        # the warning without ever passing the argument.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            with profile(activities=[ProfilerActivity.CPU]):
+                torch.ones(1)
+
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
     def test_nvprof_import_deprecated(self, api):
         with patch("torch.autograd.profiler._parse_nvprof_trace", return_value=[]):
