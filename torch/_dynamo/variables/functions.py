@@ -1353,18 +1353,36 @@ class FrameVariable(VariableTracker):
     def python_type(self) -> type:
         return types.FrameType
 
-    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # A generator frame is linked to its caller only while it is running,
         # and a frame that outlives its generator can keep that link.
-        if self.inline_tracer.frame_state in {
+        state = self.inline_tracer.frame_state
+        if state in {
             FrameState.FRAME_CREATED,
             FrameState.FRAME_SUSPENDED,
             FrameState.FRAME_SUSPENDED_YIELD_FROM,
         }:
             return ConstantVariable.create(None)
-        return None
+        unimplemented(
+            gb_type="Unsupported generator frame f_back",
+            context=f"{state}",
+            explanation="f_back is only modeled for created or suspended generators.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.lookup_tp_getset_member(name) is None:
+            unimplemented(
+                gb_type="Unsupported generator frame attribute",
+                context=f"frame.{name}",
+                explanation=f"Dynamo does not model the frame attribute {name}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
