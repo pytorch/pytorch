@@ -1656,12 +1656,14 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             ("x.md", "../a/../other/x"),
             ("x.md", "../absent/SKILL.md"),
             ("x.md", "the `other`\nskill"),
+            ("x.md", "the `absent` skill"),
+            ("x.md", "~/.claude/skills/other/SKILL.md"),
             ("x.md", "the other skill"),
             ("x.txt", ".agents/skills/./a/x"),
             ("x.md", ".claude/skills/a/x"),
         ]
         good = [
-            ("x.md", "~/.claude/skills/a/SKILL.md"),
+            ("x.md", "~/.claude/skills/a/SKILL.md and the `a` skill"),
             ("x.md", "../a/SKILL.md"),
             ("sub/x.md", "../other/x"),
             ("x.md", "my-other skill; other skillset"),
@@ -1819,8 +1821,14 @@ def skill_reference_problems(skills: Path, installed) -> list:
                 problems.append(
                     f"{where} names a skill by its repo path; use ../<name>/"
                 )
-            # Named in prose, an uninstalled skill is one the `Skill` tool
-            # cannot load.
+            # A home path or a backticked name must name an installed skill,
+            # whether or not the other one exists in the tree.
+            named = re.findall(r"~/\.claude/skills/([\w-]+)", text)
+            named += re.findall(r"(?<![\w-])`([\w-]+)`\s+skills?\b", text)
+            for other in sorted(set(named) - set(installed)):
+                problems.append(f"{where} names the uninstalled {other} skill")
+            # Named in plain prose, an uninstalled skill is one the `Skill`
+            # tool cannot load.
             for other in uninstalled:
                 if re.search(rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text):
                     problems.append(f"{where} names the uninstalled {other} skill")
