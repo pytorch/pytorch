@@ -1285,6 +1285,32 @@ class TestMatmulCuda(InductorTestCase):
         template = "gluon" if b_k_major else "triton"
         FileCheck().check(f"{template}_tem_fused__grouped_mm").run(code[0])
 
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    def test_grouped_gemm_gluon_two_cta_cpp_wrapper(self):
+        major, minor = torch.cuda.get_device_capability()
+        if not (major == 10 and minor in [0, 3]):
+            self.skipTest("Supported only on CC 10.0 and 10.3")
+        if not IS_BIG_GPU:
+            self.skipTest("max-autotune requires a big GPU")
+
+        device = "cuda"
+        G, M, N, K = 4, 2048, 640, 512
+        A = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        B = torch.randn(G, N, K, device=device, dtype=torch.bfloat16).transpose(-2, -1)
+        offs = torch.tensor([0, 520, 1304, 2048], device=device, dtype=torch.int32)
+
+        options = {
+            "cpp_wrapper": True,
+            "triton.autotune_at_compile_time": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.gluon_mode": "force",
+            "test_configs.autotune_choice_desc_regex": "USE_TWO_CTA=True",
+        }
+        out, code = run_and_get_code(torch.compile(F.grouped_mm, options=options), A, B, offs=offs)
+        self.assertEqual(out, F.grouped_mm(A, B, offs=offs), atol=5e-2, rtol=2e-2)
+        FileCheck().check("gluon_tem_fused__grouped_mm").run("\n".join(code))
+
     def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
         device = "cuda"
         element_size = dtype.itemsize

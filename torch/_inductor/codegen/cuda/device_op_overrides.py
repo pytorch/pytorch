@@ -160,21 +160,36 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     uint32_t sharedMemBytes,
                     void* args[],
                     cudaStream_t stream,
-                    bool launchPdl) {
-                if (!launchPdl) {
+                    bool launchPdl,
+                    uint32_t numCtas = 1) {
+                if (!launchPdl && numCtas == 1) {
                     CUDA_DRIVER_CHECK(cuLaunchKernel(
                         func, gridX, gridY, gridZ, __WARP_SIZE__*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
                     ));
                     return;
                 }
 
-                CUlaunchAttribute launchAttr{};
-                launchAttr.id =
-                    CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
-                launchAttr.value.programmaticStreamSerializationAllowed = 1;
+                CUlaunchAttribute launchAttr[3]{};
+                unsigned int numAttrs = 0;
+                if (launchPdl) {
+                    launchAttr[numAttrs].id =
+                        CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+                    launchAttr[numAttrs++].value.programmaticStreamSerializationAllowed = 1;
+                }
+                // Same cluster launch as Triton's own launcher.
+                if (numCtas > 1) {
+                    launchAttr[numAttrs].id = CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION;
+                    launchAttr[numAttrs].value.clusterDim.x = numCtas;
+                    launchAttr[numAttrs].value.clusterDim.y = 1;
+                    launchAttr[numAttrs++].value.clusterDim.z = 1;
+                    launchAttr[numAttrs].id =
+                        CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE;
+                    launchAttr[numAttrs++].value.clusterSchedulingPolicyPreference =
+                        CU_CLUSTER_SCHEDULING_POLICY_SPREAD;
+                }
 
                 CUlaunchConfig launchConfig{};
-                launchConfig.gridDimX = gridX;
+                launchConfig.gridDimX = gridX * numCtas;
                 launchConfig.gridDimY = gridY;
                 launchConfig.gridDimZ = gridZ;
                 launchConfig.blockDimX = __WARP_SIZE__ * numWarps;
@@ -182,8 +197,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 launchConfig.blockDimZ = 1;
                 launchConfig.sharedMemBytes = sharedMemBytes;
                 launchConfig.hStream = stream;
-                launchConfig.attrs = &launchAttr;
-                launchConfig.numAttrs = 1;
+                launchConfig.attrs = launchAttr;
+                launchConfig.numAttrs = numAttrs;
                 CUDA_DRIVER_CHECK(
                     cuLaunchKernelEx(&launchConfig, func, args, nullptr));
             }

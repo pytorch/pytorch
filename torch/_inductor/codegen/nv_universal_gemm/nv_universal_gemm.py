@@ -164,16 +164,26 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     ) -> float:
         """Benchmark the NVIDIA Universal GEMM kernel.
 
-        Override the base class to always create tensors from input_tensor_meta.
-        This is necessary because input_nodes may be ReinterpretViews that share
-        the same underlying buffer name. The autotuning framework deduplicates
-        inputs by name (in AlgorithmSelectorCache.get_inputs()), resulting in
-        fewer tensors than expected. By always creating from input_tensor_meta,
-        we ensure each input gets its own tensor with the correct size/stride/offset
-        from the view's layout.
-
+        Inputs are reconstructed because aliased views may be deduplicated by the
+        autotuner. Grouped GEMM replaces random offsets with valid balanced values.
         """
         input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            from torch._inductor.kernel.mm_grouped import (
+                _create_balanced_grouped_mm_offsets,
+            )
+
+            offsets_meta = self.input_tensor_meta[-1]
+            input_tensors = (
+                *input_tensors[:-1],
+                _create_balanced_grouped_mm_offsets(
+                    self.input_tensor_meta[0].sizes[0],
+                    offsets_meta.sizes[0],
+                    16 // self.input_tensor_meta[0].dtype.itemsize,
+                    offsets_meta.dtype,
+                    offsets_meta.device,
+                ),
+            )
         if out is None:
             out = self.output_tensor_meta.to_tensor()
 
@@ -764,6 +774,69 @@ def _exclude_efc_kernels(metadata) -> bool:
     return "EFC" not in metadata.operator_class.__name__
 
 
+def _select_grouped_gemm_kernels(kernels: list[Any], max_configs: int) -> list[Any]:
+    """Select grouped autotune candidates across tile and cluster shapes."""
+    if max_configs <= 0:
+        return []
+    if len(kernels) <= max_configs:
+        return kernels
+
+    two_cta_kernels = [
+        kernel for kernel in kernels if kernel.metadata.design.use_2cta_mma
+    ]
+    if not two_cta_kernels:
+        return kernels[:max_configs]
+
+    one_cta_by_tile: dict[tuple[int, ...], Any] = {}
+    for kernel in kernels:
+        if kernel.metadata.design.use_2cta_mma:
+            continue
+        tile_shape = tuple(kernel.metadata.design.tile_shape)
+        one_cta_by_tile.setdefault(tile_shape, kernel)
+    one_cta_kernels = list(one_cta_by_tile.values())[: max(max_configs - 1, 0)]
+    two_cta_limit = max_configs - len(one_cta_kernels)
+
+    kernels_by_tile: dict[tuple[int, ...], list[Any]] = {}
+    for kernel in two_cta_kernels:
+        tile_shape = tuple(kernel.metadata.design.tile_shape)
+        kernels_by_tile.setdefault(tile_shape, []).append(kernel)
+
+    for tile_kernels in kernels_by_tile.values():
+        tile_kernels.sort(
+            key=lambda kernel: (
+                kernel.metadata.design.cluster_shape[1] != 1,
+                kernel.metadata.design.cluster_shape[1],
+                kernel.metadata.design.cluster_shape[0],
+            )
+        )
+
+    selected: list[Any] = []
+    for index in range(max(map(len, kernels_by_tile.values()))):
+        for tile_kernels in kernels_by_tile.values():
+            if index >= len(tile_kernels):
+                continue
+            kernel = tile_kernels[index]
+            selected.append(kernel)
+            if len(selected) == two_cta_limit:
+                break
+        if len(selected) == two_cta_limit:
+            break
+
+    selected.extend(one_cta_kernels)
+    if len(selected) == max_configs:
+        return selected
+
+    for kernel in kernels:
+        if kernel.metadata.design.use_2cta_mma or any(
+            kernel is selected_kernel for selected_kernel in one_cta_kernels
+        ):
+            continue
+        selected.append(kernel)
+        if len(selected) == max_configs:
+            break
+    return selected
+
+
 def _add_nv_gemm_choices_impl(
     choices: list[ChoiceCaller],
     layout: Layout,
@@ -992,8 +1065,12 @@ def _add_nv_gemm_choices_impl(
     else:
         # TODO(nikhilap): Enable heuristics for grouped GEMM
         # when nvMatmulHeuristics adds support
-        non_efc_kernels = non_efc_kernels[:max_configs]
-        efc_kernels = efc_kernels[:max_configs]
+        if variant == GemmVariant.GROUPED_GEMM:
+            non_efc_kernels = _select_grouped_gemm_kernels(non_efc_kernels, max_configs)
+            efc_kernels = _select_grouped_gemm_kernels(efc_kernels, max_configs)
+        else:
+            non_efc_kernels = non_efc_kernels[:max_configs]
+            efc_kernels = efc_kernels[:max_configs]
 
     all_kernels = [(kernel, False) for kernel in non_efc_kernels] + [
         (kernel, True) for kernel in efc_kernels

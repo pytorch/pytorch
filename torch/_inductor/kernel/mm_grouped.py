@@ -541,6 +541,17 @@ def can_use_gluon_kernel(
     ) and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
 
 
+def _create_balanced_grouped_mm_offsets(total, groups, alignment, dtype, device):
+    offsets = torch.arange(1, groups + 1, dtype=torch.int64, device=device)
+    offsets *= total
+    offsets += groups * alignment // 2
+    offsets //= groups * alignment
+    offsets *= alignment
+    offsets.clamp_max_(total // alignment * alignment)
+    offsets[-1] = total
+    return offsets.to(dtype=dtype)
+
+
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
@@ -553,15 +564,13 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.optimization_hint(end)
-    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
-    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
-        end_hint / noffs_hint
+    return _create_balanced_grouped_mm_offsets(
+        V.graph.sizevars.optimization_hint(end),
+        V.graph.sizevars.optimization_hint(offs_box.get_size()[0]),
+        alignment,
+        offs_box.get_dtype(),
+        offs_box.get_device(),
     )
-    offs[:-1] = (offs[:-1] / alignment).round() * alignment
-    offs = offs.clamp(max=end_hint)  # Ensure non-decreasing up to end_hint
-    offs[-1] = end_hint
-    return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
 def _tuned_grouped_mm_common(
@@ -801,6 +810,12 @@ def _tuned_grouped_mm_common(
             mat_a.get_dtype(), g, m, n, k, a_is_2d, b_is_2d
         ):
             if config.kwargs["USE_TMA_STORE"] and not can_use_tma_store:
+                continue
+            lazy_cpp_wrapper = (
+                V.graph.cpp_wrapper
+                and inductor_config.triton.autotune_at_compile_time is False
+            )
+            if config.num_ctas > 1 and lazy_cpp_wrapper:
                 continue
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,

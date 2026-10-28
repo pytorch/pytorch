@@ -153,6 +153,46 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
+    def test_grouped_gemm_cuda_graph(self):
+        device = "cuda"
+        dtype = torch.bfloat16
+        G, K, N = 8, 128, 256
+        alignment = 16
+
+        A, B, offsets = self._get_inputs(G, 512, K, N, device, dtype, alignment)
+
+        def grouped_gemm_fn(A_packed, B_batched, offs):
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            grouped_gemm_compiled = torch.compile(
+                grouped_gemm_fn, backend="inductor", dynamic=False
+            )
+            grouped_gemm_compiled(A, B, offsets)
+            torch.cuda.synchronize()
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                c_graph = grouped_gemm_compiled(A, B, offsets)
+
+        graph.replay()
+        self.assertEqual(c_graph, grouped_gemm_fn(A, B, offsets))
+
+        # Repartition the same rows: the captured graph must pick up new offsets.
+        num_units = A.shape[0] // alignment
+        cuts = torch.randperm(num_units - 1)[: G - 1].sort().values + 1
+        new_offsets = torch.cat([cuts * alignment, torch.tensor([A.shape[0]])])
+        offsets.copy_(new_offsets)
+        graph.replay()
+        self.assertEqual(c_graph, grouped_gemm_fn(A, B, offsets))
+
 
 if __name__ == "__main__":
     run_tests()

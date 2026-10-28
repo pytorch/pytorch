@@ -234,7 +234,8 @@ def meta__transformer_encoder_layer_fwd(
     # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
     if guard_or_false(src.numel() == 0):
         return src.clone()
-    return torch.empty_like(src)
+    # The kernel's result comes out of layer_norm / addmm, so it is contiguous.
+    return torch.empty_like(src, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
@@ -4305,7 +4306,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    expected_dim = 2 if w.fake_device.type == "xpu" else 4
+    is_xpu = device_hint(w) == "xpu"
+    expected_dim = 2 if is_xpu else 4
     torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
@@ -4315,7 +4317,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    dim_n = w.size(0) if w.fake_device.type == "xpu" else w.size(0) * 8
+    dim_n = w.size(0) if is_xpu else w.size(0) * 8
     return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
@@ -5975,11 +5977,11 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
-    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
-    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
+    # Only CPU, CUDA and XPU sample 5D bicubic; the trace refuses it elsewhere, as
+    # eager does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
         interpolation_mode != GridSamplerInterpolation.BICUBIC.value
-        or device_hint(input) in ("cpu", "cuda"),
+        or device_hint(input) in ("cpu", "cuda", "xpu"),
         lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
         f"on {device_hint(input)}",
     )
@@ -9426,6 +9428,7 @@ cpp_meta_supports_symint_ops = {
     aten.as_strided_.default,
     aten.zeros.default,
     aten.detach.default,
+    aten.alias.default,
     aten.view_as_real.default,
     aten.view_as_complex.default,
     aten.set_.source_Storage_storage_offset,
@@ -9434,6 +9437,16 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
+    aten.add.Tensor,
+    aten.sub.Tensor,
+    aten.mul.Tensor,
+    aten.div.Tensor,
+    aten.add_.Tensor,
+    aten.bitwise_and.Tensor,
+    aten.le.Tensor,
+    aten.le.Scalar,
+    aten.eq.Tensor,
+    aten.ne.Scalar,
 }
 
 

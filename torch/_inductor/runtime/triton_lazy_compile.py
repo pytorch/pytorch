@@ -198,6 +198,8 @@ def run_triton_kernel_with_autotune(
     shared_mem = cached_params["shared_mem"]
 
     config = config_to_dict(launcher.config) if launcher.config else {}
+    if config.get("num_ctas", 1) != 1:
+        raise RuntimeError("Lazy compile does not support num_ctas > 1")
 
     # For combo/foreach kernels, the autotuned config may have empty kwargs
     # (e.g., the foreach heuristic only tunes num_warps, not XBLOCK).
