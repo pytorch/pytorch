@@ -639,6 +639,12 @@ class CompiledFxGraph(OutputCode):
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
+        # User CuTeDSL kernels the generated module launches through objects bound in
+        # this process (see prepare_for_serialization).
+        wrapper = getattr(graph, "wrapper_code", None)
+        self.process_local_kernels = sorted(
+            getattr(wrapper, "user_defined_cutedsl_launchers", None) or ()
+        )
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.kernel_free_cudagraph = graph.kernel_free_cudagraph
@@ -1002,6 +1008,13 @@ class CompiledFxGraph(OutputCode):
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
+        if getattr(self, "process_local_kernels", None):
+            raise RuntimeError(
+                "This compiled graph launches user CuTeDSL kernels "
+                f"({', '.join(self.process_local_kernels)}) through objects bound in "
+                "this process, so it cannot be serialized (aot_compile, precompile, "
+                "compiling in a subprocess). Compile it in the process that runs it."
+            )
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
         # TODO: This could be better if we're ever able to serialize compiled

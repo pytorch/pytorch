@@ -1,6 +1,8 @@
 """Compile and launch user-defined CuTeDSL kernels (``@cute.jit`` host functions).
 
-Used by the eager impl of ``cutedsl_kernel_wrapper_mutation``.
+Used by the eager impl of ``cutedsl_kernel_wrapper_mutation`` and by Inductor's
+Python wrapper, where each kernel becomes a CuteDSLKernelLauncher: the counterpart
+of the CachingAutotuner a user Triton kernel becomes in generated code.
 
 A compiled CuTeDSL kernel is specialized to the argument layouts it was compiled for
 and checks nothing at launch, so compiles are cached per argument signature: dtype,
@@ -9,7 +11,7 @@ the value of every constant.
 """
 
 import weakref
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import torch
@@ -94,3 +96,31 @@ def launch_cutedsl_kernel(
                     compiled = cute.compile(fn, **compile_args)
                     per_fn[tuple(key)] = compiled
         compiled(*call_args)
+
+
+class CuteDSLKernelLauncher:
+    """One user CuTeDSL kernel in Inductor's generated Python wrapper.
+
+    ``run(*args, stream=...)`` takes the kernel arguments (``arg_names``: tensors and
+    runtime scalars, in host-function signature order) positionally; the constants
+    were bound when the wrapper was generated.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        arg_names: Sequence[str],
+        constant_args: Mapping[str, Any],
+    ) -> None:
+        self.fn = fn
+        self.arg_names = tuple(arg_names)
+        self.constant_args = dict(constant_args)
+
+    def run(self, *args: Any, stream: int) -> None:
+        if len(args) != len(self.arg_names):
+            raise AssertionError(
+                f"expected {len(self.arg_names)} arguments ({self.arg_names}), got {len(args)}"
+            )
+        launch_cutedsl_kernel(
+            self.fn, {**dict(zip(self.arg_names, args)), **self.constant_args}, stream
+        )
