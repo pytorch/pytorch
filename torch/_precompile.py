@@ -2009,15 +2009,21 @@ _TORCH_HELPER_OP_MODULES = MappingProxyType(
         "pippy": "torch.distributed.pipelining._IR",
     }
 )
+# Torch namespaces defined only when a function runs (CUDA lazy init, inductor's
+# memory-check debug mode), so no module import registers them.
+_TORCH_LAZY_OP_NAMESPACES = frozenset({"triton", "_inductor_debug"})
 
 
 def _torch_op_module(op_name: str, overload: str) -> str | None:
     """The torch module whose import registers ``op_name``, if torch defines it from
     Python."""
+    ns = op_name.split("::")[0]
+    if ns in _TORCH_LAZY_OP_NAMESPACES:
+        return None
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
     if path.startswith(_TORCH_OP_HELPERS):
-        return _TORCH_HELPER_OP_MODULES.get(op_name.split("::")[0])
+        return _TORCH_HELPER_OP_MODULES.get(ns)
     if not (path.startswith(_TORCH_DIR + os.sep) and path.endswith(".py")):
         return None
     relpath = os.path.relpath(path.removesuffix(".py"), os.path.dirname(_TORCH_DIR))
@@ -2064,9 +2070,9 @@ def _write_custom_op_imports(
     buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers the op. The
-    # recorded module is a best guess (and ops defined with Library.define have
-    # none), so the imports are best effort and the ops themselves are checked.
+    # path imports the module that registers the op. The recorded module is a best
+    # guess (and a user op defined with torch.library.Library or torch.library.define
+    # has none), so the imports are best effort and the ops themselves are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
@@ -2075,11 +2081,14 @@ def _write_custom_op_imports(
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     buf.writeline(f"CUSTOM_OPS = {ops!r}")
     buf.writeline("import importlib as _importlib")
+    buf.writeline("import warnings as _warnings")
     buf.writeline("import torch as _torch")
     buf.writeline("_import_errors = {}")
     buf.writeline("for _module in CUSTOM_OP_MODULES:")
     buf.writeline("    try:")
     buf.writeline("        _importlib.import_module(_module)")
+    # Not just ImportError: e.g. importing torch.distributed.device_mesh before
+    # torch.distributed.tensor raises ValueError.
     buf.writeline("    except Exception as _e:")
     buf.writeline("        _import_errors[_module] = _e")
     buf.writeline("_missing = []")
@@ -2102,6 +2111,13 @@ def _write_custom_op_imports(
         "        f\"that failed to import: {sorted(_import_errors) or 'none'}.\""
     )
     buf.writeline("    ) from next(iter(_import_errors.values()), None)")
+    buf.writeline("for _module, _e in _import_errors.items():")
+    buf.writeline(
+        '    _warnings.warn(f"importing custom op module {_module!r} raised {_e!r}; "'
+    )
+    buf.writeline(
+        '    "the ops this artifact calls are registered, so it loads anyway")'
+    )
     buf.writeline("")
 
 
