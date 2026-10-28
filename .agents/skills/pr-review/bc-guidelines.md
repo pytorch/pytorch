@@ -43,8 +43,9 @@ An API is **public** if:
 
 ## Python Version Support
 
-The minimum supported Python version is defined by `requires-python` in [pyproject.toml](../../../pyproject.toml).
-All Python code must be compatible with the minimum supported version.
+PyTorch supports all non-EOL CPython versions which means the last 5 versions.
+Right now it support 3.11-3.15.
+Which means that all the code must be compatible with 3.11.
 
 PyTorch also supports free threaded CPython, so any C++ code must be compatible with it.
 
