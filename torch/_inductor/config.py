@@ -2709,11 +2709,8 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
-    # Require that the whole graph can be captured into a CUDA graph, and fail
-    # the compile otherwise: the model must run on CUDA only, without host
-    # syncs, control flow, data-dependent shapes, mutated inputs, or ops marked
-    # cudagraph-unsafe. The compiled model can then run as CUDA graphs through
-    # AOTInductorModelContainerRunWithCudaGraph.
+    # Fail the compile unless the whole model can be captured into a CUDA graph,
+    # so it can run through AOTInductorModelContainerRunWithCudaGraph.
     cudagraphs: bool = False
 
     # flag to force weight to be appended to the shared library and mapped by the runtime

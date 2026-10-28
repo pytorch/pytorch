@@ -10440,6 +10440,20 @@ class AOTInductorTestsTemplate:
                 event.synchronize()
                 return y * 2
 
+        class SyncsStream(torch.nn.Module):
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x + 1
+                s.synchronize()
+                return y * 2
+
+        class SyncsDevice(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                torch.cuda.synchronize()
+                return y * 2
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -10453,9 +10467,11 @@ class AOTInductorTestsTemplate:
             # AOT mode lowers without graph partitioning, which skips CPU ops.
             (CpuOp(), "cpu device", {"triton.cudagraphs": True}),
             (Item(), "incompatible op", {}),
-            (MutatesInput(), "mutates inputs", {}),
+            (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
             (Cond(), "control flow operator: torch.cond", {}),
-            (SyncsEvent(), "waits on the host for a CUDA event", {}),
+            (SyncsEvent(), r"waits on the host \(Event.synchronize\)", {}),
+            (SyncsStream(), r"waits on the host \(Stream.synchronize\)", {}),
+            (SyncsDevice(), r"waits on the host \(torch.cuda.synchronize\)", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
@@ -10585,9 +10601,8 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(new_weights(), False, False)
         (out,) = runner.run_with_cuda_graph([x])
         self.assertEqual(out, model(x))
-        # Now a graph exists. The runner reports only that the call failed;
-        # the model prints why.
-        msg = "API call failed"
+        # Now a graph exists.
+        msg = "captured CUDA graphs"
         with self.assertRaisesRegex(RuntimeError, msg):
             runner.update_constant_buffer(new_weights(), False, False)
         with tempfile.NamedTemporaryFile() as blob:
@@ -10613,11 +10628,16 @@ class AOTInductorTestsTemplate:
         )
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 2, self.device)
         errors = []
+        barrier = threading.Barrier(4)
 
         def work():
             try:
                 stream = torch.cuda.Stream()
                 with torch.cuda.stream(stream):
+                    # Creates the thread's library handles for the eager
+                    # reference below before any instance captures.
+                    model(torch.randn(4, 16, device=self.device))
+                    barrier.wait(timeout=60)
                     for _ in range(20):
                         x = torch.randn(4, 16, device=self.device)
                         (out,) = runner.run_with_cuda_graph([x])

@@ -208,23 +208,19 @@ out = compiled.run_with_cuda_graph(*example_inputs)
 
 In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments as `run`.
 
-- The first call with new input shapes and strides runs eagerly, the next one
-  captures a graph, and later calls with those shapes replay it. A thread's
-  first call on each model instance also runs eagerly, since some libraries
-  set up per thread.
-- Once a model instance holds `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
-  (an environment variable, default 8), calls with new shapes run eagerly.
-- Replayed outputs are copies: they never alias the inputs, and outputs that
-  were views of each other come back as separate tensors.
-- Each model instance (see `num_runners`) captures its own graphs into its own
-  memory pool, so graph memory and warm-up calls grow with the number of
-  instances.
-- If a capture fails but the eager call succeeds, those input shapes run
-  eagerly from then on, with a warning.
-- Captured graphs keep reading the constants they were captured with, so once
-  a model captured a graph, its active constants can't change: updating,
-  refolding, swapping or reloading them fails. The inactive constant buffer
-  can still be updated.
+- A new input layout (shapes and strides) runs eagerly on its first call, is
+  captured on its next call and replayed after that. A thread's first call on
+  each model instance also runs eagerly, since some libraries set up per
+  thread.
+- Each model instance (see `num_runners`) keeps up to
+  `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs (an environment variable, default
+  8) in its own memory pool; past that, new layouts run eagerly.
+- Replayed outputs are copies: they don't alias the inputs, and views among
+  outputs come back as separate tensors.
+- If a capture fails but the eager call succeeds, that layout runs eagerly from
+  then on, with a warning.
+- Once a graph is captured, the active constants can't change; the inactive
+  constant buffer can still be updated.
 
 ## Troubleshooting
 

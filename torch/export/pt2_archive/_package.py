@@ -741,20 +741,12 @@ class AOTICompiledModel:
 
     def run_with_cuda_graph(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         """
-        Like calling the model, but runs it as CUDA graphs that the runtime
-        captures and replays. Requires a CUDA model compiled with
-        ``aot_inductor.cudagraphs=True``.
-
-        The first call with new input shapes and strides runs eagerly and the
-        next one captures a graph that later calls replay; a thread's first
-        call on each model instance also runs eagerly. Past
-        ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` graphs per model instance (an
-        environment variable, default 8), new shapes run eagerly. Replayed
-        outputs are copies: they don't alias the inputs, and outputs that were
-        views of each other come back separate. Each model instance has its
-        own graphs and memory pool. Once a graph was captured, the active
-        constants can't be changed; ``load_constants`` into the active buffer
-        fails.
+        Like calling the model, but runs it as CUDA graphs; requires a CUDA
+        model compiled with ``aot_inductor.cudagraphs=True``. A new input
+        layout runs eagerly first, is captured on its next call and replayed
+        after that, up to ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8)
+        graphs per model instance. Outputs are copies, and once a graph is
+        captured, loading constants into the active buffer fails.
         """
         return self._run(self.loader.run_with_cuda_graph, args, kwargs)
 

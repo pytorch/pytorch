@@ -12,6 +12,9 @@
 #include <torch/csrc/inductor/aoti_runtime/cudagraph_manager.h>
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,6 +43,11 @@ struct Region {
       AtenTensorHandle* outputs,
       cudaStream_t stream) {
     calls++;
+    if (sync_stream) {
+      // Synchronizing a capturing stream invalidates the capture.
+      (void)cudaStreamSynchronize(stream);
+      (void)cudaGetLastError();
+    }
     const at::Tensor& x = tensor_of(inputs[0]);
     at::cuda::CUDAStreamGuard guard(
         at::cuda::getStreamFromExternal(stream, x.get_device()));
@@ -57,6 +65,7 @@ struct Region {
   int calls = 0;
   bool fail = false;
   bool fail_in_capture = false;
+  bool sync_stream = false;
 };
 
 at::Tensor affine(const at::Tensor& x) {
@@ -142,6 +151,47 @@ TEST_F(CudaGraphManagerTest, ThreadIsWarmOnlyAfterASuccessfulCall) {
     EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
     EXPECT_EQ(manager.num_graphs(), 1);
   }).join();
+}
+
+TEST_F(CudaGraphManagerTest, WarmupsAndCapturesHoldTheCaptureMutex) {
+  std::mutex capture_mutex;
+  auto x = at::randn({8}, at::kCUDA);
+  // Runs a call on another thread while capture_mutex is held, and checks that
+  // the call waits for it.
+  auto expect_waits = [&](CudaGraphManager& manager, Region& region) {
+    std::unique_lock<std::mutex> held(capture_mutex);
+    std::atomic<bool> done{false};
+    std::thread caller([&] {
+      run(manager, region, x);
+      done = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(done);
+    held.unlock();
+    caller.join();
+  };
+  CudaGraphOptions options;
+  options.capture_mutex = &capture_mutex;
+  CudaGraphManager warming(0, options);
+  Region warming_region(affine);
+  expect_waits(warming, warming_region);
+  EXPECT_EQ(warming.num_graphs(), 0);
+
+  // A thread's first eager call, here past max_graphs, also waits.
+  CudaGraphOptions no_graphs = options;
+  no_graphs.max_graphs = 0;
+  CudaGraphManager eager(0, no_graphs);
+  Region eager_region(affine);
+  expect_waits(eager, eager_region);
+
+  options.warmup_calls = 0;
+  CudaGraphManager capturing(0, options);
+  Region region(affine);
+  expect_waits(capturing, region);
+  EXPECT_EQ(capturing.num_graphs(), 1);
+  // A replay doesn't take it.
+  std::lock_guard<std::mutex> held(capture_mutex);
+  EXPECT_TRUE(run(capturing, region, x).equal(affine(x)));
 }
 
 TEST_F(CudaGraphManagerTest, KeysOnShapes) {
@@ -335,6 +385,21 @@ TEST_F(CudaGraphManagerTest, CaptureOnlyFailureRunsEagerly) {
   EXPECT_EQ(manager.num_graphs(), 1);
 }
 
+TEST_F(CudaGraphManagerTest, InvalidatedCaptureRunsEagerly) {
+  CudaGraphManager manager(0, no_warmup());
+  Region region(affine);
+  region.sync_stream = true;
+  auto x = at::randn({16}, at::kCUDA);
+  EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+  EXPECT_EQ(manager.num_graphs(), 0);
+
+  // Other keys still capture.
+  region.sync_stream = false;
+  auto y = at::randn({8}, at::kCUDA);
+  EXPECT_TRUE(run(manager, region, y).equal(affine(y)));
+  EXPECT_EQ(manager.num_graphs(), 1);
+}
+
 TEST_F(CudaGraphManagerTest, ForgetsUncapturableKeysPastLimit) {
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
@@ -446,6 +511,27 @@ TEST_F(CudaGraphManagerTest, RejectsInputsOnOtherDevices) {
   EXPECT_EQ(region.calls, 0);
 }
 
+TEST_F(CudaGraphManagerTest, RunsOnItsDeviceWhileAnotherIsCurrent) {
+  if (c10::cuda::device_count() < 2) {
+    GTEST_SKIP() << "Needs 2 GPUs";
+  }
+  CudaGraphManager manager(1, no_warmup());
+  Region region(affine);
+  c10::cuda::CUDAGuard device_guard(0);
+  for (int i = 0; i < 3; ++i) {
+    auto x = at::randn({8}, at::Device(at::kCUDA, 1));
+    auto input = reinterpret_cast<AtenTensorHandle>(&x);
+    AtenTensorHandle output = nullptr;
+    // The null stream: the legacy default stream of the manager's device.
+    manager.run(region, &input, 1, &output, 1, nullptr);
+    EXPECT_TRUE(tensor_of(output).equal(affine(x)));
+    aoti_torch_delete_tensor_object(output);
+  }
+  EXPECT_EQ(manager.num_graphs(), 1);
+  EXPECT_EQ(region.calls, 1);
+  EXPECT_EQ(c10::cuda::current_device(), 0);
+}
+
 TEST_F(CudaGraphManagerTest, KeysOnAllInputs) {
   CudaGraphManager manager(0, no_warmup());
   int calls = 0;
@@ -483,6 +569,60 @@ TEST_F(CudaGraphManagerTest, KeysOnAllInputs) {
   auto y = at::randn({4}, at::kCUDA);
   EXPECT_TRUE(run_region(x, y).allclose(x + y.sum()));
   EXPECT_EQ(calls, 2);
+}
+
+TEST_F(CudaGraphManagerTest, CopiesInputsOfMixedLayoutsAndDtypes) {
+  CudaGraphManager manager(0, no_warmup());
+  auto make_inputs = [] {
+    return std::vector<at::Tensor>{
+        at::randn({8}, at::kCUDA),
+        at::randn({6, 4}, at::kCUDA).t(),
+        at::randn({1, 6}, at::kCUDA).expand({4, 6}),
+        at::randn({6, 8}, at::kCUDA).narrow(1, 2, 3),
+        at::randint(100, {5}, at::kCUDA),
+        at::randn({7}, at::kCUDA).to(at::kHalf),
+        at::randn({}, at::kCUDA)};
+  };
+  auto expected = [](const std::vector<at::Tensor>& xs) {
+    std::vector<at::Tensor> flat;
+    for (const auto& x : xs) {
+      flat.push_back(x.flatten().to(at::kFloat));
+    }
+    return at::cat(flat);
+  };
+  auto region = [&](AtenTensorHandle* inputs,
+                    AtenTensorHandle* outputs,
+                    cudaStream_t stream) {
+    std::vector<at::Tensor> xs;
+    for (size_t i = 0; i < 7; ++i) {
+      xs.push_back(tensor_of(inputs[i]));
+    }
+    at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromExternal(stream, 0));
+    outputs[0] = new_handle(expected(xs));
+  };
+  auto run_region = [&](std::vector<at::Tensor> xs) {
+    std::vector<AtenTensorHandle> inputs;
+    for (auto& x : xs) {
+      inputs.push_back(reinterpret_cast<AtenTensorHandle>(&x));
+    }
+    AtenTensorHandle output = nullptr;
+    manager.run(
+        region,
+        inputs.data(),
+        inputs.size(),
+        &output,
+        1,
+        at::cuda::getCurrentCUDAStream().stream());
+    at::Tensor result = tensor_of(output);
+    aoti_torch_delete_tensor_object(output);
+    return result;
+  };
+  run_region(make_inputs());
+  EXPECT_EQ(manager.num_graphs(), 1);
+  for (int i = 0; i < 2; ++i) {
+    auto xs = make_inputs();
+    EXPECT_TRUE(run_region(xs).equal(expected(xs)));
+  }
 }
 
 TEST_F(CudaGraphManagerTest, ReturnsNullOutputs) {

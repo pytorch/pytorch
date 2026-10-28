@@ -258,8 +258,7 @@ class AOTInductorModelContainer {
   }
 
 #ifdef USE_CUDA
-  // Like run(), but runs the model as CUDA graphs: each model instance captures
-  // and replays its own graphs through its CudaGraphManager. See
+  // Like run(), but runs the model as CUDA graphs; see
   // AOTInductorModelContainerRunWithCudaGraph.
   void run_with_cuda_graph(
       AtenTensorHandle*
@@ -286,7 +285,8 @@ class AOTInductorModelContainer {
                 output_handles,
                 stream,
                 proxy_executor,
-                max_graphs_env_.value);
+                max_graphs_env_.value,
+                capture_mutex());
           } catch (...) {
             mark_captured();
             throw;
@@ -436,10 +436,11 @@ class AOTInductorModelContainer {
     auto& const_folded =
         inactive_buffer ? inactive().fold_state : active().fold_state;
     if (!inactive_buffer) {
-      check_no_cuda_graphs();
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Checked under the lock, which keeps graphs from being captured.
+      check_no_cuda_graphs();
       model = pool_.get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
@@ -955,10 +956,8 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
-  // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, the limit on CUDA graphs per model
-  // instance (CudaGraphOptions has the default). Read when the container is
-  // created, so every instance gets the same limit; a bad value fails
-  // run_with_cuda_graph().
+  // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, read once so every instance gets the
+  // same limit; a bad value fails run_with_cuda_graph().
   struct MaxGraphsEnv {
     std::optional<int64_t> value;
     std::string error;
@@ -983,8 +982,7 @@ class AOTInductorModelContainer {
   }
   const MaxGraphsEnv max_graphs_env_ = read_max_graphs_env();
 
-  // Captured CUDA graphs keep reading the constants they were captured with,
-  // so the active constants can't change once a model instance captured one.
+  // Captured graphs keep reading the constants they were captured with.
   void check_no_cuda_graphs() const {
     AOTI_RUNTIME_CHECK(
         !captured_cuda_graphs_,
@@ -992,6 +990,17 @@ class AOTInductorModelContainer {
         "graphs");
   }
   std::atomic<bool> captured_cuda_graphs_{false};
+
+  // Shared by the instances' managers on ROCm; see
+  // CudaGraphOptions::capture_mutex.
+  std::mutex* capture_mutex() {
+#ifdef USE_ROCM
+    return &capture_mutex_;
+#else
+    return nullptr;
+#endif // USE_ROCM
+  }
+  std::mutex capture_mutex_;
 
   // Folds the constants on the first call, then runs fn on a model instance
   // checked out of the pool and leaves the instance pending until its work

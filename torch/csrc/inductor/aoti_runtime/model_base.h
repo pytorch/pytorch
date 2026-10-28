@@ -1453,7 +1453,8 @@ class AOTInductorModelBase {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
-      std::optional<int64_t> max_graphs) {
+      std::optional<int64_t> max_graphs,
+      std::mutex* capture_mutex) {
     AOTI_RUNTIME_CHECK(
         cudagraphs_,
         "Running as CUDA graphs requires compiling the model with "
@@ -1468,6 +1469,7 @@ class AOTInductorModelBase {
       if (max_graphs) {
         options.max_graphs = *max_graphs;
       }
+      options.capture_mutex = capture_mutex;
       cudagraph_manager_ =
           std::make_unique<CudaGraphManager>(device_idx_, options);
     }
@@ -1480,9 +1482,8 @@ class AOTInductorModelBase {
       borrowed_inputs.push_back(input.get());
     }
     auto* model = static_cast<Model*>(this);
-    // The manager lends its inputs, while run_impl steals them, so the model
-    // gets new handles to the same tensors.
-    // run_impl nulls each handle it steals, so the rest are freed on error.
+    // run_impl steals the inputs the manager only lends, so it gets new
+    // handles; it nulls each one it steals, so the rest are freed on error.
     auto region = [&](AtenTensorHandle* region_inputs,
                       AtenTensorHandle* region_outputs,
                       cudaStream_t region_stream) {
@@ -2191,8 +2192,7 @@ class AOTInductorModelBase {
   int32_t device_type_{};
   int32_t device_idx_{};
 
-  // Set by generated code when compiled with aot_inductor.cudagraphs=True,
-  // which checks at compile time that the model can be captured.
+  // Set by generated code compiled with aot_inductor.cudagraphs=True.
   bool cudagraphs_{false};
 #ifdef USE_CUDA
   std::unique_ptr<CudaGraphManager> cudagraph_manager_;
