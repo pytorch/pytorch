@@ -38,13 +38,56 @@ KernelT = TypeVar("KernelT")
 # do not support arbitrary functions.
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
+class _Keep:
+    """Keeps a value alive inside a key without taking part in the key's equality."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Keep)
+
+    def __hash__(self) -> int:
+        return 0
+
+
+def constant_key(value: object) -> object:
+    """A hashable key for a constant kernel argument, equal for two values only when
+    they are interchangeable: tuples, lists and dicts by content, a cutlass Numeric by
+    its type and Python value, other hashable values by equality, anything else by
+    identity (the key then keeps the value alive, so its id is not reused)."""
+    if isinstance(value, (tuple, list)):
+        return (type(value), tuple(constant_key(v) for v in value))
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple((constant_key(k), constant_key(v)) for k, v in value.items()),
+        )
+    if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
+        inner = getattr(value, "value", None)
+        if isinstance(inner, (bool, int, float)):
+            return (type(value), inner)
+    try:
+        hash(value)
+    except TypeError:
+        return ("id", id(value), _Keep(value))
+    return (type(value), value)
+
+
 class KernelSideTable(Generic[KernelT]):
-    def __init__(self) -> None:
+    def __init__(self, dedupe_constant_args: bool = False) -> None:
         # Per instance, so that each DSL's table has its own index space.
         self.id_to_kernel: dict[int, KernelT] = {}
         self.kernel_to_id: dict[KernelT, int] = {}
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
+        # With dedupe_constant_args, equal constant args share one index, so a table
+        # that is never reset does not grow with every eager launch.
+        self._constant_args_index: dict[object, int] | None = (
+            {} if dedupe_constant_args else None
+        )
 
     # Returns index on the table
     def add_kernel(self, kernel: KernelT) -> int:
@@ -68,8 +111,15 @@ class KernelSideTable(Generic[KernelT]):
     # for constant args.
     def add_constant_args(self, args: dict[str, object]) -> int:
         with self.lock:
+            key = None
+            if self._constant_args_index is not None:
+                key = tuple((k, constant_key(v)) for k, v in sorted(args.items()))
+                if key in self._constant_args_index:
+                    return self._constant_args_index[key]
             idx = len(self.constant_args)
             self.constant_args[idx] = args
+            if key is not None:
+                self._constant_args_index[key] = idx  # type: ignore[index]
             return idx
 
     # Returns the constant args
@@ -87,6 +137,8 @@ class KernelSideTable(Generic[KernelT]):
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        if self._constant_args_index is not None:
+            self._constant_args_index = {}
 
 
 def store_non_graphable_args(
