@@ -2056,6 +2056,8 @@ _TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
         "_inductor_debug": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
         # The op name comes from a process-global counter.
         "_native": "the same sequence of torch._native register_op_override calls",
+        "semi_structured": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered() "
+        "or _ensure_cutlass_mm_registered()",
     }
 )
 
@@ -2091,13 +2093,15 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     lazy: dict[str, set[str]] = {}
     for op_name, overload in op_names:
         ns = op_name.split("::")[0]
+        # Checked first: a lazy custom_op's module imports without defining it.
+        if ns in _TORCH_LAZY_OP_NAMESPACES:
+            lazy.setdefault(_TORCH_LAZY_OP_NAMESPACES[ns], set()).add(op_name)
+            continue
         module = _custom_op_module(op_name, overload)
         if module is None:
             module = _torch_op_module(op_name, overload)
         if module is not None:
             modules.add(module)
-        elif ns in _TORCH_LAZY_OP_NAMESPACES:
-            lazy.setdefault(_TORCH_LAZY_OP_NAMESPACES[ns], set()).add(op_name)
         elif ns not in _TORCH_OP_NAMESPACES:
             unrecorded.add(op_name)
     for setup, ops in sorted(lazy.items()):
