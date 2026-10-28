@@ -40,6 +40,7 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **No backward-compatibility hacks** - Unused code is deleted completely, not renamed with underscores or marked with "removed" comments
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
+- [ ] **Agent guidance stated by intent** - Changes to agent guidance (`CLAUDE.md`, `.agents/skills/`, `REVIEW.md` files) state rules by intent and leave edge cases to the reader's judgment. Flag factual errors and contradictions with other guidance; don't ask for more exemptions, paths or limits to settle gray areas a reader can resolve locally
 
 ### Warnings and Logging
 

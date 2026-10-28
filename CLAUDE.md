@@ -236,6 +236,11 @@ Follow these rules for all code changes in this repository:
   `// See Note [...]` pointer in the header. Documentation callers need (API
   docs, interface contracts) stays in the header. This applies to comments you
   add or substantially rewrite; existing comments can stay.
+- Keep agent guidance (`CLAUDE.md`, skills under `.agents/skills/`,
+  `REVIEW.md` files) short and stated by intent, and leave edge cases to the
+  reader's judgment. Don't try to settle every edge case with lists of paths,
+  exemptions or hard limits: each is a claim that can be wrong or go stale, and
+  agents and reviewers apply it literally.
 
 If uncertain, choose the simpler, more concise implementation.
 
