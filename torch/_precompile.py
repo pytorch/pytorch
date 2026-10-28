@@ -1978,9 +1978,32 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
+_TORCH_DIR = os.path.dirname(torch.__file__)
+# torch's helpers that build a Library for the caller's namespace record themselves.
+_TORCH_OP_HELPERS = tuple(
+    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
+)
+
+
+def _torch_op_module(op_name: str, overload: str) -> str | None:
+    """The torch module whose import registers ``op_name``, if torch defines it from
+    Python."""
+    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    path = debug.removeprefix("registered at ").rpartition(":")[0]
+    if path.startswith(_TORCH_OP_HELPERS):
+        return None
+    if not (path.startswith(_TORCH_DIR + os.sep) and path.endswith(".py")):
+        return None
+    relpath = os.path.relpath(path.removesuffix(".py"), os.path.dirname(_TORCH_DIR))
+    return relpath.replace(os.sep, ".").removesuffix(".__init__")
+
+
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     """The modules registering the ops among ``op_names``."""
-    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
+    modules = {
+        _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload)
+        for op_name, overload in op_names
+    }
     return tuple(sorted(m for m in modules if m is not None))
 
 
@@ -1996,9 +2019,9 @@ def _write_custom_op_imports(
     buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers the op. The
-    # recorded module is a best guess (and ops defined with Library.define have
-    # none), so the imports are best effort and the ops themselves are checked.
+    # path imports the module that registers the op. The recorded module is a best
+    # guess (and a user op defined with torch.library.Library or torch.library.define
+    # has none), so the imports are best effort and the ops themselves are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
