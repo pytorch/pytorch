@@ -267,7 +267,7 @@ def run_url(repo: str, row: dict) -> str:
 
 
 def report_url(
-    repo: str, pr: int, sha: str, run: str = "", finding: dict | None = None
+    repo: str, pr: int, sha: str, run_link: str = "", finding: dict | None = None
 ) -> str:
     """The feedback form for this review, or for one finding of it. Every value
     is percent-encoded, so the link cannot leave its markdown link syntax."""
@@ -277,8 +277,8 @@ def report_url(
         "pr": f"https://github.com/{repo}/pull/{pr}",
         "commit": sha,
     }
-    if run:
-        params["run"] = run
+    if run_link:
+        params["run"] = run_link
     if finding is not None:
         params["finding"] = f"{unescape_path(finding['path'])}:{finding['line']}"
     return f"{REPORT_ISSUE_URL}?{urllib.parse.urlencode(params)}"
@@ -433,11 +433,13 @@ def _compose(
     return defuse_bot_commands("\n".join(lines))
 
 
-def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings, run="") -> dict:
+def post(
+    gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
+) -> dict:
     """Create the review. If GitHub refuses the inline comments (422), they go
     into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
-    report = report_url(gh.repo, pr, sha, run)
+    report = report_url(gh.repo, pr, sha, run_link)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
     comments = [
@@ -445,7 +447,7 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings, run="") -> d
             "path": unescape_path(f["path"]),
             "line": f["line"],
             "side": "RIGHT",
-            "body": comment_body(f, report_url(gh.repo, pr, sha, run, f)),
+            "body": comment_body(f, report_url(gh.repo, pr, sha, run_link, f)),
         }
         for f in blocking_findings(verdict, findings)
         if not f.get("discussion")
@@ -1063,11 +1065,11 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
 RETRACTED = object()
 
 
-def publish(gh, pr, sha, author, verdict, summary, findings, run=""):
+def publish(gh, pr, sha, author, verdict, summary, findings, run_link: str = ""):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
     findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
-    new = post(gh, pr, sha, verdict, summary, findings, run)
+    new = post(gh, pr, sha, verdict, summary, findings, run_link)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
