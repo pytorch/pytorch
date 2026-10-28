@@ -202,10 +202,12 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
-// Closes the global callback session at interpreter exit. If disableProfiler()
-// is never called (e.g. an exception between prof.start() and prof.stop()),
-// this is needed to block threads from accessing profiler resources after they
-// have been torn down.
+// Irreversibly disables global callback recording and correlation pops for the
+// entire process, including future profile_all_threads and KINETO_ONDEMAND
+// sessions. Call only at process exit, after the final use of global profiling
+// and before profiler/backend static destruction.
+// Python registers this hook with atexit. LibTorch-only embedders using global
+// profiling must call it themselves before static destruction.
 TORCH_API void closeGlobalCallbackSession();
 
 using ActivityFilter = std::unordered_map<

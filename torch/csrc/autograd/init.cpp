@@ -448,6 +448,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def(
       "_close_global_callback_session",
       closeGlobalCallbackSession,
+      "Irreversibly disable global callback recording and correlation pops "
+      "process-wide, including future profile_all_threads and on-demand "
+      "sessions. Call only at process exit, after the final use of global "
+      "profiling and before native profiler resources are destroyed.",
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
