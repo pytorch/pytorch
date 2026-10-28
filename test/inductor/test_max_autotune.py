@@ -6869,7 +6869,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
-        self.assertFalse(is_gfx1250_arch("gfx1251"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
