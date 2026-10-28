@@ -237,6 +237,37 @@ class TunableOpWorkerTest(TestCase):
         # when the graph's first GEMM runs under set_device(1).
         self.assertEqual(self._stamped().filename, "tunableop_results1.csv")
 
+    def test_pinned_filename_is_reused_for_a_job_on_another_device(self):
+        # One manager per process picks one filename, so leaving the parent
+        # unpinned lets a second device's results land where nothing reads.
+        pinned = {}
+
+        def get_filename():
+            return pinned.get("name", "")
+
+        def set_filename(name, insert_device_ordinal=False):
+            pinned["name"] = name
+
+        tunable = mock.Mock()
+        tunable.get_filename.side_effect = get_filename
+        tunable.set_filename.side_effect = set_filename
+        env = {k: v for k, v in os.environ.items() if k != "PYTORCH_TUNABLEOP_FILENAME"}
+        with (
+            mock.patch("torch.cuda.tunable", tunable),
+            mock.patch.dict(os.environ, env, clear=True),
+        ):
+            for device in (0, 1):
+                bmreq = mock.Mock()
+                bmreq.output_tensor_meta = mock.Mock(
+                    device=torch.device("cuda", device)
+                )
+                bmreq.input_tensor_meta = []
+                with mock.patch("torch.cuda.current_device", return_value=device):
+                    tunableop.submit(tunableop.BenchmarkJob(bmreq, tuning=False))
+                # Both devices write the file the runtime will open.
+                self.assertEqual(self._stamped().filename, "tunableop_results0.csv")
+        self.assertEqual(tunable.set_filename.call_count, 1)
+
     def test_a_set_parent_filename_wins_over_the_job_device(self):
         # The branch the empty-filename test cannot reach: SetFilename has
         # already baked an ordinal in, so re-deriving one here would disagree
@@ -419,10 +450,14 @@ class TunableOpWorkerTest(TestCase):
         with (
             mock.patch("torch.cuda.current_device", return_value=0),
             mock.patch("torch.cuda.tunable.get_filename", return_value=""),
+            mock.patch("torch.cuda.tunable.set_filename") as pin,
             mock.patch.dict("os.environ", env, clear=True),
         ):
             # No PYTORCH_TUNABLEOP_FILENAME: default rule applies, ordinal included.
             tunableop.submit(job)
+            pin.assert_called_once_with(
+                "tunableop_results0.csv", insert_device_ordinal=False
+            )
             self.assertEqual(self._stamped().filename, "tunableop_results0.csv")
             self.assertEqual(tunableop._worker_key, (0, "tunableop_results0.csv"))
 
@@ -433,6 +468,7 @@ class TunableOpWorkerTest(TestCase):
         with (
             mock.patch("torch.cuda.current_device", return_value=1),
             mock.patch("torch.cuda.tunable.get_filename", return_value=""),
+            mock.patch("torch.cuda.tunable.set_filename"),
             mock.patch.dict("os.environ", {"PYTORCH_TUNABLEOP_FILENAME": "env.csv"}),
         ):
             tunableop.submit(job)
