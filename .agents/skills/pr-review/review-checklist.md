@@ -168,6 +168,12 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 
 - [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
 
+### CI Dependencies
+
+When a PR changes code that runs in a Linux CI build or test job (anything under `.ci/` other than `.ci/docker/`, `.github/`, or scripts those jobs run, such as `benchmarks/dynamo/` and `test/`):
+
+- [ ] **No package resolution at test time** — PR adds an install that resolves packages from an index while a Linux CI job runs, instead of adding them to the CI image. Apply [ci-dependencies.md](ci-dependencies.md) for what counts, the fix, and the exemptions. A non-exempt install always means **Request Changes**
+
 ### Miscellaneous
 
 - [ ] **torch._check** — PR uses `assert` or `if not cond: raise` in Python op implementations instead of `torch._check()` / `torch._check_is_size()` which work correctly with meta tensors and symbolic shapes
