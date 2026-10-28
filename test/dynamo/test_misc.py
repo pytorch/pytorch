@@ -2987,7 +2987,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             return f
 
-        def try_set_and_del(f):
+        def try_readonly(f):
             results = []
             try:
                 f.__closure__ = f.__closure__
@@ -2997,20 +2997,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 del f.__closure__
             except AttributeError:
                 results.append("del")
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                results.append("globals")
+            try:
+                f.__builtins__ = {}
+            except AttributeError:
+                results.append("builtins")
             return results
 
         def nested(x):
-            return x + 1, try_set_and_del(make_f())
+            return x + 1, try_readonly(make_f())
 
         def sourced(x, f):
-            return x + 1, try_set_and_del(f)
+            return x + 1, try_readonly(f)
 
         x = torch.ones(1)
         for fn, args in ((nested, (x,)), (sourced, (x, make_f()))):
             ref = fn(*args)
             res = torch.compile(fn, backend="eager", fullgraph=True)(*args)
             self.assertEqual(ref, res)
-            self.assertEqual(res[1], ["set", "del"])
+            self.assertEqual(res[1], ["set", "del", "globals", "builtins"])
 
     def test_setattr_writable_function_attributes(self):
         def make_g():
@@ -3026,8 +3034,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             def h():
                 pass
 
-            h.__name__ = "renamed"
-            return x + g.foo, h.__name__
+            h.__annotations__ = {"y": int}
+            return x + g.foo, h.__annotations__["y"] is int
 
         x = torch.ones(1)
         g_ref, g_res = make_g(), make_g()
@@ -3036,6 +3044,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(g_res.foo, 1)
         self.assertEqual(g_res.__annotations__, {"x": int})
+
+    def test_setattr_unmodeled_function_attribute_graph_breaks(self):
+        def fn(x):
+            def h(a=1):
+                return a
+
+            h.__defaults__ = (2,)
+            return x + h()
+
+        x = torch.ones(1)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     # Asserting on the graph break counters rather than on the compiled result:
     # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method

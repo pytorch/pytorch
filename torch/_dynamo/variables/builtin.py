@@ -3849,8 +3849,8 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
         # Function tp_getset/tp_members entries that never write (read-only or
         # unmodeled) must run on every path, since functions with a source skip
-        # call_method below. Writable slots of sourced functions keep the
-        # store_attr path, which replays them onto the real function.
+        # call_method below. Validating writable slots (e.g. the type of
+        # __name__) on sourced functions is out of scope; they keep store_attr.
         if (
             isinstance(obj, BaseUserFunctionVariable)
             and name_var.is_python_constant()

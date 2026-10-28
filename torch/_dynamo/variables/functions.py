@@ -444,19 +444,23 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("__setattr__", "__delattr__") and args[0].is_python_constant():
-            # func_setattro is PyObject_GenericSetAttr: tp_getset/tp_members entries
-            # are data descriptors, so their setter (value=None for delete) wins
-            # over the instance __dict__.
+            # Read-only and unmodeled tp_getset/tp_members entries never write: like
+            # CPython data descriptors they raise AttributeError (or graph break)
+            # instead of landing in __dict__. Modeling writable slots such as
+            # __name__ or __doc__ is out of scope; they keep the __dict__ path.
             # https://github.com/python/cpython/blob/v3.13.0/Objects/funcobject.c
             attr = args[0].as_python_constant()
             entry = (
                 self.lookup_tp_getset_member(attr) if isinstance(attr, str) else None
             )
-            if entry is not None:
+            if entry is not None and entry.setter in (
+                readonly_setter,
+                unmodeled_setter,
+            ):
+                entry.setter(self, tx, args[1] if name == "__setattr__" else None)
+            if args[0].is_constant_match("__annotations__"):
                 value = args[1] if name == "__setattr__" else None
-                result = entry.setter(self, tx, value)
-                if result is not None:
-                    return result
+                return self._set_annotations(tx, value)
         if name == "__setattr__":
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
@@ -646,6 +650,10 @@ class BaseUserFunctionVariable(VariableTracker):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # __globals__ and __builtins__ are READONLY PyMemberDefs in funcobject.c.
+        # Reads keep the existing lookup (the getter declines); writes raise.
+        "__globals__": Member(lambda s, tx: None, readonly_setter),
+        "__builtins__": Member(lambda s, tx: None, readonly_setter),
     }
 
     def lookup_instance_dict(
