@@ -9427,17 +9427,28 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(_custom_op_modules(names), ())
         self.assertEqual(_custom_ops(names), ((f"{ns}::op", ""),))
 
+        # A module that imports but raises is collected like a missing one.
+        broken = f"precompile_broken_{uuid.uuid4().hex}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        with open(os.path.join(directory, broken + ".py"), "w") as f:
+            f.write("raise RuntimeError('half registered')\n")
+        self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
+        modules = (broken, "precompile_no_such_module")
+
         def run(ops):
             buf = PySourceBuilder()
-            _write_custom_op_imports(buf, ("precompile_no_such_module",), ops)
+            _write_custom_op_imports(buf, modules, ops)
             exec(buf.getvalue(), {})
 
-        run(((f"{ns}::op", ""),))
+        with self.assertWarnsRegex(UserWarning, rf"'{broken}' raised RuntimeError"):
+            run(((f"{ns}::op", ""),))
         with self.assertRaisesRegex(
             torch.compiler.PrecompileError,
             rf"{ns}::missing\.out'\]\..*'precompile_no_such_module'",
-        ):
+        ) as raised:
             run(((f"{ns}::op", ""), (f"{ns}::missing", "out")))
+        # Chained to the first module's error.
+        self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
         try:
@@ -9478,6 +9489,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", lambda x: x.clone(), "CPU")
+        lib.define("bypassed(Tensor x) -> Tensor")
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "artifact.py")
             with capture(
@@ -9488,6 +9500,13 @@ class TestPrecompileCustomOpRecording(TestCase):
                 backend="eager",
             ) as cap:
                 cap(torch.ones(4))
+                # A compile that graph-broke on an op and was then bypassed.
+                package = cap._session._package
+                with package.code_context(_no_fake_op_fn.__code__):
+                    package.add_graph_break_op(
+                        torch.ops.precompile_no_fake.bypassed.default
+                    )
+                    package.bypass_current_compile()
             with open(artifact) as f:
                 python_code = f.read()
         self.assertIn("CUSTOM_OPS = (('precompile_no_fake::op', ''),)", python_code)
