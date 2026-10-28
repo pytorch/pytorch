@@ -43,7 +43,6 @@ import os
 import platform
 import re
 import shlex
-from typing import Any
 
 
 class Toolchain:
@@ -508,7 +507,7 @@ class TritonToolchain(Toolchain):
         "#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>",
     )
 
-    REQUIRED_BUILD_KEYS = ("fn", "signature", "launch", "args")
+    REQUIRED_BUILD_KEYS = ("kernel_path", "kernel_name", "signature", "launch", "args")
 
     @staticmethod
     def _sm_number(arch: str) -> int:
@@ -621,14 +620,17 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         import triton
         from triton.backends.compiler import GPUTarget
 
-        fn = b["fn"]
-        kernel: Any = getattr(fn, "jit_kernel", fn)
+        # An arbitrary path from the builder dict, not an importable module.
+        from torchgen.native_aot_decl import load_by_path
+
+        kernel_mod = load_by_path("kernel", b["kernel_path"])
+        kernel = getattr(kernel_mod, b["kernel_name"])
 
         sig = [s.strip() for s in b["signature"].split(",")]
         if len(sig) != len(kernel.arg_names):
             raise RuntimeError(
                 f"{b['prefix']}: signature has {len(sig)} entries but "
-                f"kernel takes {len(kernel.arg_names)}: "
+                f"{b['kernel_name']} takes {len(kernel.arg_names)}: "
                 f"{list(kernel.arg_names)}"
             )
 

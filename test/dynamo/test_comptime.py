@@ -2,6 +2,7 @@
 
 import collections
 import re
+import sys
 import time
 import typing
 from io import StringIO
@@ -143,7 +144,10 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertIn("-->", out)
         # Check that the bytecode resembles what we expect
         self.assertIn("STORE_FAST", out)
-        self.assertIn("BINARY_OP", out)
+        if sys.version_info < (3, 11):
+            self.assertIn("BINARY_MULTIPLY", out)
+        else:
+            self.assertIn("BINARY_OP", out)
 
     def test_print_value_stack(self):
         global FILE

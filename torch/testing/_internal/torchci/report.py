@@ -10,7 +10,7 @@ from typing import Any, NamedTuple
 
 
 # Bumped on breaking changes.
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "0.2"
 REPORT_SUFFIX = ".report.jsonl"
 
 

@@ -1,19 +1,21 @@
 # Owner(s): ["module: ci"]
 
+import contextlib
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/codeowners"))
+import check_taxonomy
 from check_taxonomy import find_ownership_errors, parse_codeowners
-
-
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts/codeowners/check_taxonomy.py"
 
 
 def parse(codeowners: str):
@@ -30,19 +32,30 @@ def ownership_errors(codeowners: str, *, exceptions=None) -> dict[str, list[str]
     return {title: entries for title, entries in errors.items() if entries}
 
 
-def run_lint(codeowners: str, *args: str) -> subprocess.CompletedProcess:
-    """Run check_taxonomy.py in a throwaway repo whose only committed file is CODEOWNERS."""
+def run_lint(codeowners: str, *args: str) -> tuple[int, str]:
+    """Run the lint's main() in a throwaway repo whose only committed file is CODEOWNERS.
+
+    The repo's REVIEWERS_NOT_OWNERS name paths that don't exist here, so the lint runs
+    without exceptions.
+    """
     with tempfile.TemporaryDirectory() as repo:
         Path(repo, "CODEOWNERS").write_text(codeowners)
         identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
         for command in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "init"]):
             subprocess.check_output(["git", *identity, *command], cwd=repo)
-        return subprocess.run(
-            [sys.executable, "-S", str(SCRIPT), *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-        )
+        stdout = io.StringIO()
+        previous = os.getcwd()
+        os.chdir(repo)
+        try:
+            with (
+                mock.patch.object(check_taxonomy, "REVIEWERS_NOT_OWNERS", {}),
+                mock.patch.object(sys, "argv", ["check_taxonomy.py", *args]),
+                contextlib.redirect_stdout(stdout),
+            ):
+                returncode = check_taxonomy.main()
+        finally:
+            os.chdir(previous)
+        return returncode, stdout.getvalue()
 
 
 LINT_HEADER = """\
@@ -87,7 +100,7 @@ class TestFindOwnershipErrors(TestCase):
 # label: module: inductor
 # owner: @alice
 # /torch/_inductor/
-# owner: @bob
+# owner: @carol
 /torch/_inductor/codegen/ @carol
 # label: module: fx
 # owner: not-a-handle
@@ -104,9 +117,10 @@ class TestFindOwnershipErrors(TestCase):
                 "Label lines without an owner line": [
                     "CODEOWNERS:4 # label: module: dynamo"
                 ],
-                "Misplaced owner lines": ["CODEOWNERS:9 # owner: @bob"],
+                "Misplaced owner lines": ["CODEOWNERS:9 # owner: @carol"],
                 "Invalid owner handles": ["CODEOWNERS:12 # owner: not-a-handle"],
-                # The misplaced @bob line is reported above, not compared.
+                # The misplaced @carol line is reported above, and is neither compared
+                # nor used as the block's owners: @carol is still missing below.
                 "Label lists with several owner lists": [
                     "module: inductor: @alice | @dave"
                 ],
@@ -183,15 +197,21 @@ class TestFindOwnershipErrors(TestCase):
 /torch/_dynamo/eval_frame.py @alice
 """
         exceptions = {
-            "torch/_dynamo/": frozenset({"@bob"}),
+            "torch/_dynamo/": frozenset({"@Bob"}),
             "torch/_dynamo/eval_frame.py": frozenset({"@alice"}),
             "torch/removed.py": frozenset({"@carol"}),
         }
-        # @bob is allowed; the eval_frame.py exception is unneeded since @alice is
-        # an owner; the removed rule's exception is ignored.
+        # @bob is allowed even though the exception spells it @Bob. The eval_frame.py
+        # exception is unneeded since @alice is an owner, and the removed rule's
+        # exception is reported so it can't later exempt a new rule.
         self.assertEqual(
             ownership_errors(codeowners, exceptions=exceptions),
-            {"Unneeded reviewer exceptions": ["/torch/_dynamo/eval_frame.py: @alice"]},
+            {
+                "Unneeded reviewer exceptions": [
+                    "/torch/_dynamo/eval_frame.py: @alice",
+                    "/torch/removed.py: @carol",
+                ]
+            },
         )
 
     def test_owners_reset_at_section(self):
@@ -215,13 +235,13 @@ class TestFindOwnershipErrors(TestCase):
 class TestLintWiring(TestCase):
     def test_ownership_errors_fail_the_lint(self):
         codeowners = LINT_HEADER + "# label: module: ci\n/CODEOWNERS @alice\n#\n"
-        result = run_lint(codeowners)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("Label lines without an owner line (1):", result.stdout)
+        returncode, stdout = run_lint(codeowners)
+        self.assertEqual(returncode, 1, stdout)
+        self.assertIn("Label lines without an owner line (1):", stdout)
 
-        result = run_lint(codeowners, "--lintrunner")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        message = json.loads(result.stdout)
+        returncode, stdout = run_lint(codeowners, "--lintrunner")
+        self.assertEqual(returncode, 0, stdout)
+        message = json.loads(stdout)
         self.assertEqual(message["code"], "CODEOWNERS_TAXONOMY")
         self.assertIn("1 label lines without an owner line", message["description"])
 
@@ -230,9 +250,9 @@ class TestLintWiring(TestCase):
             LINT_HEADER
             + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @alice\n#\n"
         )
-        result = run_lint(codeowners)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(run_lint(codeowners, "--lintrunner").stdout, "")
+        returncode, stdout = run_lint(codeowners)
+        self.assertEqual(returncode, 0, stdout)
+        self.assertEqual(run_lint(codeowners, "--lintrunner"), (0, ""))
 
 
 if __name__ == "__main__":

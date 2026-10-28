@@ -65,7 +65,7 @@ VmapDimVector VmapPhysicalView::getPhysicalDims(OptionalIntArrayRef opt_logical_
       result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
     }
   } else {
-    for (const auto dim : c10::irange(logical_ndim)) {
+    for (int64_t dim = 0; dim < logical_ndim; dim++) {
       result.push_back(dim + numBatchDims());
     }
   }

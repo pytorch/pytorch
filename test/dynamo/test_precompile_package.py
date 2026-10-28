@@ -1502,7 +1502,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             and value.__name__ == name
             and not reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, name), value)
         ]
-        self.assertEqual(refused, ["ExceptionGroup"])
+        heap_types = ["ExceptionGroup"] if sys.version_info >= (3, 11) else []
+        self.assertEqual(refused, heap_types)
 
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
@@ -1840,7 +1841,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # stores the function under its own name, is pinned last.
         def minted(key, qualname):
             code = _user_op.__code__.replace(co_name=qualname.rpartition(".")[2])
-            code = code.replace(co_qualname=qualname)
+            if sys.version_info >= (3, 11):
+                code = code.replace(co_qualname=qualname)
             fn = types.FunctionType(code, globals(), "__annotate__")
             fn.__qualname__ = qualname
             return type("Cfg", (), {key: fn})

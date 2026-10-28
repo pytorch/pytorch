@@ -25,7 +25,6 @@ import copyreg
 import dataclasses
 import enum
 import functools
-import gc
 import hashlib
 import importlib
 import inspect
@@ -171,7 +170,6 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
-    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -339,11 +337,6 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
-def _mapping_proxy_mapping(value: object) -> object:
-    # A mappingproxy's only GC referent is the mapping it wraps.
-    return gc.get_referents(value)[0]
-
-
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -365,11 +358,10 @@ dunder_attrs_assumed_constants = (
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
-    # NOTE: we need to find the LAST matching index because localsplus can
-    # contain duplicate names in the case of cells (e.g. in Dynamo's resume
-    # functions): a name can be both local and cell and will take up 2 slots of
-    # the frame's localsplus. The correct behavior is to refer to the cell,
-    # which has a higher index.
+    # NOTE: we need to find the LAST matching index because <= 3.10 contains
+    # duplicate names in the case of cells: a name can be both local and cell
+    # and will take up 2 slots of the frame's localsplus. The correct behavior
+    # is to refer to the cell, which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
@@ -2253,16 +2245,6 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, MappingProxyMappingSource):
-            if not base_guard_manager:  # to make mypy happy
-                raise AssertionError("base_guard_manager must not be None")
-            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
-            out = base_guard_manager.lambda_manager(
-                python_lambda=_mapping_proxy_mapping,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
         elif istype(source, AttrProxySource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2988,20 +2970,18 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        hooks = get_hooks()
-        guard_hooks_ids: tuple[int, int] | None = None
-        if are_inline_hooks(hooks):
-            # The C++ guard compares only the hooks' addresses, and a freed
-            # hook's address can be reused by new hooks, so freeing either hook
-            # must invalidate this entry.
-            pack, unpack = hooks
-            guard_hooks_ids = (
-                self.id_ref(pack, "saved_tensors_hooks pack hook"),
-                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
-            )
+        def hooks_ids_fn(
+            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
+        ) -> tuple[int, ...] | None:
+            if not are_inline_hooks(hooks):
+                return None
+
+            return tuple(map(id, hooks))
+
+        guard_hooks_ids = hooks_ids_fn(get_hooks())
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                hooks
+                get_hooks()
             )
 
         code = [
@@ -5126,7 +5106,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                code.co_qualname,
+                getattr(code, "co_qualname", code.co_name),
                 code.co_filename,
                 code.co_firstlineno,
                 e,

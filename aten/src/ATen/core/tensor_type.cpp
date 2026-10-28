@@ -1,7 +1,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/core/GradMode.h>
 
-#include <c10/util/irange.h>
 #include <utility>
 
 namespace c10 {
@@ -17,7 +16,7 @@ bool possible_cross_dimension_overlap(c10::IntArrayRef sizes, c10::IntArrayRef s
   std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
 
   // sort indices going with ascending strides
-  for (const auto i : c10::irange(1, n_dim)) {
+  for (int i = 1; i < n_dim; i++) {
     auto c = i;
     for (int j = i - 1; j >= 0; j--) {
       if (strides[stride_indices[j]] > strides[stride_indices[c]]) {
@@ -106,7 +105,7 @@ std::ostream& operator<<(
   auto sizes_opt = ss.sizes();
 
   os << '(';
-  for (const auto i : c10::irange(rank_opt.value())) {
+  for (size_t i = 0; i < rank_opt.value(); i++) {
     if (i > 0) {
       os << ", ";
     }
@@ -203,7 +202,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       }
       return 0;
     };
-    for (const auto i : c10::irange(1, n_dim)) {
+    for (int i = 1; i < n_dim; i++) {
       int dim1 = i;
       for (int dim0 = i - 1; dim0 >= 0; dim0--) {
         int comparison = should_swap(stride_indices[dim0], stride_indices[dim1]);
@@ -226,7 +225,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
   std::vector<Stride> stride_properties;
   stride_properties.reserve(stride_indices.size());
-  for (const auto i : c10::irange(stride_indices.size())) {
+  for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {
       if (!has_overlap) {

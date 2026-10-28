@@ -1230,8 +1230,7 @@ class GitHubPR:
         return cast(str, self.info["author"]["login"])
 
     def is_dependabot_pr(self) -> bool:
-        # GraphQL reports the bot's login as `dependabot`, REST as `dependabot[bot]`
-        return normalize_login(self.get_pr_creator_login()) == "dependabot"
+        return self.get_pr_creator_login() == "dependabot[bot]"
 
     def _fetch_authors(self) -> list[tuple[str, str]]:
         if self._authors is not None:

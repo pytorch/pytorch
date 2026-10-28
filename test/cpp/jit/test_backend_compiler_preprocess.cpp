@@ -55,6 +55,7 @@ c10::IValue preprocess(
               node->kind().toQualString(),
               " is not supported in this compiler. Source code: ",
               node->sourceRange().str());
+          break;
       }
       ss << ',';
     }

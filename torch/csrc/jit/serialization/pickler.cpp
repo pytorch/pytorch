@@ -401,6 +401,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
           false,
           "Unsupported sparse tensor layout type in serialization ",
           layout);
+      break;
   }
   // backward_hooks
   pushGlobal("collections", "OrderedDict");
@@ -473,6 +474,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
             false,
             "Unsupported tensor quantization type in serialization ",
             toString(tensor.qscheme()));
+        break;
     }
     push<PickleOpCode>(PickleOpCode::TUPLE);
   }

@@ -72,8 +72,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// NOTE: this is the only constructor that is not inherited from
   /// HeaderOnlyArrayRef.
   template <typename U>
-  /* implicit */ ArrayRef(
-      const SmallVectorTemplateCommon<T, U>& Vec C10_LIFETIMEBOUND)
+  /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
       : HeaderOnlyArrayRef<T>(Vec.data(), Vec.size()) {}
 
   /// @}
@@ -210,51 +209,43 @@ ArrayRef(const std::initializer_list<T>&) -> ArrayRef<T>;
 
 /// Construct an ArrayRef from a single element.
 template <typename T>
-[[nodiscard]] ArrayRef<T> makeArrayRef(const T& OneElt C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T& OneElt) {
   return OneElt;
 }
 
 /// Construct an ArrayRef from a pointer and length.
 template <typename T>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const T* data C10_LIFETIMEBOUND,
-    size_t length) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T* data, size_t length) {
   return ArrayRef<T>(data, length);
 }
 
 /// Construct an ArrayRef from a range.
 template <typename T>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const T* begin C10_LIFETIMEBOUND,
-    const T* end C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T* begin, const T* end) {
   return ArrayRef<T>(begin, end);
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const SmallVectorImpl<T>& Vec C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const SmallVectorImpl<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T, unsigned N>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const SmallVector<T, N>& Vec C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const SmallVector<T, N>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::vector.
 template <typename T>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const std::vector<T>& Vec C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const std::vector<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::array.
 template <typename T, std::size_t N>
-[[nodiscard]] ArrayRef<T> makeArrayRef(
-    const std::array<T, N>& Arr C10_LIFETIMEBOUND) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const std::array<T, N>& Arr) {
   return Arr;
 }
 
@@ -273,7 +264,7 @@ template <typename T>
 /// Construct an ArrayRef from a C array.
 template <typename T, size_t N>
 // NOLINTNEXTLINE(*c-arrays*)
-[[nodiscard]] ArrayRef<T> makeArrayRef(const T (&Arr C10_LIFETIMEBOUND)[N]) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }
 

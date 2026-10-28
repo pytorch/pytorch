@@ -49,7 +49,6 @@ import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import (
-    DeviceInterface,
     get_interface_for_device,
     get_registered_device_interfaces,
 )
@@ -1068,6 +1067,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1560,21 +1569,20 @@ class FxGraphHashDetails:
                     device_types.add(factory_device)
         return device_types
 
-    @staticmethod
-    def _template_allow_tf32(
-        device_types: OrderedSet[str],
-        allow_tf32: Callable[[type[DeviceInterface]], bool],
+    @classmethod
+    def _mm_template_allow_tf32(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
     ) -> tuple[tuple[str, bool], ...]:
         # NotImplementedError means this device has no DeviceInterface.
-        # allow_tf32 itself is not caught: a broken implementation should
+        # allow_tf32() itself is not caught: a broken implementation should
         # fail the compile instead of being cached as ALLOW_TF32=False.
         flags: list[tuple[str, bool]] = []
-        for device_type in sorted(device_types):
+        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
             try:
                 iface = get_interface_for_device(device_type)
             except NotImplementedError:
                 continue
-            flags.append((device_type, bool(allow_tf32(iface))))
+            flags.append((device_type, bool(iface.allow_tf32())))
         return tuple(flags)
 
     def __init__(
@@ -1716,15 +1724,7 @@ class FxGraphHashDetails:
         # precision string is already in cuda_matmul_settings; this records the
         # resolved flag for every device in the graph so other backends
         # invalidate the FX graph cache when their flag changes.
-        device_types = self._graph_device_types(gm, example_inputs)
-        self.mm_template_allow_tf32 = self._template_allow_tf32(
-            device_types, lambda iface: iface.allow_tf32()
-        )
-        # The conv templates follow DeviceInterface.conv_allow_tf32, which no
-        # other field here covers.
-        self.conv_template_allow_tf32 = self._template_allow_tf32(
-            device_types, lambda iface: iface.conv_allow_tf32()
-        )
+        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no

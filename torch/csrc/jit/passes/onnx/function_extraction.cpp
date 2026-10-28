@@ -607,6 +607,7 @@ Node* FunctionExtractor::CreateFunctionNode(
                 static_cast<int>(a->kindOf(attr)),
                 " from node ",
                 *a);
+            break;
         }
       };
 
@@ -1001,7 +1002,10 @@ static bool HasSameAttribute(
           static_cast<int>(a_kind),
           " from node ",
           *a);
+      break;
   }
+
+  return true;
 }
 
 scope_list FunctionExtractor::SortScopesByMaxDepth(

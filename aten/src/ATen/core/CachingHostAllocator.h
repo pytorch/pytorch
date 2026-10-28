@@ -17,7 +17,6 @@
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -581,7 +580,7 @@ struct CachingHostAllocatorImpl {
           // leaves the totals reported by getStats() unchanged.
           auto& pool = it->second->blocks;
           auto& dst = default_pool_;
-          for (const auto i : c10::irange(pool.free_list_.size())) {
+          for (size_t i = 0; i < pool.free_list_.size(); ++i) {
             std::scoped_lock lock(pool.free_list_[i].mutex_, dst.free_list_[i].mutex_);
             add_stats(dst.active_bucket_stats[i], pool.active_bucket_stats[i]);
             add_stats(dst.active_bytes_bucket_stats[i], pool.active_bytes_bucket_stats[i]);
@@ -705,7 +704,7 @@ struct CachingHostAllocatorImpl {
   void for_each_bucket(const F& fn) {
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
     auto visit = [&](BlockPool& pool) {
-      for (const auto i : c10::irange(pool.free_list_.size())) {
+      for (size_t i = 0; i < pool.free_list_.size(); ++i) {
         std::lock_guard<std::mutex> g(pool.free_list_[i].mutex_);
         fn(pool, i);
       }

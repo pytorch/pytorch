@@ -3,6 +3,7 @@
 """Tests for sequence protocol operations (sq_*) in PyTorch Dynamo."""
 
 import collections
+import sys
 
 import torch
 import torch._dynamo.test_case
@@ -1121,7 +1122,10 @@ class TestSqAssItem(torch._dynamo.test_case.TestCase):
         class L(list):
             pass
 
-        with self.assertRaises(TypeError):
+        if sys.version_info >= (3, 11):
+            with self.assertRaises(TypeError):
+                L([1, 2], newarg=3)
+        else:
             L([1, 2], newarg=3)
 
     # -- mutation visibility --

@@ -5,7 +5,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/impl/CUDAGraphMemory.h>
@@ -34,7 +33,6 @@
 #endif
 
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <array>
@@ -230,7 +228,6 @@ struct ExpandableSegment;
 struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
-  CaptureId_t capture_id{0}; // capture in which this allocation was made
   stream_set stream_uses; // streams on which the block was used
   int32_t registration_counter{-1};
   size_t size; // block size in bytes
@@ -2326,9 +2323,6 @@ class DeviceCachingAllocator {
 
     block->allocated = true;
     block->requested_size = orig_size;
-    block->capture_id = capture_tracker_.hasActiveCaptures()
-        ? captureIdMayInitCtx(stream).value_or(0)
-        : 0;
 
     block->context_when_allocated = std::move(context);
     record_trace(
@@ -2429,7 +2423,7 @@ class DeviceCachingAllocator {
           "All streams in the same capture should agree on the graph");
 
       // Use current terminals as the free markers for the stream
-      for (const auto i : c10::irange(info.num_terminals)) {
+      for (size_t i = 0; i < info.num_terminals; ++i) {
         auto terminal = info.terminals[i];
         markers.insert(terminal);
       }
@@ -2498,7 +2492,7 @@ class DeviceCachingAllocator {
     // is a predecessor). A free marker is reusable if it is a predecessor of
     // all terminal nodes.
     std::deque<cudaGraphNode_t> dfs;
-    for (const auto i : c10::irange(info.num_terminals)) {
+    for (size_t i = 0; i < info.num_terminals; ++i) {
       dfs.push_back(info.terminals[i]);
     }
 
@@ -2938,7 +2932,7 @@ class DeviceCachingAllocator {
     };
 
     // allocate all blocks in the segment
-    for (const auto i : c10::irange(segment_len)) {
+    for (size_t i = 0; i < segment_len; ++i) {
       // Note [Last block when restoring checkpoint state]
       // The last block in expandable segment is one of the following cases:
       // - case 1: a unmapped tail containing the remaining amount of available
@@ -5814,26 +5808,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     return "native";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(cudaMemcpyAsync(
-        dest,
-        src,
-        count,
-        cudaMemcpyDeviceToDevice,
-        cuda::getCurrentCUDAStream()));
-  }
-
-  std::optional<AllocationStreamInfo> allocation_stream_info(
-      const void* ptr) const override {
-    auto* block = ptr
-        ? const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr)
-        : nullptr;
-    if (!block) {
-      return std::nullopt;
-    }
-    return AllocationStreamInfo{
-        cuda::getStreamFromExternal(block->stream, block->device),
-        block->capture_id,
-        block->pool->owner_PrivatePool != nullptr};
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
   }
 };
 

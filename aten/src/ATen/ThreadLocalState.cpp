@@ -9,7 +9,6 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/DTensorState.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -78,7 +77,7 @@ void ThreadLocalState::setThreadLocalState(
 
   at::impl::ThreadLocalPythonObjects::set_state(state.saved_objects_);
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
-  for(const auto i : c10::irange(state.autocast_dtypes_.size())) {
+  for(size_t i=0; i<state.autocast_dtypes_.size(); i++) {
      at::autocast::set_autocast_dtype(static_cast<at::DeviceType>(i), state.autocast_dtypes_[i]);
   }
 #endif
