@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "test_utils.h"
+#include <c10/util/irange.h>
 
 using namespace torch;
 using namespace torch::jit;
@@ -102,7 +103,7 @@ TEST(CpuFusion, ParallelRuntimes) {
 
   constexpr size_t kNumThreads = 2;
   std::vector<std::vector<std::pair<int, int>>> all_inputs;
-  for (size_t id = 0; id < kNumThreads; ++id) {
+  for (const auto id : c10::irange(kNumThreads)) {
     std::vector<std::pair<int, int>> thread_input = {
         {id, id + 1},
         {id + 10, id + 11},
@@ -128,7 +129,7 @@ TEST(CpuFusion, ParallelRuntimes) {
   };
 
   std::vector<std::thread> threads;
-  for (size_t id = 0; id < kNumThreads; ++id) {
+  for (const auto id : c10::irange(kNumThreads)) {
     threads.emplace_back(exec_runtime, id);
   }
 

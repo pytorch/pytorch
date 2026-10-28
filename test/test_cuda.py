@@ -188,6 +188,14 @@ def skip_background_threads_on_windows(f):
     return wrapped
 
 
+def skip_unless_blas_library_selectable(backend):
+    # Windows ignores the setter; archs without hipBLASLt fall back to hipBLAS.
+    with blas_library_context(backend):
+        effective = torch.backends.cuda.preferred_blas_library()
+    if effective != torch.backends.cuda._BlasBackends[backend]:
+        raise unittest.SkipTest(f"cannot select {backend}, BLAS runs on {effective}")
+
+
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
@@ -1395,6 +1403,7 @@ print(public_active, active, allocated)
     @serialTest()
     @blas_library_context("cublaslt")
     def test_cublaslt_workspace_eager_resize_and_zero(self):
+        skip_unless_blas_library_selectable("cublaslt")
         a = torch.randn(128, 128, device="cuda")
         out = torch.empty_like(a)
 
@@ -1594,6 +1603,7 @@ print(mem_after_first, torch.cuda.memory_allocated())
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cached_lazy_reallocation(self, backend):
+        skip_unless_blas_library_selectable(backend)
         test_script = f"""
 import torch
 torch.backends.cuda.preferred_blas_library("{backend}")
