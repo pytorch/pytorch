@@ -25,6 +25,7 @@
 #include <ctime>
 #include <mutex>
 #include <new>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -694,6 +695,13 @@ void RocprofLogger::api_callback(
   if (record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) {
       timestamps[record.correlation_id.internal] = getApproximateTime();
+      // Registered on entry: the dispatch record can be delivered before this
+      // call's exit callback runs.
+      if (isKernelApi(record.operation)) {
+        auto& dis = singleton();
+        std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+        dis.pendingDispatches_.insert(record.correlation_id.internal);
+      }
     } // ROCPROFILER_CALLBACK_PHASE_ENTER
     else { // ROCPROFILER_CALLBACK_PHASE_EXIT
       uint64_t startTime = timestamps[record.correlation_id.internal];
@@ -702,6 +710,15 @@ void RocprofLogger::api_callback(
 
       // Kernel Launch Records
       if (isKernelApi(record.operation)) {
+        // A failed launch dispatches nothing, so no record will arrive.
+        auto* data = static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(
+            record.payload);
+        if (data->retval.hipError_t_retval != hipSuccess) {
+          auto& dis = singleton();
+          std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+          dis.pendingDispatches_.erase(record.correlation_id.internal);
+        }
+
         kernel_args args;
         rocprofiler_iterate_callback_tracing_kind_operation_args(
             record,
@@ -845,6 +862,12 @@ void RocprofLogger::buffer_callback(
                 header->payload));
         auto& dispatch = record.dispatch_info;
 
+        {
+          auto& dis = singleton();
+          std::lock_guard<std::mutex> lock(dis.pendingDispatchesMutex_);
+          dis.pendingDispatches_.erase(record.correlation_id.internal);
+        }
+
         // Safe access to agents map with default value
         auto& globalContext = getGlobalContext();
         auto agent_it = globalContext.agents.find(dispatch.agent_id);
@@ -937,6 +960,10 @@ void RocprofLogger::setPerThreadBuffers(bool enabled) {
   perThreadBuffers_.store(enabled, std::memory_order_relaxed);
 }
 
+void RocprofLogger::setDispatchRecordWait(std::chrono::milliseconds wait) {
+  dispatchRecordWait_ = wait;
+}
+
 void RocprofLogger::ensureRegistered() {
   int status = 0;
   rocprofiler_is_initialized(&status);
@@ -961,6 +988,11 @@ void RocprofLogger::startLogging() {
   }
 
   externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
+  {
+    // Launches given up on by an earlier stop must not stall this session's.
+    std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
+    pendingDispatches_.clear();
+  }
   // start_context is idempotent (it returns SUCCESS for an already-active
   // context), so there is no need to query context state first.
   ROCPROF_CALL(rocprofiler_start_context(globalContext.context));
@@ -991,6 +1023,32 @@ void RocprofLogger::stopLogging() {
   // to the contexts active at enqueue, and its record is still written to
   // this buffer when the kernel completes after the stop.
   ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
+
+  // The SDK writes a dispatch record from its own completion handler, which
+  // can run after the application has already seen the kernel finish (e.g.
+  // hipDeviceSynchronize returned). Such a record would miss the flush above
+  // and be dropped as out of range in the next session, so re-flush until
+  // every launch of this session has its record. The wait is bounded because
+  // some launches never produce one (a kernel still running, or a dispatch
+  // the SDK could not time).
+  auto pendingCount = [this] {
+    std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
+    return pendingDispatches_.size();
+  };
+  const auto deadline = std::chrono::steady_clock::now() + dispatchRecordWait_;
+  size_t pending = pendingCount();
+  while (pending > 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    ROCPROF_CALL(rocprofiler_flush_buffer(globalContext.buffer));
+    pending = pendingCount();
+  }
+  if (pending > 0) {
+    LOG_FIRST_N(WARNING, 10)
+        << "Stopped waiting for " << pending
+        << " kernel dispatch record(s) after " << dispatchRecordWait_.count()
+        << " ms; their GPU events are missing from this trace. Raise "
+        << "ROCPROF_DISPATCH_RECORD_WAIT_MSECS to wait longer.";
+  }
 }
 
 //

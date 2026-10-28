@@ -18,6 +18,7 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <functional>
@@ -57,6 +58,8 @@ constexpr char kCuptiPerThreadBufferEnabledKey[] =
     "CUPTI_PER_THREAD_BUFFER_ENABLED";
 constexpr std::string_view kRocprofPerThreadBufferEnabledKey =
     "ROCPROF_PER_THREAD_BUFFER_ENABLED";
+constexpr std::string_view kRocprofDispatchRecordWaitMsecsKey =
+    "ROCPROF_DISPATCH_RECORD_WAIT_MSECS";
 constexpr char kPerformanceMetricsKey[] = "PERFORMANCE_METRICS";
 constexpr char kPerformanceMetricsDeviceIdKey[] =
     "PERFORMANCE_METRICS_DEVICE_ID";
@@ -376,6 +379,8 @@ bool Config::handleOption(const std::string& name, std::string& val) {
     perThreadBufferEnabled_ = toBool(val);
   } else if (name == kRocprofPerThreadBufferEnabledKey) {
     rocprofPerThreadBufferEnabled_ = toBool(val);
+  } else if (name == kRocprofDispatchRecordWaitMsecsKey) {
+    rocprofDispatchRecordWait_ = milliseconds(std::max(0, toInt32(val)));
   } else if (!name.compare(kPerformanceMetricsKey)) {
     performanceMetricNames_ = splitAndTrim(val, ',');
   } else if (!name.compare(kPerformanceMetricsDeviceIdKey)) {

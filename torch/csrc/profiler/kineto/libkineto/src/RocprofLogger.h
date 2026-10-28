@@ -9,6 +9,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <list>
@@ -18,6 +19,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <rocprofiler-sdk/fwd.h>
@@ -53,6 +55,7 @@ class RocprofLogger {
   void clearLogs();
   void setMaxEvents(uint32_t maxBufferSize);
   void setPerThreadBuffers(bool enabled);
+  void setDispatchRecordWait(std::chrono::milliseconds wait);
 
   static int toolInit(
       rocprofiler_client_finalize_t finalize_func,
@@ -109,6 +112,12 @@ class RocprofLogger {
   std::atomic<uint64_t> totalRows_{0};
 
   std::atomic<bool> externalCorrelationEnabled_{true};
+
+  // Internal correlation ids of kernel launches in this session whose dispatch
+  // record has not been delivered yet; stopLogging() waits for them.
+  std::unordered_set<uint64_t> pendingDispatches_;
+  std::mutex pendingDispatchesMutex_;
+  std::chrono::milliseconds dispatchRecordWait_{20};
 
   friend class libkineto::RocprofActivityApi;
 };

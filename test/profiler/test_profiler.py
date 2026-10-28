@@ -56,6 +56,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     skipXPUIf,
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
@@ -2531,6 +2532,22 @@ class TestProfilerDevice(TestCase):
         else:
             self.assertTrue(found_mm)
         self._check_stats(p._stats)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @onlyCUDA
+    def test_kineto_short_sessions_have_kernel_events(self, device):
+        # Each session synchronizes before it stops, so its kernel belongs in
+        # its own trace. A device record delivered late lands in the next
+        # session instead, which drops it as out of range.
+        x = torch.randn(1 << 20, device=device)
+        missed = 0
+        for _ in range(64):
+            with profile(activities=[ProfilerActivity.CUDA]) as p:
+                x.mul_(1.0001)
+                torch.cuda.synchronize()
+            if not any(e.device_type == DeviceType.CUDA for e in p.events()):
+                missed += 1
+        self.assertEqual(missed, 0)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_trace_only_export_matches_default(self, device):
