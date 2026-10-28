@@ -113,27 +113,30 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
     "xpu": (
-        "intel-cmplr-lib-rt==2026.1.2 | "
-        "intel-cmplr-lib-ur==2026.1.2 | "
-        "intel-cmplr-lic-rt==2026.1.2 | "
-        "intel-sycl-rt==2026.1.2 | "
-        "oneccl-devel==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2026.1.0 | "
-        "onemkl-sycl-blas==2026.1.0 | "
-        "onemkl-sycl-dft==2026.1.0 | "
-        "onemkl-sycl-lapack==2026.1.0 | "
-        "onemkl-sycl-rng==2026.1.0 | "
-        "onemkl-sycl-sparse==2026.1.0 | "
-        "dpcpp-cpp-rt==2026.1.2 | "
-        "intel-opencl-rt==2026.1.2 | "
-        "mkl==2026.1.0 | "
-        "intel-openmp==2026.1.2 | "
-        "tbb==2023.1.0 | "
-        "tcmlib==1.5.0 | "
-        "umf==1.1.0 | "
-        "intel-pti==1.1.0 | "
+        "intel-cmplr-lib-rt==2026.2.0 | "
+        "intel-cmplr-lib-ur==2026.2.0 | "
+        "intel-cmplr-lic-rt==2026.2.0 | "
+        "intel-sycl-rt==2026.2.0 | "
+        # oneccl 2022.2.0 switched its transport dependency from impi-rt to
+        # libfabric>=2.6, which is not published on PyPI yet.
+        "oneccl-devel==2022.2.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.2.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        # onemkl-license 2026.2.0 ships a win_amd64 wheel only; the Linux mkl
+        # wheel dropped its onemkl-license requirement in 2026.2.
+        "onemkl-license==2026.2.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+        "onemkl-sycl-blas==2026.2.0 | "
+        "onemkl-sycl-dft==2026.2.0 | "
+        "onemkl-sycl-lapack==2026.2.0 | "
+        "onemkl-sycl-rng==2026.2.0 | "
+        "onemkl-sycl-sparse==2026.2.0 | "
+        "dpcpp-cpp-rt==2026.2.0 | "
+        "intel-opencl-rt==2026.2.0 | "
+        "mkl==2026.2.0 | "
+        "intel-openmp==2026.2.0 | "
+        "tbb==2023.2.0 | "
+        "tcmlib==1.6.0 | "
+        "umf==1.2.0 | "
+        "intel-pti==1.2.0 | "
         "pyzes==0.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
