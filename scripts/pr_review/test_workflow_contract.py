@@ -1651,14 +1651,15 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             self.assertTrue((skills / name / "SKILL.md").is_file())
             links = [p for p in (skills / name).rglob("*") if p.is_symlink()]
             self.assertEqual(links, [], f"{name} contains a symlink")
-            for md in (skills / name).rglob("*.md"):
-                text = md.read_text()
+            for md in sorted(p for p in (skills / name).rglob("*") if p.is_file()):
+                text = md.read_text(errors="replace")
                 # In stage A a repo path to a skill resolves only in the PR
                 # checkout, i.e. to the untrusted copy, whether or not that
-                # skill is installed. Another skill is named relatively. Any
-                # mention fails, so `.agents/skills/./x` cannot slip past.
+                # skill is installed (`.claude/skills` links to it). Another
+                # skill is named relatively. Any mention fails, so
+                # `.agents/skills/./x` cannot slip past.
                 self.assertEqual(
-                    re.findall(r"\.agents/skills\b", text),
+                    re.findall(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text),
                     [],
                     f"{md.relative_to(REPO)} names a skill by its repo path, "
                     "which stage A reads from the PR; use ../<name>/",
