@@ -442,8 +442,13 @@ def generic_is_true(
     Resolution order: constants → nb_bool → mp_length/sq_length → truthy.
     """
     from .constant import ConstantVariable
+    from .dicts import ConstDictVariable
 
     if obj.is_python_constant():
+        # ConstDictVariable is lazy about installing guards, so guard the
+        # length the result depends on.
+        if isinstance(obj, ConstDictVariable) and obj.source:
+            install_guard(obj.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         try:
             return ConstantVariable.create(bool(obj.as_python_constant()))
         except Exception as e:

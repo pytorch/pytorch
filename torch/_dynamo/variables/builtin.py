@@ -3522,11 +3522,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, UserDefinedObjectVariable):
             bool_result = self.call_bool(tx, a)
             return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
+        if isinstance(a, ConstDictVariable):
+            return VariableTracker.build(
+                tx, not generic_is_true(tx, a).as_python_constant()
+            )
         if isinstance(
             a,
             (
                 ListVariable,
-                ConstDictVariable,
                 SetVariable,
                 FrozensetVariable,
                 variables.DictKeySetVariable,
