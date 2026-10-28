@@ -401,7 +401,7 @@ class ConstantVariable(VariableTracker):
                         tx,
                         args=list(exc.args),
                     )
-            if name == "to_bytes" and isinstance(self.value, int):
+            if name == "to_bytes" and istype(self.value, int):
                 try:
                     return ConstantVariable.create(
                         self.value.to_bytes(*const_args, **const_kwargs)

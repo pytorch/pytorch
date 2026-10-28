@@ -325,6 +325,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
 
+    def test_bytes_non_iterator_matches_eager(self):
+        # __bytes__, __index__ and dynamic ints must not take the iterator path.
+        class HasBytes:
+            def __bytes__(self):
+                return b"hi"
+
+        fns = (
+            lambda t: (t + 1, bytes(HasBytes())),
+            lambda t: (t + 1, bytes(torch.tensor(3))),
+            lambda t: (t + 1, bytes(t.size(0))),
+        )
+        for fn in fns:
+            opt = torch.compile(fn, backend="eager", dynamic=True)
+            self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
     def test_heapq_polyfill(self):
         # heapq is a C extension; Dynamo traces it via the pure-Python polyfill
         # (torch/_dynamo/polyfills/heapq.py). Counter.most_common(n) routes

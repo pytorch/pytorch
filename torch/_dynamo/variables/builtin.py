@@ -2198,9 +2198,17 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx,
                     args=list(e.args),
                 )
-        if len(args) == 1 and not kwargs:
-            # bytes(iterable_of_ints), e.g. a generator: unpack it and fold
-            # if every element is a constant.
+        if (
+            len(args) == 1
+            and not kwargs
+            and isinstance(
+                args[0],
+                (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
+            )
+        ):
+            # bytes(iterator_of_ints), e.g. a generator: unpack it and fold if
+            # every element is a constant. Other types may define __bytes__,
+            # the buffer protocol or __index__, which take priority in CPython.
             try:
                 items = [x.as_python_constant() for x in unpack_iterable(tx, args[0])]
             except NotImplementedError:
