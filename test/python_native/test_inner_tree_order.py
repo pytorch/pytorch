@@ -433,6 +433,16 @@ class TestInnerTreeOrder(TestCase):
                 got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
             self.assertEqual(got, x.sum(dim=1, dtype=dtype))
 
+    def test_strided_rows_use_the_trait_plan(self):
+        """Serve strided ragged rows with the same trait-tuned DAG as contiguous rows."""
+        x = torch.randn(64, 2 * 4097, device="cuda", dtype=torch.float16)[:, ::2]
+        trait = T.SumOps(acc=cutlass.Float32)
+        key = "inner_tree_test_strided_trait_plan"
+        with _order_on():
+            strided = kg.reduce_dim(trait, key, x, [1], torch.float16)
+            contiguous = kg.reduce_dim(trait, key, x.contiguous(), [1], torch.float16)
+        self.assertEqual(strided.view(torch.int16), contiguous.view(torch.int16))
+
     def test_ragged_plan_fusion_is_trait_aware(self):
         """Select ragged fusion per trait; kchunk changes register cost, not the tree."""
         n, m = 4097, 4096
