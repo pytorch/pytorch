@@ -309,6 +309,9 @@ def _physical_col_view(
     B = math.prod(x.shape[: dims[0]])
     R = math.prod(x.shape[dims[0] : dims[-1] + 1])
     C = math.prod(x.shape[dims[-1] + 1 :])
+    # Stage one indexes batched rows as batch * R + row in Int32.
+    if B * R >= _INT32_LIMIT:
+        return None
     return x.reshape(B, R, C)
 
 
@@ -404,7 +407,11 @@ def _try_fast_row(
             acc_bits=max(dt.width for dt in trait.fdtypes),
             alignment=_L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
         )
-    if kernel_order == "inner_tree":
+    # A tuned inner-tree choice for an unordered request falls back when no plan exists.
+    if kernel_order == "inner_tree" and (
+        order == "inner_tree"
+        or rt.trait_itree_plan(trait, N, M, itemsize, device=x.device) is not None
+    ):
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
         )
@@ -670,57 +677,65 @@ def _reduce(
     count = x.numel() // num_o
     from . import kernel_rowtile as rt
 
+    explicit = order == "inner_tree"
     order = rt.reduction_order(order)
     tune = block is None
     block = _K0_BLOCK if block is None else block
     if order == "inner_tree" and count > 0:
+        ordered = None
         if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
-            raise ValueError("inner-tree reduction requires 32-bit logical extents")
-        red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
-        kind = fast_kind(red_pairs, kept_pairs, nouts)
-        if x.is_contiguous() and kind in ("row", "all"):
-            x2 = x.reshape(num_o, count)
-            ordered = rt.reduce_row_tile(
-                trait,
-                trait_key,
-                x2,
-                out_dtypes,
-                nouts=nouts,
-                order="inner_tree",
-            )
+            reason = "inner-tree reduction requires 32-bit logical extents"
         else:
-            ordered = None
-            from . import kernel_coltile as ct
+            reason = "inner-tree reduction cannot serve this geometry"
+            red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+            kind = fast_kind(red_pairs, kept_pairs, nouts)
+            if x.is_contiguous() and kind in ("row", "all"):
+                plan = rt.trait_itree_plan(
+                    trait, count, num_o, x.element_size(), device=x.device
+                )
+                if plan is not None:
+                    ordered = rt.reduce_row_tile(
+                        trait,
+                        trait_key,
+                        x.reshape(num_o, count),
+                        out_dtypes,
+                        nouts=nouts,
+                        order="inner_tree",
+                    )
+            else:
+                from . import kernel_coltile as ct
 
-            col_view = _physical_col_view(
-                x, red_axes, red_pairs, kept_pairs, count, num_o
-            )
-            if col_view is not None:
-                ordered = ct.reduce_ordered_col(
-                    trait,
-                    trait_key,
-                    col_view,
-                    out_dtypes,
-                    nouts,
-                    order=order,
+                col_view = _physical_col_view(
+                    x, red_axes, red_pairs, kept_pairs, count, num_o
                 )
-            if ordered is None:
-                ordered = _try_indexed_itree(
-                    trait,
-                    trait_key,
-                    x,
-                    red_pairs,
-                    kept_pairs,
-                    num_o,
-                    count,
-                    out_dtypes,
-                    nouts,
-                )
+                if col_view is not None:
+                    ordered = ct.reduce_ordered_col(
+                        trait,
+                        trait_key,
+                        col_view,
+                        out_dtypes,
+                        nouts,
+                        order=order,
+                    )
+                if ordered is None:
+                    ordered = _try_indexed_itree(
+                        trait,
+                        trait_key,
+                        x,
+                        red_pairs,
+                        kept_pairs,
+                        num_o,
+                        count,
+                        out_dtypes,
+                        nouts,
+                    )
         if ordered is not None:
             return tuple(_as_shape(o, out_shape) for o in ordered)
-        raise ValueError("inner-tree reduction cannot serve this geometry")
+        if explicit:
+            raise ValueError(reason)
+        rt.inner_tree_fallback(reason)
     if order == "inner_tree":
-        # Empty reductions have no accumulation order.
+        # Empty reductions have no accumulation order; gated fallbacks were reported above.
         order = "unordered"
 
     # Route one-element outputs through the reduce-all split instead of one general block.
@@ -917,13 +932,20 @@ def _reduce_all(
         raise AssertionError(f"reduce-all needs a CUDA input, got {x.device}")
     from . import kernel_rowtile as rt
 
-    order = rt.reduction_order(order)
+    requested, order = order, rt.reduction_order(order)
     if not x.is_contiguous():
         if getattr(trait, "has_index", False):
             x = x.contiguous()
         else:
             return _reduce(
-                trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
+                trait,
+                trait_key,
+                x,
+                None,
+                out_dtypes,
+                nouts,
+                block=block,
+                order=requested,
             )
     L = x.numel()
     xf = x.reshape(-1)
@@ -935,17 +957,20 @@ def _reduce_all(
     x2 = xf.view(1, -1)
 
     if order == "inner_tree" and L > 0:
-        if L >= _INT32_LIMIT:
-            raise ValueError("inner-tree reduction requires 32-bit logical extents")
-        outs = rt.reduce_row_tile(
-            trait,
-            trait_key,
-            x2,
-            out_dtypes,
-            nouts=nouts,
-            order="inner_tree",
-        )
-        return tuple(_as_shape(o, ()) for o in outs)
+        if L < _INT32_LIMIT:
+            outs = rt.reduce_row_tile(
+                trait,
+                trait_key,
+                x2,
+                out_dtypes,
+                nouts=nouts,
+                order="inner_tree",
+            )
+            return tuple(_as_shape(o, ()) for o in outs)
+        reason = "inner-tree reduction requires 32-bit logical extents"
+        if requested == "inner_tree":
+            raise ValueError(reason)
+        rt.inner_tree_fallback(reason)
     if order == "inner_tree":
         order = "unordered"
     if _oneshot_ok(x2):
