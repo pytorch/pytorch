@@ -1643,58 +1643,43 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "stage A does not install exactly INSTALLED_SKILLS",
         )
         skills = REPO / ".agents" / "skills"
-        uninstalled = sorted(
-            d.name
-            for d in skills.iterdir()
-            if d.is_dir() and d.name not in INSTALLED_SKILLS
-        )
         for name in INSTALLED_SKILLS:
-            # `find -type f` skips a symlink that `cp -rT` copies into stage
-            # A's reach, so one would be readable without moving the hash;
-            # that includes the skill directory itself.
-            self.assertFalse((skills / name).is_symlink(), f"{name} is a symlink")
             self.assertTrue((skills / name / "SKILL.md").is_file())
-            links = [p for p in (skills / name).rglob("*") if p.is_symlink()]
-            self.assertEqual(links, [], f"{name} contains a symlink")
-            for md in sorted(p for p in (skills / name).rglob("*") if p.is_file()):
-                text = md.read_text(errors="replace")
-                # In stage A a repo path to a skill resolves only in the PR
-                # checkout, i.e. to the untrusted copy, whether or not that
-                # skill is installed (`.claude/skills` links to it). Another
-                # skill is named relatively. Any mention fails, so
-                # `.agents/skills/./x` cannot slip past.
-                self.assertEqual(
-                    re.findall(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text),
-                    [],
-                    f"{md.relative_to(REPO)} names a skill by its repo path, "
-                    "which stage A reads from the PR; use ../<name>/",
-                )
-                # Named in prose, an uninstalled skill is one the `Skill` tool
-                # cannot load, and the model's fallback is the PR's copy.
-                for other in uninstalled:
-                    self.assertIsNone(
-                        re.search(
-                            rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text
-                        ),
-                        f"{md.relative_to(REPO)} names the {other} skill, "
-                        "which stage A does not install",
-                    )
-                # A sibling skill is read from beside the installed copy, so it
-                # must be installed too; otherwise the only copy the model can
-                # reach is the PR's. Any mention counts, not just a Markdown
-                # link, resolved whole from the file that makes it.
-                for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
-                    target = (md.parent / rel).resolve()
-                    if not target.is_relative_to(skills.resolve()):
-                        continue
-                    parts = target.relative_to(skills.resolve()).parts
-                    if parts and (skills / parts[0]).is_dir():
-                        self.assertIn(
-                            parts[0],
-                            INSTALLED_SKILLS,
-                            f"{md.relative_to(REPO)} refers to the {parts[0]} "
-                            "skill, which stage A does not install",
-                        )
+        self.assertEqual(skill_reference_problems(skills, INSTALLED_SKILLS), [])
+
+    def test_the_skill_reference_lint_fails_and_passes_where_it_should(self):
+        """The lint on a fake tree with skill `a` installed and `other` not."""
+        bad = [
+            ("x.md", "[s](../other/SKILL.md)"),
+            ("x.md", "`../other/SKILL.md`"),
+            ("sub/x.md", "see `../../other/x`."),
+            ("x.md", "../a/../other/x"),
+            ("x.md", "../absent/SKILL.md"),
+            ("x.md", "the `other`\nskill"),
+            ("x.md", "the other skill"),
+            ("x.txt", ".agents/skills/./a/x"),
+            ("x.md", ".claude/skills/a/x"),
+        ]
+        good = [
+            ("x.md", "~/.claude/skills/a/SKILL.md"),
+            ("x.md", "../a/SKILL.md"),
+            ("sub/x.md", "../other/x"),
+            ("x.md", "my-other skill; other skillset"),
+        ]
+        for (rel, text), fails in [(c, True) for c in bad] + [(c, False) for c in good]:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                skills = Path(tmp)
+                for d in ("a", "other"):
+                    (skills / d).mkdir()
+                    (skills / d / "SKILL.md").write_text("x")
+                (skills / "a" / rel).parent.mkdir(parents=True, exist_ok=True)
+                (skills / "a" / rel).write_text(text)
+                self.assertEqual(bool(skill_reference_problems(skills, ("a",))), fails)
+        with tempfile.TemporaryDirectory() as tmp:
+            skills = Path(tmp)
+            (skills / "real").mkdir()
+            (skills / "a").symlink_to(skills / "real")
+            self.assertTrue(skill_reference_problems(skills, ("a",)))
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
         """RUN the step: naming a file is not hashing it, and four text pins
@@ -1809,6 +1794,47 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         rest = prepare[i:]
         nxt = re.search(r"(?m)^      -(?: |$)", rest)
         return rest[: nxt.start()] if nxt else rest
+
+
+def skill_reference_problems(skills: Path, installed) -> list:
+    """Ways the installed skills under `skills` could send stage A to a skill
+    copy it does not install, whose only reachable copy is then the PR's."""
+    problems = []
+    root = skills.resolve()
+    uninstalled = [d.name for d in skills.iterdir() if d.name not in installed]
+    for name in installed:
+        # `find -type f` skips a symlink that `cp -rT` copies into stage A's
+        # reach, so one would be readable without moving the hash; that
+        # includes the skill directory itself.
+        tree = [skills / name, *(skills / name).rglob("*")]
+        if any(p.is_symlink() for p in tree):
+            problems.append(f"{name} is or contains a symlink")
+            continue
+        for path in sorted(p for p in tree if p.is_file()):
+            text = path.read_text(errors="replace")
+            where = path.relative_to(skills)
+            # A repo path to a skill resolves only in the PR checkout
+            # (`.claude/skills` links to it), installed or not.
+            if re.search(r"\.agents/skills\b|(?<!~/)\.claude/skills\b", text):
+                problems.append(
+                    f"{where} names a skill by its repo path; use ../<name>/"
+                )
+            # Named in prose, an uninstalled skill is one the `Skill` tool
+            # cannot load.
+            for other in uninstalled:
+                if re.search(rf"(?<![\w-])`?{re.escape(other)}`?\s+skills?\b", text):
+                    problems.append(f"{where} names the uninstalled {other} skill")
+            # A relative reference, resolved whole from its file, that lands in
+            # another skill's directory, existing or not.
+            for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
+                target = (path.parent / rel).resolve()
+                if target.is_relative_to(root) and target != root:
+                    other = target.relative_to(root).parts[0]
+                    if other not in installed:
+                        problems.append(
+                            f"{where} refers to the uninstalled {other} skill"
+                        )
+    return problems
 
 
 def hashed_skill_dirs(step: str) -> list:
