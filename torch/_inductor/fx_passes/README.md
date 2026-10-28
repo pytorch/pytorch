@@ -47,7 +47,7 @@ def f(x: Tensor):
 
 a pass must not eliminate `x.clone()`, by the same rule as in [Altering Aliasing](#altering-aliasing): passes must neither introduce nor remove aliasing between user-visible inputs and outputs.
 
-Mutation-introducing passes must run after passes that rely on the functional invariant. Any pass running after mutation has been introduced must support the resulting non-functional graph. Preserve these ordering constraints when adding or reordering passes.
+Mutation-introducing passes must run after passes that rely on the functional invariant. Near lowering, `slice_scatter_chunking_pass` must run before `reinplace_inplaceable_ops`; `decompose_auto_functionalized` runs later and also introduces mutation. Any pass running after mutation has been introduced must support the resulting non-functional graph. Preserve these ordering constraints when adding or reordering passes.
 
 
 ## Altering Aliasing
