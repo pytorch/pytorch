@@ -15,7 +15,7 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
 fi
 
 if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
-    time python test/run_test.py --include test_cuda_multigpu test_cuda_primary_ctx --verbose
+    time python test/run_test.py --include test_multigpu test_cuda_primary_ctx --verbose
 
     # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
     # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
