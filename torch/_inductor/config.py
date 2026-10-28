@@ -2713,13 +2713,8 @@ class aot_inductor:
     # the compile otherwise: the model must run on CUDA only, without host
     # syncs, control flow, data-dependent shapes, mutated inputs, or ops marked
     # cudagraph-unsafe. The compiled model can then run as CUDA graphs through
-    # AOTInductorModelContainerRunCudaGraph.
+    # AOTInductorModelContainerRunWithCudaGraph.
     cudagraphs: bool = False
-
-    # With cudagraphs, calls with new input shapes run eagerly once a model
-    # instance holds this many CUDA graphs. The AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS
-    # environment variable overrides it when the model runs.
-    cudagraphs_max_graphs: int = 8
 
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models

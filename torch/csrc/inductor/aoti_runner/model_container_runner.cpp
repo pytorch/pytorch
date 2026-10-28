@@ -230,10 +230,11 @@ consider rebuild your model with the latest AOTInductor.");
       "AOTInductorModelContainerCreateWithExternalConstants")
 #undef TRY_LOAD_SYMBOL
   try {
-    run_cuda_graph_func_ = reinterpret_cast<decltype(run_cuda_graph_func_)>(
-        model_so_->sym("AOTInductorModelContainerRunCudaGraph"));
+    run_with_cuda_graph_func_ =
+        reinterpret_cast<decltype(run_with_cuda_graph_func_)>(
+            model_so_->sym("AOTInductorModelContainerRunWithCudaGraph"));
   } catch (const at::DynamicLibraryError&) {
-    // Older models can't run as CUDA graphs; run_cuda_graph() says so.
+    // Older models can't run as CUDA graphs; run_with_cuda_graph() says so.
   }
 
   // Hack to find the json file name from the model so file
@@ -385,19 +386,19 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       });
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run_cuda_graph_impl(
+std::vector<at::Tensor> AOTIModelContainerRunner::run_with_cuda_graph_impl(
     std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
   return call_run_func(
       input_handles,
-      "run_cuda_graph_func_(...)",
+      "run_with_cuda_graph_func_(...)",
       [&](AtenTensorHandle* output_handles, size_t num_outputs) {
         // Checked here, so that call_run_func frees the input handles.
         TORCH_CHECK(
-            run_cuda_graph_func_ != nullptr,
-            "AOTInductorModelContainerRunCudaGraph is unavailable. "
+            run_with_cuda_graph_func_ != nullptr,
+            "AOTInductorModelContainerRunWithCudaGraph is unavailable. "
             "Rebuild the model with the latest AOTInductor.");
-        return run_cuda_graph_func_(
+        return run_with_cuda_graph_func_(
             container_handle_,
             input_handles.data(),
             input_handles.size(),
@@ -431,15 +432,15 @@ std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
   return run_impl(input_handles, stream_handle);
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run_cuda_graph(
+std::vector<at::Tensor> AOTIModelContainerRunner::run_with_cuda_graph(
     const std::vector<at::Tensor>& inputs,
     void* stream_handle) {
-  RECORD_USER_SCOPE("AOTIModelContainerRunner::run_cuda_graph");
+  RECORD_USER_SCOPE("AOTIModelContainerRunner::run_with_cuda_graph");
   ScopedObserverEvent observer_event(
       observer(), AOTIContainerEvent::kInference, {});
   std::vector<AtenTensorHandle> input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  return run_cuda_graph_impl(input_handles, stream_handle);
+  return run_with_cuda_graph_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::

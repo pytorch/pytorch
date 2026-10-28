@@ -1442,9 +1442,8 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs through this instance's
-  // CudaGraphManager. The graphs are dropped first if the container's active
-  // constants changed since they were captured (constants_version).
-  void run_cuda_graph(
+  // CudaGraphManager.
+  void run_with_cuda_graph(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
                          // are stolen; the array itself is borrowed
@@ -1454,7 +1453,7 @@ class AOTInductorModelBase {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
-      uint64_t constants_version) {
+      std::optional<int64_t> max_graphs) {
     AOTI_RUNTIME_CHECK(
         cudagraphs_,
         "Running as CUDA graphs requires compiling the model with "
@@ -1466,16 +1465,12 @@ class AOTInductorModelBase {
     }
     if (!cudagraph_manager_) {
       CudaGraphOptions options;
-      options.max_graphs = cudagraphs_max_graphs_;
-      if (const char* env = std::getenv("AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS")) {
-        options.max_graphs = std::stoll(env);
+      if (max_graphs) {
+        options.max_graphs = *max_graphs;
       }
       cudagraph_manager_ =
           std::make_unique<CudaGraphManager>(device_idx_, options);
-    } else if (constants_version != cudagraph_constants_version_) {
-      cudagraph_manager_->reset();
     }
-    cudagraph_constants_version_ = constants_version;
 
     auto inputs =
         steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
@@ -2195,10 +2190,8 @@ class AOTInductorModelBase {
   // Set by generated code when compiled with aot_inductor.cudagraphs=True,
   // which checks at compile time that the model can be captured.
   bool cudagraphs_{false};
-  int64_t cudagraphs_max_graphs_{0};
 #ifdef USE_CUDA
   std::unique_ptr<CudaGraphManager> cudagraph_manager_;
-  uint64_t cudagraph_constants_version_ = 0;
 #endif // USE_CUDA
 };
 

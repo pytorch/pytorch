@@ -9422,9 +9422,10 @@ class DeviceCopy(ExternKernelOut):
         ):
             if V.graph.cpp_wrapper:
                 # Even if x is promoted to be a device constant, we still need to
-                # register device info to construct the correct CppWrapper class later
+                # register device info to construct the correct CppWrapper class later.
+                # Nothing runs on x_device, so cudagraph checks ignore it.
                 V.graph.add_device_info(device)
-                V.graph.add_device_info(x_device)
+                V.graph.add_device_info(x_device, runs_work=False)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)

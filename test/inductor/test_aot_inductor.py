@@ -348,6 +348,17 @@ def profiled_ivalue_kinds(code, kernel_name):
     ]
 
 
+def run_profiled(fn):
+    """Runs fn under the profiler; returns its result and whether it launched
+    a CUDA graph."""
+    activities = [torch.profiler.ProfilerActivity.CUDA]
+    with torch.profiler.profile(activities=activities) as prof:
+        result = fn()
+    launch_names = ("cudaGraphLaunch", "hipGraphLaunch")
+    launched = any(n in e.name for e in prof.events() for n in launch_names)
+    return result, launched
+
+
 class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
@@ -10368,12 +10379,26 @@ class AOTInductorTestsTemplate:
     def test_aot_cudagraphs_accepts_capturable_model(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
-        model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
-        self.check_model(
-            model,
-            (torch.randn(4, 16, device=self.device),),
-            options={"aot_inductor.cudagraphs": True},
-        )
+
+        class CpuConstant(torch.nn.Module):
+            def forward(self, x):
+                # Folded into a CUDA constant at compile time.
+                return x + torch.tensor([1.0, 2.0, 3.0, 4.0]).to(x.device)
+
+        class UnusedCpuInput(torch.nn.Module):
+            def forward(self, x, unused):
+                return x.relu()
+
+        x = torch.randn(4, 4, device=self.device)
+        for model, inputs in (
+            (torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU()), (x,)),
+            (CpuConstant(), (x,)),
+            (UnusedCpuInput(), (x, torch.randn(4))),
+        ):
+            with self.subTest(type(model).__name__):
+                self.check_model(
+                    model, inputs, options={"aot_inductor.cudagraphs": True}
+                )
 
     def test_aot_cudagraphs_rejects_non_cuda_model(self):
         if self.device == "cuda":
@@ -10499,47 +10524,42 @@ class AOTInductorTestsTemplate:
         so_path = AOTIRunnerUtil.legacy_compile(
             model,
             (torch.randn(4, 16, device=self.device),),
-            options={
-                "aot_inductor.cudagraphs": True,
-                "aot_inductor.cudagraphs_max_graphs": 1,
-            },
+            options={"aot_inductor.cudagraphs": True},
             dynamic_shapes=({0: batch},),
         )
 
         def launches_graph(runner, batch_size):
             x = torch.randn(batch_size, 16, device=self.device)
-            activities = [torch.profiler.ProfilerActivity.CUDA]
-            with torch.profiler.profile(activities=activities) as prof:
-                (out,) = runner.run_cuda_graph([x])
+            (out,), launched = run_profiled(lambda: runner.run_with_cuda_graph([x]))
             self.assertEqual(out, model(x))
-            return any("cudaGraphLaunch" in e.name for e in prof.events())
+            return launched
 
         def new_runner(env):
-            runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
-                so_path, 1, self.device
-            )
-            # The model instance reads the variable on its first call.
+            # The container reads the variable when it is created.
             with patch.dict(os.environ, env):
-                launches_graph(runner, 2)
-            return runner
+                return torch._C._aoti.AOTIModelContainerRunnerCuda(
+                    so_path, 1, self.device
+                )
 
-        runner = new_runner({})
+        runner = new_runner({"AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS": "1"})
         # A new shape warms up, is captured on its next call, then replays.
         self.assertEqual(
             [launches_graph(runner, 4) for _ in range(3)], [False, True, True]
         )
-        # With cudagraphs_max_graphs=1 reached, another shape runs eagerly.
+        # With the limit reached, another shape runs eagerly.
         self.assertEqual([launches_graph(runner, 8) for _ in range(2)], [False, False])
         self.assertTrue(launches_graph(runner, 4))
-        # The environment variable overrides the compiled limit.
         runner = new_runner({"AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS": "3"})
         for batch_size in (4, 8):
             launches = [launches_graph(runner, batch_size) for _ in range(3)]
             self.assertEqual(launches, [False, True, True])
         runner = new_runner({"AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS": "0"})
         self.assertEqual([launches_graph(runner, 4) for _ in range(3)], [False] * 3)
+        runner = new_runner({"AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS": "3x"})
+        with self.assertRaisesRegex(RuntimeError, "must be a non-negative integer"):
+            runner.run_with_cuda_graph([torch.randn(4, 16, device=self.device)])
 
-    def test_aot_cudagraphs_run_after_constant_updates(self):
+    def test_aot_cudagraphs_run_rejects_constant_updates(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
         model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
@@ -10549,37 +10569,20 @@ class AOTInductorTestsTemplate:
             model, (x,), options={"aot_inductor.cudagraphs": True}
         )
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
-        name_to_fqn = runner.get_constant_names_to_original_fqns()
-
-        def run_and_check():
-            # Warms up, captures, then replays: a constant update dropped the
-            # graphs captured before it.
-            launches = []
-            for _ in range(3):
-                activities = [torch.profiler.ProfilerActivity.CUDA]
-                with torch.profiler.profile(activities=activities) as prof:
-                    (out,) = runner.run_cuda_graph([x])
-                self.assertEqual(out, model(x))
-                launches.append(any("cudaGraphLaunch" in e.name for e in prof.events()))
-            self.assertEqual(launches, [False, True, True])
-
-        def new_weights():
-            state = model.state_dict()
-            weights = {n: torch.randn_like(state[f]) for n, f in name_to_fqn.items()}
-            model.load_state_dict({name_to_fqn[n]: w for n, w in weights.items()})
-            return weights
-
-        run_and_check()
-        # Graphs captured with the old constants must not replay.
-        runner.update_constant_buffer(new_weights(), True, False)
-        runner.swap_constant_buffer()
-        runner.free_inactive_constant_buffer()
-        run_and_check()
-        runner.update_constant_buffer(new_weights(), False, False)
-        run_and_check()
-        # User-managed constants are used in place, at new addresses.
-        runner.update_constant_buffer(new_weights(), False, False, True)
-        run_and_check()
+        names = runner.get_constant_names_to_original_fqns()
+        state = model.state_dict()
+        weights = {n: torch.randn_like(state[f]) for n, f in names.items()}
+        runner.run_with_cuda_graph([x])
+        # The runner reports only that the call failed; the model prints why.
+        msg = "API call failed"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            runner.update_constant_buffer(weights, False, False)
+        # The inactive buffer can still be updated, but not swapped in.
+        runner.update_constant_buffer(weights, True, False)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            runner.swap_constant_buffer()
+        (out,) = runner.run_with_cuda_graph([x])
+        self.assertEqual(out, model(x))
 
     def test_aot_cudagraphs_run_on_several_instances(self):
         if self.device != "cuda":
@@ -10600,21 +10603,23 @@ class AOTInductorTestsTemplate:
                 with torch.cuda.stream(stream):
                     for _ in range(20):
                         x = torch.randn(4, 16, device=self.device)
-                        (out,) = runner.run_cuda_graph([x])
+                        (out,) = runner.run_with_cuda_graph([x])
                         self.assertEqual(out, model(x))
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=work) for _ in range(4)]
-        activities = [torch.profiler.ProfilerActivity.CUDA]
-        with torch.profiler.profile(activities=activities) as prof:
+        def run_threads():
+            # run_with_cuda_graph releases the GIL, so the threads run concurrently.
+            threads = [threading.Thread(target=work) for _ in range(4)]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
+
+        _, launched = run_profiled(run_threads)
         if errors:
             raise errors[0]
-        self.assertTrue(any("cudaGraphLaunch" in e.name for e in prof.events()))
+        self.assertTrue(launched)
 
     def test_aot_cudagraphs_run_from_package(self):
         if self.device != "cuda":
@@ -10629,12 +10634,22 @@ class AOTInductorTestsTemplate:
         compiled = torch._inductor.aoti_load_package(package_path)
         launches = []
         for _ in range(3):
-            activities = [torch.profiler.ProfilerActivity.CUDA]
-            with torch.profiler.profile(activities=activities) as prof:
-                out = compiled.run_cuda_graph(x)
+            out, launched = run_profiled(lambda: compiled.run_with_cuda_graph(x))
             self.assertEqual(out, model(x))
-            launches.append(any("cudaGraphLaunch" in e.name for e in prof.events()))
+            launches.append(launched)
         self.assertEqual(launches, [False, True, True])
+
+    def test_aot_cudagraphs_run_requires_cuda_model(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("requires CPU")
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+        package_path = torch._inductor.aoti_compile_and_package(
+            torch.export.export(model, (x,))
+        )
+        compiled = torch._inductor.aoti_load_package(package_path)
+        with self.assertRaisesRegex(RuntimeError, "requires a CUDA model"):
+            compiled.run_with_cuda_graph(x)
 
     def test_aot_cudagraphs_run_requires_flag(self):
         if self.device != "cuda":
@@ -10644,7 +10659,7 @@ class AOTInductorTestsTemplate:
         so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         with self.assertRaisesRegex(RuntimeError, "aot_inductor.cudagraphs=True"):
-            runner.run_cuda_graph([x])
+            runner.run_with_cuda_graph([x])
 
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

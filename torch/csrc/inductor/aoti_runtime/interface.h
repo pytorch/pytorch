@@ -175,10 +175,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
 // eagerly, so that lazy initialization happens outside a capture, and the
 // next one captures a CUDA graph, which later calls with those shapes replay.
 // Each model instance captures its own graphs; once it holds
-// aot_inductor.cudagraphs_max_graphs of them (or
-// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, if set), calls with new shapes run
-// eagerly. Requires a CUDA model compiled with aot_inductor.cudagraphs=True.
-AOTI_API AOTIRuntimeError AOTInductorModelContainerRunCudaGraph(
+// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS of them (default 8), calls with new
+// shapes run eagerly. Requires a CUDA model compiled with
+// aot_inductor.cudagraphs=True.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithCudaGraph(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed

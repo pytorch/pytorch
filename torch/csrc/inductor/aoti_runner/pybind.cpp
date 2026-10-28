@@ -101,10 +101,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
       .def(
-          "run_cuda_graph",
-          &AOTIModelContainerRunnerCuda::run_cuda_graph,
+          "run_with_cuda_graph",
+          &AOTIModelContainerRunnerCuda::run_with_cuda_graph,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",

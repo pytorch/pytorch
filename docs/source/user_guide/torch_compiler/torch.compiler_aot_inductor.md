@@ -190,6 +190,36 @@ Result from the second inference:
 [ CUDAFloatType{2,1} ]
 ```
 
+## Running as CUDA graphs
+
+A CUDA model compiled with `aot_inductor.cudagraphs=True` can run as CUDA graphs
+that the runtime captures and replays, which cuts the host overhead of launching
+kernels. The compile fails if the model can't be captured, e.g. because it runs
+ops on the CPU, syncs with the host, or has data-dependent shapes.
+
+```python
+package_path = torch._inductor.aoti_compile_and_package(
+    torch.export.export(model, example_inputs),
+    inductor_configs={"aot_inductor.cudagraphs": True},
+)
+compiled = torch._inductor.aoti_load_package(package_path)
+out = compiled.run_with_cuda_graph(*example_inputs)
+```
+
+In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments as `run`.
+
+- The first call with new input shapes and strides runs eagerly, the next one
+  captures a graph, and later calls with those shapes replay it.
+- Once a model instance holds `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
+  (an environment variable, default 8), calls with new shapes run eagerly.
+- Replayed outputs are copies: they never alias the inputs, and outputs that
+  were views of each other come back as separate tensors.
+- Each model instance (see `num_runners`) captures its own graphs into its own
+  memory pool, so graph memory and warm-up calls grow with the number of
+  instances.
+- If a capture fails but the eager call succeeds, those input shapes run
+  eagerly from then on, with a warning.
+
 ## Troubleshooting
 
 Below are some useful tools for debugging AOT Inductor.

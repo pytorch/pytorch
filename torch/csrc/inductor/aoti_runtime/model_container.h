@@ -1,11 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -235,7 +240,7 @@ class AOTInductorModelContainer {
 
   // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph,
   // since checking out an instance may query events of earlier calls. Use
-  // run_cuda_graph(), or capture run_single_threaded().
+  // run_with_cuda_graph(), or capture run_single_threaded().
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -255,8 +260,8 @@ class AOTInductorModelContainer {
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs: each model instance captures
   // and replays its own graphs through its CudaGraphManager. See
-  // AOTInductorModelContainerRunCudaGraph.
-  void run_cuda_graph(
+  // AOTInductorModelContainerRunWithCudaGraph.
+  void run_with_cuda_graph(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
                          // are stolen; the array itself is borrowed
@@ -266,14 +271,16 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
+    AOTI_RUNTIME_CHECK(max_graphs_env_.error.empty(), max_graphs_env_.error);
     run_on_available_model(
         stream, proxy_executor, [&](AOTInductorModel* model) {
-          model->run_cuda_graph(
+          ran_with_cuda_graph_ = true;
+          model->run_with_cuda_graph(
               input_handles,
               output_handles,
               stream,
               proxy_executor,
-              constants_version_.load());
+              max_graphs_env_.value);
         });
   }
 #endif // USE_CUDA
@@ -406,8 +413,8 @@ class AOTInductorModelContainer {
   }
 
   void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
-    ConstantsChange change(*this, true);
-    pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
+    check_no_cuda_graphs();
+    return pool_.primary_model().update_constants_from_blob(weight_blob_ptr);
   }
 
   void run_const_fold(
@@ -418,6 +425,7 @@ class AOTInductorModelContainer {
     auto& const_folded =
         inactive_buffer ? inactive().fold_state : active().fold_state;
     if (!inactive_buffer) {
+      check_no_cuda_graphs();
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
@@ -540,7 +548,6 @@ class AOTInductorModelContainer {
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
-    ConstantsChange change(*this, !use_inactive);
 
     auto& target = use_inactive ? inactive() : active();
     auto& source = use_inactive ? active() : inactive();
@@ -608,11 +615,13 @@ class AOTInductorModelContainer {
       bool validate_full_update,
       bool user_managed = false,
       bool allow_h2d_copy = false) {
+    if (!use_inactive) {
+      check_no_cuda_graphs();
+    }
     auto& model = pool_.primary_model();
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
-    ConstantsChange change(*this, !use_inactive);
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
@@ -860,7 +869,8 @@ class AOTInductorModelContainer {
 
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
-    ConstantsChange change(*this, true);
+    check_no_cuda_graphs();
+
     active_idx_ = 1 - active_idx_;
 
     pool_.for_each_model([this](AOTInductorModel& model) {
@@ -934,27 +944,42 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
-  // Captured CUDA graphs keep reading the constants they were captured with,
-  // so a model instance drops its graphs on its next run_cuda_graph() once the
-  // active constants changed. Bumped when the change is done, even partly.
-  struct ConstantsChange {
-    ConstantsChange(AOTInductorModelContainer& container, bool active)
-        : container_(container), active_(active) {}
-    ~ConstantsChange() {
-      if (active_) {
-        container_.constants_version_++;
-      }
-    }
-    ConstantsChange(const ConstantsChange&) = delete;
-    ConstantsChange& operator=(const ConstantsChange&) = delete;
-    ConstantsChange(ConstantsChange&&) = delete;
-    ConstantsChange& operator=(ConstantsChange&&) = delete;
-
-   private:
-    AOTInductorModelContainer& container_;
-    bool active_;
+  // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, the limit on CUDA graphs per model
+  // instance (CudaGraphOptions has the default). Read when the container is
+  // created, so every instance gets the same limit; a bad value fails
+  // run_with_cuda_graph().
+  struct MaxGraphsEnv {
+    std::optional<int64_t> value;
+    std::string error;
   };
-  std::atomic<uint64_t> constants_version_{0};
+  static MaxGraphsEnv read_max_graphs_env() {
+    const char* env = std::getenv("AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS");
+    if (env == nullptr) {
+      return {};
+    }
+    std::string value(env);
+    if (value.empty() || value.size() > 18 ||
+        !std::all_of(value.begin(), value.end(), [](unsigned char c) {
+          return std::isdigit(c);
+        })) {
+      return {
+          std::nullopt,
+          "AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS must be a non-negative integer, "
+          "got \"" +
+              value + "\""};
+    }
+    return {std::stoll(value), ""};
+  }
+  const MaxGraphsEnv max_graphs_env_ = read_max_graphs_env();
+
+  // Captured CUDA graphs keep reading the constants they were captured with,
+  // so the active constants can't change once a model ran as CUDA graphs.
+  void check_no_cuda_graphs() const {
+    AOTI_RUNTIME_CHECK(
+        !ran_with_cuda_graph_,
+        "Can't change the active constants of a model that ran as CUDA graphs");
+  }
+  std::atomic<bool> ran_with_cuda_graph_{false};
 
   // Folds the constants on the first call, then runs fn on a model instance
   // checked out of the pool and leaves the instance pending until its work
