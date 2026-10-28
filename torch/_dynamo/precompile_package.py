@@ -1624,10 +1624,11 @@ class _CapturePackage(CompilePackage):
         # graph-breaks on and runs eagerly because fake tensors cannot run them (no
         # fake kernel, or a data-dependent output value or shape). Ops in a
         # torch._dynamo.disable'd function, ops past the point where Dynamo gave
-        # up on a frame it falls back on, and ops only AOTAutograd traces (a custom
-        # op's backward formula), are not recorded, nor are those of a bypassed
-        # compile, whose frame serving re-traces under
-        # allow_serve_time_compiles=True.
+        # up on a frame it falls back on, and under the eager backend the ops of a
+        # custom op's backward formula, which no graph holds, are not recorded,
+        # nor are those of a bypassed compile, whose frame serving re-traces under
+        # allow_serve_time_compiles=True. The artifact adds the ops Inductor's
+        # code calls.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
@@ -2181,8 +2182,13 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            BundledAOTAutogradCacheArtifact,
+        )
+        from torch._inductor.output_code import CompiledFxGraph
         from torch._precompile import (
             _build_multigraph_artifact,
+            _called_op_names,
             _custom_op_modules,
             _custom_ops,
         )
@@ -2192,17 +2198,29 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = self._package.graph_break_op_names.union(
-            *(self._package.op_names.get(b, ()) for b in backends)
-        )
+        op_names = set(self._package.graph_break_op_names)
+        for backend_id, artifact in backends.items():
+            # Unlike a make_fx capture, the graph's ops stay even if Inductor
+            # decomposed them, since the frame's guards can name them.
+            op_names |= self._package.op_names.get(backend_id, set())
+            if isinstance(artifact, BundledAOTAutogradCacheArtifact):
+                # Inductor's code also calls the ops a post-grad pass inserted,
+                # and those of the backward.
+                compiled = (artifact.content.compiled_fw, artifact.content.compiled_bw)
+                for result in (c.result for c in compiled if c is not None):
+                    if isinstance(result, CompiledFxGraph):
+                        op_names |= _called_op_names(result.source_code)
+        entry = self._served_entry()[0]
+        ops = _custom_ops(op_names)
+        modules = _custom_op_modules(op_names)
+        if not all(_custom_op_modules([op]) for op in ops):
+            # An op with no known module (Library.define, a C++ extension's
+            # load_library) is likely registered by a module the frames run in,
+            # which the driver imports only after the ops are checked.
+            frame_modules = {c.python_module for c in entry.codes} - {"__main__"}
+            modules = tuple(sorted(frame_modules.union(modules)))
         return _build_multigraph_artifact(
-            self._served_entry()[0],
-            backends,
-            summary,
-            self._backend,
-            self._fn,
-            _custom_op_modules(op_names),
-            _custom_ops(op_names),
+            entry, backends, summary, self._backend, self._fn, modules, ops
         )
 
 
