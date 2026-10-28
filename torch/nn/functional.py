@@ -7321,11 +7321,21 @@ def quantize_tensor(
       strides ``(K, 1)`` and ``dim=(0, 1)`` will result in ``qdata`` with
       shape ``(M, K)`` and strides ``(K, 1)``, and ``scale`` with
       shape ``(M, K // 32)`` and strides ``(K // 32, 1)``.
+    - ``mxfp8`` swizzled quantization of input shaped ``(M, K)`` with
+      strides ``(K, 1)`` and ``dim=(1, 0)`` will result in ``qdata`` with
+      shape ``(M, K)`` and strides ``(1, M)``, and ``scale`` with
+      shape ``(L, 1)`` and strides ``(1, L)``, with ``L`` being
+      swizzle-specific.
+    - ``mxfp8`` swizzled quantization of input shaped ``(K, M)`` with
+      strides ``(1, K)`` and ``dim=(0, 1)`` will result in ``qdata`` with
+      shape ``(K, M)`` and strides ``(M, 1)``, and ``scale`` with
+      shape ``(1, L)`` and strides ``(L, 1)``, with ``L`` being
+      swizzle-specific.
     - ``mxfp8`` swizzled quantization of input shaped ``(B, K, N)`` with
-      strides ``(K * N, N, 1)`` and ``dim=(2, 1)`` will result in ``qdata``
-      with shape ``(B, K, N)`` and strides ``(K * N, 1, K)`` and ``scale``
+      strides ``(N * K, 1, K)`` and ``dim=(2, 1)`` will result in ``qdata``
+      with shape ``(B, K, N)`` and strides ``(N * K, 1, K)`` and ``scale``
       with shape ``(B, L, 1)`` and strides ``(L, 1, L)``, with ``L`` being
-      swizzle-specific (see above).
+      swizzle-specific.
 
     Automatic autograd is not supported for this op, users are encouraged to define
     their own derivative.
