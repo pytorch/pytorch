@@ -3,6 +3,7 @@
 #include <list>
 #include <utility>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
@@ -69,7 +70,7 @@ private:
 
 void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
   auto nesting_value = dispatch_trace_nesting_value();
-  for (int64_t i = 0; i < nesting_value; ++i) std::cerr << ' ';
+  for ([[maybe_unused]] const auto _ : c10::irange(nesting_value)) std::cerr << ' ';
   std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << ']' << std::endl;
 }
 } // namespace detail

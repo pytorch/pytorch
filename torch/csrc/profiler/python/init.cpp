@@ -4,6 +4,7 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -286,7 +287,7 @@ PyObject* RecordFunctionFast_enter(
             std::vector<std::string> string_list;
             Py_ssize_t list_size = PyList_Size(value);
 
-            for (Py_ssize_t i = 0; i < list_size; i++) {
+            for (const auto i : c10::irange(list_size)) {
               PyObject* item = PyList_GetItem(value, i);
               if (THPUtils_checkString(item)) {
                 string_list.push_back(THPUtils_unpackString(item));
