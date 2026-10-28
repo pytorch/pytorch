@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <optional>
 #include <utility>
 
 namespace torch::autograd {
