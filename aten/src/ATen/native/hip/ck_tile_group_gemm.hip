@@ -145,7 +145,8 @@ namespace at::hip::detail {
         concept GroupGemmConfigs = GemmTypeConfigs<typename T::Forward> && GemmTypeConfigs<typename T::GradInput> &&
                 GemmTypeConfigs<typename T::GradWeight> && requires { typename T::Fallback; };
 
-        // Tile configs for one target. Deliberately undefined so an arch without configs fails to compile.
+        // Tile configs for one target. Deliberately undefined: launch's if constexpr turns an arch or dtype without
+        // configs into a not-implemented error at runtime.
         // DataType is the type of A, B and the output: grouped_mm requires all three to match.
         template <amdgcn_target_id Arch, typename DataType>
         struct CkTileGroupGemmConfigs;
@@ -643,7 +644,6 @@ namespace at::hip::detail {
             switch (dtype) {
                 case at::kBFloat16: return f(ck_tile::bf16_t{});
                 case at::kHalf: return f(ck_tile::half_t{});
-                case at::kFloat: return f(float{});
                 default: TORCH_CHECK(false, "ck_tile group gemm: unsupported dtype ", dtype);
             }
         };

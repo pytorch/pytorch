@@ -11968,6 +11968,8 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((768, 64), (2, 8192, 64), [384, 768], False), name="ck_tile_2d_3d_n8192"),
     subtest(((1536, 64), (2, 2816, 64), [768, 1536], False), name="ck_tile_2d_3d_n2816"),
     subtest(((1536, 64), (2, 2880, 64), [768, 1536], False), name="ck_tile_2d_3d_n2880"),
+    subtest(((512, 64), (2, 6144, 64), [256, 512], False), name="ck_tile_2d_3d_n6144"),
+    subtest(((1536, 64), (2, 4864, 64), [768, 1536], False), name="ck_tile_2d_3d_n4864"),
     subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
     subtest(((2048, 32), (2, 8192, 32), [1024, 2048], False), name="ck_tile_2d_3d_k32"),
     subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
@@ -11981,6 +11983,14 @@ _GROUPED_MM_CK_TILE_CASES = [
 # layout also has the unaligned config (C1). Keyed by (arch, CU count): load_cost divides tiles by the CU count, so
 # which configs the cases reach depends on it. Update this table when the configs in ck_tile_group_gemm.hip change.
 _GROUPED_MM_CK_TILE_CONFIGS = {
+    ("gfx950", 128): {
+        "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
+        "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
+        "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
+        "RR 128x128x64 4w 32x32x16 -N-", "RR 256x128x64 4w 16x16x32 MNK C1",
+        "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
+        "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
     ("gfx950", 256): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
