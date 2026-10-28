@@ -1414,16 +1414,6 @@ class CompilePackage:
     def note_compute(self) -> None:
         """Called when the current compile traced a graph, even one bypass_package then drops."""
 
-    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
-        """Called with each graph registered under ``backend_id``, before its backend
-        compiles it."""
-
-    def add_graph_break_op(self, op: object) -> None:
-        """Called with an op fake tensors cannot run (no fake kernel, or a data-dependent
-        output value or shape) and with the target of the node that called it (an op
-        whose kernel or fake kernel called it, or not an op), as Dynamo graph-breaks
-        on the node and runs it eagerly between graphs."""
-
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
 

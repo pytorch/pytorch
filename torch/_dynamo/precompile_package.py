@@ -1593,20 +1593,6 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
-        # The operators each backend graph calls, by backend id, and those Dynamo
-        # graph-breaks on and runs eagerly because fake tensors cannot run them (no
-        # fake kernel, or a data-dependent output value or shape). Ops in a
-        # torch._dynamo.disable'd function, ops past the point where Dynamo gave
-        # up on a frame it falls back on, and ops only AOTAutograd traces (a custom
-        # op's backward formula), are not recorded, nor are those of a bypassed
-        # compile, whose frame serving re-traces under
-        # allow_serve_time_compiles=True.
-        self.op_names: dict[str, set[tuple[str, str]]] = {}
-        self.graph_break_op_names: set[tuple[str, str]] = set()
-        # The current compile's graph-break ops, kept only if it records a guarded
-        # code or falls back to eager, so a bypassed compile's ops are dropped like
-        # its backend graphs.
-        self._compile_graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1617,35 +1603,6 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         self.note_compute()
         super()._add_backend_id(backend_id, backend)
-
-    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
-        from torch._precompile import _op_names
-
-        self.op_names[backend_id] = _op_names(gm)
-
-    def add_graph_break_op(self, op: object) -> None:
-        from torch._precompile import _overload_names
-
-        self._compile_graph_break_op_names |= _overload_names(op)
-
-    @contextlib.contextmanager
-    def code_context(
-        self, code: types.CodeType, global_scope: dict[str, object] | None = None
-    ) -> Iterator[None]:
-        self._compile_graph_break_op_names = set()
-        with super().code_context(code, global_scope):
-            yield
-
-    def add_guarded_code(
-        self, guards_state: bytes, dynamo_code: types.CodeType
-    ) -> None:
-        super().add_guarded_code(guards_state, dynamo_code)
-        self.graph_break_op_names |= self._compile_graph_break_op_names
-
-    def record_eager_fallback(self, code: types.CodeType) -> None:
-        super().record_eager_fallback(code)
-        self.graph_break_op_names |= self._compile_graph_break_op_names
-        self._compile_graph_break_op_names = set()
 
     def add_resume_function(
         self,
@@ -2154,28 +2111,15 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import (
-            _build_multigraph_artifact,
-            _custom_op_modules,
-            _custom_ops,
-        )
+        from torch._precompile import _build_multigraph_artifact
 
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = self._package.graph_break_op_names.union(
-            *(self._package.op_names.get(b, ()) for b in backends)
-        )
         return _build_multigraph_artifact(
-            self._served_entry()[0],
-            backends,
-            summary,
-            self._backend,
-            self._fn,
-            _custom_op_modules(op_names),
-            _custom_ops(op_names),
+            self._served_entry()[0], backends, summary, self._backend, self._fn
         )
 
 
