@@ -1594,14 +1594,16 @@ class _CapturePackage(CompilePackage):
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
         # The operators each backend graph calls, by backend id, and those run
-        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function or a
-        # frame Dynamo falls back on, and ops only AOTAutograd traces (a custom
-        # op's backward formula), are not recorded, nor are those of a bypassed
-        # compile, whose frame serving re-traces under allow_serve_time_compiles=True.
+        # eagerly at a graph break. Ops in a torch._dynamo.disable'd function, ops
+        # past the point where Dynamo gave up on a frame it falls back on, and ops
+        # only AOTAutograd traces (a custom op's backward formula), are not
+        # recorded, nor are those of a bypassed compile, whose frame serving
+        # re-traces under allow_serve_time_compiles=True.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
-        # code, so a bypassed compile's ops are dropped like its backend graphs.
+        # code or falls back to eager, so a bypassed compile's ops are dropped like
+        # its backend graphs.
         self._compile_graph_break_op_names: set[tuple[str, str]] = set()
 
     def note_compute(self) -> None:
@@ -1637,6 +1639,11 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         super().add_guarded_code(guards_state, dynamo_code)
         self.graph_break_op_names |= self._compile_graph_break_op_names
+
+    def record_eager_fallback(self, code: types.CodeType) -> None:
+        super().record_eager_fallback(code)
+        self.graph_break_op_names |= self._compile_graph_break_op_names
+        self._compile_graph_break_op_names = set()
 
     def add_resume_function(
         self,
