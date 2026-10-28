@@ -1134,16 +1134,26 @@ class FSDPModule:
         :meth:`unshard` with ``async_op=True``; otherwise each module's
         all-gather is exposed. Backward prefetching needs no configuration.
         """
+        self._set_unshard_async_op(async_op)
+
+    def _set_unshard_async_op(self, async_op: bool):
+        """
+        Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
+        and pre-backward unshard op. This defaults to ``False`` but can be set
+        to ``True`` with this method.
+
+        Setting this to ``True`` allows the all-gather allocations to happen in
+        the default stream, avoiding inter-stream memory fragmentation.
+        However, you must use explicit prefetching (e.g. via :meth:`unshard`)
+        in forward to still get overlap, and the pre-all-gather ops like dtype
+        casting and copy-in will not overlap with compute.
+        """
         self_module = cast(nn.Module, self)
         for module in self_module.modules():
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.unshard_async_op = async_op
-
-    def _set_unshard_async_op(self, async_op: bool) -> None:
-        # Kept for existing callers of the private name
-        self.set_unshard_async_op(async_op)
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
