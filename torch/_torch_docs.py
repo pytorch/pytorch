@@ -1112,6 +1112,7 @@ Args:
 
 Example::
 
+    >>> import numpy
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.as_tensor(a)
     >>> t
@@ -1494,6 +1495,7 @@ Example::
     >>> e
     tensor([3., 4., 5.], grad_fn=<AddBackward0>)
 
+    >>> import numpy
     >>> array = numpy.array([1, 2, 3])
     >>> # Shares memory with array 'array'
     >>> t1 = torch.asarray(array)
@@ -4328,6 +4330,7 @@ Keyword args:
 
 Example::
 
+    >>> import math
     >>> torch.exp(torch.tensor([0, math.log(2.)]))
     tensor([ 1.,  2.])
 """.format(**common_args),
@@ -4618,6 +4621,7 @@ and ``bool``.
 
 Example::
 
+    >>> import numpy
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
     >>> t
@@ -13440,8 +13444,8 @@ Arguments:
 Example::
 
     >>> torch.unbind(torch.tensor([[1, 2, 3],
-    >>>                            [4, 5, 6],
-    >>>                            [7, 8, 9]]))
+    ...                            [4, 5, 6],
+    ...                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
 """,
 )
@@ -13468,6 +13472,7 @@ Returns:
 
 Example::
 
+    >>> import itertools
     >>> a = [1, 2, 3]
     >>> list(itertools.combinations(a, r=2))
     [(1, 2), (1, 3), (2, 3)]
