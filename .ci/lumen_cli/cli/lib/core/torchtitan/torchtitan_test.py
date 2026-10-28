@@ -22,7 +22,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parents[6] / ".github" / "scripts"
 
 
 def _nightly_index_url() -> str:
-    # torchao and torchcomms nightlies must match the CUDA toolchain of the
+    # torchao nightlies must match the CUDA toolchain of the
     # build, so reuse CUDA_STABLE from generate_binary_build_matrix.py (the
     # single source of truth for the stable CUDA version, e.g. "13.2" -> cu132)
     # rather than hardcoding the wheel channel here.
@@ -40,12 +40,11 @@ class TorchtitanTestRunner(BaseRunner):
 
     def prepare(self):
         clone_torchtitan(dst=self.work_directory)
-        # torchao and torchcomms nightlies are required by torchtitan
+        # torchao nightlies are required by torchtitan
         pip_install_packages(
             packages=[
                 "--pre",
                 "torchao",
-                "torchcomms",
                 "--index-url",
                 _nightly_index_url(),
             ],

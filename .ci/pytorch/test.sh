@@ -1996,7 +1996,6 @@ test_distributed_single_gpu() {
   # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
   # the `multigpu` marker in test/conftest.py). Sharded with the rest of the
   # `default` config's Python tests.
-  install_torchcomms
   install_spmd_types
   install_nccl4py
   test_distributed not-multigpu
@@ -2441,7 +2440,6 @@ test_executorch() {
 
 test_torchtitan() {
   install_torchao
-  install_torchcomms
   # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
   # from the pinned commit rather than PyPI so it links the CI-built torch.
   install_torchvision
@@ -2459,7 +2457,7 @@ test_torchtitan() {
   # Neither helion nor torchtitan should pull their own copies of these from
   # PyPI, that would silently run the tests against the wrong PyTorch
   local ci_built_versions
-  ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
+  ci_built_versions=$(get_pkg_versions torch torchao)
 
   pip_install helion
 
@@ -2467,7 +2465,7 @@ test_torchtitan() {
   pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
-  installed_versions=$(get_pkg_versions torch torchao torchcomms)
+  installed_versions=$(get_pkg_versions torch torchao)
   if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
     echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
     echo "Expected:"
@@ -2622,11 +2620,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
-  install_torchcomms
   install_spmd_types
   test_distributed_4gpu
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchcomms
   install_spmd_types
   install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
@@ -2685,7 +2681,6 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2852,7 +2847,6 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
-  install_torchcomms
   install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
