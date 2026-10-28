@@ -9173,6 +9173,12 @@ def fn(x):
     y = x.sin()
     torch.ops.{ns}.bump.default(y)
     return torch.ops.{ns}.triple.default(y) + 1
+
+
+def train_fn(x):
+    x = x.detach().requires_grad_()
+    torch.ops.{ns}.triple.default(x.sin()).sum().backward()
+    return x.grad
 """
 
 
@@ -9274,6 +9280,8 @@ class TestPrecompileCustomOpModules(TestCase):
         [
             ("make_fx", "eager", "fn"),
             ("make_fx", "inductor", "fn"),
+            ("make_fx", "eager", "train_fn"),
+            ("make_fx", "inductor", "train_fn"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9313,8 +9321,13 @@ class TestPrecompileCustomOpModules(TestCase):
                 for line in python_code.splitlines()
                 if line.startswith("CUSTOM_OP_MODULES = ")
             ]
-            # The backward's op is registered by a module the forward op's imports.
-            self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module,)!r}")
+            # A make_fx training capture traces the backward, so its op's module is
+            # recorded.
+            traced_bw = tracer == "make_fx" and entry == "train_fn"
+            modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
+            if traced_bw:
+                self.assertIn(repr((f"{bwns}::scale", "")), python_code)
 
 
 class TestPrecompileCustomOpRecording(TestCase):
@@ -9399,16 +9412,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_pystub_module_is_recorded(self):
-        try:
-            import libtorch_agn_2_13  # noqa: F401
-        except ImportError:
-            self.skipTest("requires the libtorch_agn_2_13 cpp extension")
         from torch._precompile import _custom_op_module
 
-        name = "libtorch_agn_2_13::identity_with_fake_module"
-        self.assertEqual(_custom_op_module(name, ""), "libtorch_agn_2_13")
-        missing = "libtorch_agn_2_13::identity_w_nonexistent_fake_module"
-        self.assertIsNone(_custom_op_module(missing, ""))
+        # As a C++ op that names its module with m.set_python_module.
+        name = f"precompile_pystub_{uuid.uuid4().hex}::op"
+        with mock.patch.object(torch._C, "_dispatch_pystub") as dispatch_pystub:
+            dispatch_pystub.return_value = ("unittest", "context")
+            self.assertEqual(_custom_op_module(name, ""), "unittest")
+            dispatch_pystub.return_value = None
+            self.assertIsNone(_custom_op_module(name, ""))
 
 
 if __name__ == "__main__":
