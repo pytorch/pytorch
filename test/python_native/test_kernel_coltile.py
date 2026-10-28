@@ -262,17 +262,21 @@ class TestKernelColTile(TestCase):
                     )
                     self.assertEqual(vals, torch.full_like(vals, tie))
                     self.assertEqual(idx, torch.full_like(idx, 100))
-            real = ct.reduce_batched_col_tile
-            for shape, dim in (((1100, 256), 0), ((2, 1100, 4096), 1)):
+            two_out, batched = ct.reduce_col_tile_2out, ct.reduce_batched_col_tile
+            for shape, dim in (((1100, 8192), 0), ((2, 1100, 4096), 1)):
                 x = torch.randn(shape, device="cuda")
                 x.select(dim, 100).fill_(tie)
                 x.select(dim, 900).fill_(tie)
                 with (
                     self.subTest(op=name, routed=shape),
-                    mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as bat,
+                    mock.patch.object(ct, "reduce_col_tile_2out", wraps=two_out) as two,
+                    mock.patch.object(
+                        ct, "reduce_batched_col_tile", wraps=batched
+                    ) as bat,
                 ):
                     key = f"{name}dim_route"
                     vals, idx = kg.reduce_dim2(trait, key, x, dim, [f32, i32])
+                    self.assertEqual(two.call_count, int(x.dim() == 2))
                     self.assertEqual(bat.call_count, int(x.dim() == 3))
                     self.assertEqual(vals, torch.full_like(vals, tie))
                     self.assertEqual(idx, torch.full_like(idx, 100))
@@ -294,6 +298,31 @@ class TestKernelColTile(TestCase):
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestColTileHost(TestCase):
+    def test_route_gate_keeps_other_architectures_on_general(self):
+        # Off B200, only 2D one-output column views leave the general kernel.
+        wide = torch.empty(1100, 8192, device="cuda")
+        batched = torch.empty(4, 64, 16, device="cuda")
+        for view, nouts in ((wide, 1), (wide, 2), (batched, 1), (batched, 2)):
+            with self.subTest(shape=tuple(view.shape), nouts=nouts):
+                self.assertTrue(kg._col_route_ok(view, nouts, (10, 0)))
+                self.assertEqual(
+                    kg._col_route_ok(view, nouts, (9, 0)),
+                    view.dim() == 2 and nouts == 1,
+                )
+        x = torch.randn(4, 64, 16, device="cuda")
+        real = ct.reduce_batched_col_tile
+        with (
+            mock.patch.object(kg, "_BATCHED_COL_CCS", ()),
+            mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served,
+        ):
+            got = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Float32), "gate_off", x, 1, torch.float32
+            )
+        served.assert_not_called()
+        torch.testing.assert_close(
+            got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-4
+        )
+
     def test_col_axis_carries_no_tile(self):
         # Driver-supplied column vec needs no tile; requesting one must fail clearly.
         trait = T.SumOps(acc=cutlass.Float32)

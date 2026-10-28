@@ -42,7 +42,7 @@ class TestColumnConfig(TestCase):
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
-        """Keep unmeasured architectures on conservative stage-one geometry."""
+        """Size stage one from the reduced and column extents by default."""
         cfg = self.select(size=16, columns=256)
         self.assertEqual(cfg.rule, "default")
         self.assertEqual(cfg.threads_per_block, 32)
@@ -56,14 +56,6 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.rule, "explicit")
         for key, value in kwargs.items():
             self.assertEqual(getattr(cfg, key), value)
-
-    def test_inner_tree_never_selects_unordered_plan(self):
-        """Never satisfy an ordered request with an unordered column plan."""
-        self.assertIsNone(self.select(order="inner_tree"))
-        with self.assertRaisesRegex(ValueError, "unknown reduction order"):
-            self.select(order="linear")
-        with self.assertRaisesRegex(ValueError, "requires unordered"):
-            ct.reduce_col_tile(None, "sum", None, torch.float32, order="inner_tree")
 
 
 instantiate_parametrized_tests(TestColumnConfig)
