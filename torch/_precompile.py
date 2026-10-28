@@ -252,7 +252,6 @@ it.
 
 from __future__ import annotations
 
-import ast
 import base64
 import contextlib
 import dataclasses
@@ -272,7 +271,6 @@ import types
 import uuid
 from collections.abc import (
     Callable,  # noqa: TC003
-    Iterable,  # noqa: TC003
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
@@ -1699,8 +1697,6 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
-#   0. Imports of the modules registering the custom ops the graph calls, and a check
-#      that those ops are registered (only when the graph calls custom ops).
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
 #      Inductor kernels (JIT-compiled from the embedded source on first use -- no
 #      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
@@ -1890,8 +1886,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
-        "CUSTOM_OP_MODULES",
-        "CUSTOM_OPS",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -1921,139 +1915,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
-def _overload_names(op: object) -> set[tuple[str, str]]:
-    """The ``(ns::op, overload)`` names of ``op`` if it is an operator: its own,
-    or every overload's for an ``OpOverloadPacket``."""
-    if isinstance(op, torch._ops.OpOverloadPacket):
-        ops = [getattr(op, name) for name in op.overloads()]
-    else:
-        ops = [op]
-    return {
-        (o._schema.name, o._schema.overload_name)
-        for o in ops
-        if isinstance(o, torch._ops.OpOverload)
-    }
-
-
-def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
-    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
-    call, directly or passed to a higher-order op."""
-    names: set[tuple[str, str]] = set()
-    for module in gm.modules():
-        graph = getattr(module, "graph", None)
-        if not isinstance(graph, torch.fx.Graph):
-            continue
-        for node in graph.nodes:
-            if node.op != "call_function":
-                continue
-            for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
-                names |= _overload_names(op)
-    return names
-
-
-def _called_op_names(python_code: str) -> set[tuple[str, str]]:
-    """The ``(ns::op, overload)`` names of the ``torch.ops.<ns>.<op>.<overload>``
-    calls in Inductor's generated code. Unlike the captured graph, this omits ops
-    Inductor decomposed or lowered and includes ops a post-grad pass inserted."""
-    names: set[tuple[str, str]] = set()
-    for node in ast.walk(ast.parse(python_code)):
-        parts = []
-        while isinstance(node, ast.Attribute):
-            parts.append(node.attr)
-            node = node.value
-        if isinstance(node, ast.Name) and node.id == "torch" and len(parts) == 4:
-            overload, op, ns, ops = parts
-            if ops == "ops":
-                names.add((f"{ns}::{op}", "" if overload == "default" else overload))
-    return names
-
-
-def _custom_op_module(op_name: str, overload: str) -> str | None:
-    """The importable module that registers ``op_name``, if one is known: the one
-    defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
-    names with ``m.set_python_module``."""
-    from torch._library.custom_ops import OPDEFS
-
-    if (opdef := OPDEFS.get(op_name)) is not None:
-        name = getattr(opdef._init_fn, "__module__", None)
-    else:
-        pystub = torch._C._dispatch_pystub(op_name, overload)
-        name = pystub[0] if pystub is not None else None
-    if name is None or name == "__main__":
-        return None
-    module = sys.modules.get(name)
-    return name if getattr(module, "__spec__", None) is not None else None
-
-
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``."""
-    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
-    return tuple(sorted(m for m in modules if m is not None))
-
-
-def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
-    """The ops among ``op_names`` outside aten and prims, which the artifact checks
-    are registered once its imports ran."""
-    return tuple(
-        sorted(n for n in op_names if n[0].split("::")[0] not in ("aten", "prims"))
-    )
-
-
-def _write_custom_op_imports(
-    buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
-) -> None:
-    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers the op. The
-    # recorded module is a best guess (and ops defined with Library.define have
-    # none), so the imports are best effort and the ops themselves are checked.
-    if not ops:
-        return
-    buf.writeline("# " + "=" * 70)
-    buf.writeline("# 0. The modules registering the custom ops the graphs call")
-    buf.writeline("# " + "=" * 70)
-    buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
-    buf.writeline(f"CUSTOM_OPS = {ops!r}")
-    buf.writeline("import importlib as _importlib")
-    buf.writeline("import warnings as _warnings")
-    buf.writeline("import torch as _torch")
-    buf.writeline("_import_errors = {}")
-    buf.writeline("for _module in CUSTOM_OP_MODULES:")
-    buf.writeline("    try:")
-    buf.writeline("        _importlib.import_module(_module)")
-    # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-    # torch.distributed.tensor raises ValueError.
-    buf.writeline("    except Exception as _e:")
-    buf.writeline("        _import_errors[_module] = _e")
-    buf.writeline("_missing = []")
-    buf.writeline("for _name, _overload in CUSTOM_OPS:")
-    buf.writeline("    try:")
-    buf.writeline("        _torch._C._dispatch_find_schema_or_throw(_name, _overload)")
-    buf.writeline("    except RuntimeError:")
-    buf.writeline(
-        '        _missing.append(f"{_name}.{_overload}" if _overload else _name)'
-    )
-    buf.writeline("if _missing:")
-    buf.writeline("    raise _torch.compiler.PrecompileError(")
-    buf.writeline(
-        '        f"this artifact calls custom ops not registered here: {_missing}. "'
-    )
-    buf.writeline(
-        '        "Import the modules registering them before loading it. Modules "'
-    )
-    buf.writeline(
-        "        f\"that failed to import: {sorted(_import_errors) or 'none'}.\""
-    )
-    buf.writeline("    ) from next(iter(_import_errors.values()), None)")
-    buf.writeline("for _module, _e in _import_errors.items():")
-    buf.writeline(
-        '    _warnings.warn(f"importing custom op module {_module!r} raised {_e!r}; "'
-    )
-    buf.writeline(
-        '    "the ops this artifact calls are registered, so it loads anyway")'
-    )
-    buf.writeline("")
-
-
 def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
@@ -2063,8 +1924,6 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
-    op_names = _called_op_names(graph_python)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2118,8 +1977,6 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
-    op_names = _op_names(gm)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2428,8 +2285,6 @@ def _build_multigraph_python_source(
     entry_binding: dict[str, Any] | None,
     mode: str,
     unreachable: list[str],
-    custom_op_modules: tuple[str, ...],
-    custom_ops: tuple[tuple[str, str], ...],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2447,7 +2302,6 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_modules, custom_ops)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -2579,8 +2433,6 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_modules: tuple[str, ...],
-    custom_ops: tuple[tuple[str, str], ...],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2600,16 +2452,7 @@ def _build_multigraph_artifact(
     mode = "installed" if unreachable else "standalone"
     binding = _entry_binding(entry_fn) if mode == "standalone" else None
     python_code = _build_multigraph_python_source(
-        entry,
-        frames,
-        backends,
-        summary,
-        backend,
-        binding,
-        mode,
-        unreachable,
-        custom_op_modules,
-        custom_ops,
+        entry, frames, backends, summary, backend, binding, mode, unreachable
     )
     inductor_bundle = None
     if backend != "eager":
@@ -3697,16 +3540,11 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by their build command with the PyTorch install
-    taken out, so they serve a host that installed the same PyTorch build
-    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
-    producer's. The key also covers each kernel's source, so a kernel whose source
-    or command names a path in the Inductor cache dir (a linked Halide runtime,
-    CUTLASS or CK library, or a GPU ``cpp_wrapper`` wrapper's cubin path) keeps
-    that path: a host whose cache dir is at the producer's path restores the frozen
-    binary, which needs those files at the same path, and any other host rebuilds
-    it. Rebuilding needs a C++ compiler on the serving host: :func:`no_compilation`
-    does not gate C++ builds.
+    Frozen C++ kernels are keyed by their full build command, which includes
+    the producer's absolute PyTorch include and library paths, so they serve
+    only a host whose PyTorch install and toolchain paths match the producer's.
+    Any other host rebuilds them, which needs a C++ compiler there:
+    :func:`no_compilation` does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
@@ -3724,18 +3562,11 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
-    Before anything else runs, the artifact imports the modules in its
-    ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
-    and then checks that every op in ``CUSTOM_OPS`` is registered. A module that
-    fails to import only warns when its ops are registered anyway, e.g. by a
-    module the server imported under another name.
-
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture), or if a custom op the
-    artifact calls is not registered once its imports ran. A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
