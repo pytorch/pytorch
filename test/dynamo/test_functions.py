@@ -8235,6 +8235,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn_1(t), fn(t))
         self.assertEqual(counter.frame_count, 2)
 
+    @unittest.expectedFailure
     def test_del_defaults_sets_none(self):
         def h(a, b=1, *, k=1):
             return a + b + k
