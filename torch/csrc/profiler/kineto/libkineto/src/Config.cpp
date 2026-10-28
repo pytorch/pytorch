@@ -18,7 +18,6 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 
-#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <functional>
@@ -380,7 +379,7 @@ bool Config::handleOption(const std::string& name, std::string& val) {
   } else if (name == kRocprofPerThreadBufferEnabledKey) {
     rocprofPerThreadBufferEnabled_ = toBool(val);
   } else if (name == kRocprofDispatchRecordWaitMsecsKey) {
-    rocprofDispatchRecordWait_ = milliseconds(std::max(0, toInt32(val)));
+    rocprofDispatchRecordWait_ = milliseconds(toInt32(val));
   } else if (!name.compare(kPerformanceMetricsKey)) {
     performanceMetricNames_ = splitAndTrim(val, ',');
   } else if (!name.compare(kPerformanceMetricsDeviceIdKey)) {

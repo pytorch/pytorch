@@ -1029,8 +1029,9 @@ void RocprofLogger::stopLogging() {
   // hipDeviceSynchronize returned). Such a record would miss the flush above
   // and be dropped as out of range in the next session, so re-flush until
   // every launch of this session has its record. The wait is bounded because
-  // some launches never produce one (a kernel still running, or a dispatch
-  // the SDK could not time).
+  // some launches never produce a usable one: a dispatch the SDK could not
+  // time has no record, and a kernel still running at stop ends outside this
+  // session's window, so its record is dropped even if the wait sees it.
   auto pendingCount = [this] {
     std::lock_guard<std::mutex> lock(pendingDispatchesMutex_);
     return pendingDispatches_.size();
