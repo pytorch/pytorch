@@ -12,6 +12,11 @@
 #include <cuda_runtime.h>
 #include <cufile.h>
 
+#if defined(USE_ROCM)
+#include <unistd.h>
+#include <climits>
+#endif
+
 namespace {
 // To get error message for cuFileRead/Write APIs that return ssize_t (-1 for
 // filesystem error and a negative CUfileOpError enum value otherwise).
@@ -37,6 +42,26 @@ std::string cuGDSFileGetErrorString(T status) {
   return errStr;
 }
 
+// hipFile silently truncates a transfer to the kernel's MAX_RW_COUNT (INT_MAX
+// rounded down to a page), so reject larger ones rather than transfer part of
+// the storage. Remove once hipFile supports larger transfers.
+void check_transfer_size(
+    [[maybe_unused]] const char* fn_name,
+    [[maybe_unused]] size_t nbytes) {
+#if defined(USE_ROCM)
+  static const size_t max_nbytes = static_cast<size_t>(INT_MAX) &
+      ~(static_cast<size_t>(sysconf(_SC_PAGESIZE)) - 1);
+  TORCH_CHECK(
+      nbytes <= max_nbytes,
+      fn_name,
+      " transfers at most ",
+      max_nbytes,
+      " bytes per call on ROCm, but the storage has ",
+      nbytes,
+      " bytes");
+#endif
+}
+
 using GdsAsyncIOFn = decltype(&cuFileReadAsync);
 
 // Enqueues fn on the current stream of the storage's device and returns a
@@ -58,6 +83,7 @@ at::Tensor gds_io_async(
       !stream.is_capturing(),
       fn_name,
       " is not supported during CUDA graph capture");
+  check_transfer_size(fn_name, storage.nbytes());
 
   // The size, offsets and byte count are accessed after this call returns.
   // Keep them in pinned memory that the caching host allocator does not reuse
@@ -102,6 +128,7 @@ void gds_load_storage(
 
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
+  check_transfer_size("cuFileRead", nbytes);
 
   // Read the binary file
   ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
@@ -118,6 +145,7 @@ void gds_save_storage(
 
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
+  check_transfer_size("cuFileWrite", nbytes);
 
   // Write device memory contents to the file
   ssize_t ret = cuFileWrite(cf_handle, dataPtr, nbytes, offset, 0);

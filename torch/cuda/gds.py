@@ -206,7 +206,8 @@ class GdsFile:
 
         This is a wrapper around ``cuFileRead`` (CUDA) / ``hipFileRead`` (ROCm).
         ``storage.nbytes()`` of data will be loaded from the file at ``offset``
-        into the storage.
+        into the storage. On ROCm, a storage larger than ``2**31`` bytes minus
+        the page size raises a ``RuntimeError`` (see :ref:`rocm-gds`).
 
         .. note::
             ``load_storage`` is not ordered with respect to other asynchronous
@@ -231,7 +232,8 @@ class GdsFile:
 
         This is a wrapper around ``cuFileReadAsync`` (CUDA) / ``hipFileReadAsync`` (ROCm).
         ``storage.nbytes()`` of data will be loaded from the file at ``offset``
-        into the storage.
+        into the storage. On ROCm, a storage larger than ``2**31`` bytes minus
+        the page size raises a ``RuntimeError`` (see :ref:`rocm-gds`).
 
         The load is enqueued on the current stream of ``storage``'s device,
         and this function returns without waiting for it to run. It runs after
@@ -277,6 +279,8 @@ class GdsFile:
 
         This is a wrapper around ``cuFileWrite`` (CUDA) / ``hipFileWrite`` (ROCm).
         All bytes of the storage will be written to the file at ``offset``.
+        On ROCm, a storage larger than ``2**31`` bytes minus the page size
+        raises a ``RuntimeError`` (see :ref:`rocm-gds`).
 
         .. note::
             ``save_storage`` is not ordered with respect to other asynchronous
@@ -301,7 +305,9 @@ class GdsFile:
 
         This is a wrapper around ``cuFileWriteAsync`` (CUDA) / ``hipFileWriteAsync`` (ROCm).
         The bytes of the storage are written to the file at ``offset``; check
-        the returned count to confirm all of them were.
+        the returned count to confirm all of them were. On ROCm, a storage
+        larger than ``2**31`` bytes minus the page size raises a
+        ``RuntimeError`` (see :ref:`rocm-gds`).
 
         The save is enqueued on the current stream of ``storage``'s device,
         and this function returns without waiting for it to run. It runs after
