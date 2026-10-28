@@ -135,6 +135,22 @@ class TestDiffParsing(unittest.TestCase):
         self.assertEqual(result["verdict"], "changes_requested")
         self.assertEqual([f["line"] for f in result["findings"]], [2])
 
+    def test_a_deletion_does_not_leak_into_the_next_file(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n"
+            "diff --git a/k.py b/k.py\n--- a/k.py\n+++ b/k.py\n"
+            "@@ -5,3 +5,2 @@\n-old\n kept\n kept2\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": {1, 2}, "k.py": {5, 6}})
+
+    def test_a_malformed_hunk_in_a_deletion_anchors_nothing(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "--- a/gone.py\n+++ /dev/null\n@@ bogus @@\n-x\n-y\n"
+        )
+        self.assertEqual(parse_diff(diff), {"gone.py": set()})
+
     def test_lines_removed_from_a_kept_file_are_not_anchors(self):
         # Only a deleted file is anchored on its old side; a modified file keeps
         # new-side numbers, which is what the publish step posts on the right.

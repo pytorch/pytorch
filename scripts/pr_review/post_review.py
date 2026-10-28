@@ -523,7 +523,8 @@ def with_removed(gh: GitHub, pr: int, findings: list[dict]) -> list[dict]:
     """`findings`, each on a file the PR deletes marked `removed` with a link to
     its diff line. The sanitizer anchors those on the deleted file's own lines,
     which GitHub takes on the diff's LEFT side. Unchanged if the files could not
-    be listed: GitHub then refuses those comments and they go into the body."""
+    be listed: GitHub then refuses the inline comments (all of them, with the 422
+    the review falls back on) and they go into the body."""
     if not findings:
         return findings
     try:
