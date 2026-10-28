@@ -746,11 +746,15 @@ class AOTICompiledModel:
         ``aot_inductor.cudagraphs=True``.
 
         The first call with new input shapes and strides runs eagerly and the
-        next one captures a graph that later calls replay. Past
+        next one captures a graph that later calls replay; a thread's first
+        call on each model instance also runs eagerly. Past
         ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` graphs per model instance (an
-        environment variable, default 8), new shapes run eagerly. Replayed outputs are copies: they don't alias the inputs,
-        and outputs that were views of each other come back separate.
-        Each model instance has its own graphs and memory pool.
+        environment variable, default 8), new shapes run eagerly. Replayed
+        outputs are copies: they don't alias the inputs, and outputs that were
+        views of each other come back separate. Each model instance has its
+        own graphs and memory pool. Once a graph was captured, the active
+        constants can't be changed; ``load_constants`` into the active buffer
+        fails.
         """
         return self._run(self.loader.run_with_cuda_graph, args, kwargs)
 

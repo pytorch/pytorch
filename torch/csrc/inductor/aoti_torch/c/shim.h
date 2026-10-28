@@ -651,7 +651,16 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // other threads keep launching work while one captures. A pool takes one
 // capture at a time, and graphs captured into it one after another share its
 // memory. Once every graph captured into a pool is deleted, the pool can't take
-// another capture.
+// another capture. A graph whose capture_begin failed counts too, unless the
+// call was rejected for its arguments: a null handle, a blocking stream or one
+// that is already capturing, a pool that is already capturing, or a graph that
+// already captured.
+//
+// Graphs captured into one pool reuse each other's memory: a graph captured
+// later can place its outputs in memory an earlier graph uses for temporaries.
+// So replays on different streams must be ordered, and a replay's outputs must
+// be used or copied before another graph in the pool replays, unless the
+// graphs are replayed in the order they were captured.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 
@@ -679,7 +688,10 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
 
 // Starts capturing the work enqueued on `stream`, which must belong to the
-// pool's device, in thread-local capture mode. Memory allocated on `stream`
+// pool's device and be created with cudaStreamNonBlocking, in thread-local
+// capture mode. While a blocking stream captures, work that other threads
+// launch on the legacy default stream would invalidate the capture, so a
+// blocking stream is rejected. Memory allocated on `stream`
 // during the capture comes from `pool`. The capture must end on the thread
 // that began it; capture_end on another thread fails and leaves the capture
 // running.

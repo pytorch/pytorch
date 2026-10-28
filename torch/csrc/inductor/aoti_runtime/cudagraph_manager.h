@@ -61,7 +61,9 @@ class CudaGraphManager {
       : device_index_(device_index), options_(checked(options)) {
     AOTICudaGuard device_guard(device_index_);
     // Owned rather than taken from the stream pool, so no other thread can
-    // enqueue work into a capture.
+    // enqueue work into a capture. Non-blocking, as capture_begin requires:
+    // while a blocking stream captures, work that other threads launch on the
+    // legacy default stream would invalidate the capture.
     AOTI_RUNTIME_CUDA_CHECK(
         cudaStreamCreateWithFlags(&capture_stream_, cudaStreamNonBlocking));
     AOTI_RUNTIME_CUDA_CHECK(
@@ -307,11 +309,12 @@ class CudaGraphManager {
       AtenTensorHandle* inputs,
       AtenTensorHandle* outputs,
       cudaStream_t stream) {
+    fn(inputs, outputs, stream);
+    // Only a call that succeeded did the thread's lazy setup.
     if (warm_threads_.size() >= kMaxWarmupKeys) {
       warm_threads_.clear();
     }
     warm_threads_.insert(std::this_thread::get_id());
-    fn(inputs, outputs, stream);
   }
 
   void mark_uncapturable(std::vector<int64_t> key, const char* error) {

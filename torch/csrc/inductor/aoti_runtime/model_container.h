@@ -274,13 +274,24 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(max_graphs_env_.error.empty(), max_graphs_env_.error);
     run_on_available_model(
         stream, proxy_executor, [&](AOTInductorModel* model) {
-          ran_with_cuda_graph_ = true;
-          model->run_with_cuda_graph(
-              input_handles,
-              output_handles,
-              stream,
-              proxy_executor,
-              max_graphs_env_.value);
+          // Set even if the call fails, as long as a graph was captured.
+          auto mark_captured = [&] {
+            if (model->has_cuda_graphs()) {
+              captured_cuda_graphs_ = true;
+            }
+          };
+          try {
+            model->run_with_cuda_graph(
+                input_handles,
+                output_handles,
+                stream,
+                proxy_executor,
+                max_graphs_env_.value);
+          } catch (...) {
+            mark_captured();
+            throw;
+          }
+          mark_captured();
         });
   }
 #endif // USE_CUDA
@@ -973,13 +984,14 @@ class AOTInductorModelContainer {
   const MaxGraphsEnv max_graphs_env_ = read_max_graphs_env();
 
   // Captured CUDA graphs keep reading the constants they were captured with,
-  // so the active constants can't change once a model ran as CUDA graphs.
+  // so the active constants can't change once a model instance captured one.
   void check_no_cuda_graphs() const {
     AOTI_RUNTIME_CHECK(
-        !ran_with_cuda_graph_,
-        "Can't change the active constants of a model that ran as CUDA graphs");
+        !captured_cuda_graphs_,
+        "Can't change the active constants of a model that captured CUDA "
+        "graphs");
   }
-  std::atomic<bool> ran_with_cuda_graph_{false};
+  std::atomic<bool> captured_cuda_graphs_{false};
 
   // Folds the constants on the first call, then runs fn on a model instance
   // checked out of the pool and leaves the instance pending until its work

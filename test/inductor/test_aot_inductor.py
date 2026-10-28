@@ -10565,24 +10565,41 @@ class AOTInductorTestsTemplate:
         model = torch.nn.Sequential(torch.nn.Linear(16, 32), torch.nn.ReLU())
         model = model.to(self.device)
         x = torch.randn(4, 16, device=self.device)
-        so_path = AOTIRunnerUtil.legacy_compile(
-            model, (x,), options={"aot_inductor.cudagraphs": True}
-        )
+        # mmap'd weights, so that the runner can reload them from a blob.
+        options = {
+            "aot_inductor.cudagraphs": True,
+            "aot_inductor.force_mmap_weights": True,
+        }
+        so_path = AOTIRunnerUtil.legacy_compile(model, (x,), options=options)
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         names = runner.get_constant_names_to_original_fqns()
-        state = model.state_dict()
-        weights = {n: torch.randn_like(state[f]) for n, f in names.items()}
+
+        def new_weights():
+            state = model.state_dict()
+            weights = {n: torch.randn_like(state[f]) for n, f in names.items()}
+            model.load_state_dict({names[n]: w for n, w in weights.items()})
+            return weights
+
+        # A warm-up call captures nothing, so the constants can still change.
         runner.run_with_cuda_graph([x])
-        # The runner reports only that the call failed; the model prints why.
+        runner.update_constant_buffer(new_weights(), False, False)
+        (out,) = runner.run_with_cuda_graph([x])
+        self.assertEqual(out, model(x))
+        # Now a graph exists. The runner reports only that the call failed;
+        # the model prints why.
         msg = "API call failed"
         with self.assertRaisesRegex(RuntimeError, msg):
-            runner.update_constant_buffer(weights, False, False)
+            runner.update_constant_buffer(new_weights(), False, False)
+        with tempfile.NamedTemporaryFile() as blob:
+            blob.write(bytes(1 << 20))
+            blob.flush()
+            with self.assertRaisesRegex(RuntimeError, msg):
+                runner.update_constant_buffer_from_blob(blob.name)
         # The inactive buffer can still be updated, but not swapped in.
+        weights = new_weights()
         runner.update_constant_buffer(weights, True, False)
         with self.assertRaisesRegex(RuntimeError, msg):
             runner.swap_constant_buffer()
-        (out,) = runner.run_with_cuda_graph([x])
-        self.assertEqual(out, model(x))
 
     def test_aot_cudagraphs_run_on_several_instances(self):
         if self.device != "cuda":
@@ -10660,6 +10677,11 @@ class AOTInductorTestsTemplate:
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         with self.assertRaisesRegex(RuntimeError, "aot_inductor.cudagraphs=True"):
             runner.run_with_cuda_graph([x])
+        # The rejected call captured nothing, so the constants can still change.
+        state = model.state_dict()
+        names = runner.get_constant_names_to_original_fqns()
+        weights = {n: torch.randn_like(state[f]) for n, f in names.items()}
+        runner.update_constant_buffer(weights, False, False)
 
     def test_custom_op_in_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

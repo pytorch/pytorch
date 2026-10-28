@@ -1513,6 +1513,10 @@ class AOTInductorModelBase {
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
   }
 
+  bool has_cuda_graphs() {
+    return cudagraph_manager_ && cudagraph_manager_->num_graphs() > 0;
+  }
+
 #endif // USE_CUDA
 
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(

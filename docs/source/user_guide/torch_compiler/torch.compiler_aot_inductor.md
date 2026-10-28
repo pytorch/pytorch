@@ -209,7 +209,9 @@ out = compiled.run_with_cuda_graph(*example_inputs)
 In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments as `run`.
 
 - The first call with new input shapes and strides runs eagerly, the next one
-  captures a graph, and later calls with those shapes replay it.
+  captures a graph, and later calls with those shapes replay it. A thread's
+  first call on each model instance also runs eagerly, since some libraries
+  set up per thread.
 - Once a model instance holds `AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS` graphs
   (an environment variable, default 8), calls with new shapes run eagerly.
 - Replayed outputs are copies: they never alias the inputs, and outputs that
@@ -219,6 +221,10 @@ In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments a
   instances.
 - If a capture fails but the eager call succeeds, those input shapes run
   eagerly from then on, with a warning.
+- Captured graphs keep reading the constants they were captured with, so once
+  a model captured a graph, its active constants can't change: updating,
+  refolding, swapping or reloading them fails. The inactive constant buffer
+  can still be updated.
 
 ## Troubleshooting
 
