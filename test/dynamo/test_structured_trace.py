@@ -22,7 +22,11 @@ import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+from torch.testing._internal.common_utils import (
+    find_free_port,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -171,6 +175,12 @@ class StructuredTraceTestingFormatter(logging.Formatter):
             metadata["inductor_output_code"]["filename"] = "FILENAME"
             if "file_path" in metadata["inductor_output_code"]:
                 metadata["inductor_output_code"]["file_path"] = "FILENAME"
+        if "artifact" in metadata:
+            metadata["artifact"]["name"] = re.sub(
+                r"^(torch_dynamo_resume_in_.*_at_)\d+(_(?:ORIGINAL|MODIFIED)_BYTECODE)$",
+                r"\1LINE\2",
+                metadata["artifact"]["name"],
+            )
         if "stack" in metadata:
             metadata["stack"] = "STACK"
         if "compilation_metrics" in metadata:
@@ -219,6 +229,46 @@ def show_chrome_events(fn):
         return fn(self, *args, **kwargs)
 
     return wrapper
+
+
+@instantiate_parametrized_tests
+class StructuredTraceFormatterTest(TestCase):
+    @parametrize(
+        "name, expected",
+        [
+            (
+                "torch_dynamo_resume_in___init___at_105_ORIGINAL_BYTECODE",
+                "torch_dynamo_resume_in___init___at_LINE_ORIGINAL_BYTECODE",
+            ),
+            (
+                "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE",
+                "torch_dynamo_resume_in_fn_at_LINE_MODIFIED_BYTECODE",
+            ),
+            (
+                "torch_dynamo_resume_in_fn_2_at_17_ORIGINAL_BYTECODE",
+                "torch_dynamo_resume_in_fn_2_at_LINE_ORIGINAL_BYTECODE",
+            ),
+            ("fn_at_105_ORIGINAL_BYTECODE", "fn_at_105_ORIGINAL_BYTECODE"),
+            (
+                "torch_dynamo_resume_in_fn_at_105_OTHER",
+                "torch_dynamo_resume_in_fn_at_105_OTHER",
+            ),
+        ],
+    )
+    def test_resume_function_artifact_names(self, name, expected):
+        record = logging.makeLogRecord(
+            {
+                "metadata": {"artifact": {"name": name, "encoding": "string"}},
+                "payload": "unchanged payload",
+            }
+        )
+        formatter = StructuredTraceTestingFormatter()
+        self.assertEqual(
+            json.loads(formatter.format(record)),
+            {"artifact": {"name": expected, "encoding": "string"}},
+        )
+        self.assertEqual(record.metadata["artifact"]["name"], name)
+        self.assertEqual(record.payload, "unchanged payload")
 
 
 class StructuredTraceTest(TestCase):
@@ -554,16 +604,16 @@ class StructuredTraceTest(TestCase):
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
-{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_50_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_LINE_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "dynamo_graph_break_reason", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4000000}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}
 {"describe_tensor": {"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "dynamo_hint_overrides": {}, "is_leaf": true, "requires_grad": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['___stack1']"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1}
-{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_50_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_LINE_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 1, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 1, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}
-{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_50_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_LINE_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4000000}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "dynamo_hint_overrides": {}, "requires_grad": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['___stack0']"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}
@@ -586,7 +636,7 @@ class StructuredTraceTest(TestCase):
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_50_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_LINE_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 2, "frame_compile_id": 0, "attempt": 1}
 {"artifact": {"name": "fx_graph_runnable", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
@@ -596,7 +646,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"bwd_compilation_metrics": "METRICS", "frame_id": 2, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}
-{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_52_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_example_training_fn_at_LINE_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4000000}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "dynamo_hint_overrides": {}, "requires_grad": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['output']"}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}
@@ -676,7 +726,6 @@ class StructuredTraceTest(TestCase):
     @skipIf(HAS_XPU_AND_TRITON, "No backend type associated with device type xpu")
     @requires_distributed()
     @requires_gpu_and_triton
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_ddp_graphs(self):
         import torch._dynamo.convert_frame as convert_frame
 
@@ -725,7 +774,7 @@ class StructuredTraceTest(TestCase):
 {{"dynamo_cpp_guards_str": {{}}, "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 1}}
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
-{{"artifact": {{"name": "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE", "encoding": "string"}}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch_dynamo_resume_in___init___at_LINE_ORIGINAL_BYTECODE", "encoding": "string"}}, "frame_id": 3, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
 {{"compilation_metrics": "METRICS", "rank": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}}
 {{"dynamo_start": {{"stack": "STACK"}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
 {{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4194304}}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}}
@@ -796,7 +845,6 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_tlparse
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_graph_breaks(self):
         @torch.compile(backend="inductor")
         def fn(x):
@@ -813,7 +861,7 @@ class StructuredTraceTest(TestCase):
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
-{"artifact": {"name": "torch_dynamo_resume_in_fn_at_808_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_fn_at_LINE_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "dynamo_hint_overrides": {}, "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
@@ -831,7 +879,8 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "aot_autograd_runtime_wrappers", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_fn_at_LINE_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 """,
