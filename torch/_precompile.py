@@ -252,6 +252,7 @@ it.
 
 from __future__ import annotations
 
+import ast
 import base64
 import contextlib
 import dataclasses
@@ -1950,6 +1951,23 @@ def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
     return names
 
 
+def _called_op_names(python_code: str) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the ``torch.ops.<ns>.<op>.<overload>``
+    calls in Inductor's generated code. Unlike the captured graph, this omits ops
+    Inductor decomposed or lowered and includes ops a post-grad pass inserted."""
+    names: set[tuple[str, str]] = set()
+    for node in ast.walk(ast.parse(python_code)):
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name) and node.id == "torch" and len(parts) == 4:
+            overload, op, ns, ops = parts
+            if ops == "ops":
+                names.add((f"{ns}::{op}", "" if overload == "default" else overload))
+    return names
+
+
 def _custom_op_module(op_name: str, overload: str) -> str | None:
     """The importable module that registers ``op_name``, if one is known: the one
     defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
@@ -2177,9 +2195,7 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
-    if compiled._gm is None:
-        raise PrecompileError("internal: graph missing before _compile()")
-    op_names = _op_names(compiled._gm)
+    op_names = _called_op_names(graph_python)
     _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
