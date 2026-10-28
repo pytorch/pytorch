@@ -12785,6 +12785,17 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize_test(
+        "value",
+        [255 + 2**-16, 2047 + 2**-13, 262143 + 2**-6, 2**24, 2**24 + 2],
+    )
+    def test_silu_backward_large_positive(self, device, dtype, value):
+        # The derivative rounds to 1 at these finite inputs in both dtypes.
+        x = torch.tensor([value], device=device, dtype=dtype, requires_grad=True)
+        F.silu(x).backward()
+        self.assertEqual(x.grad, torch.ones_like(x), atol=0, rtol=0)
+
     @onlyNativeDeviceTypes
     def test_mish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
