@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1040,6 +1041,95 @@ def forward(self, scores_1, mask_1, value_1):
                 f"by updating CROSS_REF_EXCLUDE_SET."
             ),
         )
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_channel_shuffle_cpu_layout(self, device, dtype):
+        from torch._refs.nn.functional import channel_shuffle
+
+        for shape in (
+            (2, 4, 3),
+            (2, 4, 3, 5),
+            (2, 4, 2, 3, 5),
+            (2, 4, 1, 5),
+            (1, 4, 1, 1),
+            (2, 1, 3, 5),
+            (0, 4, 3, 5),
+        ):
+            x = torch.randn(shape, device=device, dtype=dtype)
+            inputs = [x]
+            if x.ndim in (4, 5):
+                memory_format = (
+                    torch.channels_last if x.ndim == 4 else torch.channels_last_3d
+                )
+                inputs.extend(
+                    [x.contiguous(memory_format=memory_format), x.transpose(-1, -2)]
+                )
+            for input in inputs:
+                groups = {1, input.size(1)}
+                if input.size(1) % 2 == 0:
+                    groups.add(2)
+                for group in sorted(groups):
+                    with self.subTest(shape=shape, stride=input.stride(), groups=group):
+                        expected = torch.channel_shuffle(input, group)
+                        actual = channel_shuffle(input, group)
+                        self.assertEqual(actual, expected)
+                        self.assertEqual(actual.stride(), expected.stride())
+                        self.assertEqual(
+                            torch._C._is_alias_of(actual, input),
+                            torch._C._is_alias_of(expected, input),
+                        )
+                        with FakeTensorMode() as mode:
+                            fake = torch.channel_shuffle(mode.from_tensor(input), group)
+                        self.assertEqual(fake.shape, expected.shape)
+                        self.assertEqual(fake.stride(), expected.stride())
+                        self.assertEqual(fake.dtype, expected.dtype)
+
+    @onlyCPU
+    @parametrize("dynamic", [False, True])
+    def test_channel_shuffle_cpu_compile_reshape(self, device, dynamic):
+        def fn(x):
+            y = torch.channel_shuffle(x, 2)
+            return y, y.reshape(x.size(0), -1)
+
+        for spatial_shape, memory_format in (
+            ((3, 5), torch.channels_last),
+            ((2, 3, 5), torch.channels_last_3d),
+        ):
+            compiled = torch.compile(
+                fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+            )
+            for batch in (2, 3):
+                x = torch.randn(batch, 4, *spatial_shape, device=device)
+                x = x.contiguous(memory_format=memory_format).requires_grad_()
+                expected = fn(x)
+                actual = compiled(x)
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual[0].stride(), expected[0].stride())
+                self.assertEqual(
+                    torch.autograd.grad(actual[1].square().sum(), x)[0],
+                    torch.autograd.grad(expected[1].square().sum(), x)[0],
+                )
+
+    @onlyCPU
+    def test_channel_shuffle_cpu_decomposed_reshape(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x):
+            y = torch.channel_shuffle(x, 2)
+            return y, y.reshape(x.size(0), -1)
+
+        x = torch.randn(2, 4, 3, 5, device=device).contiguous(
+            memory_format=torch.channels_last
+        )
+        gm = make_fx(
+            fn,
+            decomposition_table=get_decompositions([aten.channel_shuffle]),
+            tracing_mode="fake",
+        )(x)
+        actual, expected = gm(x), fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
 
     @onlyCPU
     @skipIfCrossRef

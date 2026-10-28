@@ -332,12 +332,13 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     ):
         return input.view(input.shape)
 
-    return (
-        input.reshape(n, groups, cg, *dhw)
-        .transpose(1, 2)
-        .reshape(input.shape)
-        .contiguous()
-    )
+    result = input.reshape(n, groups, cg, *dhw).transpose(1, 2).reshape(input.shape)
+    if device_hint(input) == "cpu":
+        # channel_shuffle_cpu allocates a fresh output in the input's suggested
+        # format, including channels_last and channels_last_3d. A clone also
+        # matches that allocation for identity shuffles and size-one dimensions.
+        return result.clone(memory_format=utils.suggest_memory_format(input))
+    return result.contiguous()
 
 
 def group_norm(
