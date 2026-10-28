@@ -8,6 +8,7 @@ import importlib
 import inspect
 import io
 import json
+import operator
 import os
 import pathlib
 import pickle
@@ -7616,10 +7617,12 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        with fresh_cache():
-            lib = CppCodeCache.load(source)
-            with open(lib._name, "rb") as binary:
-                payload = pickle.dumps({lib.key: binary.read()})
+        # Frozen as a capture freezes it, under the key a replay looks it up by.
+        with fresh_cache(), _runtime_cache.capture_scope():
+            CppCodeCache.load(source)
+            [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+            with open(binary_path, "rb") as binary:
+                payload = pickle.dumps({key: binary.read()})
         artifact = _runtime_cache.InductorCppCacheArtifact(
             hashlib.sha256(payload).hexdigest(), payload
         )
@@ -7638,17 +7641,15 @@ class TestPrecompileRuntimeCache(TestCase):
 
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
         from torch.compiler._cache import CacheArtifactManager
 
+        code = 'extern "C" long captured_cpp_kernel(long x) { return x; }'
         with fresh_cache():
             loaded = []
 
             def load():
-                loaded.append(
-                    CppCodeCache.load(
-                        'extern "C" long captured_cpp_kernel(long x) { return x; }'
-                    )
-                )
+                loaded.append(CppCodeCache.load(code))
 
             source, cache = _capture_files(
                 self,
@@ -7663,7 +7664,11 @@ class TestPrecompileRuntimeCache(TestCase):
                 torch.load(cache, weights_only=True)["artifact"]
             )
             (frozen,) = artifacts["inductor_cpp"]
-            self.assertEqual(pickle.loads(frozen.content), {lib.key: binary})
+            # The key a replay looks the kernel up by.
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load(code)
+                (key,) = _runtime_cache._capture.cpp_kernels
+            self.assertEqual(pickle.loads(frozen.content), {key: binary})
 
     def test_cpp_kernel_is_recorded_on_every_load(self):
         from torch._inductor.codecache import CppCodeCache
@@ -7676,7 +7681,8 @@ class TestPrecompileRuntimeCache(TestCase):
             CppCodeCache.load_async(source)
             with _runtime_cache.capture_scope():
                 CppCodeCache.load_async(source)
-                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+                [(binary_path, _)] = _runtime_cache._capture.cpp_kernels.values()
+            (key,) = CppCodeCache.cache
             self.assertEqual(CppCodeCache._binary_paths[key], binary_path)
 
     def test_capture_builds_unforced_cpp_loads_and_rejects_missing_binaries(self):
@@ -7714,7 +7720,7 @@ class TestPrecompileRuntimeCache(TestCase):
                         paths=(source, cache),
                         then=record,
                     )
-                self.assertIn("'missing'", str(failure.exception.__cause__))
+                self.assertIn("missing.so", str(failure.exception.__cause__))
                 self.assertFalse(os.path.exists(cache))
                 del _runtime_cache._capture.cpp_kernels["missing"]
                 _capture_files(
@@ -9117,6 +9123,297 @@ class TestPrecompileRuntimeCache(TestCase):
                 )
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertIn(f"runtime cache phase ok: {phase}", out.stdout)
+
+
+_CUSTOM_OP_MODULE = """
+import torch
+
+import {bwmod}
+
+
+@torch.library.custom_op("{ns}::triple", mutates_args=())
+def triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+@triple.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
+def _setup_context(ctx, inputs, output):
+    pass
+
+
+def _backward(ctx, grad):
+    return torch.ops.{bwns}.scale.default(grad)
+
+
+triple.register_autograd(_backward, setup_context=_setup_context)
+
+
+@torch.library.custom_op("{ns}::bump", mutates_args=("x",))
+def bump(x: torch.Tensor) -> None:
+    x.add_(1)
+
+
+@bump.register_fake
+def _(x):
+    return None
+"""
+
+
+# Calls the op without importing the module that registers it, so a standalone
+# artifact rebinding these functions does not import that module either.
+_ENTRY_MODULE = """
+import torch
+
+
+def fn(x):
+    y = x.sin()
+    torch.ops.{ns}.bump.default(y)
+    return torch.ops.{ns}.triple.default(y) + 1
+
+
+class Child(torch.nn.Module):
+    def forward(self, x):
+        y = torch.ops.{ns}.triple.default(x.sin())
+        torch._dynamo.graph_break()
+        return y + 1
+
+
+child = Child()
+
+
+def step(x):
+    return child(x * 2) + 1
+
+
+def train_fn(x):
+    x = x.detach().requires_grad_()
+    torch.ops.{ns}.triple.default(x.sin()).sum().backward()
+    return x.grad
+
+
+def cond_fn(x):
+    return torch.cond(
+        x.sum() > 0,
+        lambda y: torch.ops.{ns}.triple.default(y),
+        lambda y: y.cos(),
+        (x,),
+    )
+"""
+
+
+_BACKWARD_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("{bwns}::scale", mutates_args=())
+def scale(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+@scale.register_fake
+def _(x):
+    return torch.empty_like(x)
+"""
+
+
+_UNUSED_OP_MODULE = """
+import torch
+
+
+@torch.library.custom_op("{ns}::unused", mutates_args=())
+def unused(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@unused.register_fake
+def _(x):
+    return torch.empty_like(x)
+"""
+
+
+_CUSTOM_OP_DRIVER = """
+import os
+import sys
+
+import torch
+
+phase, directory, module, entries, unused, tracer, backend, entry = sys.argv[1:9]
+if phase != "missing":
+    sys.path.insert(0, directory)
+pc = torch.compiler.precompile
+artifact = os.path.join(directory, "artifact.py")
+cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
+x = torch.arange(6, dtype=torch.float32)
+if phase == "capture":
+    __import__(module)
+    __import__(unused)
+    fn = getattr(__import__(entries), entry)
+    torch._dynamo.config.nested_graph_breaks = False
+    with pc.capture(
+        fn,
+        artifact_path=artifact,
+        cache_path=cache,
+        tracer=pc.DynamoTracer() if tracer == "dynamo" else pc.MakeFxTracer(),
+        backend=backend,
+    ) as cap:
+        torch.save(cap(x), expected_path)
+elif phase == "replay":
+    assert module not in sys.modules, module
+    loaded = pc.load(artifact, cache)
+    torch.testing.assert_close(loaded(x), torch.load(expected_path))
+    assert module in sys.modules, "the artifact did not import its custom op module"
+    assert unused not in sys.modules, "the artifact imported an unused custom op module"
+else:
+    try:
+        pc.load(artifact, cache)
+    except torch.compiler.PrecompileError as e:
+        assert repr(module) in str(e), e
+    else:
+        raise AssertionError("load ran an artifact whose custom op module is missing")
+print("custom op phase ok:", phase)
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileCustomOpModules(TestCase):
+    @skipIfCrossRef
+    @parametrize(
+        "tracer,backend,entry,mode",
+        [
+            ("make_fx", "eager", "fn", None),
+            ("make_fx", "inductor", "fn", None),
+            ("dynamo", "eager", "fn", "standalone"),
+            ("dynamo", "inductor", "fn", "standalone"),
+            ("dynamo", "eager", "step", "installed"),
+            ("dynamo", "inductor", "cond_fn", "standalone"),
+            ("dynamo", "inductor", "train_fn", "standalone"),
+        ],
+    )
+    def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
+        self, tracer, backend, entry, mode
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            tag = uuid.uuid4().hex
+            module, unused = f"precompile_op_module_{tag}", f"precompile_unused_{tag}"
+            bwmod, entries = f"precompile_bw_op_{tag}", f"precompile_entries_{tag}"
+            ns, bwns = f"precompile_op_test_{tag}", f"precompile_bw_test_{tag}"
+            for name, source in (
+                (module, _CUSTOM_OP_MODULE),
+                (entries, _ENTRY_MODULE),
+                (bwmod, _BACKWARD_OP_MODULE),
+                (unused, _UNUSED_OP_MODULE),
+            ):
+                with open(os.path.join(directory, name + ".py"), "w") as f:
+                    f.write(
+                        source.replace("{ns}", ns)
+                        .replace("{bwns}", bwns)
+                        .replace("{bwmod}", bwmod)
+                    )
+            for phase in ("capture", "replay", "missing"):
+                out = subprocess.run(
+                    [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
+                    + [module, entries, unused, tracer, backend, entry],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"custom op phase ok: {phase}", out.stdout)
+            with open(os.path.join(directory, "artifact.py")) as f:
+                python_code = f.read()
+            (line,) = [
+                line
+                for line in python_code.splitlines()
+                if line.startswith("CUSTOM_OP_MODULES = ")
+            ]
+            # The backward's op is registered by a module the forward op's imports.
+            self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module,)!r}")
+            if mode is not None:
+                self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
+
+
+class TestPrecompileCustomOpRecording(TestCase):
+    def _op(self, name):
+        ns = f"precompile_recording_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(f"{ns}::{name}", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        return op, f"{ns}::{name}"
+
+    def test_op_names_include_ops_passed_to_higher_order_ops(self):
+        from torch._precompile import _op_names
+
+        called, called_name = self._op("called")
+        passed, passed_name = self._op("passed")
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(called._opoverload, (x,))
+        # As auto_functionalized and with_effects take the op they run.
+        z = graph.call_function(operator.getitem, ((passed._opoverload, y), 1))
+        graph.call_function(torch.ops.aten.add.Tensor, (y, z))
+        graph.output(z)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        expected = {(called_name, ""), (passed_name, ""), ("aten::add", "Tensor")}
+        self.assertEqual(_op_names(gm), expected)
+
+    def test_a_capture_records_the_ops_of_each_backend_graph(self):
+        from torch._dynamo.precompile_package import _CapturePackage
+
+        first, first_name = self._op("first")
+        second, second_name = self._op("second")
+
+        def graph(op):
+            return torch.fx.symbolic_trace(lambda x: op._opoverload(x) + 1)
+
+        # The artifact unions these over only the backends it serves.
+        package = _CapturePackage(lambda x: x)
+        package.add_backend_graph("__compiled_fn_1", graph(first))
+        package.add_backend_graph("__compiled_fn_2", graph(second))
+        self.assertEqual(
+            package.op_names,
+            {
+                "__compiled_fn_1": {(first_name, "")},
+                "__compiled_fn_2": {(second_name, "")},
+            },
+        )
+
+    def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
+        served, served_name = self._op("served")
+        unserved, unserved_name = self._op("unserved")
+        modules = {}
+        for op in (served, unserved):
+            module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+            module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+            op._init_fn.__module__ = module.__name__
+            modules[module.__name__] = module
+        self.enterContext(mock.patch.dict(sys.modules, modules))
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = os.path.join(directory, "artifact.py")
+            with capture(
+                _no_compilation_single_graph,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+                op_names = cap._session._package.op_names
+                (served_ops,) = op_names.values()
+                served_ops.add((served_name, ""))
+                # As a compile bypass_current_compile drops: recorded, never served.
+                op_names["__compiled_fn_unserved"] = {(unserved_name, "")}
+            with open(artifact) as f:
+                python_code = f.read()
+        expected = (served._init_fn.__module__,)
+        self.assertIn(f"CUSTOM_OP_MODULES = {expected!r}", python_code)
 
 
 if __name__ == "__main__":
