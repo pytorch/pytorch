@@ -3932,8 +3932,14 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        # Dicts are guarded lazily, so folding over one would install no guard.
+        if (
+            self.can_constant_fold_through()
+            and check_unspec_or_constant_args(args, kwargs)
+            and not any(
+                isinstance(x, variables.ConstDictVariable)
+                for x in itertools.chain(args, kwargs.values())
+            )
         ):
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
