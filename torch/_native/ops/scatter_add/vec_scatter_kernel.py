@@ -5,8 +5,8 @@ contiguous tensors), but works everywhere scalar atomicAdd does. Matches
 the fallback path in https://github.com/pytorch/pytorch/pull/182675.
 
 Algorithm: warp-per-source-row. Each warp reads ``idx[entry]`` once, then
-the 32 lanes chunk through N with vectorized gather (4 fp32 or 8 halves
-per lane per step) and issue atomics into ``out[ind, :]``:
+the 32 lanes chunk through N, loading 16 bytes (4 fp32 or 8 halves) per
+lane per step, and issue atomics into ``out[ind, :]``:
 
 - fp32: per-element ``atomicAdd``.
 - fp16/bf16: paired x2 atomics
@@ -27,11 +27,12 @@ import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._ptx import make_packed_half_atomic_add
+from .cutedsl_impl import _SRC_ALIGN_BYTES, _VEC_DST_ALIGN_BYTES
 
 
 _WARPS_PER_BLOCK = 8
 _THREADS_PER_BLOCK = 32 * _WARPS_PER_BLOCK
-_VEC_BYTES = 16  # 16-byte vector gather = LDG.128
+_VEC_BYTES = 16  # bytes per lane per step
 
 _TORCH_TO_CUTE = {
     torch.float32: Float32,
@@ -77,8 +78,8 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
     """Build a dtype-specialized vectorized scatter-add kernel.
 
     Each warp handles one source row. 32 lanes chunk through N, each lane
-    issuing a single vectorized LDG.128 (via ``cute.autovec_copy``) for
-    ``vec_elems`` consecutive elements and atomic-adding them into
+    loading ``vec_elems`` consecutive elements (16 bytes, via
+    ``cute.autovec_copy``) and atomic-adding them into
     ``out[ind, :]``.
 
     fp16/bf16 use paired x2 atomics (``red.global.add.noftz.{f16x2,bf16x2}``)
@@ -130,10 +131,8 @@ def _make_kernel(dtype, elem_bytes: int, vec_elems: int, contig: bool):
                     src_off = Int64(entry_id) * src_row_stride + Int64(off)
                     dst_off = r * out_row_stride + Int64(off)
 
-                    # Vectorized gmem -> register load. ``autovec_copy``
-                    # picks the widest safe instruction given the static
-                    # shape (vec_elems x elem_bytes == 16 bytes, so this
-                    # becomes a single LDG.128).
+                    # autovec_copy can't prove this offset is 16B-aligned, so it emits
+                    # scalar loads; the kernel is atomic-bound, so that's fine.
                     gsrc = cute.make_tensor(
                         mSrc.iterator + src_off,
                         cute.make_layout(vec_elems),
@@ -204,14 +203,24 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
     vec_elems = _VEC_BYTES // elem_bytes
     launcher = _make_kernel(dtype, elem_bytes, vec_elems, contig)
 
+    # Contract the cond guarantees (tvm-ffi rejects calls that break it):
+    # 16B-aligned src pointer and row stride, 4B-aligned out pointer and row
+    # stride, N % vec_elems == 0.
     mSrc_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
+        dtype,
+        (cute.sym_int(), cute.sym_int(divisibility=vec_elems)),
+        stride=(cute.sym_int64(divisibility=_SRC_ALIGN_BYTES // elem_bytes), 1),
+        assumed_align=_SRC_ALIGN_BYTES,
     )
     # Index is contiguous (see _flatten_for_expanded_1d); fix stride=1
     # so `mIndex[i]` doesn't emit a runtime stride multiply.
     mIndex_fake = cute.runtime.make_fake_tensor(Int64, (cute.sym_int(),), stride=(1,))
+    dst_div = max(1, _VEC_DST_ALIGN_BYTES // elem_bytes)
     mOut_fake = cute.runtime.make_fake_tensor(
-        dtype, (cute.sym_int(), cute.sym_int()), stride=(cute.sym_int64(), 1)
+        dtype,
+        (cute.sym_int(), cute.sym_int(divisibility=vec_elems)),
+        stride=(cute.sym_int64(divisibility=dst_div), 1),
+        assumed_align=_VEC_DST_ALIGN_BYTES,
     )
     return cute.compile(
         launcher,
@@ -234,7 +243,7 @@ def _compile_vec_scatter(torch_dtype: torch.dtype, contig: bool):
 
 
 def vec_elems_for(dtype: torch.dtype) -> int:
-    """Elements per lane per step (16-byte vector gather)."""
+    """Elements per lane per step (16 bytes)."""
     return _VEC_BYTES // dtype.itemsize
 
 
