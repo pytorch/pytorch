@@ -3721,6 +3721,34 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
             self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
 
+    def test_member_descriptor_delete_c_member(self):
+        # OSError.strerror is a T_OBJECT member: del clears it, reads give None.
+        def fn():
+            e = OSError(1, "x")
+            OSError.__dict__["strerror"].__delete__(e)
+            return e
+
+        with self.assertRaisesRegex(Unsupported, "Delete of an unmodeled C member"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIsNone(torch.compile(fn, backend="eager")().strerror)
+
+    @unittest.expectedFailure
+    def test_property_without_name_no_setter(self):
+        class C:
+            pass
+
+        C.x = property()
+
+        def fn(t):
+            try:
+                C().x = 1
+            except AttributeError as e:
+                return t + 1, str(e)
+
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(res, fn(t))
+
     def test_tuplegetter_readonly_slot(self):
         # namedtuple field accessors are read-only; __set__/__delete__ raise
         # AttributeError through the tp_descr_set slot.
