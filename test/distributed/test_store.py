@@ -1339,7 +1339,7 @@ class PrefixStoreBarrierTimeoutTest(TestCase):
         import time
 
         store = dist.PrefixStore("prefix", dist.HashStore())
-        store.set_timeout(timedelta(milliseconds=250))
+        store.set_timeout(timedelta(milliseconds=1))
         start = time.monotonic()
         with self.assertRaises(DistStoreError):
             store.barrier("barrier_key", 2)
@@ -1352,7 +1352,7 @@ class PrefixStoreBarrierTimeoutTest(TestCase):
         store.set_timeout(timedelta(seconds=300))
         start = time.monotonic()
         with self.assertRaises(DistStoreError):
-            store.barrier("barrier_key2", 2, timedelta(milliseconds=250))
+            store.barrier("barrier_key2", 2, timedelta(milliseconds=1))
         self.assertLess(time.monotonic() - start, 10)
 
 
