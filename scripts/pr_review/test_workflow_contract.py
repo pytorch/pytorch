@@ -79,11 +79,11 @@ HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
 PR_REVIEW_SKILL = REPO / ".agents" / "skills" / "pr-review" / "SKILL.md"
 # THE skills stage A installs and may read: pr-review, and the sibling skills
-# installed beside it, which an installed skill may link to as `../<name>/`.
+# installed beside it, which an installed skill may refer to as `../<name>/`.
 # This is the one list a change widening the review's trusted skill surface has
 # to edit; the install step, the Read grants, the prompt hash and those links
 # are each checked against it.
-INSTALLED_SKILLS = ("pr-review",)
+INSTALLED_SKILLS = ("pr-review", "cuda-streams")
 # The two claude-code-action steps: stage A reviews, stage B maps its review.
 MODEL_STEP_IDS = ("a", "claude")
 
@@ -1644,22 +1644,40 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         )
         skills = REPO / ".agents" / "skills"
         for name in INSTALLED_SKILLS:
-            self.assertTrue((skills / name / "SKILL.md").is_file())
             # `find -type f` skips a symlink that `cp -rT` copies into stage
-            # A's reach, so one would be readable without moving the hash.
+            # A's reach, so one would be readable without moving the hash;
+            # that includes the skill directory itself.
+            self.assertFalse((skills / name).is_symlink(), f"{name} is a symlink")
+            self.assertTrue((skills / name / "SKILL.md").is_file())
             links = [p for p in (skills / name).rglob("*") if p.is_symlink()]
             self.assertEqual(links, [], f"{name} contains a symlink")
-            # A sibling skill an installed one links to is read from beside
-            # it, so it must be installed too; otherwise the only copy the
-            # model can reach is the PR's.
             for md in (skills / name).rglob("*.md"):
-                for sibling in re.findall(r"\]\(\.\./([\w-]+)/", md.read_text()):
-                    if (skills / sibling).is_dir():
+                text = md.read_text()
+                # In stage A a repo path to a skill resolves only in the PR
+                # checkout, i.e. to the untrusted copy, whether or not that
+                # skill is installed. Another skill is named relatively. Any
+                # mention fails, so `.agents/skills/./x` cannot slip past.
+                self.assertEqual(
+                    re.findall(r"\.agents/skills\b", text),
+                    [],
+                    f"{md.relative_to(REPO)} names a skill by its repo path, "
+                    "which stage A reads from the PR; use ../<name>/",
+                )
+                # A sibling skill is read from beside the installed copy, so it
+                # must be installed too; otherwise the only copy the model can
+                # reach is the PR's. Any mention counts, not just a Markdown
+                # link, resolved whole from the file that makes it.
+                for rel in re.findall(r"(?<![\w./])\.\./[\w./-]*", text):
+                    target = (md.parent / rel).resolve()
+                    if not target.is_relative_to(skills.resolve()):
+                        continue
+                    parts = target.relative_to(skills.resolve()).parts
+                    if parts and (skills / parts[0]).is_dir():
                         self.assertIn(
-                            sibling,
+                            parts[0],
                             INSTALLED_SKILLS,
-                            f"{md.relative_to(REPO)} links the {sibling} skill, "
-                            "which stage A does not install",
+                            f"{md.relative_to(REPO)} refers to the {parts[0]} "
+                            "skill, which stage A does not install",
                         )
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
