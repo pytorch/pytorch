@@ -1257,6 +1257,24 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         # The discussion stays.
         self.assertEqual(deleted(gh), [])
 
+    def test_a_deleted_files_finding_joins_its_left_side_discussion(self):
+        # A re-review of a delete-only PR, after the author replied on the left.
+        root = {**comment(50, 5, line=3, path="gone.py"), "side": "LEFT"}
+        finding = {"path": "gone.py", "line": 3, "severity": "major", "message": "U."}
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, author="tristan", reply_to=50)],
+            files=[{"filename": "gone.py", "status": "removed"}],
+        )
+        go(gh, row(findings=[finding]))
+        body = gh.posted()[0]
+        self.assertNotIn("comments", body)
+        self.assertIn(
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            body["body"],
+        )
+
     def test_other_findings_stay_inline_and_are_counted(self):
         findings = [
             {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
