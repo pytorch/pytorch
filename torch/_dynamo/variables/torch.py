@@ -48,7 +48,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_item_memo
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -2194,7 +2194,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 or example_value.dim() != 0
                 or example_value.device.type != "cpu"
                 or example_value.dtype != torch.int64
-                or (item_memo := example_value.item_memo) is None
+                or (item_memo := maybe_get_item_memo(example_value)) is None
             ):
                 return None
 
