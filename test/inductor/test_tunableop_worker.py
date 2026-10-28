@@ -717,7 +717,7 @@ class TunableopModeValidationTest(TestCase):
     def test_invalid_mode_warns_and_disables(self):
         tunableop._mode_warned = False
         try:
-            with inductor_config.patch({"cuda.aten_tunableop_mode": "on"}):
+            with inductor_config.patch({"cuda.aten_tunableop_mode": "ON"}):
                 with self.assertLogs(tunableop.log, level="WARNING") as logs:
                     self.assertFalse(tunableop.is_tune_mode())
                     self.assertFalse(tunableop.is_reuse_mode())
@@ -725,6 +725,8 @@ class TunableopModeValidationTest(TestCase):
             self.assertTrue(
                 any("TORCHINDUCTOR_ATEN_TUNABLEOP_MODE" in m for m in logs.output)
             )
+            # Echoes what was set, not the normalized form.
+            self.assertTrue(any("'ON'" in m for m in logs.output))
             # Warns only once: the second invalid value logs nothing.
             with inductor_config.patch({"cuda.aten_tunableop_mode": "bogus"}):
                 with self.assertNoLogs(tunableop.log, level="WARNING"):
@@ -758,6 +760,40 @@ class TunableopModeValidationTest(TestCase):
                     self.assertNoLogs(tunableop.log, level="WARNING"),
                 ):
                     tunableop.is_tune_mode()
+
+    def test_reuse_mode_warns_when_the_results_file_will_not_be_read(self):
+        # RECORD_UNTUNED makes the manager skip ReadFile, so the worker has an
+        # empty results map and every GEMM silently falls back to Default.
+        tunableop._env_warned = False
+        self.addCleanup(setattr, tunableop, "_env_warned", False)
+        with (
+            inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch.dict(os.environ, {"PYTORCH_TUNABLEOP_RECORD_UNTUNED": "1"}),
+            self.assertLogs(tunableop.log, level="WARNING") as logs,
+        ):
+            self.assertTrue(tunableop.is_reuse_mode())
+        self.assertTrue(any("nothing to borrow" in m for m in logs.output))
+
+    def test_reuse_mode_ignores_the_tuning_kill_switch(self):
+        # TUNING=0 blocks tune mode but not reuse: it never tunes, and
+        # RecordBorrowed persists regardless.
+        tunableop._env_warned = False
+        self.addCleanup(setattr, tunableop, "_env_warned", False)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("PYTORCH_TUNABLEOP_")
+        }
+        with (
+            inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch.dict(
+                os.environ, {**env, "PYTORCH_TUNABLEOP_TUNING": "0"}, clear=True
+            ),
+            self.assertNoLogs(tunableop.log, level="WARNING"),
+        ):
+            self.assertTrue(tunableop.is_reuse_mode())
 
     def test_mode_is_case_normalized(self):
         # Without this "Tune" turns both passes off behind a one-time warning.
@@ -904,14 +940,10 @@ class TunableOpRealWorkerTest(TestCase):
         self.assertIn("dynamic_dims_mask().__enter__", [c[0] for c in calls])
 
 
-class TunableOpRocmWorkerTest(TestCase):
-    """Real BenchmarkJob through a real worker on ROCm hardware.
+class TunableOpSettingsRoundTripTest(TestCase):
+    """snapshot_settings against the real getters and setters, on any GPU."""
 
-    Covers what the stubbed tests cannot: the pickle round trip, and the worker
-    appending to the file the parent's runtime reads.
-    """
-
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
     def test_rotating_buffer_size_round_trips_through_snapshot(self):
@@ -933,6 +965,16 @@ class TunableOpRocmWorkerTest(TestCase):
         stamped = tunableop.snapshot_settings()["set_rotating_buffer_size"]
         tunable.set_rotating_buffer_size(stamped)  # what the worker does
         self.assertEqual(tunable.get_rotating_buffer_size(), parent_bytes)
+
+
+class TunableOpRocmWorkerTest(TestCase):
+    """Real BenchmarkJob through a real worker on ROCm hardware.
+
+    Covers what the stubbed tests cannot: the pickle round trip, and the worker
+    appending to the file the parent's runtime reads.
+    """
+
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
