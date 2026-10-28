@@ -53,7 +53,7 @@ runs:
         echo "job_id: ${{inputs.job_id}}"
         echo "job_name:  ${{inputs.job_name}}"
         echo "artifact_prefix: ${{inputs.artifact_prefix}}"
-    - uses: nick-fields/retry@v3.0.0
+    - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
       name: Setup dependencies
       with:
         shell: bash
