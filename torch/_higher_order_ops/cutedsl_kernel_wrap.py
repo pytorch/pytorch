@@ -19,9 +19,11 @@ import inspect
 import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TYPE_CHECKING
+from typing_extensions import Never
 
 import sympy
 
+import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.user_kernel_hop import (
@@ -32,15 +34,19 @@ from torch._higher_order_ops.user_kernel_hop import (
     KernelSideTable,
     register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
+    store_non_graphable_args,
     trace_user_kernel_wrapper,
+    UserKernelHOPifier,
     UserKernelHOPInfo,
     UserKernelWrapperHOP,
 )
 from torch._higher_order_ops.utils import register_fake
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 
 if TYPE_CHECKING:
+    from torch._guards import Source
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
 
@@ -129,6 +135,17 @@ def python_scalar(value: Any) -> Any:
         if isinstance(value, Numeric):
             return value.value
     return value
+
+
+def is_dsl_runtime_object(cls: type) -> bool:
+    """Objects PT2 has to make itself: cute tensors and pointers (it converts torch
+    tensors) and CUDA streams (it passes the current stream). Other DSL values, such
+    as cutlass dtype classes, enums and Numeric values, are ordinary constants."""
+    module = getattr(cls, "__module__", "") or ""
+    name = getattr(cls, "__name__", "")
+    return module.startswith("cutlass.cute.runtime") or (
+        module.startswith("cuda.") and name in ("CUstream", "CUdeviceptr")
+    )
 
 
 _host_fn_infos: "weakref.WeakKeyDictionary[Callable[..., Any], CuteDSLHostFnInfo]" = (
@@ -470,3 +487,294 @@ register_user_kernel_hop(
         reinplace_trigger="CUTEDSL_OPS",
     )
 )
+
+
+###############################################################################
+# The "CuteDSLHOPifier": a class that transforms a call to a CuTeDSL host function
+# into a call to the cutedsl_kernel_wrapper_mutation HOP.
+
+
+def normalize_mutates_args(mutates_args: object) -> MutatesArgs:
+    if mutates_args == "unknown":
+        return "unknown"
+    error = ValueError(
+        'mutates_args must be a sequence of parameter names or "unknown", '
+        f"got {mutates_args!r}"
+    )
+    if isinstance(mutates_args, str):
+        raise error
+    try:
+        # Materialize once: a generator would be empty on a second pass.
+        names = tuple(mutates_args)  # type: ignore[call-overload]
+    except TypeError:
+        raise error from None
+    if not all(isinstance(name, str) for name in names):
+        raise error
+    return tuple(dict.fromkeys(names))
+
+
+class CuteDSLHOPifier(UserKernelHOPifier):
+    """Orchestrator for converting a call to a CuTeDSL host function into a call to
+    the cutedsl_kernel_wrapper_mutation HOP: the counterpart of TritonHOPifier.
+
+    It has two main use cases.
+
+    1. When Dynamo sees a wrapped host function, it becomes a CuteDSLKernelVariable,
+    whose calls DynamoCuteDSLHOPifier turns into a call to the HOP.
+
+    2. For make_fx and non-strict export, wrap_cutedsl returns a
+    TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns into a
+    call to the HOP (which can then be traced).
+
+    A CuTeDSL launch has no grid, autotuner or heuristics, so what is left is binding
+    the call to the host function's signature: the stream parameter is supplied at
+    launch and must not be passed; Constexpr arguments are baked into the compiled
+    kernel, so symbolic values for them are specialized; tensors and scalars are
+    kernel arguments (see CuteDSLHostFnInfo).
+    """
+
+    def is_tensor(self, val: Any) -> bool:
+        raise NotImplementedError("abstract method")
+
+    def python_type(self, val: Any) -> type:
+        raise NotImplementedError("abstract method")
+
+    def leaves(self, val: Any) -> list[Any]:
+        """The values inside a list/tuple argument (the value itself otherwise)."""
+        raise NotImplementedError("abstract method")
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        """val with every symbolic value in it (or itself) specialized."""
+        raise NotImplementedError("abstract method")
+
+    def call_HOP(  # type: ignore[no-untyped-def]
+        self,
+        variable,
+        combined_args: dict[str, Any],
+        tx,
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
+    def host_fn_info(self, kernel: Callable[..., Any]) -> CuteDSLHostFnInfo:
+        try:
+            return get_host_fn_info(kernel)
+        except ValueError as e:
+            self.raise_unsupported(str(e))
+
+    def init_variable(
+        self,
+        variable: Any,
+        kernel: Callable[..., Any],
+        mutates_args: object,
+        kernel_idx: int | None,
+    ) -> None:
+        """Record the host function on ``variable`` and, once the write set is known,
+        add it to the side table. ``mutates_args`` is None for a host function that
+        has not been wrapped (Dynamo met it raw): calling that is unsupported."""
+        variable.kernel = kernel
+        variable.mutates_args = None
+        variable.kernel_idx = None
+        if mutates_args is None:
+            return
+        try:
+            normalized = normalize_mutates_args(mutates_args)
+        except ValueError as e:
+            self.raise_unsupported(str(e))
+        info = self.host_fn_info(kernel)
+        if normalized != "unknown":
+            scalar_params = (
+                {info.stream_param} | info.constexpr_params | set(info.numeric_params)
+            )
+            for name in normalized:
+                if name not in info.params or name in scalar_params:
+                    self.raise_unsupported(
+                        f"mutates_args: {name!r} is not a tensor parameter of "
+                        f"{CuteDSLKernel(kernel, ()).name} (parameters: {info.params})"
+                    )
+        variable.mutates_args = normalized
+        variable.kernel_idx = cutedsl_kernel_side_table.add_kernel(
+            CuteDSLKernel(kernel, normalized)
+        )
+        if kernel_idx is not None and variable.kernel_idx != kernel_idx:
+            raise AssertionError(
+                f"kernel_idx mismatch: expected {kernel_idx}, got {variable.kernel_idx}"
+            )
+
+    def bind_args(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bind a call to the host function's parameters, minus the stream."""
+        kernel = variable.kernel
+        name = CuteDSLKernel(kernel, ()).name
+        if variable.kernel_idx is None:
+            self.raise_unsupported(
+                f"Calling the CuTeDSL host function {name} directly is not supported: "
+                "wrap it with torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=[...]) "
+                "and call the wrapper with torch.Tensor arguments and no stream"
+            )
+        info = self.host_fn_info(kernel)
+        params = [p for p in info.params if p != info.stream_param]
+        if len(args) > len(params):
+            self.raise_unsupported(
+                f"{name}() takes {len(params)} arguments without the stream but "
+                f"{len(args)} were given"
+            )
+        combined_args = dict(zip(params, args))
+        for key, val in kwargs.items():
+            if key == info.stream_param:
+                self.raise_unsupported(
+                    f"{name}(): do not pass {key!r}; the kernel is launched on the "
+                    "current CUDA stream"
+                )
+            if key not in params:
+                self.raise_unsupported(
+                    f"{name}() got an unexpected keyword argument {key!r}"
+                )
+            if key in combined_args:
+                self.raise_unsupported(
+                    f"{name}() got multiple values for argument {key!r}"
+                )
+            combined_args[key] = val
+        missing = [
+            p for p in params if p not in combined_args and p not in info.defaults
+        ]
+        if missing:
+            self.raise_unsupported(f"{name}() missing arguments {missing}")
+
+        for key, val in combined_args.items():
+            if self.is_tensor(val):
+                if key in info.constexpr_params or key in info.numeric_params:
+                    self.raise_unsupported(
+                        f"{name}(): a tensor was passed to the scalar parameter {key!r}"
+                    )
+                continue
+            leaves = self.leaves(val)
+            for leaf in leaves:
+                if self.is_tensor(leaf):
+                    # Only top-level tensors become graph arguments; one inside a
+                    # container would be baked in as a trace-time constant.
+                    self.raise_unsupported(
+                        f"{name}(): {key!r} holds a tensor inside a container; pass "
+                        "each tensor as its own argument"
+                    )
+                if is_dsl_runtime_object(self.python_type(leaf)):
+                    self.raise_unsupported(
+                        f"{name}(): pass torch.Tensor and Python values, not "
+                        f"{self.python_type(leaf).__name__} ({key!r}); PT2 converts "
+                        "tensors and supplies the stream"
+                    )
+            if key in info.constexpr_params or not (len(leaves) == 1 and leaves[0] is val):
+                # The DSL bakes a Constexpr argument into the compiled kernel, and a
+                # container can only be a side-table constant, so symbolic values in
+                # either are specialized (see [Note: Specialize tl.constexpr args in
+                # user-defined triton kernels]).
+                combined_args[key] = self.specialize_nested(variable, val)
+        return combined_args
+
+    def call_cutedsl_kernel(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+        tx: Any,
+    ) -> Any:
+        return self.call_HOP(variable, self.bind_args(variable, args, kwargs), tx)
+
+
+###############################################################################
+# Helpers for the wrap_cutedsl API, which makes a CuTeDSL host function traceable
+# into a graph via make_fx or non-strict export
+
+
+class TracingCuteDSLHOPifier(CuteDSLHOPifier):
+    def raise_unsupported(self, msg: str) -> Never:
+        raise RuntimeError(msg)
+
+    def get_value(self, val: Any) -> Any:
+        return val
+
+    def is_tensor(self, val: Any) -> bool:
+        return isinstance(val, Tensor)
+
+    def python_type(self, val: Any) -> type:
+        return type(val)
+
+    def leaves(self, val: Any) -> list[Any]:
+        return pytree.tree_leaves(val)
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        return pytree.tree_map(variable.specialize_symbolic, val)
+
+    def call_HOP(
+        self,
+        variable: "TraceableCuteDSLKernelWrapper",
+        combined_args: dict[str, Any],
+        tx: None,
+    ) -> None:
+        if tx is not None:
+            raise AssertionError("tx must be None for TracingCuteDSLHOPifier")
+        if not isinstance(variable.kernel_idx, int):
+            raise AssertionError(
+                f"kernel_idx must be an int, got {type(variable.kernel_idx)}"
+            )
+        graphable_args, constant_args_idx = store_non_graphable_args(
+            cutedsl_kernel_side_table, combined_args
+        )
+        return cutedsl_kernel_wrapper_mutation(
+            kernel_idx=variable.kernel_idx,
+            constant_args_idx=constant_args_idx,
+            kwargs=graphable_args,
+        )
+
+
+tracing_cutedsl_hopifier_singleton = TracingCuteDSLHOPifier()
+
+
+class TraceableCuteDSLKernelWrapper:
+    """What wrap_cutedsl returns: calling it launches the host function eagerly, or
+    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export.
+    Dynamo traces it as a CuteDSLKernelVariable."""
+
+    kernel: Callable[..., Any]
+    mutates_args: MutatesArgs | None
+    kernel_idx: int | None
+    kernel_source: "Source | None"
+
+    def __init__(
+        self,
+        kernel: Callable[..., Any],
+        mutates_args: object,
+        kernel_idx: int | None = None,
+        kernel_source: "Source | None" = None,
+    ) -> None:
+        self.kernel_source = kernel_source
+        tracing_cutedsl_hopifier_singleton.init_variable(
+            self, kernel, mutates_args, kernel_idx
+        )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        from torch._library.triton import is_wrap_triton_enabled
+
+        if is_wrap_triton_enabled():
+            return tracing_cutedsl_hopifier_singleton.call_cutedsl_kernel(
+                self, args, kwargs, None
+            )
+        # Eager fast path (e.g. inside a triton_op's eager backend): launch directly,
+        # skipping the HOP dispatch.
+        from torch._inductor.runtime.cutedsl_user_kernel import launch_cutedsl_kernel
+
+        launch_cutedsl_kernel(
+            self.kernel,
+            tracing_cutedsl_hopifier_singleton.bind_args(self, args, kwargs),
+        )
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        import torch
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
+            return guard_scalar(arg)
+        return arg
