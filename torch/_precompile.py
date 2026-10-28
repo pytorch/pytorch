@@ -1957,86 +1957,10 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
-# Torch's namespaces whose schemas record no torch module of their own: those defined
-# from C++, which record a build-time path, and those torch defines through
-# torch.library's helpers, which record the helper.
-_TORCH_OP_NAMESPACES = frozenset(
-    {
-        "aten",
-        "prim",
-        "coor",
-        "debugprims",
-        "pippy",
-        "device_mesh",
-        "onnx",
-        "inductor",
-        "inductor_prims",
-        "profiler",
-        "quantized",
-        "_quantized",
-        "quantization",
-        "sparse",
-        "c10d",
-        "c10d_functional",
-        "_c10d_functional",
-        "_c10d_functional_autograd",
-        "_dtensor",
-        "symm_mem",
-        "fsdp",
-        "mkl",
-        "mkldnn",
-        "mkldnn_prepacked",
-        "onednn",
-        "static_runtime",
-        "xnnpack",
-        "prepacked",
-        "vulkan",
-        "vulkan_prepack",
-        "metal",
-        "metal_prepack",
-        "vulkan_quantized",
-        "_nnapi",
-    }
-)
-
-
-def _registered_by_torch(op_name: str, overload: str) -> bool:
-    if op_name.split("::")[0] in _TORCH_OP_NAMESPACES:
-        return True
-    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
-    path = debug.removeprefix("registered at ").rpartition(":")[0]
-    torch_dir = os.path.dirname(torch.__file__)
-    # torch's helpers that build a Library for the caller's namespace record themselves.
-    helpers = tuple(
-        os.path.join(torch_dir, name)
-        for name in ("library.py", "_library", "_custom_op")
-    )
-    return path.startswith(torch_dir + os.sep) and not path.startswith(helpers)
-
-
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``, warning once about the
-    ops torch does not register and no importable module is known to register."""
-    modules: set[str] = set()
-    unrecorded: set[str] = set()
-    for op_name, overload in op_names:
-        if (module := _custom_op_module(op_name, overload)) is not None:
-            modules.add(module)
-        elif not _registered_by_torch(op_name, overload):
-            unrecorded.add(op_name)
-    if unrecorded:
-        log.warning(
-            "torch.compiler.precompile: the captured graphs call %s, which no "
-            "importable module is known to register: defined in __main__, defined "
-            "with torch.library.Library or torch.library.define, or a C++ op without "
-            "set_python_module. The artifact serves only where something else "
-            "registers them before it is loaded. Define a Python op with "
-            "torch.library.custom_op in an importable module, and give a C++ op "
-            "m.set_python_module; for a library's ops, import that library before "
-            "loading the artifact.",
-            ", ".join(sorted(unrecorded)),
-        )
-    return tuple(sorted(modules))
+    """The modules registering the ops among ``op_names``."""
+    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
+    return tuple(sorted(m for m in modules if m is not None))
 
 
 def _write_custom_op_imports(buf: Any, modules: tuple[str, ...]) -> None:
