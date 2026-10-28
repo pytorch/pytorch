@@ -10,6 +10,7 @@
 #include <ATen/ops/cat.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -138,7 +139,7 @@ class ConcatLinearLayers {
     if (tensor_a.dim() != tensor_b.dim()) {
       return false;
     }
-    for (int64_t i = 1; i < tensor_a.dim(); i++) {
+    for (const auto i : c10::irange(1, tensor_a.dim())) {
       if (tensor_a.size(i) != tensor_b.size(i)) {
         return false;
       }
@@ -167,7 +168,7 @@ class ConcatLinearLayers {
 
       // Now iterate over the rest of the users of the set to
       // see if there is anything that we can coalesce `base_node` with.
-      for (size_t j = i + 1; j < linear_layer_group.size(); j++) {
+      for (const auto j : c10::irange(i + 1, linear_layer_group.size())) {
         auto node = linear_layer_group[j];
         if (checked_nodes.contains(node)) {
           continue;

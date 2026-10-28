@@ -332,12 +332,12 @@ void convertReturnsToTuples(Block* b) {
 
         // Make node outputs a single tuple;
         std::vector<TypePtr> types;
-        for (size_t i = 0; i < n->outputs().size(); ++i) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           types.push_back(n->output(i)->type());
         }
         Value* tup_output = n->addOutput()->setType(TupleType::create(types));
         Node* tup_unpack = g->createTupleUnpack(tup_output)->insertAfter(n);
-        for (size_t i = 0; i < tup_unpack->outputs().size(); ++i) {
+        for (const auto i : c10::irange(tup_unpack->outputs().size())) {
           auto rev_idx = tup_unpack->outputs().size() - i - 1;
           n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(rev_idx));
           n->eraseOutput(rev_idx);

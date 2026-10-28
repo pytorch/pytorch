@@ -2,6 +2,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -55,9 +56,8 @@ static std::map<int64_t, Value*> InsertSymbolicShapesCompute(
       *shape_mapping.partial_eval_shape_graph,
       shape_compute_graph_inputs);
   std::map<int64_t, Value*> sym_shape_to_enclosing_graph_value;
-  for (size_t i = 0;
-       i < shape_mapping.partial_eval_shape_graph->outputs().size();
-       ++i) {
+  for (const auto i :
+       c10::irange(shape_mapping.partial_eval_shape_graph->outputs().size())) {
     Value* output = shape_mapping.partial_eval_shape_graph->outputs().at(i);
     auto sym_shape =
         shape_mapping.graph_output_to_symbolic_shape_dim_.find(output);
@@ -330,7 +330,7 @@ static void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
       false_block_outputs,
       false_block_outputs.size());
   false_block->appendNode(copy_node);
-  for (size_t i = 0; i < false_block_outputs.size(); ++i) {
+  for (const auto i : c10::irange(false_block_outputs.size())) {
     false_block->replaceOutput(i, copy_node->outputs().at(i));
   }
 }
@@ -660,7 +660,7 @@ static RegisterOperators reg_guard({
                 flattened_stride_offset += 1;
               } else {
                 auto strides = tensor.strides();
-                for (size_t dim = 0; dim < num_dims; ++dim) {
+                for (const auto dim : c10::irange(num_dims)) {
                   auto summarized_dim = summarizeStrideDim(
                       sizes,
                       strides,

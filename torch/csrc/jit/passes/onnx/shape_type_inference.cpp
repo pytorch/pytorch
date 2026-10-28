@@ -748,12 +748,12 @@ std::vector<::c10::ShapeSymbol> Broadcast(
     }
   }
   if (rank_0 < rank_1) {
-    for (size_t idx = rank_min; idx < rank_max; idx++) {
+    for (const auto idx : c10::irange(rank_min, rank_max)) {
       size_t shape_idx = rank_max - 1 - idx;
       final_shape[shape_idx] = input_shape_value_1[shape_idx];
     }
   } else {
-    for (size_t idx = rank_min; idx < rank_max; idx++) {
+    for (const auto idx : c10::irange(rank_min, rank_max)) {
       size_t shape_idx = rank_max - 1 - idx;
       final_shape[shape_idx] = input_shape_value_0[shape_idx];
     }
@@ -1811,7 +1811,7 @@ void UpdateOutputTypeByONNXProto(
   // get data from value_info and updated original graph.
   const auto updateNodeOutputsByONNXValueInfo =
       [&](const onnx::ValueInfoProto& v_info) {
-        for (size_t i = 0; i < n->outputs().size(); ++i) {
+        for (const auto i : c10::irange(n->outputs().size())) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
             UpdateTorchValueByOnnxValueInfo(
                 n->output(i), v_info, symbol_dim_map, dim_symbol_map);
@@ -1834,7 +1834,7 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   auto n = b->owningNode();
   if (nullptr != n && n->kind() == ::c10::onnx::Loop) {
     // Copy node input metadata to subgraph input.
-    for (size_t i = 0; i < n->inputs().size(); ++i) {
+    for (const auto i : c10::irange(n->inputs().size())) {
       b->inputs().at(i)->setType(n->inputs().at(i)->type());
     }
   }
@@ -2167,7 +2167,7 @@ void ONNXShapeTypeInference(
       const auto& inferred_shape = inferred_shape_pair->second;
       int rank = inferred_shape.dim_size();
       std::vector<::c10::ShapeSymbol> final_shape(rank);
-      for (int i = 0; i < rank; ++i) {
+      for (const auto i : c10::irange(rank)) {
         final_shape[i] = ONNXDimToShapeSymbol(
             inferred_shape.dim(i), symbol_dim_map, dim_symbol_map);
       }

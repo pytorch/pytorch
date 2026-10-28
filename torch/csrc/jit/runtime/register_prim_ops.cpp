@@ -1873,11 +1873,11 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             r_pad = l_pad;
             l_pad = tmp;
           }
-          for (std::string::size_type i = 0; i < l_pad; ++i) {
+          for ([[maybe_unused]] const auto _ : c10::irange(l_pad)) {
             ss << fillchar;
           }
           ss << string;
-          for (std::string::size_type i = 0; i < r_pad; ++i) {
+          for ([[maybe_unused]] const auto _ : c10::irange(r_pad)) {
             ss << fillchar;
           }
           push(stack, std::move(ss).str());

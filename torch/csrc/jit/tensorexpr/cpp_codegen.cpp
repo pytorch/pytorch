@@ -3,6 +3,7 @@
 #include <utility>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
 #include <torch/csrc/jit/tensorexpr/cpp_intrinsics.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -218,7 +219,7 @@ void CppPrinter::visit(const StorePtr& v) {
   auto flat_idx =
       flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
   const int lanes = v->value()->dtype().lanes();
-  for (int lane = 0; lane < lanes; lane++) {
+  for (const auto lane : c10::irange(lanes)) {
     lane_ = lane;
     emitIndent();
     os() << *v->base_handle() << '[' << *flat_idx << "] = " << *v->value()
@@ -264,7 +265,7 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   std::vector<BufPtr> bufs(v->buf_args());
   bufs.insert(bufs.begin(), v->buf());
   auto for_buf = [&](const std::function<void(const BufPtr)>& print_buf) {
-    for (size_t i = 0; i < bufs.size(); i++) {
+    for (const auto i : c10::irange(bufs.size())) {
       if (i > 0) {
         os() << ", ";
       }
@@ -373,7 +374,7 @@ void CppCodeGen::init() {
   printer_->printPrologue();
   os() << "void " << kernel_func_name() << '(';
   const std::vector<BufferArg> buffer_args = this->buffer_args();
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     if (i > 0) {
       os() << ", ";
     }

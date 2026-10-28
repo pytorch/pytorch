@@ -291,7 +291,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
           if (auto it = input_tensor_lists_.find(output_index);
               it != input_tensor_lists_.end()) {
             size_t list_size = it->second;
-            for (size_t i = 0; i < list_size; i++) {
+            for ([[maybe_unused]] const auto _ : c10::irange(list_size)) {
               produceOutput(output_index++, {}, outputs);
             }
           } else {
