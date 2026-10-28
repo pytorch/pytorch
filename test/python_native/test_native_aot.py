@@ -425,11 +425,10 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(register_1024["eligible"])
         base = torch.empty(M, 4096, device="cuda")
         cow = base._lazy_clone()
-        is_cow = torch._C._is_cow_tensor(cow)
         data_ptr = cow.const_data_ptr()
         uncovered = mod.covered_axes(cow, 100)
         self.assertFalse(uncovered["eligible"])
-        self.assertEqual(torch._C._is_cow_tensor(cow), is_cow)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
         self.assertEqual(cow.const_data_ptr(), data_ptr)
         # Schema defaults come from the function signature itself.
         self.assertEqual(
