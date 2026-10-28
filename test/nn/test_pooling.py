@@ -29,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
+    onlyMPS,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -1608,6 +1609,15 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyMPS  # CUDA/ROCm kernel overflows 32-bit index within a slice
+    @largeTensorTest("5GB")
+    def test_max_pool3d_64bit_indices(self, device):
+        # Zero-stride input that needs 64-bit indexing, MPS reads it without materializing
+        x = torch.zeros(1, dtype=torch.half, device=device).expand(1, 1, 32769, 65536)
+        out, idx = F.max_pool3d(x, (1, 1, 3), (1, 32768, 65533), return_indices=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(idx.flatten().tolist(), [0, 65533, 2**31, 2**31 + 65533])
 
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
