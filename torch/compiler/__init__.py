@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
-import threading
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -576,15 +575,16 @@ def wrap_numpy(fn):
     return wrap(fn)
 
 
-class _TracingFlags(threading.local):
-    """Per-thread compile/export tracing flags.
+class _TracingFlags:
+    """Live tracing flags of one compile/export session.
 
-    Threads run torch.compile/export sessions concurrently, so the flags must
-    not leak across threads (see #202042): other threads observe False while
-    this thread compiles, and per-thread save/restore keeps one session's
-    exit from clobbering another thread's in-flight session. threading.local
-    lazily runs __init__ once per thread, seeding fresh threads with False.
+    Sessions run concurrently in different threads (see #202042), so the
+    active flags live in a per-thread TLS slot, not a process-wide global:
+    each session owns its own instance, so one session's exit cannot restore
+    a stale value into another thread's in-flight session.
     """
+
+    __slots__ = ("is_compiling", "is_exporting", "is_non_strict_tracing")
 
     def __init__(self) -> None:
         self.is_compiling = False
@@ -592,7 +592,38 @@ class _TracingFlags(threading.local):
         self.is_non_strict_tracing = False
 
 
+# Shared no-session default; never mutated (sessions stash their own instance).
 _flags = _TracingFlags()
+
+_SESSION_FLAGS_TLS_KEY = "torch_compiler_tracing_flags"
+
+
+def _current_flags() -> _TracingFlags:
+    if torch._C._is_key_in_tls(_SESSION_FLAGS_TLS_KEY):
+        if (stashed := torch._C._get_obj_in_tls(_SESSION_FLAGS_TLS_KEY)) is not None:
+            return stashed
+    return _flags
+
+
+@contextlib.contextmanager
+def _session_flag(attr: str):
+    """Hold one session flag True; the session flags object lives in a
+    per-thread TLS slot while the session is active."""
+    # Invariant: only _session_flag writes this key, and it never stashes the
+    # shared default, so stashed objects are safe to mutate.
+    flags = _current_flags()
+    fresh = flags is _flags
+    if fresh:
+        flags = _TracingFlags()
+    old_value = getattr(flags, attr)
+    setattr(flags, attr, True)
+    torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, flags)
+    try:
+        yield
+    finally:
+        setattr(flags, attr, old_value)
+        if fresh:
+            torch._C._remove_obj_from_tls(_SESSION_FLAGS_TLS_KEY)
 
 
 def is_compiling() -> bool:
@@ -614,37 +645,29 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _flags.is_compiling
+        return _current_flags().is_compiling
 
 
 def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
-    return _flags.is_non_strict_tracing
+    return _current_flags().is_non_strict_tracing
 
 
 @contextlib.contextmanager
 def _non_strict_tracing_context():
     """Context manager that sets the non-strict tracing flag."""
-    old = _flags.is_non_strict_tracing
-    try:
-        _flags.is_non_strict_tracing = True
+    with _session_flag("is_non_strict_tracing"):
         yield
-    finally:
-        _flags.is_non_strict_tracing = old
 
 
 @contextlib.contextmanager
 def _compile_session_context():
     """Context manager that sets the compiling flag for the duration of a
     torch.compile session in the current thread (per-thread, see #202042)."""
-    old = _flags.is_compiling
-    try:
-        _flags.is_compiling = True
+    with _session_flag("is_compiling"):
         yield
-    finally:
-        _flags.is_compiling = old
 
 
 @contextlib.contextmanager
@@ -760,7 +783,23 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _flags.is_exporting
+    return _current_flags().is_exporting
+
+# BC for reading, since has some references out of this codebase are using them directly.
+_LEGACY_FLAG_NAMES = {
+    "_is_compiling_flag": "is_compiling",
+    "_is_exporting_flag": "is_exporting",
+    "_is_non_strict_tracing_flag": "is_non_strict_tracing",
+}
+
+
+def __getattr__(name: str) -> Any:
+    # The flags above were module globals for several releases; forward the
+    # old names so downstream readers keep working (reads only - writing the
+    # old module attribute shadows the shim instead of setting the flag).
+    if flag := _LEGACY_FLAG_NAMES.get(name) is not None:
+        return getattr(_current_flags(), flag)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:

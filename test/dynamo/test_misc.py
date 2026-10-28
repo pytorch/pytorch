@@ -10062,6 +10062,45 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(f(), torch.zeros(2, 2))
         self.assertEqual(opt_f(), torch.zeros(2, 2))
 
+    def test_is_compiling_in_wrapper_subclass_torch_dispatch(self):
+        # #184547: __torch_dispatch__ of a wrapper subclass runs eagerly inside
+        # the compile session (AOTAutograd invokes it) and must see the session
+        # flags even though Dynamo never traces it.
+        flags = []
+
+        class WrapperTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+
+            def __init__(self, elem):
+                self._elem = elem
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(t):
+                    return t._elem if isinstance(t, cls) else t
+
+                flags.append(torch.compiler.is_compiling())
+                return func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        torch._dynamo.reset()
+        torch.compile(lambda x: x + 1, backend="eager")(WrapperTensor(torch.ones(3)))
+        self.assertTrue(flags)
+        self.assertTrue(all(flags))
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+
     def test_torch_generator_set_state(self):
         def fn():
             default_state = torch.default_generator.get_state()
