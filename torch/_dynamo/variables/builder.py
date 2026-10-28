@@ -258,7 +258,9 @@ from .functions import (
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
+    PolyfilledFunctionVariable,
     PropertyVariable,
+    SkipFunctionVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -1075,6 +1077,9 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
+            UserFunctionVariable,
+            SkipFunctionVariable,
+            PolyfilledFunctionVariable,
         }
 
     def get_source(self) -> Source:
