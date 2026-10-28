@@ -3979,6 +3979,23 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
+def _collect_weakref_finalize_registry_codes() -> tuple[types.CodeType, ...]:
+    functions = []
+    for member in vars(weakref.finalize).values():
+        if isinstance(member, property):
+            functions.extend((member.fget, member.fset, member.fdel))
+        elif isinstance(member, (classmethod, staticmethod)):
+            functions.append(member.__func__)
+        else:
+            functions.append(member)
+    return tuple(fn.__code__ for fn in functions if isinstance(fn, types.FunctionType))
+
+
+# Guard construction mutates the registry. Tracing it can fail same-frame
+# guards or replay stale contents over newly registered finalizers.
+_WEAKREF_FINALIZE_REGISTRY_CODES = _collect_weakref_finalize_registry_codes()
+
+
 def check_verbose(
     obj: object, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
@@ -4052,10 +4069,12 @@ def check_verbose(
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
-    # Guard construction adds finalizers and invalidates any registry snapshot
-    # traced by detach before the first guard check.
-    if fi.code is not None and fi.code is weakref.finalize.detach.__code__:
-        return SkipResult(True, "weakref.finalize.detach uses the finalizer registry")
+    if (
+        fi.code is not None
+        and fi.code.co_filename == _WEAKREF_FINALIZE_REGISTRY_CODES[0].co_filename
+        and any(fi.code is code for code in _WEAKREF_FINALIZE_REGISTRY_CODES)
+    ):
+        return SkipResult(True, "weakref.finalize uses the finalizer registry")
 
     # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
