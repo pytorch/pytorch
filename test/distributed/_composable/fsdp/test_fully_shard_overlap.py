@@ -32,6 +32,8 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     run_tests,
     skipIfRocmVersionAtLeast,
+    TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -82,6 +84,7 @@ class TestFullyShardOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device), "_sleep"),
         "Sleep is not supported on this device",
     )
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/4463
     def test_fully_shard_training_overlap(self):
         torch.manual_seed(42)
 
@@ -107,7 +110,7 @@ class TestFullyShardOverlap(FSDPTest):
             comm_stream.wait_stream(torch.get_device_module(device).current_stream())
             with torch.get_device_module(device).stream(comm_stream):
                 torch.get_device_module(device)._sleep(
-                    int(comm_sleep_ms * get_cycles_per_ms())
+                    int(comm_sleep_ms * get_cycles_per_ms(device.type))
                 )
             torch.get_device_module(device).current_stream().wait_stream(comm_stream)
 
@@ -341,7 +344,7 @@ class TestFullyShardOverlap(FSDPTest):
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device)._sleep(
-                int(comm_sleep_ms * get_cycles_per_ms())
+                int(comm_sleep_ms * get_cycles_per_ms(device.type))
             )
             return orig_all_gather_into_tensor(*args, **kwargs)
 
@@ -393,14 +396,14 @@ class Matmul(torch.autograd.Function):
     def forward(ctx, input: torch.Tensor, weight: torch.Tensor, sleep_ms: int):
         ctx.save_for_backward(input, weight)
         ctx.sleep_ms = sleep_ms
-        torch.get_device_module(device)._sleep(int(sleep_ms * get_cycles_per_ms()))
+        device_module._sleep(int(sleep_ms * get_cycles_per_ms(device.type)))
         return input @ weight
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         (input, weight) = ctx.saved_tensors
         torch.get_device_module(device)._sleep(
-            int(2 * ctx.sleep_ms * get_cycles_per_ms())
+            int(2 * ctx.sleep_ms * get_cycles_per_ms(device.type))
         )
         grad_input = grad_output @ weight.T
         grad_weight = input.T @ grad_output
@@ -445,7 +448,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         # One delay stream per process group so that sleeps for different
         # groups (e.g. dp vs efsdp reduce-scatter) execute in parallel,
         # mirroring how real NCCL ops on separate communicators overlap.
-        delay_streams: dict[dist.ProcessGroup, torch.cuda.Stream] = {}
+        delay_streams: dict[dist.ProcessGroup, torch.Stream] = {}
 
         def wrapped(
             fsdp_params,
@@ -469,7 +472,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             ds = delay_streams[reduce_scatter_group]
             ds.wait_event(rs_event)
             with device_module.stream(ds):
-                device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
+                device_module._sleep(int(sleep_ms * get_cycles_per_ms(device.type)))
                 delayed_event = ds.record_event()
             return (rs_input, delayed_event, post_reduce_stream, *rest)
 
@@ -492,6 +495,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device), "_sleep"),
         "Sleep is not supported on this device",
     )
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/4463
     def test_fully_shard_per_param_mesh_training_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
@@ -506,6 +510,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device), "_sleep"),
         "Sleep is not supported on this device",
     )
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/4463
     def test_fully_shard_per_param_mesh_no_grad_input_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=True)
 

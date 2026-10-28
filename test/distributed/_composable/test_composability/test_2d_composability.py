@@ -192,7 +192,12 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
         global_mesh = init_device_mesh(
             device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
-        model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
+        model = Transformer.parallelize(
+            model,
+            global_mesh["tp"],
+            use_seq_parallel=True,
+            local_output_for_attn=(device_type == "xpu"),
+        )
 
         def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
