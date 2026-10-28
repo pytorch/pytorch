@@ -745,6 +745,13 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
+        # assert ops produce no output, so there is nothing to propagate. They
+        # can show up inside other ops' decompositions, which we trace to derive
+        # a strategy, so raising here would make the enclosing op look like it
+        # has no strategy either.
+        if op_schema.op is aten._assert_async.msg:
+            return OutputSharding(None, op_schema)
+
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
         single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
