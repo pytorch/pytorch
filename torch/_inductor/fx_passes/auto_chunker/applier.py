@@ -6,7 +6,7 @@ from typing import Any
 import torch
 from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode
-from torch._inductor.pattern_matcher import rank_agnostic_device
+from torch._inductor.fx_utils import rank_agnostic_device
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -40,6 +40,10 @@ def fake_tensor_prop(gm: GraphModule) -> None:
 
 
 def is_chunking_subgraph_input(node: Node) -> bool:
+    # TODO: under compile-on-one-rank a factory node's device is a current_device()
+    # node, which has no chunking meta, so e.g. a full() in the chunked region is
+    # built at full size here and then chunked, instead of at chunk size in the
+    # subgraph.
     meta = get_chunking_meta(node)
     if meta is None or is_tangent_node(node):
         return False

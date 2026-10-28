@@ -54,16 +54,22 @@ def extract_graph(fx_g, _, graph_cell):
 
 
 class CaptureGraphs(CustomGraphPass):
-    """An inductor custom pass that records the code of every graph it sees."""
+    """An inductor custom pass that records ``fn(graph)`` for every graph it sees."""
 
-    def __init__(self):
+    def __init__(self, fn=lambda graph: graph.python_code("self").src):
+        self.fn = fn
         self.graphs = []
 
     def __call__(self, graph):
-        self.graphs.append(graph.python_code("self").src)
+        self.graphs.append(self.fn(graph))
 
     def uuid(self):
         return None
+
+
+def device_operands(graph):
+    operands = pytree.tree_leaves([(n.args, n.kwargs) for n in graph.nodes])
+    return [a for a in operands if isinstance(a, torch.device)]
 
 
 class TestCompileOnOneRank(DTensorTestBase):
@@ -725,28 +731,20 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         example = [torch.empty(4, device="cuda", requires_grad=training)]
         register_replacement(search, replace, example, trace_fn, patterns)
 
-        replaced, devices, device_nodes_used = [], [], []
         current_device = torch.ops.coor.current_device.default
 
-        class Apply(CustomGraphPass):
-            def __call__(self, graph):
-                replaced.append(patterns.apply(graph))
-                operands = pytree.tree_leaves([(n.args, n.kwargs) for n in graph.nodes])
-                devices.extend(a for a in operands if isinstance(a, torch.device))
-                nodes = graph.find_nodes(op="call_function", target=current_device)
-                device_nodes_used.append(any(n.users for n in nodes))
-
-            def uuid(self):
-                return None
+        def apply(graph):
+            replaced = patterns.apply(graph)
+            nodes = graph.find_nodes(op="call_function", target=current_device)
+            return replaced, device_operands(graph), any(n.users for n in nodes)
 
         torch._dynamo.reset()
         x = torch.randn(4, device="cuda", requires_grad=training)
-        cfg = torch._inductor.config.patch(joint_custom_pre_pass=Apply())
+        capture = CaptureGraphs(apply)
+        cfg = torch._inductor.config.patch(joint_custom_pre_pass=capture)
         with cfg, fresh_cache(), torch.set_grad_enabled(training):
             self.assertEqual(torch.compile(search, backend="inductor")(x), search(x))
-        self.assertEqual(replaced, [1])
-        self.assertEqual(devices, [])
-        self.assertEqual(device_nodes_used, [True])
+        self.assertEqual(capture.graphs, [(1, [], True)])
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -789,23 +787,18 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         def f(x):
             return x[torch.arange(4, device=index_device)]
 
-        iota_devices = []
-
-        class Record(CustomGraphPass):
-            def __call__(self, graph):
-                iota = torch.ops.prims.iota.default
-                nodes = graph.find_nodes(op="call_function", target=iota)
-                iota_devices.extend(n.kwargs["device"] for n in nodes)
-
-            def uuid(self):
-                return None
+        def iota_devices(graph):
+            iota = torch.ops.prims.iota.default
+            nodes = graph.find_nodes(op="call_function", target=iota)
+            return [n.kwargs["device"] for n in nodes]
 
         torch._dynamo.reset()
         x = torch.randn(8, device="cuda")
-        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Record())
+        capture = CaptureGraphs(iota_devices)
+        cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=capture)
         with cfg, fresh_cache():
             self.assertEqual(torch.compile(f, backend="inductor")(x), f(x))
-        (device,) = iota_devices
+        [[device]] = capture.graphs
         self.assertIsInstance(device, torch.fx.Node)
         self.assertIs(device.target, torch.ops.coor.current_device.default)
 
@@ -824,27 +817,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         def f(x, w):
             return ((x * 2) @ w).softmax(dim=-1).sum()
 
-        devices = []
-
-        class Record(CustomGraphPass):
-            def __call__(self, graph):
-                operands = pytree.tree_leaves([(n.args, n.kwargs) for n in graph.nodes])
-                devices.extend(a for a in operands if isinstance(a, torch.device))
-
-            def uuid(self):
-                return None
-
         torch._dynamo.reset()
         metrics.reset()
         x = torch.randn(1024, 16, device="cuda", requires_grad=True)
         w = torch.randn(16, 1024, device="cuda", requires_grad=True)
         x_ref, w_ref = (t.detach().clone().requires_grad_() for t in (x, w))
-        cfg = torch._inductor.config.patch(joint_custom_post_pass=Record())
+        capture = CaptureGraphs(device_operands)
+        cfg = torch._inductor.config.patch(joint_custom_post_pass=capture)
         with cfg, fresh_cache():
             torch.compile(f, backend="inductor")(x, w).backward()
         f(x_ref, w_ref).backward()
         self.assertEqual((x.grad, w.grad), (x_ref.grad, w_ref.grad))
         self.assertEqual(metrics.num_auto_chunking, 1)
+        devices = [d for graph_devices in capture.graphs for d in graph_devices]
         self.assertEqual([d for d in devices if d.type == "cuda"], [])
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")

@@ -15,7 +15,11 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch._inductor.fx_utils import get_node_storage
+from torch._inductor.fx_utils import (
+    get_node_storage,
+    rank_agnostic_device,
+    rank_agnostic_passes,
+)
 from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
@@ -38,8 +42,6 @@ from ..pattern_matcher import (
     Match,
     MULTIPLE,
     PatternMatcherPass as PatternMatcherPassBase,
-    rank_agnostic_device,
-    rank_agnostic_passes,
     register_graph_pattern,
     stable_topological_sort,
 )

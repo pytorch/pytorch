@@ -36,7 +36,6 @@ successful match or a `FailedMatch` object for a failure to match.
 from __future__ import annotations
 
 import contextlib
-import contextvars
 import dataclasses
 import functools
 import importlib
@@ -69,11 +68,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.proxy_tensor import (
-    _coor_device_index_is_current,
-    _coor_enabled,
-    make_fx,
-)
+from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     ShapeEnv,
@@ -92,6 +87,7 @@ from .._subclasses import FakeTensorMode
 from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
+from .fx_utils import rank_agnostic, rank_agnostic_device
 from .lowering import fallback_node_due_to_unsupported_type
 
 
@@ -3157,71 +3153,6 @@ def fx_to_pattern(
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
-
-
-_in_rank_agnostic_passes = contextvars.ContextVar(
-    "_in_rank_agnostic_passes", default=False
-)
-
-
-@contextlib.contextmanager
-def rank_agnostic_passes() -> Generator[None, None, None]:
-    """Mark passes that run on a graph still carrying coor.current_device() nodes.
-
-    Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
-    respecialize_current_device_nodes, so passes inside this window must not bake
-    this rank's device: they get device operands from rank_agnostic_device.
-
-    This is a property of the pipeline phase, not something stored on the graph.
-    Node presence can't tell the phases apart (a graph with no device operands has
-    no such node either before or after), and a GraphModule.meta flag would be lost
-    on every GraphModule(root, graph) rebuild, such as prepare_for_partitioner's
-    right before the joint passes.
-
-    There is deliberately no check on exit that no node holds this rank's device:
-    it can't tell a device a pass inserted from one already in the incoming graph,
-    and would turn the programs below into crashes, where a leak only costs
-    cross-rank cache sharing (post_grad respecializes the device either way).
-
-    TODO: HOP proxy implementations (auto_functionalized, with_effects, ...) build
-    their nodes with create_proxy directly, bypassing make_fx's compile-on-one-rank
-    rewrite. So an explicit torch.device("cuda", idx) passed to e.g. a mutable
-    custom op reaches the joint graph with its index and still splits the FX graph
-    cache per rank.
-    """
-    token = _in_rank_agnostic_passes.set(True)
-    try:
-        yield
-    finally:
-        _in_rank_agnostic_passes.reset(token)
-
-
-def rank_agnostic() -> bool:
-    """Whether anything inserted into the graph must not bake this rank's device."""
-    return _in_rank_agnostic_passes.get() and _coor_enabled()
-
-
-def rank_agnostic_device(
-    graph: torch.fx.Graph, device: torch.device
-) -> torch.device | torch.fx.Node:
-    """The operand to give a node inserted into ``graph`` for ``device``.
-
-    Inside rank_agnostic_passes under compile-on-one-rank, this rank's current
-    accelerator becomes a coor.current_device() node, the one a CooR trace would have
-    emitted. It goes before the first non-placeholder, so it precedes every use and
-    later calls reuse it. It carries meta["val"] like the nodes make_fx creates: the
-    partitioner only lets a device node be recomputed in the backward when it has one.
-    """
-    if not (rank_agnostic() and _coor_device_index_is_current(device)):
-        return device
-    target = torch.ops.coor.current_device.default
-    first = next(n for n in graph.nodes if n.op != "placeholder")
-    if first.target is target:
-        return first
-    with graph.inserting_before(first):
-        node = graph.call_function(target)
-    node.meta["val"] = device
-    return node
 
 
 def _use_current_device_node(gm: torch.fx.GraphModule) -> None:
