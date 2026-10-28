@@ -841,8 +841,8 @@ class _TestTunableMatmulRequest(_TestBenchmarkRequest):
     """Runs a real small matmul so the child's TunableOp manager tunes/records.
 
     Defined here (not the test file) so the TuningProcess child can unpickle
-    it. Lets a ROCm-gated test submit a real BenchmarkJob through a real
-    worker and assert on the results file both processes share.
+    it. Lets a GPU test submit a real BenchmarkJob through a real worker and
+    assert on the results file both processes share.
     """
 
     def benchmark(
