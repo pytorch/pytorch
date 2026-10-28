@@ -358,22 +358,23 @@ def snapshot_settings() -> dict[str, Any]:
     return settings
 
 
-def resolve_filename(device: int) -> str:
-    """The file the runtime's results manager will use for this job.
+def resolve_and_pin_filename(device: int) -> str:
+    """The results file, committed to so the parent cannot later pick another.
 
-    Already initialized: that exact file, whatever device a GEMM runs on.
-    Not yet: the manager picks on first use (GetTuningResultsManager) and the
-    generated wrapper runs the graph under set_device, so the ordinal it bakes
-    in is the graph's device -- this one, not whichever is current at compile
-    time. Resolved here, not in the worker, so the key tracks set_filename and
-    env changes.
+    Assumes _worker_lock is held. Until the manager initializes it is free to
+    choose its own ordinal on first use, so a worker told anything else would
+    write where the runtime never reads -- and a process compiling for two
+    devices would strand one graph's results. Setting it removes the guess:
+    GetTuningResultsManager skips its own derivation once filename_ is set.
     """
-    filename = torch.cuda.tunable.get_filename()
+    tunable = torch.cuda.tunable
+    filename = tunable.get_filename()
     if not filename:
         filename = _insert_device_ordinal(
             os.environ.get("PYTORCH_TUNABLEOP_FILENAME", "tunableop_results.csv"),
             device,
         )
+        tunable.set_filename(filename, insert_device_ordinal=False)
     return filename
 
 
@@ -432,11 +433,7 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         # Inside the try: this reports faults rather than raising, and reading
         # the device can fail just as the benchmark can.
         device = _job_device(job)
-        # The visibility mask is inherited unrewritten, so the same logical
-        # ordinal names the same GPU in the worker.
-        stamped = _StampedJob(
-            job, device, resolve_filename(device), snapshot_settings()
-        )
+        settings = snapshot_settings()
     except Exception as e:  # resolve before the worker: no restart
         # Failed before the worker was involved (no device, no filename): report
         # without touching it. Shutting down here would kill a healthy worker
@@ -446,7 +443,10 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         return Outcome(None, "error")
     try:
         with _worker_lock:
-            worker = _get_worker_locked((device, stamped.filename))
+            # Under the lock: two threads must not pin different filenames.
+            filename = resolve_and_pin_filename(device)
+            stamped = _StampedJob(job, device, filename, settings)
+            worker = _get_worker_locked((device, filename))
             try:
                 worker.put(stamped)
                 return Outcome(worker.get(timeout=timeout), "ok")
