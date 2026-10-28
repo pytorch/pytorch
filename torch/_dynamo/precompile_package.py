@@ -1593,6 +1593,8 @@ class _CapturePackage(CompilePackage):
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
+        # The operators each backend graph calls, by backend id.
+        self.op_names: dict[str, set[tuple[str, str]]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1603,6 +1605,11 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         self.note_compute()
         super()._add_backend_id(backend_id, backend)
+
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        from torch._precompile import _op_names
+
+        self.op_names[backend_id] = _op_names(gm)
 
     def add_resume_function(
         self,
@@ -2111,15 +2118,21 @@ class PrecompileSession(Generic[_P, _R]):
         recorded, so run the session under ``with_fresh_cache()`` (``capture()``
         does) to keep it to this session's compiles.
         """
-        from torch._precompile import _build_multigraph_artifact
+        from torch._precompile import _build_multigraph_artifact, _custom_op_modules
 
         summary = self._gated_summary(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
+        op_names = set().union(*(self._package.op_names.get(b, ()) for b in backends))
         return _build_multigraph_artifact(
-            self._served_entry()[0], backends, summary, self._backend, self._fn
+            self._served_entry()[0],
+            backends,
+            summary,
+            self._backend,
+            self._fn,
+            _custom_op_modules(op_names),
         )
 
 
