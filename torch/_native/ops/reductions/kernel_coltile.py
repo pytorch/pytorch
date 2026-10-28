@@ -358,17 +358,13 @@ def _reduce_col_tile(
 
     # _VEC_MAX decouples vec from compile-time alignment, so key both.
     key = (
-        (
-            "coltile",
-            trait_key,
-            x.dtype,
-            tuple(out_dtypes[:nouts]),
-            align,
-            str(x.device),
-        )
-        + op.cache_sig
-        + (("col_config", cfg),)
-    )
+        "coltile",
+        trait_key,
+        x.dtype,
+        tuple(out_dtypes[:nouts]),
+        align,
+        str(x.device),
+    ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
         [_L.read_only(kernel_x)],
@@ -436,15 +432,11 @@ def _reduce_col_tile(
         )
         pdt = tuple(pp.dtype for pp in parts)
         key2 = (
-            (
-                "coltile2b",
-                trait_key,
-                tuple(out_dtypes[:nouts]),
-                pdt,
-            )
-            + s2.cache_sig
-            + (("col_config", cfg),)
-        )
+            "coltile2b",
+            trait_key,
+            tuple(out_dtypes[:nouts]),
+            pdt,
+        ) + s2.cache_sig
         _launch(s2, key2, parts, kernel_outs)
         return tuple(outs)
 
@@ -484,17 +476,13 @@ def _reduce_col_tile(
 
     pdt = tuple(pp.dtype for pp in parts)
     key2 = (
-        (
-            "coltile2",
-            trait_key,
-            x.dtype,
-            tuple(out_dtypes[:nouts]),
-            pdt,
-            str(x.device),
-        )
-        + op2.cache_sig
-        + (("col_config", cfg),)
-    )
+        "coltile2",
+        trait_key,
+        x.dtype,
+        tuple(out_dtypes[:nouts]),
+        pdt,
+        str(x.device),
+    ) + op2.cache_sig
     build2 = lambda: _compile(op2, *_fake2())  # noqa: E731
     cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
         [_L.read_only(pp) for pp in parts],
