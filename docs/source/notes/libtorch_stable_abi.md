@@ -38,7 +38,7 @@ For complete API documentation of the stable operators, see the [Torch Stable AP
 
 (shim-overhead)=
 ```{note}
-Crossing the ABI boundary through the C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Stable ops that interact with the dispatcher via [`torch_call_dispatcher`](stack-based-apis) will have extra overhead (on the order of a microsecond for a typical op), since each call will box and unbox arguments and returns into their stable counterparts.
+Calling into libtorch through the stable wrappers and C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Stable ops that interact with the dispatcher via [`torch_call_dispatcher`](stack-based-apis) will have extra overhead (on the order of a microsecond for a typical op), partly due to boxing and unboxing arguments and returns into their stable counterparts.
 ```
 
 ### Stable C headers
@@ -79,9 +79,9 @@ runtime and must be called with the GIL held. If you call them from a context th
 may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
 acquire it first.
 
-### Performance Overhead
+### Performance overhead
 
-Using the stable ABI adds a small host-side overhead to each op call, typically a few microseconds depending on your CPU. This comes from registering through the dispatcher (see [dispatcher overhead](dispatcher-overhead)) and from calling into libtorch through the C shims (see [shim overhead](shim-overhead)). The overhead is negligible next to a sizable GPU kernel and disappears after warmup under graph capture such as CUDA Graphs, but it can be noticeable in eager mode for kernels that are already fast.
+Using the stable ABI adds a small host-side overhead to each op call. The overhead is negligible next to a sizable GPU kernel and disappears after warmup under graph capture such as CUDA Graphs, but it can be noticeable in eager mode for kernels that are already fast. See [dispatcher overhead](dispatcher-overhead) and [shim overhead](shim-overhead).
 
 
 ## Migrating your kernel to the LibTorch stable ABI
@@ -92,7 +92,7 @@ Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI st
 
 (dispatcher-overhead)=
 ```{note}
-Like `TORCH_LIBRARY`, `STABLE_TORCH_LIBRARY` registers your kernels with the PyTorch dispatcher so that they behave like any ATen op, with out-of-the-box support for autograd, autocast, `torch.compile`, the profiler, and other dispatcher features. Each call through the dispatcher typically adds under a microsecond to a few microseconds of overhead compared to binding a C++ function directly to Python (e.g. with pybind11).
+`TORCH_LIBRARY` and `STABLE_TORCH_LIBRARY` register your kernels with the PyTorch dispatcher so that they behave like any ATen op, with support for autograd, autocast, `torch.compile`, the profiler, and other dispatcher features. Compared to binding a C++ function directly to Python (e.g., with pybind11 or nanobind), each call through the dispatcher via `TORCH_LIBRARY` typically adds under a microsecond to a few microseconds of overhead. `STABLE_TORCH_LIBRARY` adds a smaller cost on top of this to convert arguments and returns between stable and unstable types.
 ```
 
 While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers). This means that your extension should no longer use any utilities from the `at::` or `c10::` namespaces but instead use their replacements in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
