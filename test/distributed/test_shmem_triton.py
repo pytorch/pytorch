@@ -457,8 +457,10 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
-        NVSHMEM_SIGNAL_SET = 9  # value defined by NVSHMEM for atomic set
-        SIGNAL_VAL = 1  # Signal completion value
+        NVSHMEM_SIGNAL_SET = (
+            0 if TEST_WITH_ROCM else 9
+        )  # value defined by NVSHMEM for atomic set
+        SIGNAL_VAL = 1 + NVSHMEM_SIGNAL_SET  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
@@ -610,7 +612,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         # NVSHMEM constants from documentation
         NVSHMEM_CMP_EQ = 0  # equal comparison
-        NVSHMEM_SIGNAL_SET = 9  # atomic set operation
+        NVSHMEM_SIGNAL_SET = 0 if TEST_WITH_ROCM else 9  # atomic set operation
 
         # Message configuration
         msg_size_bytes = 8
@@ -618,7 +620,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         numel = msg_size_bytes // dtype.itemsize
 
         val_to_put = 123  # arbitrary test value
-        COMPLETION_FLAG_VAL = 1
+        COMPLETION_FLAG_VAL = 1 + NVSHMEM_SIGNAL_SET
 
         # Producer (rank 0) prepares the data to send
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val_to_put)
