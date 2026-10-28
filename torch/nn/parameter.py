@@ -56,6 +56,9 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         ) and not torch._C._is_fake_tensor(data):
             # For ease of BC maintenance, keep this path for standard Tensor.
             # Eventually (tm), we should change the behavior for standard Tensor to match.
+            # C++ fake tensors take the path below instead, giving the same
+            # marker form as a Python FakeTensor Parameter; _make_subclass also
+            # fails for them under fake_tensor_propagate_real_tensors.
             return torch.Tensor._make_subclass(cls, data, requires_grad)
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
@@ -76,6 +79,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
     # Note: the 3 methods below only apply to standard Tensor. Parameters of custom tensor types
     # are still considered that custom tensor type and these methods will not be called for them.
+    # The same holds for fake tensor Parameters made by the marker path in __new__.
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]

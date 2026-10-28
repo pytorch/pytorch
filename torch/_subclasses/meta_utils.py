@@ -1116,6 +1116,9 @@ class MetaConverter(Generic[_TensorT]):
             " will perform operations on them which need fake tensor mode to"
             " be active.  You will segfault if you are in a no_dispatch() block."
         )
+        # This guards the ops run on new Python fakes. A C++ fake mode (Fake in
+        # the include set) converts correctly even with the Fake key excluded,
+        # so the check does not apply to it.
         if torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
         ) and not torch._C._dispatch_tls_is_dispatch_key_included(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
@@ -49,6 +50,7 @@ class TORCH_API ThreadLocalState {
   c10::impl::LocalDispatchKeySet dispatch_key_;
 
   std::shared_ptr<c10::FakeTensorMode> fake_tensor_mode_state_;
+  bool fake_in_kernel_invocation_state_;
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
@@ -68,6 +70,8 @@ class TORCH_API ThreadLocalState {
 
   // TLS for AutogradModes
   AutogradState autograd_tls_;
+
+  std::optional<c10::SafePyObject> graph_exec_group_state_;
 
   // TLS for enable_torch_dispatch_mode
   c10::impl::TorchDispatchModeTLS torch_dispatch_mode_state_;

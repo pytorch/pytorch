@@ -30,6 +30,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -102,6 +103,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -174,7 +176,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (Py_ssize_t i = 0; i < num_classes; i++) {
+  for (const auto i : c10::irange(num_classes)) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
@@ -3519,6 +3521,14 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
+  // See Note [in_kernel_invocation].
+  torch::impl::py_context_manager<c10::impl::FakeInKernelInvocationGuard>(
+      py_module, "_CppFakeInKernelInvocation");
+
+  py_module.def("_cpp_fake_in_kernel_invocation", []() {
+    return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
+  });
+
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
@@ -3578,55 +3588,9 @@ Call this whenever a new thread is created in order to propagate values from
             !tensor.is_fake() &&
                 !tensor.key_set().has(c10::DispatchKey::Python),
             "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
-        auto* storage = tensor.storage().unsafeGetStorageImpl();
-        return c10::impl::cow::is_cow_data_ptr(
-            storage->_mutable_data_ptr_no_checks());
+        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
-
-  py_module.def(
-      "_cow_record_done",
-      [](const at::Tensor& tensor) {
-        TORCH_CHECK(
-            !tensor.is_fake() &&
-                !tensor.key_set().has(c10::DispatchKey::Python),
-            "_cow_record_done is not defined for Python tensor subclasses or FakeTensors");
-        c10::impl::cow::record_done(*tensor.storage().unsafeGetStorageImpl());
-      },
-      py::arg("tensor"),
-      R"doc(
-Record completion of earlier CUDA COW uses on the current stream without blocking the CPU.
-
-First join all earlier uses through this tensor, storage aliases (including views),
-and saved pointers onto the current stream. Include uses before the first lazy clone
-and materializing copies. Serialize this call with all host accesses to that storage;
-GPU waits do not serialize host threads. Missing a use can cause data corruption.
-
-Completion releases the old reference retained after materialization, allowing siblings
-to steal it. The materialized tensor remains usable on its new allocation.
-
-Completion is final for each reference; repeated calls are no-ops. If the current
-reference is COW, later data access (including ``const_data_ptr()``) or lazy cloning
-raises, including through storage aliases. Do not submit further work through saved
-pointers to that reference. Independent lazy clones have separate completion state.
-
-Completion must stay within the context's capture, or outside capture for an eager
-context. It has no effect on CPU storage or storage without COW references.
-
-Args:
-    tensor (Tensor): Tensor whose storage's earlier COW uses are complete on
-      the current stream.
-
-Example::
-
-    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> import torch
-    >>> x = torch.ones(1024, device="cuda")
-    >>> y = x._lazy_clone()
-    >>> x.add_(1)  # Materializes x; its storage retains the old allocation.
-    >>> torch._C._cow_record_done(x)
-    >>> y.add_(2)  # Can now steal the original allocation without copying.
-)doc");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
