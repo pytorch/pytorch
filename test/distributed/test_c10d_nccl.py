@@ -4395,7 +4395,6 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(work, seq)
 
 
-@xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
 class NcclErrorHandlingTest(MultiProcessTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4458,6 +4457,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_but_pass_in_sandcastle("Test does not pass when run locally")
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_nccl_errors_nonblocking(self):
         self._reduce_timeout()
         # Note: we unset and restore TORCH_NCCL_ASYNC_ERROR_HANDLING for this test
@@ -4494,6 +4494,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_nccl_errors_blocking(self):
         self._reduce_timeout()
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -4532,6 +4533,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_nccl_blocking_wait_with_barrier(self):
         self._reduce_timeout()
         self._test_barrier_error()
@@ -4539,6 +4541,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_nccl_non_blocking_wait_with_barrier(self):
         self._reduce_timeout()
         # test the barrier behavior in the non blocking wait setting
@@ -4556,6 +4559,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_error_detection_and_propagation(self):
         def assert_fut_success(fut):
             self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
@@ -4614,6 +4618,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_restart_pg_after_error(self):
         self._reduce_timeout()
         # test the barrier behavior in the non blocking wait setting
@@ -4704,6 +4709,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(3)
+    @xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
     def test_invalid_nccl_blocking_wait_env(self):
         self._run_invalid_nccl_blocking_wait_env("abc")
         self._run_invalid_nccl_blocking_wait_env("-1")
@@ -6407,15 +6413,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         # Set name
         pthread_setname_np(tid, name.encode())
 
-    # timing_enabled=True / include_collectives=True on XPU: XCCL flight recorder does not mark works completed: #torch-xpu-ops/5381
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
-    @parametrize(
-        "timing_enabled", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
-    )
-    @parametrize(
-        "include_collectives", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
-    )
+    @parametrize("timing_enabled", [True, False])
+    @parametrize("include_collectives", [True, False])
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     def test_short_json(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
