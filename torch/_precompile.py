@@ -1992,23 +1992,36 @@ _TORCH_OP_HELPERS = tuple(
 )
 
 
-def _torch_op_module(op_name: str, overload: str) -> str | None:
-    """The torch module whose import registers ``op_name``, if torch defines it from
-    Python."""
+def _file_modules() -> dict[str, str]:
+    """The importable modules in ``sys.modules`` by the real path of their file."""
+    modules: dict[str, str] = {}
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if name == "__main__" or getattr(module, "__spec__", None) is None:
+            continue
+        if isinstance(path, str):
+            modules.setdefault(os.path.realpath(path), name)
+    return modules
+
+
+def _torch_op_module(
+    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+) -> str | None:
+    """The module whose import registers ``op_name``, if a ``torch.library.Library``
+    created in a loaded module defines it. ``file_modules`` is ``_file_modules``."""
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
-    if path.startswith(_TORCH_OP_HELPERS):
+    if not path or path.startswith(_TORCH_OP_HELPERS):
         return None
-    if not (path.startswith(_TORCH_DIR + os.sep) and path.endswith(".py")):
-        return None
-    relpath = os.path.relpath(path.removesuffix(".py"), os.path.dirname(_TORCH_DIR))
-    return relpath.replace(os.sep, ".").removesuffix(".__init__")
+    return file_modules().get(os.path.realpath(path))
 
 
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     """The modules registering the ops among ``op_names``."""
+    file_modules = functools.cache(_file_modules)
     modules = {
-        _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload)
+        _custom_op_module(op_name, overload)
+        or _torch_op_module(op_name, overload, file_modules)
         for op_name, overload in op_names
     }
     return tuple(sorted(m for m in modules if m is not None))
@@ -2027,8 +2040,8 @@ def _write_custom_op_imports(
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
     # path imports the module that registers the op. The recorded module is a best
-    # guess (and a user op defined with torch.library.Library or torch.library.define
-    # has none), so the imports are best effort and the ops themselves are checked.
+    # guess (and an op defined with torch.library.define or from __main__ has
+    # none), so the imports are best effort and the ops themselves are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
