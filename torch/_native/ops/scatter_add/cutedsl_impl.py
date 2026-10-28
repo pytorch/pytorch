@@ -48,9 +48,10 @@ _SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 # kFastScatterMinSliceBytes (IndexKernelUtils.h).
 _MIN_SLICE_BYTES = 256
 
-# 16B alignment for `src.data_ptr()` and `src.stride(0) * elem`: required
-# for the LDG.128 / tile-mode TMA load of `src` and the row-start 16B
-# boundary that LDG.128 reads from. Applies to both paths.
+# 16B alignment for `src.data_ptr()` and `src.stride(0) * elem`, on both
+# paths. TMA's tile-mode load requires it. vec-scatter's loads currently
+# compile to scalar LDGs, but sharing the contract lets them be widened to
+# LDG.128 (e.g. via cute.assume) without changing which calls route there.
 _SRC_ALIGN_BYTES = 16
 # Path-specific destination alignment. TMA: cp.reduce.async.bulk gmem
 # operand needs 16B base + stride. vec-scatter: scalar fp32 atomicAdd /
@@ -181,9 +182,8 @@ def _alignment_contract_ok(
 ) -> bool:
     """Alignment of effective ptrs and outer row strides.
 
-    The src side is always read via 16B-wide vector ops (LDG.128 /
-    tile-mode TMA load), so its data_ptr and per-row stride must be
-    16B-aligned. The dst side's requirement is path-specific:
+    The src data_ptr and per-row stride must be 16B-aligned on both paths
+    (see ``_SRC_ALIGN_BYTES``). The dst side's requirement is path-specific:
 
       - TMA: ``cp.reduce.async.bulk`` writes the gmem operand via a TMA
         descriptor that requires 16B alignment of both base and stride.
