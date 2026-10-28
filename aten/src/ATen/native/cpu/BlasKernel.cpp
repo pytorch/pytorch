@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
@@ -99,6 +100,18 @@ auto sum(int64_t N, Func f) {
   return partial_sums[0];
 }
 
+// Half and BFloat16 have vectorized fp32-accumulating dot kernels (compute_dot
+// below), and gemm_core_ serves every layout of their gemm through gemm_transa_
+// on top of them. The naive kernels remain for the other reduced types.
+#if defined(C10_MOBILE)
+template <typename scalar_t>
+constexpr bool has_xf16_dot_kernel = false;
+#else
+template <typename scalar_t>
+constexpr bool has_xf16_dot_kernel =
+    std::is_same_v<scalar_t, at::Half> || std::is_same_v<scalar_t, at::BFloat16>;
+#endif
+
 template <typename scalar_t, typename opmath_t, typename out_t>
 __ubsan_ignore_signed_int_overflow__
 std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
@@ -136,7 +149,7 @@ gemm_notrans_(
   }
 }
 
-// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
+// Reduced-precision types without a dot kernel (see has_xf16_dot_kernel).
 template <typename scalar_t, typename opmath_t, typename out_t>
 std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_notrans_(
@@ -168,7 +181,8 @@ gemm_notrans_(
 }
 
 template <typename scalar_t, typename opmath_t, typename out_t>
-void gemm_transa_(
+std::enable_if_t<!has_xf16_dot_kernel<scalar_t>, void>
+gemm_transa_(
     TransposeType transa,
     int64_t m, int64_t n, int64_t k,
     opmath_t alpha,
@@ -249,7 +263,7 @@ gemm_transb_(
   gemm_transb_impl(transb, m, n, k, alpha, a, lda, b, ldb, c, ldc);
 }
 
-// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
+// Reduced-precision types without a dot kernel (see has_xf16_dot_kernel).
 template <typename scalar_t, typename opmath_t, typename out_t>
 std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 gemm_transb_(
@@ -333,109 +347,91 @@ void gemm_transab_(
   }
 }
 
-#if defined(__aarch64__) && !defined(C10_MOBILE)
-template <>
-void gemm_notrans_(
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    float alpha,
-    const at::Half* a,
-    int64_t lda,
-    const at::Half* b,
-    int64_t ldb,
-    float beta,
-    at::Half* c,
-    int64_t ldc) {
-  // c += alpha * (a @ b)
-  if (n == 1 && beta == 0.0 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, a, lda, b, 1, 0.0, c, 1);
-    return;
-  }
-  for (const auto i : c10::irange(m)) {
-    for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> float {
-        return float(c10::detail::fp16_from_bits(a[l * lda + i].x)) *
-            float(c10::detail::fp16_from_bits(b[j * ldb + l].x));
-      });
-      if (beta == 0) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
-      }
-    }
-  }
-}
-#endif // defined(__aarch64__) && !defined(C10_MOBILE)
-
 #if !defined(C10_MOBILE)
 float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
   return at::native::CPU_CAPABILITY::fp16_dot_with_fp32_arith(
       a, b, len);
 }
 
-template <>
-void gemm_transa_(
-    TransposeType transa,
-    int64_t m, int64_t n, int64_t k,
-    float alpha,
-    const at::Half *a, int64_t lda,
-    const at::Half *b, int64_t ldb,
-    float beta,
-    at::Half *c, int64_t ldc) {
-  // c = alpha * (a.T @ b) + beta * c
-  if (n == 1 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
-    return;
-  }
-  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
-    const auto *a_ = a + begin * lda;
-    for (const auto i : c10::irange(begin, end)) {
-      const auto *b_ = b;
-      for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(a_, b_, k);
-        b_ += ldb;
-        if (beta == 0) {
-          c[j*ldc+i] = alpha*dot;
-        } else {
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
-        }
-      }
-      a_ += lda;
-    }
-  });
-}
-
 float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
   return at::native::CPU_CAPABILITY::bf16_dot_with_fp32_arith(a, b, len);
 }
 
-template <>
-void gemm_transa_(
+template <typename scalar_t, typename opmath_t, typename out_t>
+std::enable_if_t<has_xf16_dot_kernel<scalar_t>, void>
+gemm_transa_(
     TransposeType transa,
     int64_t m, int64_t n, int64_t k,
-    float alpha,
-    const at::BFloat16 *a, int64_t lda,
-    const at::BFloat16 *b, int64_t ldb,
-    float beta,
-    at::BFloat16 *c, int64_t ldc) {
+    opmath_t alpha,
+    const scalar_t *a, int64_t lda,
+    const scalar_t *b, int64_t ldb,
+    opmath_t beta,
+    out_t *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+  if constexpr (std::is_same_v<scalar_t, at::Half> && std::is_same_v<out_t, at::Half>) {
+    if (n == 1 && alpha == 1.0) {
+      at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
+      return;
+    }
+  }
+  auto store = [&](int64_t i, int64_t j, opmath_t dot) C10_ALWAYS_INLINE_ATTRIBUTE {
+    if (beta == 0) {
+      c[j*ldc+i] = alpha*dot;
+    } else {
+      c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+    }
+  };
+  // Split the longer side of c across threads: c is column-major, so splitting
+  // rows when m is small has threads write interleaved bytes of the same cache
+  // lines. Grains are sized in dots so small problems skip the thread fork.
+  if (n >= m) {
+    const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, m * k));
+    parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
+      const auto *b_ = b + begin * ldb;
+      for (const auto j : c10::irange(begin, end)) {
+        const auto *a_ = a;
+        for (const auto i : c10::irange(m)) {
+          store(i, j, compute_dot(a_, b_, k));
+          a_ += lda;
+        }
+        b_ += ldb;
+      }
+    });
+    return;
+  }
+  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, n * k));
+  parallel_for(0, m, grain, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
       const auto *b_ = b;
       for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(a_, b_, k);
+        store(i, j, compute_dot(a_, b_, k));
         b_ += ldb;
-        if (beta == 0) {
-          c[j*ldc+i] = alpha*dot;
-        } else {
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
-        }
       }
       a_ += lda;
     }
   });
+}
+
+// Re-lays out a column-major (rows x k, leading dimension ld) operand so that each
+// row is contiguous over k, which is how gemm_transa_ reads both of its operands.
+template <typename scalar_t>
+std::unique_ptr<scalar_t[]> pack_k_contiguous(int64_t rows, int64_t k, const scalar_t* src, int64_t ld) {
+  std::unique_ptr<scalar_t[]> dst(new scalar_t[rows * k]);
+  // 32 two-byte elements span one cache line on both the strided and the contiguous side.
+  constexpr int64_t kBlock = 32;
+  const int64_t grain = std::max<int64_t>(kBlock, at::internal::GRAIN_SIZE / std::max<int64_t>(1, k));
+  parallel_for(0, rows, grain, [&](int64_t begin, int64_t end) {
+    for (int64_t l0 = 0; l0 < k; l0 += kBlock) {
+      const int64_t l1 = std::min(k, l0 + kBlock);
+      for (const auto r : c10::irange(begin, end)) {
+        for (const auto l : c10::irange(l0, l1)) {
+          dst[r * k + l] = src[r + l * ld];
+        }
+      }
+    }
+  });
+  return dst;
 }
 #endif // !defined(C10_MOBILE)
 
@@ -448,6 +444,35 @@ void gemm_core_(
     const scalar_t *b, int64_t ldb,
     opmath_t beta,
     out_t *c, int64_t ldc) {
+  if constexpr (has_xf16_dot_kernel<scalar_t>) {
+#if defined(__aarch64__)
+    if constexpr (std::is_same_v<scalar_t, at::Half> && std::is_same_v<out_t, at::Half>) {
+      if (transa == TransposeType::NoTranspose && transb == TransposeType::NoTranspose &&
+          n == 1 && beta == 0.0 && alpha == 1.0) {
+        at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, a, lda, b, 1, 0.0, c, 1);
+        return;
+      }
+    }
+#endif
+    // gemm_transa_ is the one vectorized, parallel kernel for these types. Repack the
+    // operands it cannot read directly and use it for every layout; the repack moves
+    // O(m*k + k*n) elements against O(m*n*k) compute. Below oneDNN's tiny-problem
+    // bound (see mkldnn_gemm) the naive loops are as fast, so leave them be.
+    if (m * n * k > 16 * 16 * 16) {
+      std::unique_ptr<scalar_t[]> a_packed, b_packed;
+      if (transa == TransposeType::NoTranspose) {
+        a_packed = pack_k_contiguous(m, k, a, lda);
+        a = a_packed.get();
+        lda = k;
+      }
+      if (transb != TransposeType::NoTranspose) {
+        b_packed = pack_k_contiguous(n, k, b, ldb);
+        b = b_packed.get();
+        ldb = k;
+      }
+      return gemm_transa_(TransposeType::Transpose, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    }
+  }
   if (transa == TransposeType::NoTranspose &&
       transb == TransposeType::NoTranspose) {
     return gemm_notrans_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);

@@ -9621,6 +9621,29 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         check_correctness(torch.dot, torch.bfloat16, a, b)
         check_correctness(torch.dot, torch.half, a, b)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_reduced_precision_without_mkldnn(self, device, dtype):
+        # With oneDNN unavailable (ISA gate or disabled), bf16/fp16 gemm runs on the ATen
+        # kernels in cpu/BlasKernel.cpp, which repack operands for every transpose layout.
+        # Cover all layouts, alpha/beta, size-1 dims and sizes that are not multiples of
+        # the repack block, against an fp32 reference.
+        def make(rows, cols, transpose):
+            if transpose:
+                return make_tensor((cols, rows), dtype=dtype, device=device, low=-1, high=1).t()
+            return make_tensor((rows, cols), dtype=dtype, device=device, low=-1, high=1)
+
+        tol = 1e-2 if dtype == torch.bfloat16 else 2e-3
+        shapes = [(1, 65, 33), (7, 65, 33), (64, 33, 300), (129, 65, 33), (200, 1, 33), (129, 130, 1)]
+        scalings = ((1, 0), (0.5, 2))
+        with torch.backends.mkldnn.flags(enabled=False):
+            for (m, n, k), ta, tb, (alpha, beta) in product(shapes, (False, True), (False, True), scalings):
+                a, b, c = make(m, k, ta), make(k, n, tb), make(m, n, False)
+                ref = torch.addmm(c.float(), a.float(), b.float(), beta=beta, alpha=alpha)
+                out = torch.addmm(c, a, b, beta=beta, alpha=alpha)
+                self.assertEqual(out.float(), ref, atol=tol, rtol=tol)
+                self.assertEqual((a @ b).float(), a.float() @ b.float(), atol=tol, rtol=tol)
+
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize("transpose_a", [True, False])
     @parametrize("transpose_b", [True, False])
