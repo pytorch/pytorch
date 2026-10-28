@@ -19,7 +19,7 @@ from torch.fx import GraphModule
 from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
-from ...select_algorithm import autotune_select_algorithm
+from ...select_algorithm import autotune_select_algorithm, RuntimeFloat
 from ...virtualized import V
 from .aux_vectorization import (
     DEFAULT_MASK_MOD_VEC_SIZE,
@@ -405,7 +405,7 @@ def create_flex_flash_attention_kernel(
     key: TensorBox,
     value: TensorBox,
     block_mask: tuple[Any, ...],
-    scale: float,
+    scale: RuntimeFloat | float,
     kernel_options: dict[str, Any],
     subgraph_buffer: SubgraphResults,
     mask_graph_buffer: SubgraphResults,
@@ -669,7 +669,7 @@ def create_flex_flash_attention_backward_kernel(
     logsumexp: TensorBox,
     grad_out: TensorBox,
     grad_logsumexp: TensorBox | None,
-    scale: float,
+    scale: RuntimeFloat | float,
     kernel_options: dict[str, Any],
     sparse_q_block_size: int,
     sparse_kv_block_size: int,

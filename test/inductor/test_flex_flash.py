@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -2706,6 +2707,84 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self._run_dynamic_test(
             seq_lens=[128, 256, 512], block_mask_factory=block_mask_factory
         )
+
+    @xfailIfSM8X
+    def test_dynamic_symbolic_scale_is_runtime(self):
+        """A scale derived from dynamic sizes is computed at runtime, not specialized."""
+
+        def default_scale(x):
+            return None
+
+        def seq_len_scale(x):
+            return 8.0 / x.shape[1]
+
+        def log_scale(x):
+            # Printed with math.log2 in the generated module.
+            return 1.0 / math.log2(x.shape[1])
+
+        for scale_fn in (default_scale, seq_len_scale, log_scale):
+
+            def attention(x, backend):
+                # Deriving the head dim from a dynamic size makes the default scale symbolic.
+                q = x.view(2, x.shape[1], -1, 64).transpose(1, 2)
+                kernel_options = {"BACKEND": backend}
+                scale = scale_fn(x)
+                return flex_attention(
+                    q, q, q, scale=scale, kernel_options=kernel_options
+                )
+
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend("inductor")
+            compiled = torch.compile(attention, backend=counter, dynamic=True)
+            with self.subTest(scale=scale_fn.__name__):
+                for seq_len in (128, 256, 512):
+                    self._check_symbolic_scale(compiled, attention, seq_len)
+                # One graph per backend; the scale does not specialize the sequence length.
+                self.assertEqual(counter.frame_count, 2)
+
+    def _check_symbolic_scale(self, compiled, attention, seq_len):
+        x = torch.randn((2, seq_len, 256), device="cuda", dtype=torch.float16)
+        x.requires_grad_()
+        x_ref = x.detach().float().requires_grad_()
+        out_flash = compiled(x, "FLASH")
+        out_triton = compiled(x, "TRITON")
+        out_ref = attention(x_ref, "TRITON")
+
+        grad = torch.randn_like(out_ref)
+        (dx_flash,) = torch.autograd.grad(out_flash, x, grad.half())
+        (dx_triton,) = torch.autograd.grad(out_triton, x, grad.half())
+        (dx_ref,) = torch.autograd.grad(out_ref, x_ref, grad)
+        for flash, triton, ref in (
+            (out_flash, out_triton, out_ref),
+            (dx_flash, dx_triton, dx_ref),
+        ):
+            # Same criterion as flash_vs_triton: FLASH error is at most 2x Triton's,
+            # plus twice the rounding noise of ref's magnitude (the +0.3-0.3 round trip).
+            atol = 2 * (ref + 0.3 - 0.3 - ref).abs().max().item()
+            triton_error = (triton.float() - ref).abs().max().item()
+            flash_error = (flash.float() - ref).abs().max().item()
+            self.assertLessEqual(flash_error, 2 * triton_error + atol)
+
+    @torch._inductor.config.patch({"graph_partition": True, "triton.cudagraphs": True})
+    def test_dynamic_scale_from_unrelated_tensor_graph_partition(self):
+        """The partition receives the size symbols the host-computed scale uses."""
+
+        def fn(x, y):
+            q = x.view(1, x.shape[1], -1, 64).transpose(1, 2)
+            kernel_options = {"BACKEND": "FLASH"}
+            scale = 1.0 / y.shape[0]
+            return flex_attention(q, q, q, scale=scale, kernel_options=kernel_options)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for seq_len, n in ((128, 7), (256, 13)):
+            x = torch.randn(1, seq_len, 256, device="cuda", dtype=torch.float16)
+            y = torch.randn(n)
+            ref = fn(x.float(), y)
+            torch.testing.assert_close(
+                compiled(x, y).float(), ref, atol=2e-2, rtol=2e-2
+            )
+        self.assertEqual(counter.frame_count, 1)
 
     def test_dynamic_batch_size(self):
         """Test dynamic batch sizes."""

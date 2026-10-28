@@ -6760,8 +6760,14 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T],
         template: Any,
         mutated_inputs: Iterable[IRNode] | None = None,
+        runtime_float_values: Sequence[sympy.Expr] = (),
     ) -> None:
-        super().__init__(layout, inputs, make_kernel_render)
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            runtime_float_values=runtime_float_values,
+        )
         self.template = template
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]

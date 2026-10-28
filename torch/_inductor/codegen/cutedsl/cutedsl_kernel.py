@@ -253,6 +253,7 @@ class CuteDSLTemplateKernel(Kernel):
         imports.splice(
             """
             import torch
+            import math
             import cutlass
             import cutlass.cute as cute
             from cutlass.cute.runtime import from_dlpack
@@ -276,9 +277,20 @@ class CuteDSLTemplateKernel(Kernel):
         return params.getvalue()
 
     def render(self, template, **kwargs):
-        from torch._inductor.select_algorithm import PartialRender
+        from torch._inductor.select_algorithm import PartialRender, RuntimeFloat
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        # Symbolic runtime floats are computed by the template's host-side Python
+        # from the kernel's size args, so they are not constexprs.
+        constexpr_kwargs = {}
+        for name, val in kwargs.items():
+            if isinstance(val, RuntimeFloat):
+                val = val.unwrap_if_number()
+            if isinstance(val, RuntimeFloat):
+                expr = self.rename_indexing(sympy.sympify(val.value))
+                kwargs[name] = f"float({PythonPrinter().doprint(expr)})"
+            else:
+                kwargs[name] = constexpr_kwargs[name] = val
         self._template_kwargs = dict(kwargs)
         self.aux_scalar_bindings = CuteDSLAuxScalarBindings(
             tuple(kwargs.get("AUX_SCALAR_SYMBOLS", ()))
@@ -287,7 +299,7 @@ class CuteDSLTemplateKernel(Kernel):
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
-            "gen_defines": lambda: self.gen_defines(**kwargs),
+            "gen_defines": lambda: self.gen_defines(**constexpr_kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
             "add_tensor_inputs": self.add_tensor_inputs,

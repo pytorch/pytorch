@@ -6588,6 +6588,115 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
 
+    def _check_symbolic_scale(self, device, attention, cases, expected_frames):
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(
+            attention, backend=counter, fullgraph=True, dynamic=True
+        )
+        # CPU and MPS flex attention are inference-only, and MPS has no float64.
+        requires_grad = device not in ("cpu", "mps")
+        gold_device = "cpu" if device == "mps" else device
+        for tokens, head_dim in cases:
+            x = torch.randn(1, tokens, 384, device=device, requires_grad=requires_grad)
+            x_ref = x.detach().clone().requires_grad_(requires_grad)
+            x_gold = x.detach().to(gold_device, torch.float64)
+            x_gold.requires_grad_(requires_grad)
+            with torch.set_grad_enabled(requires_grad):
+                out = compiled(x, head_dim)
+                out_ref = attention(x_ref, head_dim)
+                out_gold = attention(x_gold, head_dim)
+            self._check_equal(out_gold, out_ref, out, 10.0, "Out")
+            if requires_grad:
+                for t in (out, out_ref, out_gold):
+                    t.sum().backward()
+                self._check_equal(x_gold.grad, x_ref.grad, x.grad, 10.0, "Grad_X")
+
+        self.assertEqual(counter.frame_count, expected_frames)
+
+    @supported_platform
+    @temp_float32_matmul_precision("highest")
+    def test_dynamic_shapes_symbolic_default_scale(self, device):
+        # The default scale 1/sqrt(head_dim) is symbolic when head_dim is derived
+        # from a dynamic size.
+        def attention(x, head_dim):
+            q = x.view(1, x.shape[1], -1, head_dim).transpose(1, 2)
+            return flex_attention(q, q, q)
+
+        # Head dim is static, so only the head dim change recompiles. A non-power-of-2
+        # head dim checks that the host-computed scale matches eager.
+        cases = ((128, 64), (256, 64), (128, 96))
+        self._check_symbolic_scale(device, attention, cases, expected_frames=2)
+
+    @supported_platform
+    @temp_float32_matmul_precision("highest")
+    @common_utils.parametrize("cpp_wrapper", [False, True])
+    def test_dynamic_shapes_symbolic_scale_is_runtime(self, device, cpp_wrapper):
+        if cpp_wrapper and device in ("cpu", "mps"):
+            self.skipTest("covers the GPU launcher's host-computed float arg")
+
+        def attention(x, head_dim):
+            q = x.view(1, x.shape[1], -1, head_dim).transpose(1, 2)
+            return flex_attention(q, q, q, scale=8.0 / x.shape[1])
+
+        # GPU templates get the scale as a host-computed float arg, so one graph
+        # serves every length. CPU and MPS bake it in behind a value guard, so each
+        # length recompiles and must still match eager.
+        cases = ((128, 64), (256, 64), (384, 64))
+        frames = len(cases) if device in ("cpu", "mps") else 1
+        with config.patch(cpp_wrapper=cpp_wrapper):
+            self._check_symbolic_scale(device, attention, cases, expected_frames=frames)
+
+    @supported_platform
+    @skip_on_cpu  # the CPU template does not support PRESCALE_QK
+    @skip_on_mps
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_prescale_qk_scale(self, device, dynamic):
+        # With static shapes the default scale is a constexpr; with dynamic shapes
+        # and a derived head dim it is a host-computed runtime arg.
+        def attention(x):
+            q = x.view(1, x.shape[1], -1, 64).transpose(1, 2)
+            return flex_attention(q, q, q, kernel_options={"PRESCALE_QK": True})
+
+        x = torch.randn(1, 256, 256, device=device, dtype=torch.bfloat16)
+        x.requires_grad_()
+        x_ref = x.detach().clone().requires_grad_()
+        x_gold = x.detach().double().requires_grad_()
+        out, (code, *_) = run_and_get_code(
+            torch.compile(attention, fullgraph=True, dynamic=dynamic), x
+        )
+        scale_def = "SM_SCALE = tl.full(" if dynamic else "SM_SCALE : tl.constexpr"
+        FileCheck().check(scale_def).run(code)
+        out_ref, out_gold = attention(x_ref), attention(x_gold)
+        for t in (out, out_ref, out_gold):
+            t.sum().backward()
+        # PRESCALE_QK trades accuracy for speed.
+        self._check_equal(out_gold, out_ref, out, 20.0, "Out")
+        self._check_equal(x_gold.grad, x_ref.grad, x.grad, 20.0, "Grad_X")
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # no backward
+    @config.patch({"graph_partition": True, "triton.cudagraphs": True})
+    def test_dynamic_scale_from_unrelated_tensor_graph_partition(self, device):
+        # The partition must receive the size symbols the host-computed scale uses,
+        # even when no attention input depends on them.
+        def fn(x, y):
+            q = x.view(1, x.shape[1], -1, 64).transpose(1, 2)
+            return flex_attention(q, q, q, scale=1.0 / y.shape[0])
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for tokens, n in ((128, 7), (256, 13)):
+            x = torch.randn(1, tokens, 256, device=device, requires_grad=True)
+            y = torch.randn(n, device="cpu")
+            x_ref = x.detach().clone().requires_grad_()
+            out, out_ref = compiled(x, y), fn(x_ref, y)
+            out.sum().backward()
+            out_ref.sum().backward()
+            torch.testing.assert_close(out, out_ref, atol=2e-2, rtol=2e-2)
+            torch.testing.assert_close(x.grad, x_ref.grad, atol=2e-2, rtol=2e-2)
+        self.assertEqual(counter.frame_count, 1)
+
     @supported_platform
     def test_dynamic_shapes_with_max_autotune(self, device):
         make_tensor = functools.partial(

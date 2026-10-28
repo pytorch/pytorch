@@ -23,6 +23,7 @@ from ...lowering import empty, empty_strided, lowerings, register_lowering, to_d
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
     autotune_select_algorithm,
+    RuntimeFloat,
     SymbolicGridFn,
     TritonTemplate,
 )
@@ -190,7 +191,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
-            scale,
+            V.graph.sizevars.guard_float(scale),
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
@@ -204,7 +205,7 @@ def flex_attention(
             value,
             subgraph,
             block_mask,
-            scale,
+            V.graph.sizevars.guard_float(scale),
             kernel_options,
             score_mod_other_buffers,
             mask_mod_other_buffers,
@@ -306,7 +307,7 @@ def flex_attention(
             mask_graph=mask_graph,
             score_mod_other_buffers=score_mod_other_buffers,
             mask_mod_other_buffers=mask_mod_other_buffers,
-            scale=scale,
+            scale=V.graph.sizevars.guard_float(scale),
             sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
             sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
             subgraph_buffer=subgraph_buffer,
@@ -379,7 +380,7 @@ def flex_attention(
             key,
             value,
             block_mask,
-            scale,
+            RuntimeFloat(scale).unwrap_if_number(),
             kernel_options,
             subgraph_buffer,
             mask_graph_buffer,
@@ -448,7 +449,7 @@ def flex_attention(
         dtype=torch.float32,  # The max scores are always stored in fp32 regardless of the input dtype
         device=query.get_device(),
     )
-    kernel_options.setdefault("SM_SCALE", scale)
+    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale).unwrap_if_number())
 
     # Determine GQA broadcast factor.
     gqa_shared_heads = FloorDiv(Hq, Hkv)
@@ -962,7 +963,7 @@ def flex_attention_backward(*args, **kwargs):
             logsumexp,
             grad_out,
             grad_logsumexp,
-            scale,
+            V.graph.sizevars.guard_float(scale),
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
             fw_subgraph=fw_graph,
@@ -1055,7 +1056,7 @@ def flex_attention_backward(*args, **kwargs):
             logsumexp,
             grad_out,
             grad_logsumexp,
-            scale,
+            RuntimeFloat(scale).unwrap_if_number(),
             kernel_options,
             SPARSE_Q_BLOCK_SIZE,
             SPARSE_KV_BLOCK_SIZE,
@@ -1122,7 +1123,7 @@ def flex_attention_backward(*args, **kwargs):
         device=value.get_device(),
     )
 
-    kernel_options.setdefault("SM_SCALE", scale)
+    kernel_options.setdefault("SM_SCALE", RuntimeFloat(scale).unwrap_if_number())
 
     # Determine GQA factor
     gqa_shared_heads = FloorDiv(Hq, Hkv)
