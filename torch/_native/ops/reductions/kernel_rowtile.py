@@ -171,10 +171,11 @@ def _itree_arch(
 # Default per-thread width for the order, in elements (k*vec*eff live in registers at once).
 # Fusing adjacent chunks keeps a full warp, and therefore coalesced loads, on each.
 _ITREE_THREAD_ELEMS = 64
-# Per-thread width for ragged 16-bit sum-like rows (trait_itree_plan). B200 CUDA graphs,
-# 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and 4097, within 4% for N=3000-12289,
-# 0.65x at N=1025.
+# Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N
+# (trait_itree_plan). B200 CUDA graphs, 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and
+# 4097 and within 4% for N=3000-12289, but 0.65x at N=1025, so narrower rows keep the default.
 _ITREE_LOWP_THREAD_ELEMS = 32
+_ITREE_LOWP_MIN_N = 2048
 
 # Vector-width multiplier; each doubling costs ~2x. `bte`, not this, fixes the bits.
 _ITREE_VEC_MUL = 1
@@ -204,21 +205,19 @@ def reduction_order(
     return order
 
 
-_warned_inner_tree_fallback = False
+_warned_inner_tree_reasons: set[str] = set()
 
 
 def inner_tree_fallback(reason: str) -> None:
-    """Serve an env-gated inner-tree request unordered: raise if strict, else warn once."""
-    global _warned_inner_tree_fallback
+    """Fall back from the env gate: raise if strict, else warn once per reason."""
     if os.environ.get(_INNER_TREE_ENV, "") == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
-    if not _warned_inner_tree_fallback:
-        _warned_inner_tree_fallback = True
+    if reason not in _warned_inner_tree_reasons:
+        _warned_inner_tree_reasons.add(reason)
         strict = f"{_INNER_TREE_ENV}={_INNER_TREE_STRICT}"
         warnings.warn(
             f"{_INNER_TREE_ENV} could not be honoured ({reason}); such reductions use "
-            f"unordered kernels. Set {strict} to raise instead.",
-            stacklevel=2,
+            f"unordered kernels. Set {strict} to raise instead."
         )
 
 
@@ -229,16 +228,12 @@ def select_row_order(
     N: int,
     M: int,
     *,
-    order: Literal["unordered", "inner_tree"],
     nfields: int,
     nouts: int,
     acc_bits: int = 32,
     alignment: int = 16,
 ) -> Literal["linear", "inner_tree"]:
-    if order == "inner_tree":
-        return "inner_tree"
-    if order != "unordered":
-        raise ValueError(f"unknown reduction order: {order!r}")
+    """Pick the kernel order for an unordered row reduction."""
     return "linear"
 
 
@@ -492,9 +487,12 @@ def trait_itree_plan(
         return plan
     from . import traits as T
 
-    if itemsize > 2 or not isinstance(
-        trait,
-        (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps),
+    if (
+        N <= _ITREE_LOWP_MIN_N
+        or itemsize > 2
+        or not isinstance(
+            trait, (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps)
+        )
     ):
         return plan
     return itree_plan(
@@ -891,8 +889,6 @@ def reduce_row_tile(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
             f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
         )
-    if gated and itree is None and final and threads_per_row is None and N > 0:
-        inner_tree_fallback(f"no inner-tree plan for N={N}, M={M}")
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
     cfg = row_config(N, x.element_size() * 8)
