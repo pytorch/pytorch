@@ -80,6 +80,7 @@ from .base import (
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -479,6 +480,11 @@ class ConstDictVariable(VariableTracker):
         return id(value) != id(other)
 
     def reconstruct_kvs_into_new_dict(self, codegen: "PyCodegen") -> None:
+        # Replay loads sourced keys by storage position and emits the modeled order.
+        if isinstance(
+            self.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+        ):
+            self.install_dict_order_guard(codegen.tx, guard_keys=True)
         # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
@@ -559,7 +565,7 @@ class ConstDictVariable(VariableTracker):
                 break
 
     def install_dict_keys_match_guard(self) -> None:
-        if self.source:
+        if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_order_guard(
@@ -569,9 +575,12 @@ class ConstDictVariable(VariableTracker):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        # Ordinary mappings always guard keys. Hook mappings use guard_keys only
-        # when keys are observed; value iteration can share graphs across hook IDs.
-        if self.source:
+        # `ordered` selects linked order for OrderedDict, storage order otherwise;
+        # plain dicts have only storage order. Ordinary mappings always guard keys.
+        # `guard_keys` also specializes hook IDs when keys affect the trace, such as
+        # key iteration or copying. Hook values/items may guard only relative order
+        # until their sourced keys are observed, allowing equivalent modules to share.
+        if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
 
@@ -687,8 +696,7 @@ class ConstDictVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
-        if self.source and not is_constant_source(self.source):
-            self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx, guard_keys=True)
         return DictIterator(self.items)
 
     def tp_init_impl(
@@ -1018,9 +1026,7 @@ class ConstDictVariable(VariableTracker):
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        self.install_dict_keys_match_guard()
-        if self.source:
-            tx.output.guard_on_key_order.add(self.source)
+        self.install_dict_order_guard(tx, guard_keys=True)
         reversed_keys: list[VariableTracker] = [
             k.vt for k in reversed(list(self.items.keys()))
         ]
@@ -1229,7 +1235,12 @@ class OrderedDictVariable(ConstDictVariable):
         guard_keys: bool = False,
     ) -> None:
         super().install_dict_order_guard(tx, ordered=ordered, guard_keys=guard_keys)
-        if self.source and ordered and len(self.original_items) > 1:
+        if (
+            self.source
+            and not is_constant_source(self.source)
+            and ordered
+            and len(self.original_items) > 1
+        ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
     def dict_copy(
@@ -1373,6 +1384,7 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx, guard_keys=True)
         if not self.items:
             raise_observed_exception(
                 KeyError, tx, args=["popitem(): dictionary is empty"]
@@ -1452,6 +1464,7 @@ class OrderedDictVariable(ConstDictVariable):
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
+        self.install_dict_order_guard(tx, guard_keys=True)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
@@ -1940,7 +1953,12 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ConstDictVariable.install_dict_order_guard(self, tx, ordered=ordered)
         if guard_keys:
             ConstDictVariable.install_dict_keys_match_guard(self)
-        if self.source and ordered and len(self.original_items) > 1:
+        if (
+            self.source
+            and not is_constant_source(self.source)
+            and ordered
+            and len(self.original_items) > 1
+        ):
             # Hook values use storage-position sources; their order matters, but
             # equivalent modules have different hook IDs unless keys are observed.
             guard = (
