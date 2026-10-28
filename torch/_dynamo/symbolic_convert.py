@@ -961,7 +961,7 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            if truth_fn(generic_is_true(self, value).as_python_constant()):
+            if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
                 self.jump(inst)
