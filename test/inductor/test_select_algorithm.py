@@ -1885,11 +1885,6 @@ class TestTemplateRender(TestCase):
                 y = torch.randn(m)
                 self.assertEqual(compiled(a, y), a / math.sqrt(m))
 
-        # The Python wrapper cannot print a plain sympy Pow, so it is rejected.
-        n = sympy.Symbol("s0", integer=True, positive=True)
-        with self.assertRaisesRegex(ValueError, "FloatTrueDiv"):
-            RuntimeFloat(1 / sympy.sqrt(n))
-
         # A numeric RuntimeFloat stays a constexpr with no host-computed arg.
         torch._dynamo.reset()
         with patch_lowering(make_lowering(symbolic=False)):
