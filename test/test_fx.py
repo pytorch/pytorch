@@ -1818,31 +1818,84 @@ class TestFX(JitTestCase):
             for key in keys:
                 _wrapped_fns_to_patch.pop(key, None)
 
+    def test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper(self):
+        # TorchScript compiling FX's wrapper for ``scaled`` resolves ``Scale`` in
+        # torch/fx/_symbolic_trace.py's globals and fails with "Unknown type name".
+        from fx import lazy_wrap_helper
+
+        resolved = []
+
+        def resolve(d):
+            double = lazy_wrap_helper.double
+            fn = types.FunctionType(double.__code__, double.__globals__)
+            resolved.append(torch.jit.script(fn)(torch.ones(1)).item())
+            return 1
+
+        def child_forward(self, x):
+            return x + child_body  # noqa: F821
+
+        def root_forward(self, x):
+            return self.child(x + root_body)  # noqa: F821
+
+        class Child(torch.nn.Module):
+            forward = types.FunctionType(
+                child_forward.__code__, self._lazy_globals("child_body", resolve)
+            )
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            forward = types.FunctionType(
+                root_forward.__code__, self._lazy_globals("root_body", resolve)
+            )
+
+        with self._patch_is_lazy_import():
+            gm = torch.fx.symbolic_trace(Root())
+        self.assertEqual(resolved, [2.0, 2.0])
+        self.assertEqual(gm(torch.ones(1)), torch.full((1,), 3.0))
+
     def test_symbolic_trace_on_a_real_lazy_import_runtime(self):
+        # Same scenario as test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper
+        # with real lazy imports: lazy_body resolves from the root forward's globals,
+        # lazy_body2 from the globals of a child forward defined in another file.
         is_enabled = getattr(importlib, "is_lazy_imports_enabled", None)
         if not callable(is_enabled):
             self.skipTest("lazy imports are unavailable")
+        from fx import lazy_wrap_helper
+
+        helper_src = inspect.getsource(lazy_wrap_helper)
+        body_src = "import torch\nimport lazy_wrap_helper\nSCALE = torch.jit.script(lazy_wrap_helper.double)(torch.ones(1)).item()\n"
+        files = {
+            "lazy_wrap_helper.py": helper_src,
+            "lazy_body.py": body_src,
+            "lazy_body2.py": body_src,
+            "lazy_child.py": "import torch\nimport lazy_body2\nclass Child(torch.nn.Module):\n    def forward(self, x):\n        return x * lazy_body2.SCALE\n",
+            "lazy_model.py": "import torch\nimport lazy_body\nimport lazy_child\nclass M(torch.nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.child = lazy_child.Child()\n    def forward(self, x):\n        return self.child(x * lazy_body.SCALE)\n",
+        }
         script = """
-import importlib, os, sys, tempfile
-import torch
-d = tempfile.mkdtemp()
-with open(os.path.join(d, "lazy_body.py"), "w") as f:
-    f.write("import torch\n@torch.jit.script\ndef g(x: torch.Tensor) -> torch.Tensor:\n    return x\nSCALE = 2\n")
-with open(os.path.join(d, "lazy_model.py"), "w") as f:
-    f.write("import torch\nimport lazy_body\nclass M(torch.nn.Module):\n    def forward(self, x):\n        return x * lazy_body.SCALE\n")
-sys.path.insert(0, d)
-import lazy_model
+import importlib, torch
+import lazy_wrap_helper, lazy_model
+lazy_wrap_helper.__dict__
+m = lazy_model.M()
 assert importlib.is_lazy_import(lazy_model.__dict__, "lazy_body")
-gm = torch.fx.symbolic_trace(lazy_model.M())
-assert torch.equal(gm(torch.ones(2)), torch.full((2,), 2.0))
+assert importlib.is_lazy_import(lazy_model.lazy_child.__dict__, "lazy_body2")
+gm = torch.fx.symbolic_trace(m)
+assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
 """
-        result = subprocess.run(
-            [sys.executable, "-L", "-c", script],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        with tempfile.TemporaryDirectory() as d:
+            for name, src in files.items():
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(src)
+            result = subprocess.run(
+                [sys.executable, "-L", "-c", script],
+                cwd=d,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_nested_symbolic_trace_resolves_lazy_globals_with_every_patch_reverted(
