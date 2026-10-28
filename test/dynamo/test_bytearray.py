@@ -2,8 +2,6 @@
 """Tests for ByteArrayVariable: bytearray support in Dynamo.
 
 Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
-Only tests covering operations supported in PR 1 (read-only ops + wiring)
-are included; mutation, methods, and conversions will follow in later PRs.
 """
 
 import sys
@@ -13,7 +11,8 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests
+from torch._dynamo.test_case import run_tests
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class Indexable:
@@ -664,6 +663,312 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
             f(x, Items())[1],
+        )
+
+    @make_dynamo_test
+    def test_join(self):
+        self.assertEqual(self.type2test(b"").join([]), b"")
+        self.assertEqual(self.type2test(b"").join([b""]), b"")
+        for lst in [[b"abc"], [b"a", b"bc"], [b"ab", b"c"], [b"a", b"b", b"c"]]:
+            lst = list(map(self.type2test, lst))
+            self.assertEqual(self.type2test(b"").join(lst), b"abc")
+            self.assertEqual(self.type2test(b"").join(tuple(lst)), b"abc")
+            self.assertEqual(self.type2test(b"").join(iter(lst)), b"abc")
+
+        dot_join = self.type2test(b".:").join
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([bytearray(b"ab"), b"cd"]), b"ab.:cd")
+        self.assertEqual(dot_join([b"ab", bytearray(b"cd")]), b"ab.:cd")
+        self.assertEqual(dot_join(x for x in (b"a", b"b")), b"a.:b")
+
+        # The result is a new bytearray, not the separator.
+        out = dot_join([b"ab", b"cd"])
+        self.assertIsInstance(out, self.type2test)
+        out += b"ef"
+        self.assertEqual(dot_join([b"ab", b"cd"]), b"ab.:cd")
+
+    @make_dynamo_test
+    def test_join_errors(self):
+        self.assertRaises(TypeError, self.type2test(b" ").join, None)
+        with self.assertRaisesRegex(TypeError, "can only join an iterable"):
+            self.type2test(b" ").join(0)
+        dot_join = self.type2test(b".:").join
+        with self.assertRaisesRegex(
+            TypeError, "sequence item 1: expected a bytes-like object, str found"
+        ):
+            dot_join([bytearray(b"ab"), "cd", b"ef"])
+
+    def test_join_error_propagates_from_iterator(self):
+        # PySequence_Fast consumes the whole iterable before any item is
+        # type-checked, so an exception raised mid-iteration reaches the caller
+        # instead of being replaced by join's own error.
+        def f(sep):
+            def gen():
+                yield b"A"
+                raise RuntimeError("boom")
+
+            try:
+                sep.join(gen())
+            except RuntimeError as e:
+                return str(e)
+            return None
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(bytearray(b",")),
+            f(bytearray(b",")),
+        )
+
+    def test_join_getiter_type_error(self):
+        class RaisesTypeError:
+            def __iter__(self):
+                raise TypeError("iterator boom")
+
+        class ReturnsList:
+            def __iter__(self):
+                return []
+
+        def f(x, value):
+            try:
+                bytearray(b",").join(value)
+            except TypeError as e:
+                return str(e), x + 1
+
+        x = torch.ones(1)
+        for value in (RaisesTypeError(), ReturnsList()):
+            self.assertEqual(
+                torch.compile(f, backend="eager", fullgraph=True)(x, value), f(x, value)
+            )
+
+    def test_join_iterator_protocol(self):
+        class Iterator:
+            def __init__(self, fail):
+                self.fail = fail
+                self.calls = 0
+                self.index = 0
+
+            def __iter__(self):
+                self.calls += 1
+                if self.fail and self.calls == 2:
+                    raise TypeError("second iter")
+                return self
+
+            def __next__(self):
+                if self.index == 2:
+                    raise StopIteration
+                self.index += 1
+                return b"A"
+
+        def f(x, fail):
+            it = Iterator(fail)
+            try:
+                result = bytearray(b",").join(it)
+            except TypeError as e:
+                return str(e), it.calls, x + 1
+            return result, it.calls, x + 1
+
+        x = torch.ones(1)
+        for fail in (False, True):
+            self.assertEqual(
+                torch.compile(f, backend="eager", fullgraph=True)(x, fail), f(x, fail)
+            )
+
+    def test_join_length_hint(self):
+        class Iterator:
+            def __init__(self):
+                self.seen = []
+                self.done = False
+                self.value = b"A"
+
+            def __iter__(self):
+                self.seen.append("iter")
+                return self
+
+            def __length_hint__(self):
+                self.seen.append("hint")
+                self.value = b"B"
+                return 1
+
+            def __next__(self):
+                self.seen.append("next")
+                if self.done:
+                    raise StopIteration
+                self.done = True
+                return self.value
+
+        def f(x):
+            it = Iterator()
+            result = bytearray(b",").join(it)
+            return result, it.seen, x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_join_length_hint_error(self):
+        class Iterator:
+            def __iter__(self):
+                return self
+
+            def __length_hint__(self):
+                raise ValueError("hint failed")
+
+            def __next__(self):
+                raise StopIteration
+
+        def f(x):
+            try:
+                bytearray(b",").join(Iterator())
+            except ValueError as e:
+                return str(e), x + 1
+            return None, x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_join_nonconstant_item_fallback(self):
+        class Raw(bytes):
+            pass
+
+        def f(value, x):
+            x = x + 1
+            seen = []
+
+            def gen():
+                seen.append("first")
+                yield value
+                seen.append("second")
+                yield b"B"
+                seen.append("done")
+
+            it = gen()
+            result = bytearray(b",").join(it)
+            return result, seen, list(it), x * 2
+
+        value = Raw(b"A")
+        x = torch.ones(1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported method call"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(value, x)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(f, backend="eager")(value, x), f(value, x))
+
+    def test_join_separator_mutation_matches_cpython(self):
+        # Compare with the running CPython version, since older releases do
+        # not hold a temporary buffer export while consuming the iterable.
+        def run(op, sep_data=b",", compiled=False):
+            def f(sep):
+                def it():
+                    op(sep)
+                    yield b"A"
+                    yield b"B"
+
+                try:
+                    result = sep.join(it())
+                except Exception as e:
+                    return type(e).__name__, str(e), bytes(sep)
+                return "ok", bytes(result), bytes(sep)
+
+            sep = bytearray(sep_data)
+            if compiled:
+                return torch.compile(f, backend="eager", fullgraph=True)(sep)
+            return f(sep)
+
+        cases = [
+            ("extend empty", lambda s: s.extend(b"")),
+            ("extend empty list", lambda s: s.extend([])),
+            ("append out of range", lambda s: s.append(300)),
+            ("imul 1", lambda s: s.__imul__(1)),
+            ("iadd empty", lambda s: s.__iadd__(b"")),
+        ]
+        uses_export = sys.version_info >= (3, 12, 1) or (
+            (3, 11, 7) <= sys.version_info < (3, 12)
+        )
+        resizing = [
+            ("extend one", lambda s: s.extend(b"x")),
+            ("append byte", lambda s: s.append(65)),
+            ("imul 0", lambda s: s.__imul__(0)),
+            ("iadd one", lambda s: s.__iadd__(b"x")),
+        ]
+        # Older CPython versions can use freed separator memory after a resize.
+        # Check Dynamo's defined result without running that unsafe eager path.
+        if uses_export:
+            cases.extend(resizing)
+        else:
+            for name, op in resizing:
+                with self.subTest(name=name):
+                    sep = bytearray(b",")
+                    op(sep)
+                    self.assertEqual(
+                        run(op, compiled=True), ("ok", b"A" + sep + b"B", bytes(sep))
+                    )
+        with torch._dynamo.config.patch(cache_size_limit=32):
+            for name, op in cases:
+                with self.subTest(name=name):
+                    self.assertEqual(run(op, compiled=True), run(op))
+
+            # An empty separator has nothing to resize, so repeating it is
+            # allowed even though the count is greater than one.
+            def repeat_empty(sep):
+                sep.__imul__(2)
+
+            self.assertEqual(
+                run(repeat_empty, sep_data=b"", compiled=True),
+                run(repeat_empty, sep_data=b""),
+            )
+
+        cnt = CompileCounter()
+
+        def g(sep, x):
+            x = x + 1
+
+            def it():
+                sep.append(65)
+                yield b"A"
+
+            try:
+                sep.join(it())
+            except BufferError:
+                return "caught", x
+            return "ok", x
+
+        expected = ("caught" if uses_export else "ok", torch.ones(1) + 1)
+        self.assertEqual(
+            torch.compile(g, backend=cnt, fullgraph=True)(
+                bytearray(b","), torch.ones(1)
+            ),
+            expected,
+        )
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_join_nested_separator_export(self):
+        def f(x):
+            sep = bytearray(b",")
+
+            def outer():
+                sep.join(iter((b"a", b"b")))
+                try:
+                    sep.append(33)
+                except BufferError:
+                    yield b"caught"
+
+            result = sep.join(outer())
+            sep.append(63)
+            return bytes(sep), result, x + 1
+
+        cnt = CompileCounter()
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend=cnt, fullgraph=True)(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_input_bytearray_join(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(sep, ba, items):
+            return sep.join([ba, b"x"]), sep.join(items)
+
+        self.assertEqual(
+            fn(bytearray(b"-"), bytearray(b"ab"), [b"ab", bytearray(b"cd")]),
+            (bytearray(b"ab-x"), bytearray(b"ab-cd")),
         )
 
     def test_append_extend_arg_mutation(self):

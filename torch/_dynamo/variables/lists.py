@@ -36,6 +36,7 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -2106,14 +2107,22 @@ class ByteArrayVariable(VariableTracker):
 
     _nonvar_fields = {
         "data",
+        "exports",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, data: bytearray, **kwargs: Any) -> None:
+    # CPython gh-112625 added the separator export in 3.11.7 and 3.12.1:
+    # https://github.com/python/cpython/commit/0e732d0997cff08855d98c17af4dd5527f10e419
+    _join_uses_buffer_export = sys.version_info >= (3, 12, 1) or (
+        (3, 11, 7) <= sys.version_info < (3, 12)
+    )
+
+    def __init__(self, data: bytearray, exports: int = 0, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not isinstance(data, bytearray):
             raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
         self.data = data
+        self.exports = exports
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
@@ -2126,6 +2135,41 @@ class ByteArrayVariable(VariableTracker):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.data)})"
+
+    def _set_data(
+        self,
+        tx: "InstructionTranslatorBase",
+        new_data: bytearray,
+        *,
+        may_resize: bool | None = None,
+    ) -> None:
+        """Swap in a new buffer; every in-place resize must go through this.
+
+        CPython rejects a resize while the buffer has exports (ob_exports), and
+        replay writes the result back after the traced code has finished.
+        Keeping the check here means a new mutator cannot silently bypass it.
+
+        may_resize: whether CPython would run _canresize. Defaults to a length
+        change; the item/slice store paths pass True for empty extended slices,
+        which run the check without changing the length.
+        """
+        if may_resize is None:
+            may_resize = len(new_data) != len(self.data)
+        if may_resize:
+            self._check_can_resize(tx)
+        tx.output.side_effects.mutation(self)
+        # Replay writes back to the input; tracing must only replace our copy.
+        self.data = new_data
+
+    def _check_can_resize(self, tx: "InstructionTranslatorBase") -> None:
+        # The traced copy has no exports, so track them on the variable instead.
+        # bytearray.join is currently the only source of an export.
+        if self.exports:
+            raise_observed_exception(
+                BufferError,
+                tx,
+                args=["Existing exports of data: object cannot be re-sized"],
+            )
 
     def mp_subscript_impl(
         self,
@@ -2213,9 +2257,7 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        # New buffer — do not mutate a sourced live object during tracing.
-        self.data = new_data
+        self._set_data(tx, new_data)
         return self
 
     def _concat_operand(
@@ -2257,10 +2299,7 @@ class ByteArrayVariable(VariableTracker):
                 "mutation_type."
             )
         other_data = self._concat_operand(tx, other)
-        tx.output.side_effects.mutation(self)
-        # Assign a new buffer so tracing never mutates a sourced live object.
-        # Side-effect replay writes the final contents back via old[:] = new.
-        self.data = self.data + other_data
+        self._set_data(tx, self.data + other_data)
         return self
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -2484,9 +2523,9 @@ class ByteArrayVariable(VariableTracker):
             new_data.append(item.as_python_constant())
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        # New buffer: do not mutate a sourced live object during tracing.
-        self.data = new_data
+        # The byte is validated first and the buffer is resized second, so an
+        # exported separator only rejects the store after the value is checked.
+        self._set_data(tx, new_data)
         return ConstantVariable.create(None)
 
     def bytearray_extend(
@@ -2545,8 +2584,7 @@ class ByteArrayVariable(VariableTracker):
             new_data.extend(values)
         except (TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        self.data = new_data
+        self._set_data(tx, new_data)
         return ConstantVariable.create(None)
 
     def bytearray_insert(
@@ -2568,9 +2606,7 @@ class ByteArrayVariable(VariableTracker):
             new_data.insert(index, item.as_python_constant())
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        # New buffer: do not mutate a sourced live object during tracing.
-        self.data = new_data
+        self._set_data(tx, new_data)
         return ConstantVariable.create(None)
 
     def bytearray_pop(
@@ -2591,9 +2627,58 @@ class ByteArrayVariable(VariableTracker):
             result = new_data.pop(index)
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
-        tx.output.side_effects.mutation(self)
-        self.data = new_data
+        self._set_data(tx, new_data)
         return ConstantVariable.create(result)
+
+    def bytearray_join(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        iterable = args[0].realize()
+        # _PyBytes_Join materializes the iterable with PySequence_Fast before
+        # the first item is type-checked, so an iterator that raises outranks a
+        # bad item it already yielded. Sequences are already materialized.
+        if istype(iterable, (variables.ListVariable, variables.TupleVariable)):
+            items = unpack_iterable(tx, iterable)
+        else:
+            if self._join_uses_buffer_export:
+                self.exports += 1
+            try:
+                try:
+                    iterator = generic_getiter(tx, iterable)
+                except ObservedTypeError:
+                    handle_observed_exception(tx)
+                    raise_type_error(tx, "can only join an iterable")
+                # PySequence_List iterates the returned iterator again; errors
+                # from this second step propagate without being rewritten.
+                # CPython asks the argument for a length hint (default 8) after
+                # GetIter and before reading any item; __length_hint__ can have
+                # visible side effects.
+                items = unpack_iterable(tx, iterator, emulate_length_hint=8)
+            finally:
+                if self._join_uses_buffer_export:
+                    self.exports -= 1
+        parts: list[bytes] = []
+        for i, item in enumerate(items):
+            if isinstance(item, ByteArrayVariable):
+                parts.append(bytes(item.data))
+                continue
+            if not item.is_python_constant():
+                return None
+            const = item.as_python_constant()
+            if not isinstance(const, (bytes, bytearray)):
+                raise_type_error(
+                    tx,
+                    f"sequence item {i}: expected a bytes-like object, "
+                    f"{item.python_type_name()} found",
+                )
+            parts.append(bytes(const))
+        return ByteArrayVariable(
+            self.data.join(parts), mutation_type=ValueMutationNew()
+        )
 
     tp_methods = {
         "index": Method(bytearray_index),
@@ -2607,6 +2692,7 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "join": Method(bytearray_join),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
