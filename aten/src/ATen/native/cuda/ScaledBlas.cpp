@@ -906,16 +906,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #endif
   }
 
-  // v1 has no swizzle argument, so it can only express the default layout.
-  // gfx950 callers who want the 32x8 tile, and every gfx1250 MX or NVFP4
-  // caller, must use `_scaled_mm_v2` and pass SWIZZLE_32_8.
+  // v1 has no swizzle argument. ROCm NVFP4 has no NO_SWIZZLE layout on any
+  // arch, so BlockWise1x16 must not reach the backend from this entry point.
 #ifdef USE_ROCM
   if (scaling_choice_a == ScalingType::BlockWise1x16 &&
       scaling_choice_b == ScalingType::BlockWise1x16) {
     TORCH_CHECK_NOT_IMPLEMENTED(
-        !is_gfx1250_nvfp4(),
-        "gfx1250 NVFP4 block scaling requires SWIZZLE_32_8 scales "
-        "and ROCm 10.0 or above. "
+        false,
+        "NVFP4 block scaling on ROCm requires SWIZZLE_32_8 scales. "
         "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
   }
 #endif
