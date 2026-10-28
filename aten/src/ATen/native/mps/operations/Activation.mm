@@ -9,8 +9,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_log_softmax_backward_data_native.h>
-#include <ATen/ops/_prelu_kernel_backward_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/gelu_backward_native.h>
 #include <ATen/ops/gelu_native.h>
 #include <ATen/ops/relu_native.h>
@@ -73,73 +71,6 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, std::string_view approximate, 
 TORCH_IMPL_FUNC(gelu_backward_out_mps)
 (const Tensor& grad, const Tensor& self, std::string_view approximate, const Tensor& grad_input) {
   GeluBackwardKernel(kMPS, *this, get_gelutype_enum(approximate));
-}
-
-std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const Tensor& self, const Tensor& weight_) {
-  using namespace mps;
-
-  Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
-  Tensor weight_grad = at::empty_like(self, at::MemoryFormat::Contiguous);
-  if (grad_output.numel() == 0) {
-    return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
-  }
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* gradOutputTensor_ = nil;
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* weightTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-    MPSGraphTensor* weightedGradTensor_ = nil;
-  };
-
-  MPSStream* stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "prelu_backward_mps:" + getTensorsStringKey({grad_output, self, weight_});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_);
-
-      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-      MPSGraphTensor* weightedGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:weightTensor
-                                                                           secondaryTensor:gradOutputTensor
-                                                                                      name:nil];
-      MPSGraphTensor* inputGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                        secondaryTensor:gradOutputTensor
-                                                                                   name:nil];
-      MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
-                                                               secondaryTensor:zeroTensor
-                                                                          name:nil];
-      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                                     truePredicateTensor:gradOutputTensor
-                                                    falsePredicateTensor:weightedGradOutputTensor
-                                                                    name:nil];
-      MPSGraphTensor* weightedGradTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                                           truePredicateTensor:zeroTensor
-                                                          falsePredicateTensor:inputGradOutputTensor
-                                                                          name:nil];
-      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->weightedGradTensor_ = weightedGradTensor;
-    });
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
-    Placeholder weightedGradPlaceholder = Placeholder(cachedGraph->weightedGradTensor_, weight_grad);
-
-    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfPlaceholder, weightPlaceholder);
-    auto results = dictionaryFromPlaceholders(gradInputPlaceholder, weightedGradPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  }
-  return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
 }
 
 } // namespace at::native
