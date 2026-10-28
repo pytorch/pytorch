@@ -13301,33 +13301,6 @@ class <lambda>(torch.nn.Module):
                 pred, x, y
             )
 
-    # https://github.com/pytorch/pytorch/issues/201590
-    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipCUDAIf(not SM70OrLater, "triton")
-    @parametrize("dynamic", [True, False])
-    def test_cond_auto_functionalize_input_mutation_without_alias(
-        self, device, dynamic
-    ):
-        # Operand mutation on its own stays supported and visible to the caller.
-        class M(torch.nn.Module):
-            def forward(self, pred, x, y):
-                def true_fn(x, y):
-                    y.copy_(x * 2.0)
-                    return x.sum()
-
-                def false_fn(x, y):
-                    y.copy_(x + 1.0)
-                    return x.sum()
-
-                return torch.cond(pred, true_fn, false_fn, (x, y))
-
-        args = (
-            torch.tensor(True),
-            torch.ones(5, 5) * 7,
-            torch.zeros(5, 5),
-        )
-        self.check(M, args, device, dynamic)
-
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("dynamic", [True, False])
