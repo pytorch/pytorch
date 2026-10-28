@@ -2181,8 +2181,8 @@ def _check(
 
 
 @_deprecated(
-    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
-    Use _check(i >= 0) instead.",
+    "_check_is_size will be removed in a future PyTorch release. "
+    "Use _check(i >= 0) instead.",
     category=FutureWarning,
 )
 def _check_is_size(
@@ -2191,23 +2191,12 @@ def _check_is_size(
     *,
     max: "IntLikeType | None" = None,
 ) -> None:
-    """Checks that a given integer is a valid size (i.e., is non-negative).
-    You should use this over ``_check(i >= 0)`` because it can prevent
-    ``GuardOnDataDependentSymNode`` exceptions by opting yourself into alternate
-    semantics for ``guard_size_oblivious`` tests that treat values 0 and 1
-    equivalently to all other values.
+    """Checks that an integer is non-negative, with an optional upper bound.
 
-    When max is not None, this specifies an upper bound equivalent to
-    ``_check(i <= max)``.  This bound is also subject to alternate semantics:
-    in ``guard_size_oblivious`` tests, we assume that a constant max bound is
-    treated equivalently to all other values.  Symbolic max bounds are not yet
-    supported.
-
-    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
-    to infer the size from context, or if you should wrap-around or truncate).
-    Only use this if the only valid value is an honest to goodness size.
+    This deprecated compatibility helper also advises symbolic range analysis
+    that the integer represents a size. Prefer ``_check(i >= 0)`` and, when
+    needed, ``_check(i <= max)`` in new code.
     """
-    # This is responsible for the expect_true
     _check(i >= 0, message)
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
 
@@ -3001,18 +2990,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3342,11 +3325,6 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
-        # Start the one-time source hashing for Inductor's cache keys now, so
-        # it overlaps with whatever runs before the first compile.
-        from torch._inductor.codecache import prefetch_cache_keys
-
-        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
