@@ -9369,6 +9369,9 @@ def _no_fake_op_fn(x):
     return torch.ops.precompile_no_fake.op.default(x.sin()) + 1
 
 
+def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
+
+
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
         ns = f"precompile_recording_{uuid.uuid4().hex}"
@@ -9461,6 +9464,121 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(_custom_op_module(name, ""), "libtorch_agn_2_13")
         missing = "libtorch_agn_2_13::identity_w_nonexistent_fake_module"
         self.assertIsNone(_custom_op_module(missing, ""))
+
+    def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
+        from torch._precompile import _custom_op_modules
+
+        op, qualname = self._op("in_main")
+        op._init_fn.__module__ = "__main__"
+        recorded, _ = self._op("recorded")
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        recorded._init_fn.__module__ = module.__name__
+        ns = f"precompile_library_{uuid.uuid4().hex}"
+        lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
+        lib.define("f(Tensor x) -> Tensor")
+        torch._custom_ops.custom_op(f"{ns}::legacy_op")(legacy_op)
+        registry = torch._custom_op.impl.global_registry
+        self.addCleanup(registry[f"{ns}::legacy_op"]._destroy)
+        names = [(qualname, ""), (f"{ns}::f", ""), (f"{ns}::legacy_op", "")]
+        names.append((recorded._qualname, ""))
+        importlib.import_module("torch.export.custom_ops")
+
+        # Torch's own ops, registered from C++ and from Python inside torch.
+        names += [("aten::add", "Tensor"), ("export::access_subclass_inner_tensor", "")]
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            modules = _custom_op_modules(names)
+        self.assertEqual(modules, (module.__name__, "torch.export.custom_ops"))
+        (message,) = logs.output
+        self.assertIn(qualname, message)
+        self.assertIn(f"{ns}::f", message)
+        self.assertIn(f"{ns}::legacy_op", message)
+        self.assertNotIn(recorded._qualname, message)
+        self.assertNotIn("aten::add", message)
+        self.assertNotIn("export::", message)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_an_op_a_torch_submodule_registers_records_that_module(self):
+        from torch._precompile import _custom_op_modules
+
+        # device_mesh needs DeviceMesh registered as an opaque type first.
+        importlib.import_module("torch.distributed.tensor")
+        importlib.import_module("torch.distributed._ops.device_mesh")
+        op = ("device_mesh::_runtime_compute_coordinate_on_dim", "")
+        module = "torch.distributed._ops.device_mesh"
+        self.assertEqual(_custom_op_modules([op]), (module,))
+
+    @unittest.skipIf(IS_WINDOWS, "forks")
+    def test_no_op_torch_registers_is_reported(self):
+        script = textwrap.dedent(
+            """
+            import json
+            import torch
+            import torch.onnx.ops
+            from torch._precompile import _TORCH_OP_NAMESPACES, _custom_op_module, _torch_op_module
+            if torch.distributed.is_available():
+                import torch.distributed.fsdp
+                import torch.distributed.pipelining
+                import torch.distributed.tensor
+                import torch.distributed._ops.device_mesh
+            reported = set()
+            modules = {}
+            for name in torch._C._dispatch_get_all_op_names():
+                op_name, _, overload = name.partition(".")
+                ns = op_name.split("::")[0]
+                debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+                if ".py:" not in debug:
+                    if ns not in _TORCH_OP_NAMESPACES:
+                        reported.add(ns)
+                elif (module := _custom_op_module(op_name, overload) or _torch_op_module(op_name, overload)) is None:
+                    reported.add(ns)
+                else:
+                    modules.setdefault(module, []).append([op_name, overload])
+            print(json.dumps({"reported": sorted(reported), "modules": modules}))
+            """
+        )
+        # Only a source build records C++ schemas under torch/, so they are checked
+        # against the list itself. The script first imports the torch modules that
+        # register ops on import. Namespaces this build does not register (vulkan,
+        # metal, nnapi, ...) are not checked.
+        out = subprocess.check_output([sys.executable, "-c", script], text=True)
+        scan = json.loads(out)
+        # "_test" holds TorchScript's own test ops.
+        self.assertEqual(set(scan["reported"]) - {"_test"}, set())
+
+        # Each recorded module must register its ops when imported alone, as on a fresh
+        # host. A child forked from a process that imported only torch imports each one.
+        check = textwrap.dedent(
+            """
+            import importlib, json, os, sys
+            import torch
+            modules = json.load(sys.stdin)
+            for module, ops in sorted(modules.items()):
+                sys.stdout.flush()
+                if os.fork() != 0:
+                    os.wait()
+                    continue
+                try:
+                    if module == "torch.distributed._ops.device_mesh":
+                        importlib.import_module("torch.distributed.tensor")
+                    importlib.import_module(module)
+                    for op_name, overload in ops:
+                        try:
+                            torch._C._dispatch_find_schema_or_throw(op_name, overload)
+                        except RuntimeError:
+                            print(module, op_name, overload)
+                except BaseException as e:
+                    print(module, repr(e))
+                finally:
+                    sys.stdout.flush()
+                    os._exit(0)
+            """
+        )
+        self.assertGreater(len(scan["modules"]), 1)
+        modules = json.dumps(scan["modules"])
+        cmd = [sys.executable, "-c", check]
+        self.assertEqual(subprocess.check_output(cmd, input=modules, text=True), "")
 
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage

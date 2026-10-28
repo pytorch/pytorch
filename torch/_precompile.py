@@ -1960,10 +1960,102 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
+# Torch's namespaces defined from C++, whose schemas record a build-time path and
+# which `import torch` registers.
+_TORCH_OP_NAMESPACES = frozenset(
+    {
+        "aten",
+        "prim",
+        "inductor",
+        "inductor_prims",
+        "profiler",
+        "quantized",
+        "_quantized",
+        "quantization",
+        "sparse",
+        "c10d",
+        "_c10d_functional",
+        "_c10d_functional_autograd",
+        "_dtensor",
+        "symm_mem",
+        "fsdp",
+        "mkl",
+        "mkldnn",
+        "mkldnn_prepacked",
+        "onednn",
+        "static_runtime",
+        "xnnpack",
+        "prepacked",
+        "vulkan",
+        "vulkan_prepack",
+        "metal",
+        "metal_prepack",
+        "vulkan_quantized",
+        "_nnapi",
+    }
+)
+_TORCH_DIR = os.path.dirname(torch.__file__)
+# torch's helpers that build a Library for the caller's namespace record themselves,
+# so the torch modules defining ops through them are listed by namespace.
+_TORCH_OP_HELPERS = tuple(
+    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
+)
+_TORCH_HELPER_OP_MODULES = MappingProxyType(
+    {
+        "coor": "torch.fx.experimental.proxy_tensor",
+        "debugprims": "torch._prims",
+        "device_mesh": "torch.distributed._ops.device_mesh",
+        "onnx": "torch.onnx.ops._impl",
+        "pippy": "torch.distributed.pipelining._IR",
+    }
+)
+# Torch namespaces defined only when a function runs (CUDA lazy init, inductor's
+# memory-check debug mode), so no module import registers them.
+_TORCH_LAZY_OP_NAMESPACES = frozenset({"triton", "_inductor_debug"})
+
+
+def _torch_op_module(op_name: str, overload: str) -> str | None:
+    """The torch module whose import registers ``op_name``, if torch defines it from
+    Python."""
+    ns = op_name.split("::")[0]
+    if ns in _TORCH_LAZY_OP_NAMESPACES:
+        return None
+    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    path = debug.removeprefix("registered at ").rpartition(":")[0]
+    if path.startswith(_TORCH_OP_HELPERS):
+        return _TORCH_HELPER_OP_MODULES.get(ns)
+    if not (path.startswith(_TORCH_DIR + os.sep) and path.endswith(".py")):
+        return None
+    relpath = os.path.relpath(path.removesuffix(".py"), os.path.dirname(_TORCH_DIR))
+    return relpath.replace(os.sep, ".").removesuffix(".__init__")
+
+
 def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``."""
-    modules = {_custom_op_module(op_name, overload) for op_name, overload in op_names}
-    return tuple(sorted(m for m in modules if m is not None))
+    """The modules registering the ops among ``op_names``, warning once about the
+    ops torch does not register and no importable module is known to register."""
+    modules: set[str] = set()
+    unrecorded: set[str] = set()
+    for op_name, overload in op_names:
+        module = _custom_op_module(op_name, overload)
+        if module is None:
+            module = _torch_op_module(op_name, overload)
+        if module is not None:
+            modules.add(module)
+        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+            unrecorded.add(op_name)
+    if unrecorded:
+        log.warning(
+            "torch.compiler.precompile: the captured graphs call %s, which no "
+            "importable module is known to register: defined in __main__, defined "
+            "with torch.library.Library or torch.library.define, or a C++ op without "
+            "set_python_module. The artifact serves only where something else "
+            "registers them before it is loaded. Define a Python op with "
+            "torch.library.custom_op in an importable module, and give a C++ op "
+            "m.set_python_module; for a library's ops, import that library before "
+            "loading the artifact.",
+            ", ".join(sorted(unrecorded)),
+        )
+    return tuple(sorted(modules))
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -1978,9 +2070,9 @@ def _write_custom_op_imports(
     buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module whose torch.library.custom_op registers the op. The
-    # recorded module is a best guess (and ops defined with Library.define have
-    # none), so the imports are best effort and the ops themselves are checked.
+    # path imports the module that registers the op. The recorded module is a best
+    # guess (and a user op defined with torch.library.Library or torch.library.define
+    # has none), so the imports are best effort and the ops themselves are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
