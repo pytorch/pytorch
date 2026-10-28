@@ -8,12 +8,6 @@
 // allocates an empty out and reuses it instead of doing a temp-copy. The backend
 // only has to provide impl(), which we delegate to CPU here (openreg tensors are
 // host-backed), mirroring abs_out in native/Extra.cpp.
-//
-// openreg deliberately does NOT set `define_meta: true`. define_meta emits a
-// TORCH_LIBRARY_IMPL(aten, Meta) that overrides aten's meta on the device-agnostic,
-// process-global Meta key -- as an autoloaded in-tree test fixture, openreg must not
-// mutate global aten state. The define_meta codegen is covered by the gen_backend_stubs
-// unit tests; the runtime Meta-override mechanism is exercised RAII-scoped in tests/test_ops.py.
 #include <ATen/ops/div.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>

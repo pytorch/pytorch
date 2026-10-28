@@ -40,7 +40,7 @@ ParsedExternalYaml = namedtuple(
 )
 
 # Per-op keys in a supported-op dict entry; every other key is the operator name.
-_SUPPORTED_OP_OPTION_KEYS = frozenset({"structured", "define_meta", "device_guard"})
+_SUPPORTED_OP_OPTION_KEYS = frozenset({"structured", "device_guard"})
 
 
 def _require_bool_option(
@@ -163,7 +163,6 @@ def parse_backend_yaml(
         metadata: dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             structured = False
-            define_meta = False
             device_guard = use_device_guard
             if isinstance(op, dict):
                 # An op with options is a single-key mapping whose value is the option dict
@@ -192,7 +191,6 @@ def parse_backend_yaml(
                         f"Supported option keys: {sorted(_SUPPORTED_OP_OPTION_KEYS)}."
                     )
                 structured = _require_bool_option(_op, opts, "structured", False)
-                define_meta = _require_bool_option(_op, opts, "define_meta", False)
                 device_guard = _require_bool_option(
                     _op, opts, "device_guard", use_device_guard
                 )
@@ -204,11 +202,6 @@ def parse_backend_yaml(
                         "'device_guard: False'. A per-op device_guard can only disable the "
                         "backend-level guard, not enable it; set the backend-level "
                         "device_guard: True and disable it per-op where unwanted."
-                    )
-                if define_meta and not structured:
-                    raise AssertionError(
-                        f"Operator '{_op}' has 'define_meta: True' but 'structured: False'. "
-                        "Custom meta functions require a structured kernel."
                     )
                 if structured and not use_out_as_primary:
                     raise AssertionError(
@@ -243,7 +236,6 @@ def parse_backend_yaml(
                 kernel=kernel_name,
                 structured=structured,
                 cpp_namespace=cpp_namespace,
-                define_meta=define_meta,
                 device_guard=device_guard,
             )
             metadata[op_name] = m
@@ -550,102 +542,6 @@ def gen_dispatchkey_nativefunc_headers(
     )
 
 
-def gen_define_meta_registrations(
-    grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
-    backend_index: BackendIndex,
-    class_name: str,
-) -> str:
-    """Register a backend's custom meta() under the aten ``Meta`` dispatch key for every op marked
-    ``define_meta``, so that ``torch.compile`` / FakeTensor shape propagation uses the backend's
-    meta (not aten's). The generated kernel derives from the backend's structured class -- so the
-    backend's overridden ``meta()`` runs -- and allocates *meta* tensors in ``set_output`` (the
-    shape/stride bookkeeping is delegated to ``at::meta::structured_X`` via the inherited base).
-
-    Mirrors the in-tree structured ``Meta`` kernel (``RegisterMeta.cpp``); only the parent class
-    differs (the backend's class instead of ``at::meta::structured_X``). NB: the ``Meta`` key is
-    device-agnostic, so this is a *global* override of aten's meta for the op (it shadows aten's
-    Meta kernel for all devices) -- only safe when the custom meta is logical-shape-faithful to aten.
-    """
-    import torchgen.api.meta as meta_api
-
-    blocks: list[str] = []
-    registrations: list[str] = []
-    for g in grouped_native_functions:
-        if not isinstance(g, NativeFunctionsGroup):
-            continue
-        metadata = backend_index.get_kernel(g.out)
-        if metadata is None or not metadata.define_meta:
-            continue
-        meta_name = meta_api.name(g)
-        backend_struct = (
-            f"{metadata.cpp_namespace}::{class_name}::structured_{metadata.kernel}"
-        )
-        sig = DispatcherSignature.from_schema(g.functional.func)
-        num_out = len(g.functional.func.returns)
-        # structured ops can't carry TensorOptions, so these functional args always match the
-        # generated meta() declaration (i.e. equal structured.meta_arguments(g)).
-        arg_names = ", ".join(a.name for a in sig.arguments())
-        # Return one moved Tensor, or a make_tuple for multi-output ops (e.g. sort/topk).
-        moved = [f"std::move(op.outputs_[{i}])" for i in range(num_out)]
-        ret_expr = moved[0] if num_out == 1 else f"std::make_tuple({', '.join(moved)})"
-        struct_name = f"structured_{metadata.kernel}_define_meta"
-        wrapper_name = f"wrapper_Meta_define_{meta_name}"
-        # set_output_* override the 4-arg base virtual on both MetaBase and TensorIteratorBase
-        # (TensorMeta.h); emit the meta tensor directly, mirroring the in-tree structured Meta
-        # kernel (RegisterMeta.cpp).
-        #
-        # The super-call routes set_output to the structured base. For TensorIterator ops it does
-        # the iterator bookkeeping the native meta() relies on; MetaBase's set_output_raw_strided is
-        # TORCH_INTERNAL_ASSERT(false), so a super-call on a MetaBase op aborts at runtime. Emit it
-        # only for TensorIterator ops (generate_super=structured_inherits is not None in-tree).
-        super_call = (
-            f"\n        at::meta::structured_{meta_name}::set_output_raw_strided("
-            "output_idx, sizes, strides, options);"
-            if g.out.structured_inherits is not None
-            else ""
-        )
-        blocks.append(
-            f"""\
-namespace {{
-struct {struct_name} final : public {backend_struct} {{
-    void set_output_raw_strided(
-        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options
-    ) override {{
-        outputs_[output_idx] = strides.empty()
-            ? at::detail::empty_meta(sizes, options.device(at::kMeta))
-            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));{super_call}
-    }}
-    void set_output_strided(
-        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options
-    ) override {{
-        set_output_raw_strided(output_idx, sizes, strides, options);
-    }}
-    const at::Tensor & maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<at::Tensor, {num_out}> outputs_;
-}};
-{sig.defn(name=wrapper_name)} {{
-    {struct_name} op;
-    op.meta({arg_names});
-    return {ret_expr};
-}}
-}}  // anonymous namespace
-"""
-        )
-        registrations.append(
-            f'    m.impl("{g.functional.func.name}", TORCH_FN({wrapper_name}));'
-        )
-    if not registrations:
-        return ""
-    # NB: the aten Meta key is device-agnostic, so this globally overrides aten's meta for these
-    # ops (CPU/CUDA fake tensors included); safe only when the custom meta matches aten's shape.
-    reg = "TORCH_LIBRARY_IMPL(aten, Meta, m) {\n" + "\n".join(registrations) + "\n}\n"
-    return "\n".join(blocks) + reg
-
-
 def gen_dispatcher_registrations(
     fm: FileManager,
     output_dir: str,
@@ -717,32 +613,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
             dispatch_registrations_body=dispatch_registrations_body,
         )
 
-    anonymous_definitions = list(
-        concatMap(
-            dest.RegisterDispatchKey(
-                backend_index,
-                Target.ANONYMOUS_DEFINITION,
-                selector,
-                rocm=False,
-                symint=True,
-                class_method_name=f"{class_name}",
-                skip_dispatcher_op_registration=False,
-            ),
-            grouped_native_functions,
-        )
-    )
-    # Register the backend's custom meta() under the aten Meta key for every op marked
-    # define_meta, so torch.compile / FakeTensor shape propagation uses the backend's meta.
-    # Emit only for the primary backend key (not the autograd key).
-    if dispatch_key == backend_dispatch_key:
-        define_meta_block = gen_define_meta_registrations(
-            grouped_native_functions, backend_index, class_name
-        )
-        if define_meta_block:
-            anonymous_definitions = anonymous_definitions + define_meta_block.split(
-                newline
-            )
-
     fm.write_with_template(
         f"Register{dispatch_key}.cpp",
         "RegisterDispatchKey.cpp",
@@ -767,7 +637,20 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                     "deferred_dispatch_registrations": deferred_dispatch_registrations,
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": "",
-                    "dispatch_anonymous_definitions": anonymous_definitions,
+                    "dispatch_anonymous_definitions": list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.ANONYMOUS_DEFINITION,
+                                selector,
+                                rocm=False,
+                                symint=True,
+                                class_method_name=f"{class_name}",
+                                skip_dispatcher_op_registration=False,
+                            ),
+                            grouped_native_functions,
+                        )
+                    ),
                 },
             ).split(newline),
         },

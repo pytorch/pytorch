@@ -689,8 +689,7 @@ class TestStructuredCodegen(TestCase):
     (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
     csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
     Both reuse aten's native meta and only provide impl(). These exercise the
-    generated structured wrappers end to end. (openreg avoids define_meta so the
-    fixture never registers on the global aten Meta key -- see the scoped test below.)"""
+    generated structured wrappers end to end."""
 
     def test_maximum_functional(self):
         """Functional variant: out-as-primary allocates an out and reuses it."""
@@ -728,50 +727,6 @@ class TestStructuredCodegen(TestCase):
         self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
         self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
 
-    def test_define_meta_meta_override_is_scoped(self):
-        """A `define_meta` op registers its meta() on aten's device-agnostic global
-        Meta key, which torch.compile / FakeTensor shape propagation use. The generated
-        registration is only checked by the gen_backend_stubs string-golden unit tests --
-        it is not compiled or executed anywhere, because openreg drops define_meta (a static
-        Meta registration cannot be unregistered, and openreg autoloads into every process).
-        TODO: add a non-autoloaded torch_openreg_test_only extension marking a MetaBase op
-        define_meta: true, plus a subprocess test that imports it, asserts FakeTensor routes
-        through the generated meta with the right shape+dtype, then exits -- so the generated
-        path is compiled AND run without leaking the global Meta registration.
-
-        openreg deliberately does NOT register globally -- a static registration is permanent
-        and would override aten's meta for every device in the test process. Exercise the same
-        mechanism with a RAII-scoped registration: plugin -> verify FakeTensor routes through it
-        -> plugout (scope exit) -> verify it is gone, leaving aten's meta intact."""
-        import torch.library
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        hit = []
-
-        def override_meta(a, b):
-            hit.append(1)
-            return a.new_empty(torch.broadcast_shapes(a.shape, b.shape))
-
-        with torch.library._scoped_library("aten", "IMPL") as lib:  # plugin
-            lib.impl("minimum", override_meta, "Meta")
-            with FakeTensorMode() as fake_mode:
-                fx = fake_mode.from_tensor(torch.empty(1, 3))  # (1, 3)
-                fy = fake_mode.from_tensor(torch.empty(2, 1))  # (2, 1)
-                self.assertEqual(torch.minimum(fx, fy).shape, torch.Size([2, 3]))
-            self.assertTrue(hit, "FakeTensor did not route through the Meta override")
-
-        # plugout: scope exit unregisters; aten's meta is restored, no leak
-        hit.clear()
-        with FakeTensorMode() as fake_mode:
-            torch.minimum(
-                fake_mode.from_tensor(torch.empty(1, 3)),
-                fake_mode.from_tensor(torch.empty(2, 1)),
-            )
-        self.assertFalse(hit, "Meta override leaked after the scoped library closed")
-
-    # div.out is registered non-structured (out-as-primary only): the backend
-    # supplies div_out via TORCH_PRIVATEUSE1_FUNC and torchgen derives the functional
-    # and inplace variants from it.
     def test_div_out_as_primary_functional(self):
         """Functional variant: allocates an out and reuses it (no temp-copy)."""
         x = torch.tensor([6.0, 8.0], device="openreg")

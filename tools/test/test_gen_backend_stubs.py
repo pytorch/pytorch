@@ -14,11 +14,7 @@ from torchgen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
 )
-from torchgen.gen_backend_stubs import (
-    gen_define_meta_registrations,
-    parse_backend_yaml,
-    run,
-)
+from torchgen.gen_backend_stubs import parse_backend_yaml, run
 from torchgen.model import NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
@@ -327,7 +323,7 @@ at::Tensor abs(const at::Tensor & self)
 
     # The per-op dict form (PrivateUse1 out-of-tree structured/out-as-primary
     # feature) lets an op opt into a structured kernel. The op name and its
-    # options (structured/define_meta/device_guard) are siblings, so the
+    # options (structured/device_guard) are siblings, so the
     # options must sit at the same indentation as the "- op:" key.
 
     # structured: true reuses the native structured kernel for the op.
@@ -340,19 +336,6 @@ device_guard: true
 supported:
 - mul.out:
     structured: true"""
-        self.assert_success_from_gen_backend_stubs(yaml_str)
-
-    # define_meta: true (with structured: true) opts into a custom meta.
-    def test_valid_per_op_define_meta(self) -> None:
-        yaml_str = """\
-backend: PrivateUse1
-cpp_namespace: at::priv1::native
-use_out_as_primary: true
-device_guard: true
-supported:
-- sub.out:
-    structured: true
-    define_meta: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
     # An op may use the out-as-primary redirection without a structured kernel,
@@ -381,8 +364,8 @@ supported:
     structured: true"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
 
-    # The full case study from the PR description: structured + custom meta,
-    # structured + native meta, and out-as-primary-only with a device_guard override.
+    # The full case study from the PR description: structured ops reusing aten's meta
+    # and an out-as-primary-only op with a device_guard override.
     def test_valid_per_op_full_case_study(self) -> None:
         yaml_str = """\
 backend: PrivateUse1
@@ -392,29 +375,11 @@ device_guard: true
 supported:
 - sub.out:
     structured: true
-    define_meta: true
 - mul.out:
     structured: true
-    define_meta: false
 - div.out:
     device_guard: false"""
         self.assert_success_from_gen_backend_stubs(yaml_str)
-
-    # define_meta: true requires structured: true.
-    def test_define_meta_without_structured(self) -> None:
-        yaml_str = """\
-backend: PrivateUse1
-cpp_namespace: at::priv1::native
-use_out_as_primary: true
-device_guard: true
-supported:
-- mul.out:
-    define_meta: true"""
-        output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
-        self.assertExpectedInline(
-            output_error,
-            """Operator 'mul.out' has 'define_meta: True' but 'structured: False'. Custom meta functions require a structured kernel.""",
-        )
 
     # A quoted YAML scalar parses to a truthy str (not a bool), which would silently be treated
     # as structured; per-op option values must be real booleans.
@@ -594,7 +559,7 @@ supported:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Operator 'mul.out' has unknown option keys ['structred']. Supported option keys: ['define_meta', 'device_guard', 'structured'].""",  # codespell:ignore structred
+            """Operator 'mul.out' has unknown option keys ['structred']. Supported option keys: ['device_guard', 'structured'].""",  # codespell:ignore structred
         )
 
     # The flat dict form (options as siblings of the op name) is a footgun -- one extra space
@@ -695,10 +660,6 @@ supported:
             )
         )
 
-    def define_meta_registrations(self, supported: str) -> str:
-        groups, backend_index, class_name = self._parse(supported)
-        return gen_define_meta_registrations(groups, backend_index, class_name)
-
     # use_out_as_primary: a structured op (div.out) generates an out wrapper that returns the
     # impl _out call directly (note the at::priv1::native 3-level namespace) and an inplace
     # wrapper that feeds self into the out slot -- the old at::_copy_from_and_resize temp-copy is
@@ -771,26 +732,6 @@ void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & 
 };
 """,
         )
-
-    # define_meta: true additionally emits `using base` and a custom
-    # `void meta(...)` declaration in the struct; without it, neither appears.
-    def test_structured_custom_meta_declaration(self) -> None:
-        self.assertExpectedInline(
-            self.native_function_declaration(
-                "- sub.out:\n    structured: true\n    define_meta: true"
-            ),
-            """\
-struct structured_sub_out : public at::meta::structured_sub_Tensor {
-// Alias to the base meta class for easy access to native meta logic
-using base = at::meta::structured_sub_Tensor;
-void meta(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha);
-void impl(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha, const at::Tensor & out);
-};
-""",
-        )
-        native = self.native_function_declaration("- sub.out:\n    structured: true")
-        self.assertNotIn("using base", native)
-        self.assertNotIn("void meta(", native)
 
     # device_guard is active only when the backend-level and per-op guards are
     # both true; a per-op device_guard: false omits the DeviceGuard the op would
@@ -985,91 +926,6 @@ supported:
             header = (Path(out_dir) / "PrivateUse1NativeFunctions.h").read_text()
         self.assertIn("maximum_meta.h", header)
         self.assertNotIn("div_meta.h", header)
-
-    # define_meta: true also registers the backend's meta() under the aten Meta key, so
-    # torch.compile / FakeTensor uses the backend's shapes. The generated Meta kernel derives
-    # from the backend's structured class (so the backend's overridden meta() runs) and allocates
-    # meta tensors in set_output. (Emission-verified; not yet runtime-tested under torch.compile.)
-    def test_define_meta_registers_aten_meta_key(self) -> None:
-        out = self.define_meta_registrations(
-            "- minimum.out:\n    structured: true\n    define_meta: true"
-        )
-        self.assertExpectedInline(
-            out,
-            """\
-namespace {
-struct structured_minimum_out_define_meta final : public at::priv1::native::PrivateUse1NativeFunctions::structured_minimum_out {
-    void set_output_raw_strided(
-        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options
-    ) override {
-        outputs_[output_idx] = strides.empty()
-            ? at::detail::empty_meta(sizes, options.device(at::kMeta))
-            : at::detail::empty_strided_meta(sizes, strides, options.device(at::kMeta));
-        at::meta::structured_minimum::set_output_raw_strided(output_idx, sizes, strides, options);
-    }
-    void set_output_strided(
-        int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-        at::TensorOptions options
-    ) override {
-        set_output_raw_strided(output_idx, sizes, strides, options);
-    }
-    const at::Tensor & maybe_get_output(int64_t output_idx) override {
-        return outputs_[output_idx];
-    }
-    std::array<at::Tensor, 1> outputs_;
-};
-at::Tensor wrapper_Meta_define_minimum(const at::Tensor & self, const at::Tensor & other) {
-    structured_minimum_out_define_meta op;
-    op.meta(self, other);
-    return std::move(op.outputs_[0]);
-}
-}  // anonymous namespace
-TORCH_LIBRARY_IMPL(aten, Meta, m) {
-    m.impl("minimum", TORCH_FN(wrapper_Meta_define_minimum));
-}
-""",
-        )
-
-    # define_meta on a non-structured op (no aten structured meta) is not yet supported by the
-    # registration generator; it requires emitting a structured-style class with no aten base.
-    def test_define_meta_only_structured_for_now(self) -> None:
-        # div.out is non-structured here, so no Meta registration is emitted.
-        out = self.define_meta_registrations("- div.out")
-        self.assertEqual(out, "")
-
-    # A precompute structured op's define_meta declaration returns meta_return_ty (not void), so
-    # it matches TORCH_PRIVATEUSE1_PRECOMPUTE_META_FUNC; the Meta wrapper discards that return and
-    # uses set_output for the shapes.
-    def test_define_meta_precompute_returns_meta_return_ty(self) -> None:
-        decl = self.native_function_declaration(
-            "- avg_pool2d.out:\n    structured: true\n    define_meta: true"
-        )
-        self.assertIn("meta_return_ty meta(", decl)
-        self.assertNotIn("void meta(", decl)
-
-    # A multi-output structured op (sort -> values, indices) must build a tuple in the generated
-    # Meta wrapper; returning a single Tensor into the tuple slot would not compile.
-    def test_define_meta_multi_output_returns_tuple(self) -> None:
-        out = self.define_meta_registrations(
-            "- sort.values_stable:\n    structured: true\n    define_meta: true"
-        )
-        self.assertIn("std::array<at::Tensor, 2> outputs_;", out)
-        self.assertIn(
-            "return std::make_tuple(std::move(op.outputs_[0]), "
-            "std::move(op.outputs_[1]));",
-            out,
-        )
-        # set_output_* override the 4-arg base virtual (named-tensor support was removed upstream),
-        # so the generated override must be 4-arg with no DimnameList.
-        self.assertIn("at::TensorOptions options\n", out)
-        self.assertNotIn("DimnameList", out)
-        # sort is MetaBase: MetaBase::set_output_raw_strided is TORCH_INTERNAL_ASSERT(false), so the
-        # super-call (emitted for TensorIterator ops like minimum) must NOT appear here, otherwise
-        # meta() would abort at runtime. Mirrors in-tree generate_super=structured_inherits is not None.
-        self.assertNotIn(
-            "at::meta::structured_sort_stable::set_output_raw_strided", out
-        )
 
 
 if __name__ == "__main__":
