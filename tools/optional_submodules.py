@@ -1,6 +1,8 @@
 import os
+import shutil
+import time
 from pathlib import Path
-from subprocess import check_call
+from subprocess import CalledProcessError, check_call
 
 
 repo_root = Path(__file__).absolute().parent.parent
@@ -12,19 +14,23 @@ def _read_file(path: Path) -> str:
         return f.read().strip()
 
 
-def _checkout_by_tag(repo: str, tag: str) -> None:
-    check_call(
-        [
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            tag,
-            repo,
-        ],
-        cwd=third_party_path,
-    )
+def _checkout_by_tag(repo: str, tag: str, attempts: int = 6, backoff: int = 10) -> None:
+    # gitlab.com sheds load with transient clone failures, so retry with backoff
+    clone_dir = third_party_path / repo.rstrip("/").rsplit("/", 1)[-1]
+    for attempt in range(1, attempts + 1):
+        try:
+            check_call(
+                ["git", "clone", "--depth", "1", "--branch", tag, repo],
+                cwd=third_party_path,
+            )
+            return
+        except CalledProcessError:
+            if attempt == attempts:
+                raise
+            shutil.rmtree(clone_dir, ignore_errors=True)
+            delay = backoff * 2 ** (attempt - 1)
+            print(f"-- Clone failed (attempt {attempt}/{attempts}), retry in {delay}s")
+            time.sleep(delay)
 
 
 def read_nccl_pin(cuda_version: str = "") -> str:
