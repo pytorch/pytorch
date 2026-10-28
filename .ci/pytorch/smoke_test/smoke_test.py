@@ -648,6 +648,42 @@ def smoke_test_modules(package: str):
                 print(f"Output: \n{output}\n")
 
 
+def smoke_test_torchaudio() -> None:
+    import torchaudio
+    from torchaudio._extension import _IS_TORCHAUDIO_EXT_AVAILABLE
+
+    print(f"torchaudio: {torchaudio.__version__}")
+    # If libtorchaudio fails to load, the import still succeeds and the ops fall back
+    # to Python, so the import-only smoke test in the audio repo cannot see it.
+    if not _IS_TORCHAUDIO_EXT_AVAILABLE:
+        raise RuntimeError("torchaudio C++ extension is not available")
+
+    sample_rate = 16000
+    t = torch.arange(sample_rate, dtype=torch.float32) / sample_rate
+    waveform = torch.sin(2 * torch.pi * 440 * t).unsqueeze(0)
+
+    devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+    for device in devices:
+        print(f"Testing smoke_test_torchaudio on {device}")
+        wave = waveform.to(device)
+
+        resampled = torchaudio.functional.resample(wave, sample_rate, sample_rate // 2)
+        if resampled.shape != (1, sample_rate // 2):
+            raise RuntimeError(f"resample returned shape {tuple(resampled.shape)}")
+
+        mel = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate, n_fft=400, n_mels=40
+        ).to(device)(wave)
+        if mel.shape[:2] != (1, 40) or not torch.isfinite(mel).all():
+            raise RuntimeError(f"MelSpectrogram returned shape {tuple(mel.shape)}")
+
+    # lfilter runs the compiled _lfilter_core_loop; an identity filter returns its input.
+    identity = torch.tensor([1.0, 0.0, 0.0])
+    filtered = torchaudio.functional.lfilter(waveform, identity, identity)
+    if not torch.allclose(filtered, waveform, atol=1e-6):
+        raise RuntimeError("lfilter with an identity filter changed the waveform")
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -702,6 +738,9 @@ def main() -> None:
 
     if options.package in ["all", "torch_torchvision"]:
         smoke_test_modules(options.package)
+
+    if options.package == "all":
+        smoke_test_torchaudio()
 
     smoke_test_cuda(
         options.package,
