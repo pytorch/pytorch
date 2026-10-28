@@ -8,6 +8,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <memory>
 #include <vector>
