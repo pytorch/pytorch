@@ -1699,9 +1699,9 @@ class TritonOverrides(OpOverrides):
         result = f"tl.{name}({a}, {b})"
         both_nan = f"tl.{name}({a}, {b}, tl.PropagateNan.ALL)"
         if a.dtype == torch.float64:
-            # Lowering orders the operands so the second NaN supplies the payload.
+            # Eager quiets the first NaN when both FP64 operands are NaNs.
             both_nan = (
-                f"({b}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
+                f"({a}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
                 ".to(tl.float64, bitcast=True)"
             )
         return f"tl.where(({a} != {a}) & ({b} != {b}), {both_nan}, {result})"
@@ -5185,7 +5185,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self._enable_pdl_codegen():
             return
-        current_node = V.kernel.current_node
         prev_node = (
             V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
         )
@@ -5193,14 +5192,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            real = V.graph.scheduler.mutation_real_name
             return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+                real.get(dep, dep) == real.get(w.name, w.name) for w in prev_deps
             )
 
         if not dependencies:
@@ -6980,7 +6977,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        self._handle_pdl_before_access(self.post_loop_store, var)
+        self._handle_pdl_before_access(self.post_loop_store, name)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
@@ -9179,6 +9176,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):
