@@ -18,8 +18,6 @@
 #include <ATen/ops/linalg_householder_product.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/matmul.h>
-#include <ATen/ops/view_as_real.h>
-#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -261,19 +259,15 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
 
   // Working copy of A, which will be overwritten with B, then H, then T.
   Tensor H = cloneBatchedColumnMajor(input.resolve_conj().resolve_neg()).reshape({batch, n, n});
-  // Like LAPACK's xGEEV, scale A first, so that the kernels' intermediate
-  // values can't underflow or overflow. Dividing by a power of 2 is exact.
-  Tensor scale = at::view_as_real(H).abs().amax({-3, -2, -1}).view({batch, 1, 1});
-  scale = at::where(scale.gt(0), scale.log2().floor().exp2(), 1);
-  H.div_(scale);
   // D is a diagonal matrix, so we only track the diagonal entries
   Tensor D = at::empty({batch, n}, options.dtype(kFloat));
   Tensor perm = at::empty({batch, n}, options.dtype(kLong));
+  Tensor scale_exponent = at::empty({batch}, options.dtype(kInt));
   Tensor tau = at::empty({batch, std::max<int64_t>(n - 2, 0)}, options);
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encode_eig_kernel(stream, "eig_balance", H, batch, n, 0, H, D, perm, params);
+      encode_eig_kernel(stream, "eig_balance", H, batch, n, 0, H, D, perm, scale_exponent, params);
       if (n > 2) {
         encode_eig_kernel(stream, "eig_hessenberg", H, batch, n, 0, H, tau, params);
       }
@@ -299,11 +293,21 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
   const int64_t threadgroup_memory = stage_h ? ceil_div<int64_t>(h_bytes, 16) * 16 : 16;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encode_eig_kernel(
-          stream, "eig_qr_iterate", H, batch, n, threadgroup_memory, H, U_arg, rotations, eigenvalues, infos, params);
+      encode_eig_kernel(stream,
+                        "eig_qr_iterate",
+                        H,
+                        batch,
+                        n,
+                        threadgroup_memory,
+                        H,
+                        U_arg,
+                        rotations,
+                        eigenvalues,
+                        infos,
+                        scale_exponent,
+                        params);
     }
   });
-  eigenvalues.view({batch, n}).mul_(scale.view({batch, 1}));
   if (!compute_eigenvectors) {
     return;
   }

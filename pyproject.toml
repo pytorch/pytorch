@@ -129,6 +129,7 @@ include = [
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!third_party/nccl/**",
+    "!third_party/nccl-extensions/**",
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
@@ -377,7 +378,7 @@ dev = [
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 # License info:
 #   - The main Pytorch project license is BSD-3-Clause.
 #   - Explicit license-files list; audit in test/test_license.py (issue #183434).
@@ -403,6 +404,7 @@ license-files = [
     "third_party/cudnn_frontend/LICENSE.txt",
     "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
+    "third_party/dynolog_headers/LICENSE",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",
     "third_party/fbgemm/external/composable_kernel/LICENSE",
@@ -431,6 +433,8 @@ license-files = [
     "third_party/mslk/external/composable_kernel/LICENSE",
     "third_party/mslk/external/cutlass/LICENSE.txt",
     "third_party/mslk/mslk/attention/flash_attn/LICENSE",
+    "third_party/nccl_ep/LICENSE.txt",
+    "third_party/nccl_ep/ThirdPartyNotices.txt",
     "third_party/nlohmann/LICENSE.MIT",
     "third_party/onnx/LICENSE",
     "third_party/perfetto/LICENSE",
@@ -445,7 +449,6 @@ license-files = [
     "third_party/tensorpipe/third_party/libuv/LICENSE",
     "third_party/tensorpipe/third_party/libuv/LICENSE-extra",
     "torch/csrc/profiler/kineto/LICENSE",
-    "torch/csrc/profiler/kineto/libkineto/third_party/dynolog_headers/LICENSE",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -462,7 +465,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -526,6 +528,11 @@ first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
 
 [tool.ruff]
+# Ruff takes its target version from requires-python, which is now >=3.11. That
+# turns on UP035/UP036/UP044/UP017 and rewrites ~160 files that still carry the
+# Python 3.10 compatibility code. Keep linting for 3.10 until that code is
+# removed (see the "Remove Python 3.10 support code" cleanups), then delete this.
+target-version = "py310"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 extend-exclude = ["third_party", "test/cpython"]

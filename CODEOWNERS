@@ -1049,6 +1049,8 @@
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
+# label: oncall: profiler, module: third_party
+/third_party/dynolog_headers/ @scotts @ryanzhang22
 # label: module: third_party, module: xpu
 /third_party/xpu.txt @EikanWang @gujinghui
 #

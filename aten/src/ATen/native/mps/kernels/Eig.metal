@@ -137,18 +137,25 @@ float2 qr_shift(P H, I n, int ihi, int its) {
   // where
   //   l = (a + d) / 2
   //   r = sqrt((a - d)^2 + 4 b c) / 2
+  // As in LAPACK's xLAHQR, u = sqrt(b) sqrt(c) stands in for sqrt(b c), and x
+  // and u are divided by s before squaring them, so that tiny or huge entries
+  // can't underflow or overflow.
   const float2 a = H[(ihi - 1) + (ihi - 1) * n];
-  const float2 bc = c10::metal::mul(H[(ihi - 1) + ihi * n], c);
+  const float2 u = c10::metal::mul(
+      c10::metal::sqrt(H[(ihi - 1) + ihi * n]), c10::metal::sqrt(c));
   const float2 x = 0.5f * (a - d);
-  float2 y = c10::metal::sqrt(c10::metal::mul(x, x) + bc);
+  const float s = max(abs1(x), abs1(u));
+  if (s == 0) {
+    return d;
+  }
+  const float2 xs = x / s;
+  const float2 us = u / s;
+  float2 y =
+      s * c10::metal::sqrt(c10::metal::mul(xs, xs) + c10::metal::mul(us, us));
   if (dot(x, y) < 0) {
     y = -y;
   }
-  const float2 x_plus_y = x + y;
-  if (x_plus_y.x == 0 && x_plus_y.y == 0) {
-    return d;
-  }
-  return d - c10::metal::div(bc, x_plus_y);
+  return d - c10::metal::mul(u, c10::metal::div(u, x + y));
 }
 
 // One implicitly shifted QR step on the active window H[l:ihi+1, l:ihi+1]
@@ -400,10 +407,60 @@ void swap_indices(
   threadgroup_barrier(mem_flags::mem_device);
 }
 
+// MPS arithmetic flushes subnormal floats to zero, so these work on the bit
+// patterns instead.
+
+// floor(log2(x)) for the bits of a positive float x
+inline int exponent_of(uint bits) {
+  return bits < 0x00800000u ? -118 - int(clz(bits)) : int(bits >> 23) - 127;
+}
+
+// x * 2^e, rounded toward zero if the result is subnormal
+inline float ldexp_exact(float x, int e) {
+  const uint bits = as_type<uint>(x);
+  const uint sign = bits & 0x80000000u;
+  const uint magnitude = bits & 0x7fffffffu;
+  if (magnitude == 0) {
+    return x;
+  }
+  // |x| = mantissa * 2^exponent, with mantissa in [2^23, 2^24)
+  uint mantissa;
+  int exponent;
+  if (magnitude < 0x00800000u) {
+    const uint shift = clz(magnitude) - 8;
+    mantissa = magnitude << shift;
+    exponent = -149 - int(shift);
+  } else {
+    mantissa = (magnitude & 0x007fffffu) | 0x00800000u;
+    exponent = int(magnitude >> 23) - 150;
+  }
+  const int biased_exponent = exponent + e + 150;
+  if (biased_exponent >= 255) {
+    return as_type<float>(sign | 0x7f800000u);
+  }
+  if (biased_exponent > 0) {
+    return as_type<float>(
+        sign | (uint(biased_exponent) << 23) | (mantissa & 0x007fffffu));
+  }
+  const int shift = 1 - biased_exponent;
+  return as_type<float>(sign | (shift < 24 ? mantissa >> shift : 0u));
+}
+
+inline float2 ldexp_exact(float2 z, int e) {
+  return float2(ldexp_exact(z.x, e), ldexp_exact(z.y, e));
+}
+
 } // namespace eig
 
-// Balances A <- D^-1 P^T A P D (see Note [linalg.eig for MPS]), like LAPACK's
-// xGEBAL. The permutation P, with (P^T A P)[i, j] = A[perm[i], perm[j]], moves
+// Scales A by 2^scale_exponent, then balances A <- D^-1 P^T A P D (see Note
+// [linalg.eig for MPS]).
+//
+// Like LAPACK's xGEEV, the scaling brings the largest entry of A between 2^-40
+// and 2^40, which keeps intermediate values in the kernels from underflowing or
+// overflowing. eig_qr_iterate undoes it for the eigenvalues.
+//
+// The balancing is like LAPACK's xGEBAL. The permutation P, with
+// (P^T A P)[i, j] = A[perm[i], perm[j]], moves
 // rows and columns that are zero off the diagonal to the bottom and left, which
 // isolates eigenvalues that are then computed exactly, e.g. those of triangular
 // matrices. The elements of D are powers of 2, so the scaling is exact. It
@@ -415,7 +472,8 @@ kernel void eig_balance(
     device float2* A [[buffer(0)]],
     device float* D [[buffer(1)]],
     device long* perm [[buffer(2)]],
-    constant EigParams& params [[buffer(3)]],
+    device int* scale_exponent [[buffer(3)]],
+    constant EigParams& params [[buffer(4)]],
     uint tid [[thread_position_in_threadgroup]],
     uint nthreads [[threads_per_threadgroup]],
     uint batch [[threadgroup_position_in_grid]]) {
@@ -429,6 +487,26 @@ kernel void eig_balance(
   device long* perm_b = perm + static_cast<long>(batch) * n;
   threadgroup float column_scratch[32];
   threadgroup float row_scratch[32];
+  threadgroup uint largest_scratch[32];
+
+  // The bits of non-negative floats compare like their values
+  uint largest = 0;
+  for (I i = tid; i < n * n; i += nthreads) {
+    const uint2 bits = as_type<uint2>(A_b[i]) & 0x7fffffffu;
+    largest = max(largest, max(bits.x, bits.y));
+  }
+  largest =
+      c10::metal::threadgroup_max(largest_scratch, largest, tid, nthreads);
+  const int exponent = largest == 0 ? 0 : eig::exponent_of(largest);
+  const int scale = clamp(exponent, -40, 40) - exponent;
+  if (scale != 0) {
+    for (I i = tid; i < n * n; i += nthreads) {
+      A_b[i] = eig::ldexp_exact(A_b[i], scale);
+    }
+  }
+  if (tid == 0) {
+    scale_exponent[batch] = scale;
+  }
 
   for (I i = tid; i < n; i += nthreads) {
     // Initialize D to identity so that `D^-1 A D = A`
@@ -626,7 +704,8 @@ kernel void eig_qr_iterate(
     device packed_float3* rotations [[buffer(2)]],
     device float2* eigenvalues [[buffer(3)]],
     device int* info [[buffer(4)]],
-    constant EigParams& params [[buffer(5)]],
+    device const int* scale_exponent [[buffer(5)]],
+    constant EigParams& params [[buffer(6)]],
     threadgroup float2* H_staged [[threadgroup(0)]],
     uint tid [[thread_position_in_threadgroup]],
     uint nthreads [[threads_per_threadgroup]],
@@ -660,8 +739,9 @@ kernel void eig_qr_iterate(
   }
   threadgroup_barrier(mem_flags::mem_device);
 
+  // Undo eig_balance's scaling
   for (I i = tid; i < n; i += nthreads) {
-    eigenvalues_b[i] = H_b[i + i * n];
+    eigenvalues_b[i] = eig::ldexp_exact(H_b[i + i * n], -scale_exponent[batch]);
   }
   if (tid == 0) {
     info[batch] = status;
@@ -786,6 +866,7 @@ kernel void eig_vectors(
       device float2*,                                                         \
       device float*,                                                          \
       device long*,                                                           \
+      device int*,                                                            \
       constant EigParams&,                                                    \
       uint,                                                                   \
       uint,                                                                   \
@@ -805,6 +886,7 @@ kernel void eig_vectors(
       device packed_float3*,                                                  \
       device float2*,                                                         \
       device int*,                                                            \
+      device const int*,                                                      \
       constant EigParams&,                                                    \
       threadgroup float2*,                                                    \
       uint,                                                                   \

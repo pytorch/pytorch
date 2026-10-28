@@ -961,7 +961,7 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
             n = 8
             scale = 2.0 ** torch.arange(0, 4 * n, 4)
 
-            A = torch.randn(n, n, dtype=dtype, device=device)
+            A = torch.randn(n, n, dtype=dtype)
             perm = torch.randperm(n)
 
             special_matrices = [
@@ -980,10 +980,15 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
                 A * 1e-30,
                 A * 1e-22,
                 A * 1e20,
+                torch.eye(4, dtype=dtype) * 1.4e-45,
+                torch.randn(8, 8, dtype=dtype) * 1e-40,
+                torch.randn(32, 32, dtype=dtype) * 1e-38,
                 # A lower triangular matrix
                 torch.tril(torch.randn(64, 64, dtype=dtype)),
                 # A randomly permuted upper triangular matrix
                 torch.randn(n, n, dtype=dtype).triu()[perm[:, None], perm],
+                # A badly scaled 2x2 diagonal matrix
+                torch.diag(torch.tensor([2.0**127, 1.0], dtype=dtype)),
             ]
 
             if dtype.is_complex:
