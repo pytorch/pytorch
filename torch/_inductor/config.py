@@ -3018,7 +3018,7 @@ class xpu(cutlass):
 
 
 class rocm:
-    """ROCm-specific inductor configuration."""
+    """ROCm-specific inductor configuration (arch list, CK, origami, etc.)."""
 
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
