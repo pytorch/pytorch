@@ -1244,9 +1244,9 @@ class GuardManagerAcceleratorTests(torch._dynamo.test_case.TestCase):
         # Use device.index which is device-agnostic (works on all accelerators)
         x = device.index if device.index is not None else 0
         guard = guards.EQUALS_MATCH(root, x, [0], None)
-        self.assertTrue(guard(0))
-        self.assertFalse(guard(1))
-        self.assertFalse(guard(2))
+        self.assertTrue(guard(x))
+        self.assertFalse(guard(x + 1))
+        self.assertFalse(guard(x + 2))
 
 
 instantiate_device_type_tests(
