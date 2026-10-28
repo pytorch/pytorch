@@ -6,8 +6,13 @@
 namespace at::native {
 
 struct ScatterAddOp;
+struct ScatterCopyOp;
 struct ScatterMinOp;
 struct ScatterMaxOp;
+
+// Below 256-byte slices, the per-entry overhead of vectorized/TMA scatter
+// outweighs the benefit of processing a row at a time.
+inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 template<int alignment>
 inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride_bytes, const size_t element_size) {
@@ -34,11 +39,6 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
          get_alignment(static_cast<size_t>(index_stride_bytes)) == alignment &&
          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == alignment;
 }
-
-// Minimum slice size for the vectorized/TMA scatter fast paths. They launch
-// at least a warp per entry, so below 256-byte slices the per-entry overhead
-// dominates and the elementwise kernel is faster (pre-#182675 routing).
-inline constexpr size_t kFastScatterMinSliceBytes = 256;
 
 // For scatter on dim=0: self is restrided (stride[dim]=0), src and index keep original strides.
 // In TensorIterator ordering (fast to slow):
