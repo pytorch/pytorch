@@ -3,6 +3,8 @@
 
 
 import copy
+from collections.abc import Sequence
+from typing import cast
 
 import torch
 from torch._ops import OpOverload
@@ -72,7 +74,9 @@ def _scaled_mm_scale_placement(
     1. Tensor-wise scale (single element): always Replicate.
     2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement, except
        Replicate when the data is Partial or sharded on a dim where the scale
-       has size 1 (the scale broadcasts along it).
+       has size 1 (the scale broadcasts along it). Row-parallel sub-row-wise
+       scales ([M,S] Shard(1) with S shards) give each rank its own row-wise
+       scale for its slice of K (split-k scaling).
     3. 1D blockwise scale, e.g. MX format [M*K/block_size]: map
        non-contracting shard to Shard(0)/_ShardingPlaceholder(0), and reject
        contracting-dim shards (returns None).
@@ -316,7 +320,91 @@ def baddbmm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
-@register_single_dim_strategy(aten._scaled_mm.default, allow_unbacked_sharding=True)
+def _is_split_k_scaled_mm(op: OpOverload, specs: Sequence[object]) -> bool:
+    """
+    Whether specs are _scaled_mm args with row-parallel sub-row-wise (split-k)
+    scales: scale_a (m, S) Shard(1) and scale_b (S, n) Shard(0), each split
+    into S shards with K divisible by S, so every rank holds row-wise (m, 1)
+    and (1, n) scales for its slice of the contracting dim. Only depends on
+    global specs, so all ranks agree.
+    """
+    if op != aten._scaled_mm.default or len(specs) < 4:
+        return False
+    a, b, scale_a, scale_b = specs[:4]
+    if not (
+        isinstance(a, DTensorSpec)
+        and isinstance(b, DTensorSpec)
+        and isinstance(scale_a, DTensorSpec)
+        and isinstance(scale_b, DTensorSpec)
+    ):
+        return False
+    # Non-default shard orders would pair scale slices with other K slices.
+    if any(
+        s.shard_order != DTensorSpec.compute_default_shard_order(s.placements)
+        for s in (a, b, scale_a, scale_b)
+    ):
+        return False
+
+    def num_shards(spec: DTensorSpec, dim: int) -> int:
+        return prod(
+            spec.mesh.size(i)
+            for i, p in enumerate(spec.placements)
+            if isinstance(p, Shard) and p.dim == dim
+        )
+
+    shards = num_shards(scale_a, 1)
+    if shards <= 1 or num_shards(scale_b, 0) != shards:
+        return False
+    if any(s.tensor_meta is None or s.ndim != 2 for s in (a, b, scale_a, scale_b)):
+        return False
+    expected = (a.shape[1], a.shape[0], shards, shards, b.shape[1])
+    return guard_or_false(a.shape[1] % shards == 0) and all(
+        guard_or_false(x == y)
+        for x, y in zip((b.shape[0], *scale_a.shape, *scale_b.shape), expected)
+    )
+
+
+def _keep_split_k_scales(
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    # Split-k scales are only valid while split S ways, so drop strategies
+    # that reshard them (e.g. following mat1 onto another mesh dim). A/B are
+    # then redistributed to match the scales.
+    current_specs = [
+        s.strategies[0].output_spec if isinstance(s, OpStrategy) else s
+        for s in op_schema.args_schema
+    ]
+    if not _is_split_k_scaled_mm(op_schema.op, current_specs):
+        return True
+    return _is_split_k_scaled_mm(op_schema.op, input_specs)
+
+
+def _split_k_scaled_mm_fake_args(
+    op_schema: OpSchema, fake_args: tuple[object, ...]
+) -> tuple[object, ...]:
+    # The global split-k scales are not a valid scaling config, so check one
+    # shard's: its slice of K with row-wise scales.
+    if not _is_split_k_scaled_mm(op_schema.op, op_schema.args_spec):
+        return fake_args
+    a, b, scale_a, scale_b = cast(tuple[torch.Tensor, ...], fake_args[:4])
+    k = a.shape[1] // scale_a.shape[1]
+    return (
+        a[:, :k],
+        b[:k, :],
+        scale_a.new_empty((a.shape[0], 1)),
+        scale_b.new_empty((1, b.shape[1])),
+        *fake_args[4:],
+    )
+
+
+@register_single_dim_strategy(
+    aten._scaled_mm.default,
+    allow_unbacked_sharding=True,
+    full_mesh_strategy_filter=_keep_split_k_scales,
+)
 def scaled_mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -1375,3 +1463,13 @@ def grouped_mm_single_dim_strategy(
         )
 
     return strategies
+
+
+# Register the split-k fake args adjuster so the sharding propagator checks
+# per-shard scales for _scaled_mm.
+from torch.distributed.tensor._api import DTensor
+
+
+DTensor._op_dispatcher.sharding_propagator.op_to_fake_args_adjuster[
+    aten._scaled_mm.default
+] = _split_k_scaled_mm_fake_args
