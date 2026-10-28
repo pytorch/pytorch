@@ -74,6 +74,97 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("operation", ["del", "pop"])
+    def test_ordered_dict_delete_reordered_input(self, operation):
+        def fn(x, mapping):
+            if operation == "del":
+                del mapping["a"]
+            else:
+                mapping.pop("a")
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for keys in ("abc", "acb"):
+            mapping = OrderedDict((key, ord(key)) for key in keys)
+            expected = mapping.copy()
+            self.assertEqual(compiled(x, mapping), fn(x, expected))
+            self.assertEqual(list(mapping.items()), list(expected.items()))
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("operation", ["not", "bool", "len"])
+    def test_input_keys_view_truth_guards(self, mapping_type, operation):
+        def fn(x, view):
+            if operation == "not":
+                return x + (not view)
+            if operation == "bool":
+                return x + bool(view)
+            return x + len(view)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for keys in ((), ("a",), ("a", "b"), ()):
+            view = mapping_type.fromkeys(keys).keys()
+            self.assertEqual(compiled(x, view), fn(x, view))
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    def test_extend_constant_mapping(self, mapping_type):
+        @torch._dynamo.assume_constant_result
+        def constant_mapping():
+            return mapping_type(a=1, b=2)
+
+        def fn(x):
+            result = []
+            result.extend(constant_mapping())
+            return x + 1, result
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("operation", ["reversed", "repr", "popitem"])
+    def test_ordered_dict_linked_order_guards(self, operation):
+        def fn(x, mapping):
+            if operation == "reversed":
+                result = list(reversed(mapping))
+            elif operation == "repr":
+                result = repr(mapping)
+            else:
+                result = mapping.popitem()
+            return x + 1, result
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for reordered in (False, True, False):
+            mapping = OrderedDict(a=1, b=2, c=3)
+            if reordered:
+                mapping.move_to_end("a")
+            expected = mapping.copy()
+            self.assertEqual(compiled(x, mapping), fn(x, expected))
+            self.assertEqual(list(mapping.items()), list(expected.items()))
+
+    @parametrize("operation", ["copy", "update", "unpack", "extend"])
+    def test_dict_materialization_order_guards(self, operation):
+        def fn(x, mapping):
+            if operation == "copy":
+                result = mapping.copy()
+            elif operation == "update":
+                result = {}
+                result.update(mapping)
+            elif operation == "unpack":
+                result = [*mapping]
+            else:
+                result = []
+                result.extend(mapping)
+            return x + 1, list(result)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for keys in ("ab", "ba", "ab"):
+            mapping = dict.fromkeys(keys, 1)
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("size", [0, 1, 2])
     def test_ordered_dict_trivial_order_guard(self, size):
         def fn(x, mapping):

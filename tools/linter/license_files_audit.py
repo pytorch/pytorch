@@ -27,6 +27,7 @@ LICENSE_GLOBS = (
     ":(icase,glob)LICENSE",
     ":(icase,glob)third_party/**/LICENSE*",
     ":(icase,glob)third_party/**/COPYING*",
+    ":(icase,glob)third_party/nccl_ep/ThirdPartyNotices.txt",
     ":(icase,glob)torch/csrc/profiler/kineto/**/LICENSE*",
     ":(icase,glob)torch/csrc/profiler/kineto/**/COPYING*",
 )
