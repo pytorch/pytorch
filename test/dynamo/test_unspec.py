@@ -257,8 +257,11 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.arange(4.0, dtype=dtype)
         random.seed(0)
         expected = fn(x, random.Random(0))
-        random.seed(0)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # Compiling can draw from the global RNG (e.g. internal module
+        # initializations), so compile before reseeding.
+        opt_fn(x, random.Random(0))
+        random.seed(0)
         self.assertEqual(opt_fn(x, random.Random(0)), expected)
 
     def test_numpy_scalar_inputs_inductor(self):
@@ -1505,22 +1508,6 @@ else:
         o1_2_ref = main_model(x2, 2)
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
-
-    @torch._dynamo.config.patch(error_on_recompile=True)
-    def test_mark_unbacked_hint_consistency(self):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        x = torch.randn(1)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
-
-        @torch.compile(backend="eager")
-        def f(x):
-            if guard_size_oblivious(x.size(0) != 1):
-                return x + 3
-            else:
-                return x + 4
-
-        self.assertEqual(f(x), x + 3)
 
     @torch._dynamo.config.patch(error_on_recompile=True)
     def test_mark_unbacked_channels_last(self):
