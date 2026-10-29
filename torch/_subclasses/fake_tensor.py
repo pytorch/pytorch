@@ -2771,7 +2771,9 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata is None:
             return None
 
-        if is_sparse_any(metadata):
+        if metadata.layout is torch.sparse_coo or is_sparse_compressed_layout(
+            metadata.layout
+        ):
             raise AssertionError("Sparse tensors are not supported in cache")
 
         def check_value(value: _MetadataIntLike, state: _CacheKeyState) -> IntLikeType:
@@ -2786,8 +2788,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError("Unexpected _PySymInputStub value")
                 return value
 
-        shape = tuple(check_value(v, state) for v in metadata.shape)
-        stride = tuple(check_value(v, state) for v in metadata.stride)
+        shape = metadata.shape
+        if not _all_ints(shape):
+            shape = tuple(check_value(v, state) for v in shape)
+        stride = metadata.stride
+        if not _all_ints(stride):
+            stride = tuple(check_value(v, state) for v in stride)
         storage_offset = check_value(metadata.storage_offset, state)
         if metadata.storage_bytes is not None:
             check_value(metadata.storage_bytes, state)
@@ -2876,7 +2882,13 @@ class FakeTensorMode(TorchDispatchMode):
         # Reconstructing a cached FakeTensor may run symbolic checks inside
         # empty_strided()/set_().  Those checks are cache internals, not user
         # operations, so they must not be recorded by an active proxy tracer.
-        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+        # Disabling it costs a few us, so skip that when there's no tracer.
+        maybe_disable_proxy_tracing = (
+            contextlib.nullcontext()
+            if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is None
+            else torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing()
+        )
+        with maybe_disable_proxy_tracing:
             if entry.is_output_tuple:
                 outputs = [
                     self._get_output_tensor_from_cache_entry(
