@@ -11,6 +11,7 @@ import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -33,6 +34,8 @@ from torch._native.ops.reductions import (
 
 
 class TestReductionConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def general(self, **updates):
         args = dict(
             cc=(10, 3),
@@ -230,6 +233,8 @@ class TestReductionConfig(TestCase):
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "CuTeDSL requires Hopper or later")
 class TestReductionConfigDevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_required_inner_tree_cannot_fall_back(self, device):
         """Raise when no ordered route exists instead of changing reduction order."""
         import cutlass
@@ -316,6 +321,27 @@ class TestReductionConfigDevice(TestCase):
         else:
             indexed.assert_called_once()
         fallback.assert_not_called()
+        self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
+    def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
+        """Follow only the order argument in direct row calls, even under strict."""
+        import cutlass
+
+        from torch._native.ops.reductions import traits
+
+        x = torch.randn(64, 4096, device=device)
+        trait = traits.SumOps(acc=cutlass.Float32)
+        f32 = [torch.float32]
+        with (
+            mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
+            mock.patch.object(rt, "_run_itree") as itree,
+        ):
+            (got,) = rt.reduce_row_tile(trait, "row_env", x, f32)
+            with self.assertRaisesRegex(ValueError, "cannot be honoured"):
+                rt.reduce_row_tile(
+                    trait, "row_env", x, f32, threads_per_row=32, order="inner_tree"
+                )
+        itree.assert_not_called()
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
 
     @parametrize("entry", ["reduce_dim2", "reduce_all", "reduce_all2"])
