@@ -7,7 +7,13 @@ import pytest
 
 
 class TraceExpectedFailure:
+    def __init__(self, remove_rocm_sub_xfail=False):
+        self.remove_rocm_sub_xfail = remove_rocm_sub_xfail
+
     def pytest_runtest_call(self, item):
+        if self.remove_rocm_sub_xfail:
+            assert item.name.startswith('test_eager_equivalence_sub_backend_inductor_numerics_')
+            item.module.ROCM_EAGER_EQUIV_XFAILS['inductor_numerics'].pop('sub', None)
         instance = getattr(item.obj, '__self__', None)
         original = getattr(instance, '_run_with_expected_failure', None)
         if original is None:
@@ -28,4 +34,8 @@ class TraceExpectedFailure:
 
 
 if __name__ == '__main__':
-    sys.exit(pytest.main(sys.argv[1:], plugins=[TraceExpectedFailure()]))
+    arguments = sys.argv[1:]
+    remove_sub = '--remove-rocm-sub-xfail' in arguments
+    if remove_sub:
+        arguments.remove('--remove-rocm-sub-xfail')
+    sys.exit(pytest.main(arguments, plugins=[TraceExpectedFailure(remove_sub)]))
