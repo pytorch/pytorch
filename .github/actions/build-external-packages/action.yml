@@ -1,0 +1,51 @@
+# Removed with lumen_cli (#202327). This stub stays because _linux-build.yml on
+# older bases references this action as `pytorch/pytorch/...@main`, and GitHub
+# resolves every action a job uses when the job starts, even for steps that will
+# be skipped. Without it, every Linux build on a PR not yet rebased past #202327
+# fails at setup. Delete it once those PRs have aged out.
+name: Build External packages (removed)
+
+description: Removed; fails if a step actually runs it.
+
+inputs:
+  cuda-version:
+    description: Unused
+    required: false
+    default: ""
+  cuda-arch-list:
+    description: Unused
+    required: false
+    default: ""
+  docker-image:
+    description: Unused
+    required: false
+    default: ""
+  build-targets:
+    description: Unused
+    required: false
+    default: ""
+  torch-wheel-dir:
+    description: Unused
+    required: false
+    default: dist
+  output-dir:
+    description: Unused
+    required: false
+    default: external
+
+outputs:
+  build_time:
+    description: Always empty
+    value: ""
+  output_dir:
+    description: Always empty
+    value: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Fail
+      shell: bash
+      run: |
+        echo "::error::build-external-packages was removed in #202327; rebase onto main"
+        exit 1
