@@ -175,15 +175,17 @@ class DistributedPlanEffectsTest(unittest.TestCase):
             ["oncall: distributed parallelisms", "triage review", "triaged"],
         )
         self.assertNotIn("triaged", review.add_labels)
-        repro = effects(
-            "needs_reproduction",
-            ["needs reproduction", "triaged"],
-            ["needs_distributed_reproduction"],
-        )
-        self.assertEqual(repro.add_labels, ["needs reproduction", MARKER])
-        self.assertEqual(
-            repro.comment, TEMPLATES["needs_distributed_reproduction"]["comment"]
-        )
+        for templates in ([], ["needs_distributed_reproduction"]):
+            with self.subTest(templates=templates):
+                repro = effects(
+                    "needs_reproduction", ["needs reproduction", "triaged"], templates
+                )
+                self.assertEqual(repro.add_labels, ["needs reproduction", MARKER])
+                self.assertEqual(
+                    repro.comment,
+                    TEMPLATES["needs_distributed_reproduction"]["comment"],
+                )
+                self.assertFalse(repro.close)
 
     def test_high_priority_goes_to_review_without_the_marker(self):
         result = effects(
@@ -201,6 +203,17 @@ class DistributedPlanEffectsTest(unittest.TestCase):
             bot_comments=[posted],
         )
         self.assertFalse(result.mutates)
+
+    def test_implicit_reproduction_request_is_not_repeated(self):
+        posted = TEMPLATES["needs_distributed_reproduction"]["comment"]
+        existing = ROUTED | {"needs reproduction"}
+        rerun = effects("needs_reproduction", existing=existing, bot_comments=[posted])
+        self.assertEqual(rerun.comment, "")
+        self.assertEqual(rerun.add_labels, [MARKER])
+        done = effects(
+            "needs_reproduction", existing=existing | {MARKER}, bot_comments=[posted]
+        )
+        self.assertFalse(done.mutates)
 
     def test_classification_without_a_distributed_module_goes_to_review(self):
         for existing_modules, requested_modules in (
