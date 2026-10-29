@@ -6,6 +6,8 @@ Only tests covering operations supported in PR 1 (read-only ops + wiring)
 are included; mutation, methods, and conversions will follow in later PRs.
 """
 
+import sys
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -313,6 +315,132 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.rindex("b")
 
     @make_dynamo_test
+    def test_split_rsplit(self):
+        b = self.type2test(b"a,,b,c")
+        parts = b.split(b",", maxsplit=2)
+        self.assertEqual(
+            parts,
+            [self.type2test(b"a"), self.type2test(), self.type2test(b"b,c")],
+        )
+        self.assertIs(type(parts[0]), bytearray)
+        self.assertEqual(
+            b.rsplit(b",", maxsplit=2),
+            [self.type2test(b"a,"), self.type2test(b"b"), self.type2test(b"c")],
+        )
+        self.assertEqual(
+            b.split(self.type2test(b","), 1),
+            [self.type2test(b"a"), self.type2test(b",b,c")],
+        )
+        whitespace = self.type2test(b"  a  b  ")
+        self.assertEqual(whitespace.split(None, 0), [self.type2test(b"a  b  ")])
+        self.assertEqual(whitespace.rsplit(None, 0), [self.type2test(b"  a  b")])
+        self.assertRaisesRegex(ValueError, "^empty separator$", b.split, b"")
+        self.assertRaisesRegex(
+            TypeError, "^a bytes-like object is required, not 'str'$", b.rsplit, ","
+        )
+        self.assertRaisesRegex(
+            OverflowError,
+            "^Python int too large to convert to C ssize_t$",
+            b.split,
+            b",",
+            sys.maxsize + 1,
+        )
+        self.assertRaisesRegex(
+            OverflowError,
+            "^Python int too large to convert to C ssize_t$",
+            b.rsplit,
+            b",",
+            sys.maxsize + 1,
+        )
+
+    def test_input_bytearray_split_rsplit(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.split(b","), ba.rsplit(b",", 1)
+
+        result = fn(bytearray(b"a,b,c"))
+        self.assertEqual(
+            result,
+            (
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+                [bytearray(b"a,b"), bytearray(b"c")],
+            ),
+        )
+        for parts in result:
+            for part in parts:
+                self.assertIs(type(part), bytearray)
+
+    def test_input_bytearray_split_rsplit_no_separator(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.split(b","), ba.rsplit(b",")
+
+        ba = bytearray(b"abc")
+        result = fn(ba)
+        self.assertEqual(result, ([bytearray(b"abc")], [bytearray(b"abc")]))
+        for parts in result:
+            self.assertIs(type(parts[0]), bytearray)
+            self.assertIsNot(parts[0], ba)
+        self.assertIsNot(result[0][0], result[1][0])
+
+    def test_input_bytearray_split_rsplit_after_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            ba += b",d"
+            return ba.split(b","), ba.rsplit(b",", 1)
+
+        ba = bytearray(b"a,b")
+        self.assertEqual(
+            fn(ba),
+            (
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"d")],
+                [bytearray(b"a,b"), bytearray(b"d")],
+            ),
+        )
+        self.assertEqual(ba, bytearray(b"a,b,d"))
+
+    def test_input_bytearray_split_rsplit_mutate_results(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            results = ba.split(b","), ba.rsplit(b",")
+            for parts in results:
+                parts[0].append(ord("z"))
+                parts[0] += b"y"
+            return ba, results
+
+        ba = bytearray(b"a,b")
+        returned, results = fn(ba)
+        self.assertIs(returned, ba)
+        self.assertEqual(ba, bytearray(b"a,b"))
+        for parts in results:
+            self.assertEqual(parts, [bytearray(b"azy"), bytearray(b"b")])
+            for part in parts:
+                self.assertIs(type(part), bytearray)
+
+    def test_input_bytearray_split_rsplit_nonconstant_separator(self):
+        def fn(x, ba, sep):
+            return x + 1, ba.split(sep), ba.rsplit(sep)
+
+        args = torch.ones(1), bytearray(b"a,b,c"), memoryview(b",")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace method `split` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        result = torch.compile(fn, backend="eager")(*args)
+        self.assertEqual(
+            result,
+            (
+                torch.tensor([2.0]),
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+                [bytearray(b"a"), bytearray(b"b"), bytearray(b"c")],
+            ),
+        )
+        for parts in result[1:]:
+            for part in parts:
+                self.assertIs(type(part), bytearray)
+
+    @make_dynamo_test
     def test_hex(self):
         b = self.type2test(b"\x01\x02\xff")
         self.assertEqual(b.hex(), "0102ff")
@@ -329,6 +457,45 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
 
         invalid = self.type2test(b"\xffabc")
         self.assertEqual(invalid.decode(errors="replace"), "\ufffdabc")
+
+    @make_dynamo_test
+    def test_upper(self):
+        b = self.type2test(b"hello world")
+        self.assertEqual(b.upper(), self.type2test(b"HELLO WORLD"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xff\xfeabc")
+        self.assertEqual(b2.upper(), self.type2test(b"\xff\xfeABC"))
+        self.assertRaises(TypeError, lambda: b.upper(1))
+
+    @make_dynamo_test
+    def test_lower(self):
+        b = self.type2test(b"HELLO WORLD")
+        self.assertEqual(b.lower(), self.type2test(b"hello world"))
+        b2 = self.type2test(b"\xff\xfeABC")
+        self.assertEqual(b2.lower(), self.type2test(b"\xff\xfeabc"))
+        self.assertRaises(TypeError, lambda: b.lower(1))
+
+    @make_dynamo_test
+    def test_title(self):
+        b = self.type2test(b"hello world")
+        self.assertEqual(b.title(), self.type2test(b"Hello World"))
+        b2 = self.type2test(b"they're bill's friends")
+        self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
+        self.assertRaises(TypeError, lambda: b.title(1))
+
+    def test_input_bytearray_upper_lower_title(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.upper(), ba.lower(), ba.title()
+
+        self.assertEqual(
+            fn(bytearray(b"hello world")),
+            (
+                bytearray(b"HELLO WORLD"),
+                bytearray(b"hello world"),
+                bytearray(b"Hello World"),
+            ),
+        )
 
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)

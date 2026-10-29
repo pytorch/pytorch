@@ -15,6 +15,8 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    expectedFailure,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -329,6 +331,9 @@ class TestShapeOps(TestCase):
 
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32, *barebones_unsigned_types())
+    @expectedFailure("mps", torch.uint16)
+    @expectedFailure("mps", torch.uint32)
+    @expectedFailure("mps", torch.uint64)
     def test_clamp(self, device, dtype):
         op_list = (
             torch.clamp,
@@ -444,7 +449,7 @@ class TestShapeOps(TestCase):
         def test_flip_impl(input_t, dims, output_t):
             def all_t():
                 yield input_t, output_t
-                if dtype is torch.float:
+                if dtype is torch.float and self.device_type != "mps":
                     # We generate quantized versions as well
                     for qdtype in (torch.quint8, torch.qint8, torch.qint32):
                         qinput_t = torch.quantize_per_tensor(input_t, 0.1, 5, qdtype)
@@ -839,6 +844,7 @@ class TestShapeOps(TestCase):
             self.assertEqual(x.sparse_dim(), 0)
             self.assertEqual(x.dense_dim(), len(shape))
 
+    @expectedFailureMPS
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if dt == torch.bool:
@@ -891,7 +897,7 @@ class TestShapeOpsCPUOnly(TestCase):
         torch.flip(qt, dims=(0,))
 
 
-instantiate_device_type_tests(TestShapeOps, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
