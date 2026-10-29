@@ -30,7 +30,6 @@ _FourTensorOutput: TypeAlias = tuple[
 ]
 _BlockscaledTmaOutput: TypeAlias = _TwoTensorOutput | _FourTensorOutput
 _SingleQuantDim: TypeAlias = tuple[int, int]
-_QuantDim: TypeAlias = _SingleQuantDim | tuple[_SingleQuantDim, _SingleQuantDim]
 
 
 class _BlockscaledTmaSpec(NamedTuple):
@@ -65,7 +64,8 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
 def _validate_and_normalize_blockscaled_tma(
     input: torch.Tensor,
     *,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
+    dual: bool,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaSpec:
@@ -78,23 +78,15 @@ def _validate_and_normalize_blockscaled_tma(
         )
     if not isinstance(dim, tuple) or len(dim) != 2:
         raise ValueError(f"unsupported quantization dim: {dim}")
-    quant_dims: tuple[object, ...] = dim if isinstance(dim[0], tuple) else (dim,)
-    normalized_dims: list[tuple[int, int]] = []
+    first, last = dim
+    if type(first) is not int or type(last) is not int:
+        raise ValueError(f"unsupported quantization dim: {dim}")
     matrix_axes = (-2, -1, ndim - 2, ndim - 1)
-    for axes in quant_dims:
-        if not isinstance(axes, tuple) or len(axes) != 2:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        first, last = axes
-        if type(first) is not int or type(last) is not int:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        if first not in matrix_axes or last not in matrix_axes:
-            raise ValueError(f"unsupported quantization dim: {dim}")
-        normalized = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
-        if normalized not in ((0, 1), (1, 0)):
-            raise ValueError(f"expected two distinct quantization axes, got {dim}")
-        normalized_dims.append(normalized)
-    if normalized_dims not in ([(0, 1)], [(1, 0)], [(0, 1), (1, 0)]):
-        raise ValueError(f"unsupported quantization dim order: {dim}")
+    if first not in matrix_axes or last not in matrix_axes:
+        raise ValueError(f"unsupported quantization dim: {dim}")
+    normalized_dim = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
+    if normalized_dim not in ((0, 1), (1, 0)):
+        raise ValueError(f"expected two distinct quantization axes, got {dim}")
     input_transposed = not input.is_contiguous()
     if input_transposed:
         if not input.transpose(-2, -1).is_contiguous():
@@ -102,12 +94,12 @@ def _validate_and_normalize_blockscaled_tma(
                 "blockscaled TMA requires a contiguous or transpose-contiguous input"
             )
         # The TMA input is row-major; swap logical axes for transpose-contiguous views.
-        normalized_dims = [(1 - first, 1 - last) for first, last in normalized_dims]
+        normalized_dim = (1 - normalized_dim[0], 1 - normalized_dim[1])
     row_axis, col_axis = (
         (ndim - 1, ndim - 2) if input_transposed else (ndim - 2, ndim - 1)
     )
-    do_dim_k = (0, 1) in normalized_dims
-    do_dim_m = (1, 0) in normalized_dims
+    do_dim_k = dual or normalized_dim == (0, 1)
+    do_dim_m = dual or normalized_dim == (1, 0)
 
     if do_dim_k and do_dim_m:
         if not is_scale_swizzled:
@@ -376,13 +368,16 @@ def _format_blockscaled_tma_output(
 
 def _blockscaled_tma_impl_on_current_device(
     input: torch.Tensor,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dual: bool,
 ) -> _BlockscaledTmaOutput:
     spec = _validate_and_normalize_blockscaled_tma(
         input,
         dim=dim,
+        dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
@@ -426,9 +421,11 @@ def _blockscaled_tma_impl_on_current_device(
 
 def _run_blockscaled_tma(
     input: torch.Tensor,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dual: bool,
     **kwargs: object,
 ) -> _BlockscaledTmaOutput:
     if kwargs:
@@ -453,6 +450,7 @@ def _run_blockscaled_tma(
             dim=dim,
             is_square_scaling=is_square_scaling,
             is_scale_swizzled=is_scale_swizzled,
+            dual=dual,
         )
 
     if device == torch.cuda.current_device():
@@ -507,12 +505,10 @@ def _blockscaled_tma_impl(
         >>> qdata.stride()
         (1, 128)
     """
-    if isinstance(dim, tuple) and len(dim) == 2 and isinstance(dim[0], tuple):
-        raise ValueError("dual quantization dims require the dual entrypoint")
     return cast(
         _TwoTensorOutput,
         _run_blockscaled_tma(
-            input, dim, is_square_scaling, is_scale_swizzled, **kwargs
+            input, dim, is_square_scaling, is_scale_swizzled, dual=False, **kwargs
         ),
     )
 
@@ -550,9 +546,10 @@ def _blockscaled_tma_impl_dual(
         _FourTensorOutput,
         _run_blockscaled_tma(
             input,
-            ((-2, -1), (-1, -2)),
+            (-2, -1),
             is_square_scaling,
             is_scale_swizzled,
+            dual=True,
             **kwargs,
         ),
     )
