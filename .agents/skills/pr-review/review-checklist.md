@@ -40,6 +40,14 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
 
+### Warnings and Logging
+
+Applies to every new `warnings.warn`, `TORCH_WARN*`, and logger `.warning()`/`.error()` call. Deprecation warnings are covered by the deprecation items under PyTorch Infrastructure.
+
+- [ ] **Actionable** - A warning must be something the user can and should act on. The message says what happened, its consequence, and how to fix or silence it. Expected environment variation, internal fallbacks, and missing optional information are not warnings; if ignoring it is the only possible response, drop it
+- [ ] **Right mechanism** - PyTorch is a library: outside the PT2 stack (`torch._dynamo`, `torch._inductor`, `torch.export`, ...) it does not use logging, so user-facing messages go through `warnings.warn` (with a specific category) or `TORCH_WARN*`, and non-actionable messages are removed rather than logged. Within PT2, use `torch._logging`: a module logger registered in `torch._logging._registrations` (so it is controlled by `TORCH_LOGS`), `getArtifactLogger` for artifacts, `warning_once` for repeated warnings, and `trace_structured` for anything that should show up in `tlparse`. Use `log.warning` for actionable messages and `log.debug`/`log.info` for diagnostics. `.error()` is limited to cases where execution cannot continue, not conditions it recovers from
+- [ ] **No spam** - Flag any warning that can fire repeatedly in a real workload: per call, per op, per iteration, per compile. Anything reachable from a hot path or loop must be deduplicated (`TORCH_WARN_ONCE`, `warning_once`, a module-level flag)
+
 ### Initialization and Module Design
 
 - [ ] **No fragile init ordering** - If multiple imports/calls must happen in a specific undocumented order, flag the design. Dependencies should be explicit or combined into a single entry point
@@ -68,7 +76,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **C10_CUDA_KERNEL_LAUNCH_CHECK** — PR launches CUDA kernels with `<<<>>>` syntax but doesn't follow with `C10_CUDA_KERNEL_LAUNCH_CHECK()` immediately after to detect launch errors early
 - [ ] **CUDAStreamGuard** — PR manually manages CUDA streams (`cudaStreamCreate`/`cudaStreamDestroy`) instead of using `CUDAStreamGuard` or getting streams from `at::cuda::getCurrentCUDAStream()` / `getStreamFromPool()`
 - [ ] **CUDAEvent synchronization** — PR uses `cudaDeviceSynchronize()` or `cudaStreamSynchronize()` for cross-stream ordering instead of `CUDAEvent::record()` + `CUDAEvent::block()` which avoids unnecessary full synchronization
-- [ ] **recordStream for allocator** — PR uses tensors on non-default CUDA streams without calling `c10::cuda::CUDACachingAllocator::recordStream()` to prevent premature memory reuse
+- [ ] **Cross-stream tensor lifetime / recordStream** — PR uses a tensor on a stream other than the one it was allocated on. Check that either the side-stream use is synced back to the creation stream before the last reference is dropped, or `record_stream()` / `recordStream()` is called; with neither, the allocator may reuse the memory while the side stream is still using it. If the PR adds `record_stream`, don't flag it automatically: decide whether it is avoidable, using the `cuda-streams` skill (`.agents/skills/cuda-streams/SKILL.md`), and say which case you think applies and why
 - [ ] **CUDA graph compatibility** — PR adds host-GPU synchronization, unpinned memory transfers, or other graph-unsafe operations without checking `currentStreamCaptureStatusMayInitCtx()` to detect CUDA graph capture mode
 - [ ] **AcceleratorHooksInterface** — PR adds device-specific `#ifdef USE_CUDA` blocks in generic code instead of using `AcceleratorHooksInterface` from `aten/src/ATen/detail/AcceleratorHooksInterface.h` for device-agnostic behavior
 - [ ] **DeviceGuardImplInterface** — PR implements custom device management without going through `DeviceGuardImplInterface` from `c10/core/impl/DeviceGuardImplInterface.h`, bypassing the standard device abstraction layer
@@ -215,6 +223,7 @@ When reviewing changes to workflows, build scripts, or CI configuration:
 - [ ] **No cache-dependent binaries in sensitive contexts** - sccache-backed builds are susceptible to cache corruption; these artifacts should not access sensitive info or be published for general use
 - [ ] **Protected branch rules respected** - Changes to merge rules, release workflows, or deployment environments require extra scrutiny
 - [ ] **Immutable artifact references** - Docker images use immutable tags; no overwriting of published artifacts
+- [ ] **Third-party code pinned by commit SHA** - Pin dependencies (submodules, script clones/checkouts, `pip install git+`, pin files, Actions `uses:`) by full commit SHA, never mutable tags, branches, or no ref at all (first-party `pytorch/*` repos, including Actions refs and script clones, are exempt). Use the commit an upstream release tag points to (the `^{}` commit for annotated tags) and note the tag name. Shell scripts in `.ci/pytorch` read the SHA from `.github/ci_commit_pins/<repo>.txt` via `get_pinned_commit`, with the tag noted at the call site; other scripts may inline the SHA with a tag comment. Nightly pin bumps via `update-commit-hashes` in `.github/workflows/nightly.yml` are fine; do not add dependencies whose consumers the bump PR's CI does not exercise (e.g. schedule-only consumers), leaving bot-merged bumps untested; bump those by hand in reviewed PRs
 
 ### PyTorch API Security
 

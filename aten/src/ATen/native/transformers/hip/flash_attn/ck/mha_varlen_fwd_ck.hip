@@ -69,6 +69,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           const at::Tensor v,
                                           const at::Tensor seqlens_q,
                                           const at::Tensor seqlens_k,
+                                          const std::optional<at::Tensor> &seqused_k,
                                           std::optional<at::Tensor> &attn_bias_,
                                           at::Tensor out,
                                           at::Tensor softmax_lse,
@@ -136,6 +137,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     args.o_ptr = out.data_ptr();
     args.seqstart_q_ptr = seqlens_q.data_ptr();
     args.seqstart_k_ptr = seqlens_k.data_ptr();
+    args.seqlen_k_ptr = seqused_k.has_value() ? seqused_k->data_ptr() : nullptr;
     args.sink_ptr = nullptr;
     args.seqlen_q = total_q;
     args.seqlen_k = total_k;
@@ -186,7 +188,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                   std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
                   const at::Tensor &cu_seqlens_q,  // b+1
                   const at::Tensor &cu_seqlens_k,  // b+1
-                  std::optional<at::Tensor> & /*seqused_k*/,
+                  std::optional<at::Tensor> &seqused_k,
                   int max_seqlen_q,
                   const int max_seqlen_k,
                   const float p_dropout,
@@ -273,6 +275,13 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     CHECK_SHAPE(v, total_k, num_heads_k, head_size_og);
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+    if (seqused_k.has_value()) {
+        const auto& seqused = seqused_k.value();
+        TORCH_CHECK(seqused.dtype() == at::kInt, "seqused_k must have dtype int32");
+        CHECK_DEVICE(seqused);
+        CHECK_CONTIGUOUS(seqused);
+        CHECK_SHAPE(seqused, batch_size);
+    }
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size_og % 8 != 0) {
@@ -374,6 +383,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                 v_padded,
                 cu_seqlens_q,
                 cu_seqlens_k,
+                seqused_k,
                 attn_bias,
                 out,
                 softmax_lse,

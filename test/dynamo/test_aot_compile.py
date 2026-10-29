@@ -1960,8 +1960,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -2384,26 +2383,55 @@ from user code:
             return c
 
         example_inputs = (torch.ones(3), torch.ones(3))
-        expected = foo(*example_inputs)  # noqa: F841
+        expected = foo(*example_inputs)
 
         def backend(gm, example_inputs):
             return CustomCompiledFunction(gm, example_inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                PackageError,
-                "CLOSURE_MATCH guard cannot be serialized.",
-            ):
-                compiled_fn = torch.compile(  # noqa: F841
-                    foo,
-                    fullgraph=True,
-                    backend=backend,
-                    options={
-                        "guard_filter_fn": lambda guard_entries: [
-                            True for g in guard_entries
-                        ]
-                    },
-                ).aot_compile((example_inputs, {}))
+            # Keeping every guard keeps the CLOSURE_MATCH on the wrapped
+            # function, which is saved by its code and globals module.
+            compiled_fn = torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile((example_inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*example_inputs), expected)
+
+    def test_guard_filter_override_aot_refuses_a_function_no_module_owns(self):
+        namespace: dict[str, object] = {}
+        exec("def inc(x):\n    return x + 1\n", namespace)
+        inc = namespace["inc"]
+
+        def foo(x):
+            return inc(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        # A loading process has no module to find inc's globals in.
+        with self.assertRaisesRegex(
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+        ):
+            torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile(((torch.ones(3),), {}))
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):
@@ -2423,6 +2451,35 @@ from user code:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_loaded_graph_does_not_rerun_inlined_saved_tensors_hooks(self):
+        def fn(x, w):
+            return (x.sin() * w).cos().sum()
+
+        # Inlineable hooks with a lossy pack: packing twice changes the grads.
+        hooks = (
+            torch.fx.symbolic_trace(lambda x: x * 2),
+            torch.fx.symbolic_trace(lambda x: x),
+        )
+
+        def grads(f):
+            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                f(x, w).backward()
+            return x.grad, w.grad
+
+        example_args = tuple(torch.randn(4, requires_grad=True) for _ in range(2))
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor")
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            compiled_fn = compiled.aot_compile((example_args, {}))
+        expected = grads(compiled_fn)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(grads(loaded), expected)
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
@@ -5087,14 +5144,13 @@ from user code:
         self.assertEqual(len(logs.output), 2, warned)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
-        # A tree that THROWS out of C++ returns through
-        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
-        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
-        # tensor is one such tree: reading its strides fires a TORCH_CHECK.
-        # GuardManagerWrapper.check puts the state back before dispatch reads the
-        # throw as no answer, so the report is about the raise and not about what
-        # the raise left behind -- with the wrapper's restore removed, [0]'s line
-        # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
+        # RootGuardManager disables TorchFunction while its accessors run and
+        # restores it on scope exit, so a tree that THROWS out of C++ leaves the
+        # state as it found it. TENSOR_MATCH on a strided nested tensor is one
+        # such tree: reading its strides fires a TORCH_CHECK. Dispatch reads the
+        # throw as no answer, so the report is about the raise and not about
+        # what the raise left behind: were the state leaked, [0]'s line would
+        # read "GLOBAL_STATE changed: torch_function" and advise adding a
         # ModelInput, both of them artifacts of our own leak.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
@@ -5128,7 +5184,7 @@ from user code:
     def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
         # The test above throws out of check() in both passes, so the report
         # quotes the dispatch record and never calls check_verbose, the module
-        # path's only direct call of it, which has the same non-RAII exit. Here
+        # path's only direct call of it and the other scope-exit restore. Here
         # check() refuses cleanly and the tree throws only when the report
         # describes it: TENSOR_MATCH's verbose failure branch calls is_parameter,
         # which runs the Parameter metaclass's __instancecheck__, patched to
@@ -5162,8 +5218,8 @@ from user code:
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
-        # check evaluates the same kind of tree through the same wrapper, so a
-        # C++ throw would otherwise leave TorchFunction disabled on this thread
+        # check evaluates the same kind of tree, so a C++ throw without the
+        # scope-exit restore would leave TorchFunction disabled on this thread
         # and silently stop a __torch_function__ subclass from dispatching
         # afterwards. The throw propagates; only the state it leaves is pinned.
         self._hide_leaked_dynamo_globals()
