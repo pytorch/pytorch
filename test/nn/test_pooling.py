@@ -758,6 +758,7 @@ class TestPoolingNNDevice(NNTestCase):
         expected = torch.full_like(sample, 1 / (width // output_width))
         self.assertEqual(sample, expected)
 
+    @expectedFailureMPS  # No double, float shape prop does not work
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype, device):
         inp = torch.ones(0, 10, dtype=dtype, device=device)
@@ -810,6 +811,7 @@ class TestPoolingNNDevice(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
+    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
@@ -1603,6 +1605,14 @@ torch.{device_type}.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @largeTensorTest("5GB")
+    def test_max_pool3d_64bit_indices(self, device):
+        # Zero-stride input that needs 64-bit indexing, MPS reads it without materializing
+        x = torch.zeros(1, dtype=torch.half, device=device).expand(1, 1, 32769, 65536)
+        out, idx = F.max_pool3d(x, (1, 1, 3), (1, 32768, 65533), return_indices=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(idx.flatten().tolist(), [0, 65533, 2**31, 2**31 + 65533])
+
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -2336,6 +2346,7 @@ torch.{device_type}.synchronize()
                         fn(x, 6, stride=2, padding=0)
 
     @onlyAccelerator
+    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(
             self,
