@@ -2,6 +2,7 @@
 import contextlib
 import io
 import sys
+import threading
 import types
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
@@ -599,8 +600,20 @@ _flags = _TracingFlags()
 
 _SESSION_FLAGS_TLS_KEY = "torch_compiler_tracing_flags"
 
+# Number of sessions currently active anywhere in the process, maintained
+# under _SESSION_COUNT_LOCK. Fast-path gate for the flag reads below: with
+# zero active sessions no thread can have a stash, so reads return the
+# (never-mutated) default without touching TLS. Sessions update the count
+# under the lock ([re]stash before/after it), so count > 0 always covers the
+# only reads that legitimately see another thread's session: work inherited
+# via at::ThreadLocalState while the capturing session is active.
+_SESSION_COUNT = 0
+_SESSION_COUNT_LOCK = threading.Lock()
+
 
 def _current_flags() -> _TracingFlags:
+    if not _SESSION_COUNT:
+        return _flags
     if torch._C._is_key_in_tls(_SESSION_FLAGS_TLS_KEY):
         return torch._C._get_obj_in_tls(_SESSION_FLAGS_TLS_KEY)
     return _flags
@@ -613,9 +626,11 @@ def _session_flag(*attrs: str):
     # Copy-on-enter: every session mutates its own object, so a worker thread
     # entering a session under a stash inherited from at::ThreadLocalState
     # never writes the parent thread's object (#202042). A ThreadLocalState
-    # captured during the session (e.g. a deferred GraphTask) keeps reading
-    # the session values after the session ends - on purpose: that work
-    # belongs to the session that captured it.
+    # captured during the session keeps reading the session values (via its
+    # own copy and while any session is active in the process, including
+    # work it hands to autograd engine worker threads) - that work belongs
+    # to the session that captured it.
+    global _SESSION_COUNT
     current = _current_flags()
     fresh = current is _flags
     flags = _TracingFlags()
@@ -623,6 +638,8 @@ def _session_flag(*attrs: str):
         setattr(flags, attr, getattr(current, attr))
     for attr in attrs:
         setattr(flags, attr, True)
+    with _SESSION_COUNT_LOCK:
+        _SESSION_COUNT += 1
     torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, flags)
     try:
         yield
@@ -631,11 +648,19 @@ def _session_flag(*attrs: str):
             torch._C._remove_obj_from_tls(_SESSION_FLAGS_TLS_KEY)
         else:
             torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, current)
+        with _SESSION_COUNT_LOCK:
+            _SESSION_COUNT -= 1
 
 
 def is_compiling() -> bool:
     """
     Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().
+
+    The flag is per-thread: during a session, only the session's own thread
+    observes True. Threads spawned by the caller (dataloaders,
+    ThreadPoolExecutor, DataParallel replicas) read False, while autograd
+    engine worker threads inherit the session through at::ThreadLocalState
+    (e.g. CUDA backward tracing) and observe it.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
@@ -776,7 +801,8 @@ def is_exporting() -> bool:
     Indicates whether we're under exporting.
 
     It's stricter than is_compiling() flag, as it would only be set to True when
-    torch.export is used.
+    torch.export is used. See is_compiling() for the per-thread visibility
+    semantics of the session flags.
 
     Example::
 
