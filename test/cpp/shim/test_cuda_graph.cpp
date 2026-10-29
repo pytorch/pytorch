@@ -187,11 +187,13 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
-TEST_F(AOTICudaGraphTest, CaptureBeginChecksItsArguments) {
+TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
   EXPECT_EQ(
       aoti_torch_cuda_graph_capture_begin(graph_, nullptr), AOTI_TORCH_FAILURE);
   EXPECT_EQ(
       aoti_torch_cuda_graph_capture_begin(nullptr, pool_), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_cuda_graph_capture_end(nullptr), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(aoti_torch_cuda_graph_replay(nullptr), AOTI_TORCH_FAILURE);
   if (c10::cuda::device_count() < 2) {
     return;
   }

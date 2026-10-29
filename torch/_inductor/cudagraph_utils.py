@@ -14,7 +14,11 @@ from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
-from .utils import get_first_incompatible_cudagraph_node, is_using_cudagraph_partition
+from .utils import (
+    FORBIDDEN_CUDAGRAPH_OPS,
+    get_first_incompatible_cudagraph_node,
+    is_using_cudagraph_partition,
+)
 
 
 if TYPE_CHECKING:
@@ -427,6 +431,16 @@ def _with_fx_subgraphs(module: torch.nn.Module) -> Iterator[torch.fx.GraphModule
         yield from _with_fx_subgraphs(operator.attrgetter(node.target)(module))
 
 
+# JIT cudagraphs don't reject host syncs yet.
+AOT_FORBIDDEN_CUDAGRAPH_OPS = FORBIDDEN_CUDAGRAPH_OPS | frozenset(
+    [
+        "streams.synchronize_event.default",
+        "streams.synchronize_stream.default",
+        "streams.synchronize_device.default",
+    ]
+)
+
+
 def check_aot_cudagraphs(graph: GraphLowering) -> None:
     """Fails an AOTInductor compile with aot_inductor.cudagraphs=True unless
     the graph and the subgraphs of its higher-order ops can be captured into a
@@ -436,20 +450,13 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
     def with_stack_trace(msg: str, stack_trace: str | None) -> str:
         return f"{msg}. Found from:\n{stack_trace}" if stack_trace else msg
 
-    host_syncs = {
-        torch.ops.streams.synchronize_event.default: "Event.synchronize",
-        torch.ops.streams.synchronize_stream.default: "Stream.synchronize",
-        torch.ops.streams.synchronize_device.default: "torch.cuda.synchronize",
-    }
-
     def check_fx(gm: torch.fx.GraphModule) -> str | None:
-        if node := get_first_incompatible_cudagraph_node(gm):
+        forbidden = (
+            n for n in gm.graph.nodes if str(n.target) in AOT_FORBIDDEN_CUDAGRAPH_OPS
+        )
+        if node := next(forbidden, None) or get_first_incompatible_cudagraph_node(gm):
             stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
             return with_stack_trace(f"incompatible op {node.target}", stack_trace)
-        for target, sync in host_syncs.items():
-            for node in gm.graph.find_nodes(op="call_function", target=target):
-                msg = f"it waits on the host ({sync})"
-                return with_stack_trace(msg, node.meta.get("stack_trace"))
         return None
 
     def find_reason() -> str | None:
@@ -468,6 +475,12 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
                 device_node_mapping.setdefault(device, node)
         if reason := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
             return reason.removeprefix(format_default_skip_message(""))
+        # The runtime checks every input's device, so unused inputs count too.
+        (device,) = device_node_mapping
+        for node in graph.graph.find_nodes(op="placeholder"):
+            val = node.meta.get("val")
+            if isinstance(val, torch.Tensor) and val.device != device:
+                return f"input {node.name} is on {val.device}"
         placeholders = get_placeholder_info(graph.graph)
         mutated = [
             i for i, p in enumerate(placeholders) if p.name in graph.mutated_buffers
