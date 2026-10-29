@@ -1101,6 +1101,8 @@ print("RECOVERED")
             thread = threading.Thread(target=heartbeat)
             thread.start()
             try:
+                # Long enough for 12+ heartbeats even where time.sleep rounds
+                # up to the 15.6 ms Windows timer tick (Python < 3.11).
                 torch.cuda._sleep(int(200 * get_cycles_per_ms()))
                 start = time.perf_counter()
                 copy_fn()
@@ -1114,9 +1116,9 @@ print("RECOVERED")
             lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
         )
         self.assertEqual(dst, src.cpu())
-        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
-        # with the GIL released, Tensor.copy_ saw ~18. Require several
-        # heartbeats so a regression to holding the GIL fails the test.
+        # With the GIL held, ~1 heartbeat lands during the wait; with the GIL
+        # released, Tensor.copy_ gets 40 or more. Require several heartbeats
+        # so a regression to holding the GIL fails the test.
         self.assertGreaterEqual(storage_beats, 5)
 
     def test_copy_non_blocking_type_conversion(self):
