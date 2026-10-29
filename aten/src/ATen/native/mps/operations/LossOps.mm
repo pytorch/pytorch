@@ -5,6 +5,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <ATen/native/mps/kernels/ReduceOps.h>
 #include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -18,6 +19,7 @@
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/mean.h>
 #include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
@@ -166,11 +168,9 @@ static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
   return gradInput;
 }
 
-constexpr int64_t kBCEMaxThreadgroups = 512;
-
 static void bce_loss_forward_impl(const Tensor& input_arg,
                                   const Tensor& target_arg,
-                                  const Tensor& weight_arg,
+                                  const Tensor& weight,
                                   int64_t reduction,
                                   Tensor& loss) {
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
@@ -181,60 +181,62 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
   const Tensor input = input_arg.contiguous();
   const Tensor target = target_arg.to(input.scalar_type()).contiguous();
   const int64_t numel = input.numel();
-  const bool has_weight = weight_arg.defined();
   MPSStream* stream = getCurrentMPSStream();
 
-  if (reduction == Reduction::None) {
-    const bool write_to_loss = loss.is_contiguous();
-    Tensor unreduced = write_to_loss ? loss : at::empty(input.sizes(), input.options());
+  // Mean and sum are fused into the loss kernel, which writes one partial per
+  // threadgroup (pass 1 of ReduceOps' flat reduction); sum_out folds them
+  if (reduction != Reduction::None && canUse32BitIndexMath(input)) {
+    const auto n = static_cast<uint32_t>(numel);
+    const auto max_groups = std::min(512u, at::ceil_div(n, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
+    const auto slice_len = at::ceil_div(n, max_groups);
+    const auto num_groups = at::ceil_div(n, slice_len);
+    const BCELossReduceParams params{.numel = n,
+                                     .slice_len = slice_len,
+                                     .scale = reduction == Reduction::Mean ? 1.0f / n : 1.0f,
+                                     .has_weight = weight.defined()};
+    const Tensor weight_ = weight.defined() ? weight.to(input.scalar_type()).expand_as(input).contiguous() : input;
+    Tensor partials = at::empty({num_groups}, input.options().dtype(kFloat));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
-        auto pso = lib.getPipelineStateForFunc("bce_loss_forward_" + scalarToMetalTypeString(input));
+        auto pso = lib.getPipelineStateForFunc("bce_loss_forward_reduce_" + scalarToMetalTypeString(input));
+        const auto threads = std::min<uint32_t>(MAX_THREADGROUP_SIZE, [pso maxTotalThreadsPerThreadgroup]);
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pso];
-        mtl_setArgs(encoder, input, target, unreduced);
-
-        constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
-        for (auto offset = int64_t{0}; offset < numel; offset += max_threads) {
-          mtl_setArgs<3>(encoder, offset, stream->getErrorBuffer());
-          mtl_dispatch1DJob(encoder, pso, std::min(max_threads, numel - offset));
-        }
+        mtl_setArgs(encoder, input, target, weight_, partials, params, stream->getErrorBuffer());
+        [encoder dispatchThreads:MTLSizeMake(num_groups * threads, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
       }
     });
-    if (has_weight) {
-      unreduced.mul_(weight_arg);
-    }
-    if (!write_to_loss) {
-      loss.copy_(unreduced);
-    }
+    at::sum_out(loss, partials, IntArrayRef{}, false, loss.scalar_type());
     return;
   }
 
-  // Mean and sum reduce in two passes without writing per-element losses
-  const Tensor weight = has_weight ? weight_arg.to(input.scalar_type()).expand_as(input).contiguous() : input;
-  const BCELossReduceParams params{.numel = numel, .has_weight = has_weight};
-  const float divisor = reduction == Reduction::Mean ? static_cast<float>(numel) : 1.0f;
-  auto reduce_pso = lib.getPipelineStateForFunc("bce_loss_forward_reduce_" + scalarToMetalTypeString(input));
-  auto finalize_pso = lib.getPipelineStateForFunc("bce_loss_forward_finalize_" + scalarToMetalTypeString(input));
-  const auto reduce_threads = std::min<uint32_t>(1024, [reduce_pso maxTotalThreadsPerThreadgroup]);
-  const auto finalize_threads = std::min<uint32_t>(1024, [finalize_pso maxTotalThreadsPerThreadgroup]);
-  const auto num_groups = static_cast<uint32_t>(
-      std::min<int64_t>(at::ceil_div<int64_t>(numel, reduce_threads * kBCEReduceNumChains), kBCEMaxThreadgroups));
-  Tensor partial_sums = at::empty({num_groups}, input.options().dtype(kFloat));
-
+  const bool write_to_loss = reduction == Reduction::None && loss.is_contiguous();
+  Tensor unreduced = write_to_loss ? loss : at::empty(input.sizes(), input.options());
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("bce_loss_forward_" + scalarToMetalTypeString(input));
       auto encoder = stream->commandEncoder();
-      [encoder setComputePipelineState:reduce_pso];
-      mtl_setArgs(encoder, input, target, weight, partial_sums, params, stream->getErrorBuffer());
-      [encoder dispatchThreadgroups:MTLSizeMake(num_groups, 1, 1)
-              threadsPerThreadgroup:MTLSizeMake(reduce_threads, 1, 1)];
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, target, unreduced);
 
-      [encoder setComputePipelineState:finalize_pso];
-      mtl_setArgs(encoder, partial_sums, loss, num_groups, divisor);
-      [encoder dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(finalize_threads, 1, 1)];
+      constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
+      for (auto offset = int64_t{0}; offset < numel; offset += max_threads) {
+        mtl_setArgs<3>(encoder, offset, stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, numel - offset));
+      }
     }
   });
+  if (weight.defined()) {
+    unreduced.mul_(weight);
+  }
+  if (reduction == Reduction::Mean) {
+    loss.copy_(at::mean(unreduced));
+  } else if (reduction == Reduction::Sum) {
+    loss.copy_(at::sum(unreduced));
+  } else if (!write_to_loss) {
+    loss.copy_(unreduced);
+  }
 }
 
 // Binary Cross Enropy (Forward/Backward BCELoss)

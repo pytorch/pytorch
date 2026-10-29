@@ -1,8 +1,6 @@
 #pragma once
 #include <c10/metal/common.h>
 
-C10_METAL_CONSTEXPR uint32_t kBCEReduceNumChains = 8;
-
 template <typename index_t = int64_t>
 struct NLLLossForwardParams {
   index_t n_classes;
@@ -22,7 +20,9 @@ struct NLLLossBackwardParams {
 };
 
 struct BCELossReduceParams {
-  int64_t numel;
+  uint32_t numel;
+  uint32_t slice_len;
+  float scale;
   bool has_weight;
 };
 
