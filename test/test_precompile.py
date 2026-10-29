@@ -7647,6 +7647,11 @@ MultiKernelCall.benchmark_sub_kernels = recording_benchmark_sub_kernels
 x, w = inputs(0)
 make_fx = sys.argv[4] == "make_fx"
 if phase == "capture":
+    # Positive control: outside a capture this fn does build a multi-kernel.
+    torch.compile(fn)(x, w)
+    assert "sub-kernel" in benchmarked, benchmarked
+    benchmarked.clear()
+    torch._dynamo.reset()
     if make_fx:
         tracer = pc.MakeFxTracer()
     else:
@@ -7669,6 +7674,10 @@ else:
 print("multi-kernel phase ok:", phase)
 """
 )
+
+
+def _multi_kernel_hints_gemm(a, b):
+    return (a @ b).relu()
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -9303,6 +9312,26 @@ class TestPrecompileRuntimeCache(TestCase):
             "never-run backward phase ok",
         )
 
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    @torch._inductor.config.patch(
+        multi_kernel_hints=[64, 256],
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_capture_ignores_multi_kernel_hints(self):
+        # multi_kernel_hints builds a size-hint multi-kernel for a dynamic GEMM
+        # whatever triton.multi_kernel is, and under autotune_at_compile_time its
+        # def never reaches the module (NameError on multi_kernel_N).
+        a = torch.randn(128, 64, device="cuda")
+        b = torch.randn(64, 64, device="cuda")
+        source, cache = _capture_files(
+            self, _multi_kernel_hints_gemm, [(a, b)], backend="inductor", dynamic=True
+        )
+        runnable = torch.compiler.precompile.load(source, cache)
+        with torch.no_grad():
+            out = runnable(a, b)
+        torch.testing.assert_close(out, _multi_kernel_hints_gemm(a, b))
+
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("tracer", ["dynamo", "make_fx"])
@@ -10662,8 +10691,8 @@ class TestPrecompileCustomOpRecording(TestCase):
     def _render_with_ops(self, op_names, mode="standalone", prelude="", then=()):
         # A Dynamo capture of a function in an importable module starting with
         # prelude, imported before the modules then, whose graphs are taken to call
-        # op_names. Returns the artifact's CUSTOM_OP_MODULES and the entry's module
-        # name.
+        # op_names. Returns the artifact's CUSTOM_OP_MODULES, the entry's module
+        # name and the artifact.
         directory = self.enterContext(tempfile.TemporaryDirectory())
         name = f"precompile_render_{uuid.uuid4().hex}"
         with open(os.path.join(directory, name + ".py"), "w") as f:
@@ -10699,13 +10728,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         (line,) = [
             l for l in python_code.splitlines() if l.startswith("CUSTOM_OP_MODULES = ")
         ]
-        return line.strip(), name
+        return line.strip(), name, python_code
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_a_torch_cpp_op_does_not_import_the_frame_modules(self):
         importlib.import_module("torch.distributed._ops.device_mesh")
         ops = [("_c10d_functional::wait_tensor", ""), ("device_mesh::_get_submesh", "")]
-        line, _ = self._render_with_ops(ops)
+        line, _, _ = self._render_with_ops(ops)
         modules = ("torch.distributed._ops.device_mesh",)
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
 
@@ -10713,7 +10742,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         op, qualname = self._op("in_main")
         op._init_fn.__module__ = "__main__"
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            line, name = self._render_with_ops([(qualname, "")])
+            line, name, _ = self._render_with_ops([(qualname, "")])
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
         (warning,) = [m for m in logs.output if qualname in m]
         self.assertIn(f"imports {name}, the modules its frames run in", warning)
@@ -10724,7 +10753,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_defined", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            line, name = self._render_with_ops([("precompile_defined::op", "")])
+            line, name, _ = self._render_with_ops([("precompile_defined::op", "")])
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
         (warning,) = [m for m in logs.output if "precompile_defined::op" in m]
         self.assertIn(f"imports {name}, the modules its frames run in", warning)
@@ -10981,13 +11010,9 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         lib = self.enterContext(_scoped_library("precompile_served_fallback", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
-        line, name = self._render_with_ops(
-            [("precompile_served_fallback::op", "")], mode
-        )
+        line, name, python_code = self._render_with_ops([(f"{lib.ns}::op", "")], mode)
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
         path = sys.modules.pop(name).__file__
-        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
-            python_code = f.read()
         hits = types.ModuleType(f"precompile_hits_{uuid.uuid4().hex}")
         hits.count = 0
         sys.modules[hits.__name__] = hits
@@ -11026,11 +11051,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            line, name = self._render_with_ops([(f"{ns}::op", "")], mode, prelude)
+            line, name, python_code = self._render_with_ops(
+                [(f"{ns}::op", "")], mode, prelude
+            )
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(ops, name)!r}")
-        path = sys.modules[name].__file__
-        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
-            python_code = f.read()
         # As a fresh server, which registers neither.
         for module in (name, ops):
             sys.modules.pop(module).lib._destroy()
@@ -11066,11 +11090,10 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"scope = _scoped_library({ns!r}, 'IMPL')\nlib = scope.__enter__()\n"
             f"torch.library.register_kernel('{ns}::op', 'cpu', lambda x: x * 3, lib=lib)\n"
         )
-        line, name = self._render_with_ops([(f"{ns}::op", "")], prelude=prelude)
+        line, name, python_code = self._render_with_ops(
+            [(f"{ns}::op", "")], prelude=prelude
+        )
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(ops, name)!r}")
-        path = sys.modules[name].__file__
-        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
-            python_code = f.read()
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::op': ('CPU',)}}", python_code)
         for module in (name, ops):
             sys.modules.pop(module).lib._destroy()
@@ -11103,13 +11126,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            line, name = self._render_with_ops(
+            line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], prelude=prelude, then=(override,)
             )
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name, override)!r}")
-        path = sys.modules[name].__file__
-        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
-            python_code = f.read()
         sys.modules.pop(override).lib._destroy()
         served = sys.modules.pop(name)
         served.lib._destroy()
@@ -11167,20 +11187,14 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Registered only during the capture, so the artifact's op check fails.
         with _scoped_library(ns, "DEF") as lib:
             lib.define("op(Tensor x) -> Tensor")
-            _, name = self._render_with_ops([(f"{ns}::op", "")], mode)
-        path = sys.modules[name].__file__
-        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
-            python_code = f.read()
+            _, name, python_code = self._render_with_ops([(f"{ns}::op", "")], mode)
+        root = os.path.dirname(sys.modules[name].__file__)
         (served,) = [
-            line
-            for line in python_code.splitlines()
-            if line.startswith("SERVED_MODULES = ")
+            l for l in python_code.splitlines() if l.startswith("SERVED_MODULES = ")
         ]
         package = f"precompile_raising_package_{uuid.uuid4().hex}"
-        os.mkdir(os.path.join(os.path.dirname(path), package))
-        with open(
-            os.path.join(os.path.dirname(path), package, "__init__.py"), "w"
-        ) as f:
+        os.mkdir(os.path.join(root, package))
+        with open(os.path.join(root, package, "__init__.py"), "w") as f:
             f.write("raise ValueError('half initialized')\n")
         # A frame module defined in __main__, even a frame other than the entry's,
         # or one that does not import is refused before the op check too.
@@ -11189,10 +11203,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             (("unittest",), "not registered here"),
             (("__main__",), "__main__ module"),
             ((name, "__main__"), "__main__ module"),
-            (
-                ("precompile_no_such_module",),
-                "'precompile_no_such_module'.*not importable",
-            ),
+            (("precompile_missing",), "'precompile_missing'.*not importable"),
         ):
             code = python_code.replace(served, f"SERVED_MODULES = {modules!r}")
             with self.assertRaisesRegex(PrecompileError, error):

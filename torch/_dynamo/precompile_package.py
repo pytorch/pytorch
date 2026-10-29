@@ -97,9 +97,11 @@ def _frozen_kernel_config() -> dict[str, object]:
     config, so every kernel is tuned before replay and no multi-kernel picks
     its sub-kernel at first launch. Under autotune_at_compile_time the
     Python wrapper emits multi-kernel defs only into the compile-time
-    autotune block (_write_multi_kernel_defs), so a MakeFxTracer module calls
-    an undefined multi_kernel_N (NameError on the first call). Warns once for
-    each user value overridden.
+    autotune block (_write_multi_kernel_defs), so a module calls an undefined
+    multi_kernel_N (NameError on the first call). That holds for a
+    MakeFxTracer module and, for any tracer, for the size-hint multi-kernels
+    ``multi_kernel_hints`` builds whatever ``triton.multi_kernel`` is, so both
+    are off. Warns once for each user value overridden.
     """
     import torch._inductor.config as inductor_config
 
@@ -116,7 +118,18 @@ def _frozen_kernel_config() -> dict[str, object]:
             "the artifact does not record which sub-kernel a multi-kernel picks",
             inductor_config.triton.multi_kernel,
         )
-    return {"triton.autotune_at_compile_time": True, "triton.multi_kernel": 0}
+    if inductor_config.multi_kernel_hints:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides multi_kernel_hints=%s to []: "
+            "the artifact does not record which sub-kernel a multi-kernel picks",
+            str(inductor_config.multi_kernel_hints),
+        )
+    return {
+        "triton.autotune_at_compile_time": True,
+        "triton.multi_kernel": 0,
+        "multi_kernel_hints": [],
+    }
 
 
 @contextlib.contextmanager
@@ -141,8 +154,9 @@ def _capture_config() -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
-    ``triton.multi_kernel`` is off: a multi-kernel picks its sub-kernel by
-    benchmarking on first launch and the artifact does not record the choice.
+    ``triton.multi_kernel`` and ``multi_kernel_hints`` are off: a multi-kernel
+    picks its sub-kernel on first launch and the artifact does not record the
+    choice.
     Under ``cpp_wrapper`` the forced flag also turns off
     ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
     keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
