@@ -58,6 +58,13 @@ __all__ = [
     "MemRecordsAcc",
 ]
 
+_WITH_MODULES_DEPRECATION_MSG = (
+    "with_modules is deprecated and will be removed in a future release; "
+    "stop passing it. It only collects data for TorchScript models, which "
+    "are themselves deprecated, and does nothing in eager mode. Use "
+    "with_stack=True, which records nn.Module events for eager models."
+)
+
 try:
     # Available in Python >= 3.2
     from contextlib import ContextDecorator as _ContextDecorator
@@ -261,14 +268,7 @@ class profile:
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
         if with_modules is not None:
-            warn(
-                "with_modules is deprecated and will be removed in a future release; "
-                "stop passing it. It only collects data for TorchScript models, which "
-                "are themselves deprecated, and does nothing in eager mode. Use "
-                "with_stack=True, which records nn.Module events for eager models.",
-                FutureWarning,
-                stacklevel=2,
-            )
+            warn(_WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0

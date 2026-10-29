@@ -1056,24 +1056,34 @@ class TestProfiler(TestCase):
                     config.__setstate__(old_state)
 
     @parametrize("with_modules", [True, False])
-    def test_with_modules_deprecated(self, with_modules):
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_deprecated(self, autograd_profiler, with_modules):
         # with_modules only collects data for TorchScript models and is on its
-        # way out: passing it with any value must warn with FutureWarning and
-        # not error.
-        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
-            with profile(activities=[ProfilerActivity.CPU], with_modules=with_modules):
-                torch.ones(1)
+        # way out: passing it with any value must warn with FutureWarning at the
+        # caller's line, and not error.
+        activities = [ProfilerActivity.CPU]
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated") as cm:
+            if autograd_profiler:
+                prof = _profile(with_modules=with_modules)
+            else:
+                prof = profile(activities=activities, with_modules=with_modules)
+        self.assertEqual(cm.filename, __file__)
+        with prof:
+            torch.ones(1)
 
-    def test_with_modules_omitted_does_not_warn(self):
-        # The with_modules warning fires for any value other than None, but it
-        # lives in the autograd profiler, two layers below profile. profile
-        # passes the value to _KinetoProfile, whose prepare_trace hands it to
-        # the autograd profiler. If profile defaulted to False, or a layer
-        # turned None into False on the way down, every profiler user would see
-        # the warning without ever passing the argument.
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_omitted_does_not_warn(self, autograd_profiler):
+        # Both profilers warn on any with_modules value other than None, so
+        # both defaults must stay None. torch.profiler.profile also builds an
+        # autograd profiler when it starts; passing with_modules to that
+        # constructor would warn every user, even those who never pass it.
         with warnings.catch_warnings():
             warnings.filterwarnings("error", "with_modules", FutureWarning)
-            with profile(activities=[ProfilerActivity.CPU]):
+            if autograd_profiler:
+                prof = _profile()
+            else:
+                prof = profile(activities=[ProfilerActivity.CPU])
+            with prof:
                 torch.ones(1)
 
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))

@@ -359,7 +359,10 @@ class _KinetoProfile:
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        if with_modules is not None:
+            # stacklevel 3 skips profile.__init__, which calls this through super().
+            warn(prof._WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        self.with_modules = bool(with_modules)
         if (
             experimental_config is not None
             and experimental_config.trace_only
@@ -513,7 +516,6 @@ class _KinetoProfile:
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
                 with_stack=self.with_stack,
-                with_modules=self.with_modules,
                 use_kineto=True,
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
@@ -522,6 +524,9 @@ class _KinetoProfile:
                 activity_filters=activity_filters or None,
                 _profiler_extensions=profiler_extensions,
             )
+            # Set after construction so the autograd profiler doesn't repeat the
+            # with_modules warning that __init__ already issued.
+            self.profiler.with_modules = self.with_modules
         if self._cuspy_config is not None:
             from torch.profiler._cuspy.observers.profiler import ProfilerObserver
 
