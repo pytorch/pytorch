@@ -7,6 +7,7 @@ import math
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import cutlass.cute as cute
 from cutlass import Float32, Float64, Int32, Int64
 
 import torch
@@ -21,6 +22,8 @@ from .traits import WARP
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
 Pairs = Sequence[tuple[int, int]]
+_INT32_LIMIT = 1 << 31
+_GRID_X_MAX = _INT32_LIMIT - 1
 
 
 class ReduceBlock:
@@ -46,19 +49,18 @@ class ReduceBlock:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
         self.num_o = num_o  # number of outputs / blocks (= prod kept exts)
-        # The decode runs in Int32: r spans count and o spans num_o.
-        if not (count < 2**31 and num_o < 2**31):
-            raise AssertionError(
-                f"decode needs count and num_o < 2^31, got {count} and {num_o}"
-            )
-        if not red_pairs:
-            # Missing reduced runs index vals[-1]; missing kept runs denote reduce-all.
-            raise AssertionError("a reduction needs at least one reduced run")
-        # (extent, input-element-stride) pairs from TensorIterator, fastest first.
+        # An extent-one reduced axis can coalesce away, leaving no reduced pairs.
         self.red_pairs = tuple(red_pairs)
         self.kept_pairs = tuple(kept_pairs)
         self.npairs_red = len(self.red_pairs)
         self.npairs_kept = len(self.kept_pairs)
+        self.wide_count = count >= _INT32_LIMIT
+        self.wide_output = num_o >= _INT32_LIMIT
+        self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
+        self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
+        index_extent = limit if limit is not None else count
+        if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
+            raise ValueError("index reductions require indices representable in Int32")
         self.in_base = in_base  # flat input offset of output coordinate 0
         self.limit = limit if limit is not None else count  # ragged tail bound
         # Projection divisor: count normally, or original L when stage 2 folds G partials.
@@ -82,6 +84,10 @@ class ReduceBlock:
             combine=from_partials,
             npairs_red=self.npairs_red,
             npairs_kept=self.npairs_kept,
+            wide_count=self.wide_count,
+            wide_output=self.wide_output,
+            wide_red=self.wide_red,
+            wide_kept=self.wide_kept,
             gidx_from=gidx_from,
             flat_tail=flat_tail,
             ragged_chunk=ragged_chunk,
@@ -97,6 +103,7 @@ class ReduceBlock:
         # Cache boxed runtime geometry (~6us) separately while sharing the structural kernel.
         return (
             self.count,
+            self.num_o if self.wide_output else None,
             self.red_pairs,
             self.kept_pairs,
             self.in_base,
@@ -115,9 +122,15 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts: Sequence[torch.Tensor]) -> list[Any]:
+def _fakes(ts: Sequence[torch.Tensor], *, int64_extent: bool = False) -> list[Any]:
     # Dynamic flat descriptors let one structural kernel serve every length.
-    return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
+    return [
+        _L.fake_compact(
+            torch2cute[t.dtype],
+            (cute.sym_int64() if int64_extent else _L.sym(),),
+        )
+        for t in ts
+    ]
 
 
 def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
@@ -125,26 +138,28 @@ def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
     return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
-def _exts(pairs: Pairs) -> list[Any]:
-    # The launch builds FastDivmod objects for these extents inside its MLIR context.
-    return [Int32(ext) for ext, _ in pairs]
+def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
+    # FastDivmod has an Int32 dividend; wider decodes use native Int64 division.
+    dtype = Int64 if wide else Int32
+    return [dtype(ext) for ext, _ in pairs] or None
 
 
-def _strides(pairs: Pairs) -> list[Any]:
-    return [Int64(strd) for _, strd in pairs]
+def _strides(pairs: Pairs) -> list[Any] | None:
+    return [Int64(strd) for _, strd in pairs] or None
 
 
 def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
     # Runtime geometry: both decodes' extents/strides and scalar bounds.
+    grid_x = min(op.num_o, _GRID_X_MAX) if op.wide_output else None
     return (
-        Int32(op.count),
+        (Int64 if op.wide_count else Int32)(op.count),
         None,
         Int64(op.project_n),
-        None,
-        None,
-        _exts(op.red_pairs),
+        None if grid_x is None else Int32(grid_x),
+        None if grid_x is None else Int32(-(-op.num_o // grid_x)),
+        _exts(op.red_pairs, op.wide_count or op.wide_red),
         _strides(op.red_pairs),
-        _exts(op.kept_pairs),
+        _exts(op.kept_pairs, op.wide_output or op.wide_kept),
         _strides(op.kept_pairs),
         Int64(op.in_base),
         Int64(op.limit),
@@ -158,15 +173,21 @@ def _launch(
     outs: Sequence[torch.Tensor],
 ) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
+    op_name = key[1]
+    key = (str(ins[0].device),) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
         fn = cached_plan(
             _COMPILE_CACHE,
             key,
             lambda: _compile(
-                op.tile, _fakes(ins), _fakes(outs), *_geom_args(op), _stream()
+                op.tile,
+                _fakes(ins, int64_extent=True),
+                _fakes(outs, int64_extent=op.wide_output),
+                *_geom_args(op),
+                _stream(),
             ),
-            op=f"aten::{key[1]}",
+            op=f"aten::{op_name}",
         )
         plan = (fn, _geom_args(op))
         _PLAN[(key, op.geom_sig)] = plan
