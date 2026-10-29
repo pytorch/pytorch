@@ -142,26 +142,34 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(first.close_calls, 1)
         self.assertEqual(first.kill_calls, 0)
 
-    def test_a_wedged_child_is_killed_and_reaped(self):
-        # A child stuck in device teardown never acts on the sentinel. Without
-        # the kill it would hold the GPU and stall every later submit.
+    def _live_worker(self):
         self._submit(device=0)
         first = self.created[0]
         first._alive = True
         first.process = mock.Mock()
+        return first
+
+    def test_a_wedged_child_is_killed_and_reaped(self):
+        # A child stuck in device teardown never acts on the sentinel; without
+        # the kill it holds the GPU and stalls every later submit.
+        first = self._live_worker()
         first.process.wait.side_effect = subprocess.TimeoutExpired("worker", 10.0)
         self._submit(device=1)
         self.assertEqual(first.kill_calls, 1)
-        # close() belongs to the clean path; kill() closes the pipes itself.
         self.assertEqual(first.close_calls, 0)
         # Once for the bounded wait, once reaping the killed child.
         self.assertEqual(first.process.wait.call_count, 2)
 
+    def test_a_broken_pipe_during_shutdown_still_kills_the_child(self):
+        # shutdown() writes the exit sentinel; a child that already closed its
+        # read end makes that raise, and it would otherwise be orphaned.
+        first = self._live_worker()
+        first.shutdown = mock.Mock(side_effect=BrokenPipeError())
+        self._submit(device=1)
+        self.assertEqual(first.kill_calls, 1)
+
     def test_a_child_that_exits_within_the_bound_is_not_killed(self):
-        self._submit(device=0)
-        first = self.created[0]
-        first._alive = True
-        first.process = mock.Mock()
+        first = self._live_worker()
         self._submit(device=1)
         self.assertEqual(first.kill_calls, 0)
         self.assertEqual(first.close_calls, 1)
@@ -171,20 +179,11 @@ class TunableOpWorkerTest(TestCase):
         # The child can close its pipes and then wedge in device teardown. The
         # parent sees EOF, so running is already False and TuningProcess.kill()
         # skips the signal -- orphaning a process that still holds the GPU.
-        job = tunableop.BenchmarkJob(None, tuning=False)
-        with (
-            mock.patch("torch.cuda.current_device", return_value=0),
-            mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
-        ):
-            with tunableop._worker_lock:
-                worker = tunableop._get_worker_locked((0, "t.csv"))
-            worker.raises = EOFError()
-            worker.running = False
-            worker.process = mock.Mock()
-            worker.process.poll.return_value = None  # closed its pipes, still up
-            outcome = tunableop.submit(job)
+        process = mock.Mock()
+        process.poll.return_value = None  # closed its pipes, still up
+        _, outcome = self._submit_with_fault(EOFError(), process=process)
         self.assertEqual(outcome.status, "crash")
-        self.assertEqual(worker.process.kill.call_count, 1)
+        self.assertEqual(process.kill.call_count, 1)
 
     def test_unset_rotating_buffer_uses_the_current_devices_l2(self):
         # GetRotatingBufferSize reports the *current* device's L2, while the job
@@ -286,7 +285,7 @@ class TunableOpWorkerTest(TestCase):
         self._submit(device=2, filename="a.csv")
         self.assertEqual(len(self.created), 1)
 
-    def _submit_with_fault(self, exc, running=False):
+    def _submit_with_fault(self, exc, running=False, process=None):
         """Arm a fresh worker's get() with exc, then submit through it."""
         tunableop._worker = None
         tunableop._worker_key = None
@@ -299,6 +298,8 @@ class TunableOpWorkerTest(TestCase):
                 worker = tunableop._get_worker_locked((0, "t.csv"))
             worker.raises = exc
             worker.running = running  # True means the pipe is fine, the job failed
+            if process is not None:
+                worker.process = process
             outcome = tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
         return worker, outcome
 
