@@ -199,13 +199,18 @@ def is_sparse_coo(t: object) -> TypeGuard[torch.Tensor]:
     return isinstance(t, torch.Tensor) and t.layout is torch.sparse_coo
 
 
-def is_sparse_compressed_layout(layout: torch.layout) -> bool:
-    return layout in {
+_SPARSE_COMPRESSED_LAYOUTS = frozenset(
+    {
         torch.sparse_csr,
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
     }
+)
+
+
+def is_sparse_compressed_layout(layout: torch.layout) -> bool:
+    return layout in _SPARSE_COMPRESSED_LAYOUTS
 
 
 # TypeGuard (not TypeIs): False does not imply !torch.Tensor
