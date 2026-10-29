@@ -58,7 +58,7 @@ void apply_triu_tril_single(
   if (upper) {
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
-        for (int64_t j = 0; j < std::min(m, i + k); j++) {
+        for (const auto j : c10::irange(std::min(m, i + k))) {
           result[i * res_row_stride + j * res_col_stride] = static_cast<scalar_t>(0);
         }
         if (!inplace) {  // copy the rest of the self if not inplace
@@ -75,7 +75,7 @@ void apply_triu_tril_single(
           result[i * res_row_stride + j * res_col_stride] = static_cast<scalar_t>(0);
         }
         if (!inplace) {  // copy the rest of the self if not inplace
-          for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
+          for (const auto j : c10::irange(zero, std::min(m, i + k + 1))) {
             result[i * res_row_stride + j * res_col_stride] = c10::load(&self[i * self_row_stride + j * self_col_stride]);
           }
         }
