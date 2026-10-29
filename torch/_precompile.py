@@ -212,13 +212,15 @@ it.
 # artifact does so after its version checks; a failed import only warns, unless the
 # module is in CUSTOM_OP_KERNEL_MODULES: it registered a kernel the graph ran at
 # capture), then refuses to load unless every op in CUSTOM_OPS and every kernel key
-# CUSTOM_OP_KERNELS lists for it is registered. The caller must import, before load,
-# what the artifact cannot record: C++ extension ops, ops from torch.library.define or
-# __main__, and kernels registered through @torch.library.impl, register_kernel or
-# another module's Library. The
-# eager backend has no kernels to accelerate, so the eager cache carries no compiled
-# artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
-# always runs the graph inlined in python_code. The metadata
+# CUSTOM_OP_KERNELS lists for it is registered. A Dynamo artifact also imports its
+# served frames' modules for ops with no recorded module, so the caller must import,
+# before load, only what the artifact cannot record: for a make_fx artifact (or a
+# Dynamo one whose op is registered outside every served frame's module), C++
+# extension ops, ops from torch.library.define or __main__, and kernels registered
+# through @torch.library.impl, register_kernel or another module's Library. The eager
+# backend has no kernels to accelerate, so the eager cache carries no compiled artifact
+# (artifact=None) but is still a full integrity-tagged envelope, and load() always
+# runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
 # (python_code, cache) pair that did not come from the same precompile capture.
