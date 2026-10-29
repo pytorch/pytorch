@@ -49,10 +49,13 @@ for desired in ${DESIRED_PYTHONS}; do
         bash "${SCRIPTPATH}/build.sh"
 
     # BOLT keeps the unoptimized libtorch_python, relinked per interpreter, in
-    # build/lib/prebolt; keep one copy per Python before the next iteration.
-    prebolt_python="${PYTORCH_ROOT}/build/lib/prebolt/libtorch_python.so"
-    if [[ -f "${prebolt_python}" ]]; then
-        mv "${prebolt_python}" "${prebolt_python%.so}-${desired}.so"
+    # build/lib/prebolt; keep one copy per Python SOABI (the key of its BOLT
+    # profile) before the next iteration.
+    prebolt_dir="${PYTORCH_ROOT}/build/lib/prebolt"
+    if [[ -f "${prebolt_dir}/libtorch_python.so" ]]; then
+        soabi=$(DESIRED_PYTHON="${desired}" bash -c 'source "$1/set_desired_python.sh" >/dev/null && python3 -c "import sysconfig; print(sysconfig.get_config_var(\"SOABI\"))"' _ "${SCRIPTPATH}")
+        mkdir -p "${prebolt_dir}/${soabi}"
+        mv "${prebolt_dir}/libtorch_python.so" "${prebolt_dir}/${soabi}/"
     fi
 
     iter_elapsed=$(( $(date +%s) - iter_start ))
