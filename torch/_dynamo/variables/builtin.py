@@ -257,6 +257,8 @@ bin_int_ops = (
     operator.ior,
 )
 
+_RICH_CMP_DUNDERS = ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+
 un_int_ops = (operator.invert,)
 
 tensor_and_int_ops = (
@@ -538,7 +540,7 @@ class BaseBuiltinVariable(VariableTracker):
         if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
-            from .functions import MethodDescriptorVariable
+            from .descriptors import MethodDescriptorVariable
 
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
@@ -2034,12 +2036,23 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
-                return args[0].call_base_method(tx, name, args[1:], kwargs)
+                # int.__eq__(IntEnum.A, x): constant int/float/str subclass
+                # instances fall through to the rich-comparison fold below,
+                # which calls the base slot and ignores subclass overrides.
+                if not (
+                    self.fn in (int, float, str)
+                    and name in _RICH_CMP_DUNDERS
+                    and len(args) == 2
+                    and not kwargs
+                    and all(a.is_python_constant() for a in args)
+                    and isinstance(args[0].as_python_constant(), self.fn)
+                ):
+                    return args[0].call_base_method(tx, name, args[1:], kwargs)
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
-            name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+            name in _RICH_CMP_DUNDERS
             and len(args) == 2
             and not kwargs
             and isinstance(self.fn, type)

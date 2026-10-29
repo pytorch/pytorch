@@ -1,3 +1,16 @@
+#ifdef USE_ROCM
+// RCCL's nccl_device.h gates its reduce/copy device API on the macro nvcc
+// defines for --extended-lambda. hipcc supports device lambdas without a flag
+// and never defines it, so define it before the first include (nccl_dev_cap.hpp
+// pulls nccl_device.h in), as RCCL's own test/DeviceApiMPITests.cpp does.
+// TODO: drop once RCCL gates that API on HIP itself.
+#ifndef __CUDACC_EXTENDED_LAMBDA__
+#define __CUDACC_EXTENDED_LAMBDA__ 1
+#endif
+#endif
+
+#include <limits>
+
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -7,6 +20,17 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+
+#if defined(NCCL_DEVICE_HAS_REDUCE_COPY) && defined(USE_ROCM)
+// PyTorch disables HIP's half operators, but RCCL's generic OpSum<T> adds with
+// `a + b`, which half reductions instantiate.
+// TODO: drop once RCCL specializes OpSum<__half> with __hadd.
+#if defined(__HIP_NO_HALF_OPERATORS__)
+__device__ __forceinline__ __half operator+(const __half& a, const __half& b) {
+  return __float2half(__half2float(a) + __half2float(b));
+}
+#endif
+#endif
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
@@ -63,6 +87,10 @@ struct ReduceScatterOffsetsInfo {
 // Each CTA belongs to one slot; blockIdx.x is the flat CTA index used as the
 // LSA barrier index, ensuring all ranks assign the same index to each logical
 // (slot, local_block) pair (because owned_sizes[j] is consistent across ranks).
+//
+// ROCm drives this same kernel one owned slot at a time (n_owned == 1 per
+// launch), which reduces the indexing above to slot 0, slot_start 0 and
+// local_block == blockIdx.x.  See the launch site for why.
 //
 // UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
 // NVLink multicast; requires devcomm created with lsaMultimem=true.
@@ -190,7 +218,7 @@ void nccl_reduce_scatter_offset(
     // Cache the device communicator.
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
-  ncclDevComm& devcomm = devcomm_opt->get();
+  ncclDevComm devcomm = devcomm_opt->get();
 
   const int my_rank = devcomm.rank;
   const int group_size = devcomm.nRanks;
@@ -310,6 +338,14 @@ void nccl_reduce_scatter_offset(
     TORCH_CHECK(
         out[j].scalar_type() == input.scalar_type(),
         "nccl_reduce_scatter_offset: out[", j, "] must have the same dtype as input");
+    // ReduceScatterOffsetsInfo stores the per-slot size in a uint16_t, so a
+    // larger block would be truncated on the device and silently reduce only
+    // owned_sizes[j] % 65536 of its extent along `dim`.
+    TORCH_CHECK(
+        owned_sizes[j] <= std::numeric_limits<uint16_t>::max(),
+        "nccl_reduce_scatter_offset: block size ", owned_sizes[j], " at j=", j,
+        " exceeds the maximum supported block size of ",
+        std::numeric_limits<uint16_t>::max());
   }
 
   // Per-slot CTA count: sized for each slot independently.  owned_sizes[j] is
@@ -346,6 +382,7 @@ void nccl_reduce_scatter_offset(
       info.cta_slot[k] = static_cast<uint8_t>(j);
     }
   }
+#ifndef USE_ROCM
   const int total_ctas = info.ctas_offset[n_owned - 1];
 
   auto window = nccl_hdl->get_window();
@@ -370,6 +407,64 @@ void nccl_reduce_scatter_offset(
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       });
+#else
+  auto window = nccl_hdl->get_window();
+  TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
+
+  // Drive the same kernel one owned slot per launch, sequentially on the
+  // stream, so at most one destination allocation is written at a time: a
+  // fused launch whose CTAs write different destination allocations faults
+  // with a memory aperture violation on RCCL. Row tiles within one slot all
+  // write the same destination allocation, which is safe.
+  // TODO: Debug the RCCL multi-destination LSA reduction and narrow or remove
+  // this workaround when the fused launch is safe.
+  //
+  // A one-slot info struct makes the kernel's flat-CTA indexing collapse to
+  // slot 0, slot_start 0, local_block == blockIdx.x and ctas_for_slot ==
+  // ctas_j, leaving blockIdx.x as the barrier index.  All ranks agree on
+  // ctas_j because owned_sizes[j] is consistent across ranks, so every rank
+  // assigns the same barrier index to each row tile.
+  AT_DISPATCH_NV_FLOATS(
+      input.scalar_type(),
+      "nccl_reduce_scatter_offset",
+      [&]() {
+        for (int j = 0; j < n_owned; j++) {
+          const int ctas_j =
+              info.ctas_offset[j] - (j > 0 ? info.ctas_offset[j - 1] : 0);
+          ReduceScatterOffsetsInfo slot;
+          slot.n_owned = 1;
+          slot.byte_offsets[0] = info.byte_offsets[j];
+          slot.dst_ptrs[0] = info.dst_ptrs[j];
+          slot.dst_block_size[0] = info.dst_block_size[j];
+          slot.ctas_offset[0] = static_cast<uint16_t>(ctas_j);
+          for (int k = 0; k < ctas_j; ++k) {
+            slot.cta_slot[k] = 0;
+          }
+
+          if (use_multimem) {
+            reduce_scatter_offset_kernel<scalar_t, true>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window,
+                    slot,
+                    fixed_dim_size,
+                    col_sharded,
+                    outer_stride,
+                    devcomm);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          } else {
+            reduce_scatter_offset_kernel<scalar_t, false>
+                <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
+                    window,
+                    slot,
+                    fixed_dim_size,
+                    col_sharded,
+                    outer_stride,
+                    devcomm);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
+        }
+      });
+#endif
 #else
   TORCH_CHECK(
       false,
