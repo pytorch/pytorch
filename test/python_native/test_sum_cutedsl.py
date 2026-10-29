@@ -280,6 +280,51 @@ class TestSumCuteDSLOverride(TestCase):
         torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2,
+        "requires at least 2 visible CUDA devices",
+    )
+    @skipIfRocm
+    def test_non_current_device(self):
+        """Launch functional and out variants on the input tensor's device."""
+        previous = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            rt._CACHE.clear()
+            x0 = torch.ones(17, 8192, device="cuda:0")
+            x0[:, 0] = 2
+            # Warm cuda:0 first; device-keyed plans keep cuda:1 from reusing them.
+            x0.sum(dim=1)
+            torch.prod(x0, dim=1, out=torch.empty(17, device="cuda:0"))
+            x = x0.to("cuda:1")
+            with torch.backends.python_native.cutedsl.disabled():
+                expected_sum = x.sum(dim=1)
+                expected_prod = x.prod(dim=1)
+
+            reduce_row_itree = rt.reduce_row_itree
+            launch_devices = []
+
+            def record(*args, **kwargs):
+                launch_devices.append(torch.cuda.current_device())
+                return reduce_row_itree(*args, **kwargs)
+
+            with mock.patch.object(rt, "reduce_row_itree", side_effect=record):
+                got_sum = x.sum(dim=1)
+                got_prod = torch.empty(17, device="cuda:1")
+                torch.prod(x, dim=1, out=got_prod)
+
+            self.assertEqual(launch_devices, [1, 1])
+            keys = [k for k in rt._CACHE if k[0].startswith("rowitree")]
+            for device in ("cuda:0", "cuda:1"):
+                self.assertTrue(any(device in k for k in keys), f"no plan for {device}")
+            self.assertEqual(torch.cuda.current_device(), 0)
+            self.assertEqual(got_sum.device, torch.device("cuda:1"))
+            self.assertEqual(got_prod.device, torch.device("cuda:1"))
+            self.assertEqual(got_sum, expected_sum)
+            self.assertEqual(got_prod, expected_prod)
+        finally:
+            torch.cuda.set_device(previous)
+
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
         values = torch.arange(36, device="cuda", dtype=torch.float32)
