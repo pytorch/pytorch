@@ -1129,6 +1129,17 @@ def export_python(
         regenerate (delete ``path``) when that changes; nothing detects the change for
         you.
 
+    Keyword call arguments and positional defaults are normalized onto ``fn``'s full
+    positional signature (so ``rope(q=..., k=...)`` works and omitted defaults do not
+    change the artifact arity). Runtime arguments must be ``Tensor`` pytrees or
+    ``nn.Module`` arguments passed directly; a module inside a container is rejected.
+    Python scalar/config arguments are rejected because ``make_fx`` specializes their
+    values without emitting runtime guards; close such constants over in ``fn``
+    instead. A ``None`` argument, including a ``None`` default the caller never
+    passes, is rejected the same way. A ``fn`` that declares keyword-only parameters,
+    or a call that passes extra keyword arguments to ``fn``'s ``**kwargs``, is
+    rejected, since neither is expressible in the artifact's positional convention.
+
     Python attributes and Python control flow are specialized at capture and must
     remain compatible with the example. That includes ``torch.is_grad_enabled()``:
     capture traces with grad enabled so a backward inside ``fn`` is built as graph
