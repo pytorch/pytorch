@@ -75,9 +75,7 @@ native stream support may override these methods.
 
 ## NIXL backend
 
-The initial backend is NIXL, installed separately with `pip install nixl`;
-`supported()` requires a build providing `nixlRegDList`, `DRAM_SEG`,
-`nixlNotAllowedError` and `nixlNotFoundError`.
+The initial backend is NIXL, installed separately with `pip install nixl`.
 Its default UCX plugin supports CPU and CUDA memory, subject to the installed
 NIXL/UCX build and hardware.
 
@@ -93,28 +91,10 @@ The NIXL adapter resolves those futures by checking native transfer status.
 Each live transfer owns a distinct request handle.
 Independent requests may overlap; explicitly wait before issuing dependent or
 overlapping reads/writes. Completion ordering is not implicit.
-`bind()` returns connection info only; each descriptor's metadata is loaded on
-its first transfer. NIXL cannot unload single remote descriptors, so a transfer
-resets the peer when its remote buffer overlaps a different one already loaded
-from that peer, reuses a loaded range with new metadata, or exceeds 4096 loaded
-buffers. A failed transfer, or a load refused with `nixlNotAllowedError` after
-the peer restarts under the same `agent_name`, marks the peer so its next
-transfer resets it. A reset first waits for the peer's pending transfers, so a
-stuck transfer blocks the peer until `close`. The wait counts against `timeout`
-and raises `TimeoutError`. With `async_op=True` it happens before the Work is
-returned, and the Work's default wait is the time remaining, possibly zero.
-After a peer restart, a retry reloads the peer once its old transfers finish.
-Any other failed metadata load may leave the peer unusable and its pending
-transfers unfinished, so it closes the transport: `connected()` returns False,
-and `close` times out while those transfers remain, leaving the transport's
-memory registered until process exit. Peers must run the same PyTorch version:
-`connect` loads an older peer's descriptors untracked, which can make reloads
-fail.
 
 NIXL's default wait timeout is 30 seconds. `timeout` is in seconds; `None`
 selects the backend default and zero polls without waiting. `Work.wait` instead
-takes a `datetime.timedelta`; its zero default waits for the timeout remaining
-when the transfer was submitted.
+takes a `datetime.timedelta`; its zero default selects the transfer's timeout.
 Timeout and asyncio cancellation stop waiting, not DMA. The transport retains
 pending requests and buffers, even if the caller drops its Work. Wait again or
 successfully close before reusing buffers. Coordinate with peers before closing
