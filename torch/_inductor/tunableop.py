@@ -255,40 +255,40 @@ def _reap(worker: TuningProcess) -> None:
         log.debug("TunableOp worker did not exit within %ss", _SHUTDOWN_TIMEOUT_S)
 
 
+def _kill_and_reap(worker: TuningProcess) -> None:
+    """SIGKILL and wait: kill() alone skips the signal once running is clear,
+    so a child wedged in teardown would stay alive, holding the GPU."""
+    process = worker.process
+    if process is not None and process.poll() is None:
+        process.kill()
+    worker.kill()
+    _reap(worker)
+
+
 def _shutdown_locked(graceful: bool = True) -> None:
     """Assumes _worker_lock is held (_get_worker_locked calls it on key change).
 
     graceful=False kills outright, for a suspected GPU fault: once the
     reference is dropped there is no handle left to kill the child with.
     Either way it is signalled, waited on with a bound, and its pipes closed
-    before the reference goes.
+    before the reference goes -- including when the sentinel write itself
+    fails because the child already closed its read end.
     """
     global _worker, _worker_key
     if _worker is not None:
         try:
             if graceful:
-                _worker.shutdown(wait=False)
                 try:
+                    _worker.shutdown(wait=False)
                     if _worker.alive():
                         _worker.process.wait(timeout=_SHUTDOWN_TIMEOUT_S)
                 except Exception:
-                    log.debug(
-                        "TunableOp worker did not exit in %ss; killing",
-                        _SHUTDOWN_TIMEOUT_S,
-                    )
-                    _worker.kill()
-                    _reap(_worker)
+                    log.debug("TunableOp worker will not exit; killing")
+                    _kill_and_reap(_worker)
                 else:
                     _worker.close()
             else:
-                # kill() signals only when alive() is true, which close() has
-                # already falsified on the EOF path -- so a child that wedged in
-                # teardown would never be signalled, and would hold the GPU.
-                process = _worker.process
-                if process is not None and process.poll() is None:
-                    process.kill()
-                _worker.kill()
-                _reap(_worker)
+                _kill_and_reap(_worker)
         except Exception:
             log.debug("TunableOp worker shutdown failed", exc_info=True)
         _worker = None
