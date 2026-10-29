@@ -50,6 +50,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -9994,7 +9995,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
     def test_an_op_the_artifact_cannot_import_is_reported_at_capture(self):
         from torch._native import registry as native_registry
-        from torch._precompile import _custom_op_modules
+        from torch._precompile import _custom_op_modules, _warn_unrecorded
 
         op, qualname = self._op("in_main")
         op._init_fn.__module__ = "__main__"
@@ -10027,6 +10028,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         names += [("aten::add", "Tensor"), ("export::access_subclass_inner_tensor", "")]
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             modules, unrecorded = _custom_op_modules(names)
+            _warn_unrecorded(unrecorded)
         self.assertEqual(modules, (module.__name__, "torch.export.custom_ops"))
         self.assertEqual(
             {op_name for op_name, _ in unrecorded},
@@ -10142,7 +10144,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 _custom_op_modules([(f"prims::{name}", "")]), ((module,), ())
             )
 
-    @unittest.skipIf(IS_WINDOWS, "forks")
+    @unittest.skipIf(IS_WINDOWS or IS_MACOS, "forks")
     def test_no_op_torch_registers_is_reported(self):
         script = textwrap.dedent(
             """
@@ -10293,7 +10295,21 @@ class TestPrecompileCustomOpRecording(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             line, name = self._render_with_ops([(qualname, "")])
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
-        self.assertEqual(len([m for m in logs.output if qualname in m]), 1)
+        (warning,) = [m for m in logs.output if qualname in m]
+        self.assertIn(f"imports {name}, the modules its frames run in", warning)
+
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+    def test_a_library_defined_op_warns_that_the_frame_modules_are_a_fallback(self):
+        from torch.library import _scoped_library
+
+        lib = self.enterContext(_scoped_library("precompile_defined", "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            line, name = self._render_with_ops([("precompile_defined::op", "")])
+        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
+        (warning,) = [m for m in logs.output if "precompile_defined::op" in m]
+        self.assertIn(f"imports {name}, the modules its frames run in", warning)
+        self.assertIn("as a best-effort fallback", warning)
 
     @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_dynamo_graph_breaks_on_is_checked(self):
