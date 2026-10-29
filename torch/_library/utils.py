@@ -47,6 +47,20 @@ def get_source(stacklevel: int) -> str:
     return source
 
 
+# The module that last called a torch.library helper to register each kernel, by
+# qualname and dispatch key. The dispatcher only records the helper's own file.
+kernel_callers: dict[str, dict[str, str | None]] = {}
+
+
+def record_kernel_caller(qualname: str, key: str) -> None:
+    # functools for torch.library.impl, a functools.singledispatch.
+    skipped = ("torch._library", "torch.library", "functools")
+    frame = sys._getframe(1)
+    while frame.f_back and frame.f_globals.get("__name__", "").startswith(skipped):
+        frame = frame.f_back
+    kernel_callers.setdefault(qualname, {})[key] = frame.f_globals.get("__name__")
+
+
 def parse_namespace(qualname: str) -> tuple[str, str]:
     splits = qualname.split("::")
     if len(splits) != 2:
