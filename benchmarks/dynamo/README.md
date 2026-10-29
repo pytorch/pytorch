@@ -78,6 +78,115 @@ For debugging you can run just a single benchmark by adding the `--only=<NAME>` 
 
 A complete list of options can be seen by running each of the runners with the `--help` flag.
 
+### Decoder-only generation, prefill, and decode
+
+Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
+by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
+unpadded prompts:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=prefill --prompt-length=1000 \
+  --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
+```
+
+Prefill measures one forward over the prompt, returning last-position logits and
+populating a reusable static cache. The cache holds `prompt_length + 1999`
+positions, the capacity `generate` allocates for its first forward, so attention
+spans the same KV length as in generation; `prompt_length + 2000` must fit the
+model's context length. Cache allocation and reset occur outside the compiled
+and timed forward. Use `--accuracy` to check correctness or
+`--disable-cudagraphs` to measure without CUDA graphs. Prefill requires inference
+and a backend; autocast, dynamic shapes, DDP/FSDP, and export modes are
+unsupported. `--prompt-length` (default 1000) and `--batch-size` configure
+the prefill workload; generation retains its existing `1 x 1000` inputs and
+rejects `--prompt-length`.
+
+CSV `abs_latency` and `eager_latency` are milliseconds for all
+`--iterations-per-run` requests; `input_tokens_per_second` includes all batch
+elements. Default output and profiler trace names get a `_prefill` suffix; use
+separate files for different input dimensions.
+
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
+`Qwen/Qwen3.5-0.8B`:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --prompt-length=1000 \
+  --decode-length=128 --batch-size=1 --only=Qwen/Qwen3-0.6B \
+  --output=decode_performance.csv
+```
+
+Each decode request prefills the prompt eagerly into the static cache outside
+the timed region, then times `--decode-length` (default 128, at most 1999)
+single-token compiled forwards. Decode feeds fixed random tokens rather than
+sampled ones and returns the last step's logits. It shares prefill's cache
+capacity and flag restrictions. `gemma-2-2b` is excluded because its
+sliding-window cache recompiles on every step.
+
+CSV `abs_latency` and `eager_latency` are milliseconds for all
+`--iterations-per-run` requests; `output_tokens_per_second` counts every decode
+step across batch elements. Default output and profiler trace names get a
+`_decode` suffix.
+
+#### Tensor-parallel prefill and decode
+
+`--tp-size=N` runs prefill or decode with one model and request sharded across
+`N` GPUs of one node by Hugging Face tensor parallelism. It uses the model's
+`tp_plan` without tied modules such as `lm_head`, which stay replicated with the
+input embedding they share weights with. Both the eager baseline and the
+compiled forward run tensor-parallel, so `speedup` compares eager TP with
+compiled TP at the same topology. Compare against a single-GPU run separately to
+measure TP scaling.
+Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
+`Qwen/Qwen3.5-0.8B`.
+
+Launch it with torchrun, one worker per GPU. `--only` is required and
+`WORLD_SIZE` must equal `N` on one node:
+
+```
+torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
+  --inference --bfloat16 --backend=inductor --disable-cudagraphs \
+  --hf-inference-mode=prefill --tp-size=2 --only=Qwen/Qwen3-0.6B
+```
+
+Each worker uses `LOCAL_RANK` for its GPU and torchrun's rendezvous settings.
+TP requires `--bfloat16`, `--float16`, or `--float32`, which is passed to
+`from_pretrained`, and `N` must divide the model's attention and KV
+heads (Qwen3.5-0.8B has two KV heads, so it supports at most `--tp-size=2`).
+Ranks broadcast the request tokens from rank 0 and allocate their own
+TP-local static caches. Eager, compiled, and accuracy-reference passes share the
+loaded shards rather than deep-copying the model; each pass gets a fresh cache.
+Hugging Face's gradient all-reduce backward hooks are removed after loading,
+since they do nothing in inference and Dynamo cannot trace them.
+
+Before each timed request, ranks finish its setup and meet at a barrier. Each
+request counts as its slowest rank's duration, through device completion;
+`abs_latency` and `eager_latency` are the median over repetitions of those
+per-request maxima summed over `--iterations-per-run`. Token throughput counts
+logical tokens only (`iterations * batch_size * prompt_length` or
+`decode_length`), never multiplied by `N`. Rank 0 writes the CSV and JSON
+results, which add `phase`, `tp_size`, `prompt_length`, and `decode_length`
+columns, report the maximum peak memory over ranks in `eager_peak_mem` and
+`dynamo_peak_mem`, and list each rank's value in `*_peak_mem_per_rank`. Default
+output names get a `_<phase>_tp<N>` suffix; profiler traces and memory
+snapshots get per-rank names.
+Accuracy runs agree on comparison outcomes across ranks. Exceptions during
+loading or execution, including the FP64 reference, terminate the worker
+immediately so torchrun can stop peers blocked in model collectives. These
+execution failures remain fatal even when an accuracy failure is expected.
+The process-group timeout covers hangs that do not raise an exception.
+
+TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
+graphs are validated with it.
+Multi-node runs, several TP groups, and other parallelism styles are
+unsupported. Inductor TP requires CUDA/NCCL. On machines without an
+accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
+`--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
+all-gathers can corrupt memory; this was reproduced without a model or
+compilation and is not specific to Qwen3.5.
+
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```
 ./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv

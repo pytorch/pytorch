@@ -327,6 +327,27 @@ def load_model_from_path(path_and_class_str):
     return model, inputs
 
 
+# Columns that identify a tensor-parallel result row, after dev, name, batch_size.
+TP_IDENTITY_HEADERS = ("phase", "tp_size", "prompt_length", "decode_length")
+
+
+def set_current_metadata(args):
+    global \
+        current_backend, \
+        current_mode, \
+        current_dtype, \
+        current_quantization, \
+        current_settings
+    current_backend = args.backend
+    current_mode = (
+        "training" if args.training else "inference" if args.inference else ""
+    )
+    dtypes = ("float16", "bfloat16", "float32", "amp")
+    current_dtype = next((dtype for dtype in dtypes if getattr(args, dtype)), "")
+    current_quantization = args.quantization
+    current_settings = vars(args)
+
+
 def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
@@ -372,34 +393,59 @@ def output_json(filename, headers, row):
     elif "timm_models" in filename:
         origin = "timm_models"
 
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
     extra_info = {
         "device": current_device,
         "quantization": current_quantization,
         "batch_size": current_batch_size,
     }
+    dtype = current_dtype
+    model_name = current_name
     if current_settings:
         extra_info.update(current_settings)
-
-    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    is_tp = extra_info.get("tp_size", 1) > 1
+    if is_tp:
+        dtype = next(
+            (
+                name
+                for name in ("float16", "bfloat16", "float32", "amp")
+                if extra_info.get(name)
+            ),
+            "",
+        )
+        extra_info["device"] = mapping_headers.get("dev", current_device)
+        extra_info["batch_size"] = mapping_headers.get("batch_size", current_batch_size)
+        extra_info.update(
+            {
+                key: mapping_headers[key]
+                for key in TP_IDENTITY_HEADERS
+                if key in mapping_headers
+            }
+        )
+        model_name = mapping_headers.get("name", current_name)
+    else:
+        extra_info.pop("tp_size", None)
     with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
         for header, value in mapping_headers.items():
-            # These headers are not metric names
-            if header in ("dev", "name", "batch_size"):
+            # These headers are not metric names; extra_info has the TP identity.
+            if header in ("dev", "name", "batch_size") or (
+                is_tp and header in TP_IDENTITY_HEADERS
+            ):
                 continue
 
             # Make sure that the record is valid
-            if not current_name:
+            if not model_name:
                 continue
 
             record = {
                 "benchmark": {
                     "name": "TorchInductor",
                     "mode": current_mode,
-                    "dtype": current_dtype,
+                    "dtype": dtype,
                     "extra_info": extra_info,
                 },
                 "model": {
-                    "name": current_name,
+                    "name": model_name,
                     "type": "OSS model",
                     "backend": current_backend,
                     "origins": [origin],
@@ -574,6 +620,53 @@ def synchronize():
     pass
 
 
+def artifact_safe_name(name):
+    return name.replace("/", "_").replace("\\", "_")
+
+
+def max_across_ranks(values, group):
+    device = "cuda" if torch.distributed.get_backend(group) == "nccl" else "cpu"
+    tensor = torch.tensor(values, dtype=torch.float64, device=device)
+    torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX, group=group)
+    return tensor.tolist()
+
+
+def hf_inference_suffix(args):
+    suffix = f"_{args.hf_inference_mode}"
+    if args.tp_size > 1:
+        suffix += f"_tp{args.tp_size}"
+    return suffix
+
+
+def gather_across_ranks(value, group):
+    values = [None] * torch.distributed.get_world_size(group)
+    torch.distributed.all_gather_object(values, value, group=group)
+    return values
+
+
+def exit_on_tensor_parallel_error(args):
+    if args.tp_size > 1:
+        # Peers may still be in model collectives. Skip CUDA cleanup and let
+        # torchrun terminate them instead of entering another collective.
+        log.exception("Tensor-parallel worker failed")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+
+
+def tensor_parallel_identity(args):
+    if args.tp_size == 1:
+        return [], []
+    headers = list(TP_IDENTITY_HEADERS)
+    fields = [
+        args.hf_inference_mode,
+        args.tp_size,
+        args.prompt_length,
+        args.decode_length or 0,
+    ]
+    return headers, fields
+
+
 def summarize_graph_break(filename):
     """
     Sorts and de-dupes the graphs breaks on the reason string. Note that this
@@ -622,7 +715,7 @@ def print_summary_table(data, print_dataframe=False):
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
-            if col in ("dev", "name", "batch_size", "tag"):
+            if col in ("dev", "name", "batch_size", "tag", *TP_IDENTITY_HEADERS):
                 continue
             elif col in ("pct_ops", "pct_time"):
                 print(col.ljust(width), f"{data[col].mean():.3%}")
@@ -630,6 +723,10 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
+            elif col == "eager_latency":
+                print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
+            elif col in ("input_tokens_per_second", "output_tokens_per_second"):
+                print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
@@ -664,7 +761,12 @@ def timed(
     return_result=False,
     collect_outputs=False,
     batch_size=None,
+    setup_fn=None,
+    group=None,
 ):
+    # setup_fn prepares each independent request outside the measured interval.
+    # With a process group, ranks start each request together and the request
+    # takes as long as its slowest rank.
     use_xla = tensor_is_on_xla(example_inputs)
     synchronize()
 
@@ -696,7 +798,8 @@ def timed(
                 break
         return t
 
-    time_total = 0
+    sync_each_request = setup_fn is not None or group is not None
+    request_times = []
     # Dont collect outputs to correctly measure timing
     for i in range(times):
         # If batch_size is 1, it too often collides with other non batch size
@@ -712,6 +815,11 @@ def timed(
         # Put this call inside the loop to reset the seed for each iteration.
         # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
+        if setup_fn is not None:
+            setup_fn(model, example_inputs)
+            synchronize()
+        if group is not None:
+            torch.distributed.barrier(group=group)
         t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
@@ -726,15 +834,21 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
+        if sync_each_request:
+            synchronize()
         t_iter_end = time.perf_counter()
-        time_total += t_iter_end - t_iter_begin
+        request_times.append(t_iter_end - t_iter_begin)
 
-    t_0 = time.perf_counter()
-    if use_xla:
-        xm.wait_device_ops()
-    synchronize()
-    t_1 = time.perf_counter()
-    time_total += t_1 - t_0
+    if group is not None:
+        request_times = max_across_ranks(request_times, group)
+    time_total = sum(request_times)
+    if not sync_each_request:
+        t_0 = time.perf_counter()
+        if use_xla:
+            xm.wait_device_ops()
+        synchronize()
+        t_1 = time.perf_counter()
+        time_total += t_1 - t_0
     return (time_total, result) if return_result else time_total
 
 
@@ -936,7 +1050,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         name += ".json"
@@ -951,7 +1065,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1077,8 +1192,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
         if kwargs["hf_llm"]:
-            # If it's an llm, we want to optimize model.forward, and use
-            # the generate function
+            # Compile the forward, keeping generation and cache setup outside it.
             model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
@@ -1105,6 +1219,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 times=times,
                 collect_outputs=args.collect_outputs,
                 batch_size=kwargs.get("batch_size"),
+                setup_fn=kwargs.get("setup_fn"),
+                group=kwargs.get("tp_group"),
             )
 
         # call mark_step between the 2 calls to make the comparison fair.
@@ -1117,6 +1233,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             return_result=True,
             times=times,
             collect_outputs=args.collect_outputs,
+            setup_fn=kwargs.get("setup_fn"),
+            group=kwargs.get("tp_group"),
         )
 
     # Collect profiler trace in a separate run so that profiler overhead
@@ -1135,6 +1253,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
+                    group=kwargs.get("tp_group"),
                 )
             with maybe_mark_profile(p=p, mark="actual"):
                 timed(
@@ -1144,9 +1264,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
+                    group=kwargs.get("tp_group"),
                 )
 
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         if args.export_perfdoctor and trace_handler:
@@ -1158,9 +1280,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
-    if args.dump_raw_metrics:
+    # Timings are already reduced across a TP group, so one rank writes them.
+    if args.dump_raw_metrics and (args.tp_size == 1 or args.rank == 0):
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1169,8 +1293,18 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
+    tp_headers, tp_fields = tensor_parallel_identity(args)
+    first_headers += tp_headers
+    first_fields += tp_fields
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
+        headers.append("eager_latency")
+        row.append(median[0] * 1000)
+        for column, tokens in request_tokens.items():
+            headers.append(column)
+            row.append(times * tokens / median[1])
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -1204,6 +1338,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+        if "eager_peak_mem_per_rank" in kwargs:
+            headers += ["eager_peak_mem_per_rank", "dynamo_peak_mem_per_rank"]
+            for key in ("eager_peak_mem_per_rank", "dynamo_peak_mem_per_rank"):
+                row.append(";".join(f"{mem:.3f}" for mem in kwargs[key]))
 
     if "cache_lookup_latency" in kwargs:
         headers.append("cache_lookup_latency")
@@ -2019,6 +2157,44 @@ class BenchmarkRunner:
     def get_accuracy_check_runs(self, name):
         return 1
 
+    def validate_args(self, args):
+        if (
+            args.hf_inference_mode != "generate"
+            or args.prompt_length is not None
+            or args.decode_length is not None
+            or args.tp_size != 1
+        ):
+            raise ValueError(
+                "--hf-inference-mode=prefill/decode, --prompt-length, "
+                "--decode-length, and --tp-size require the huggingface suite"
+            )
+
+    def get_performance_workload(self):
+        # Return the timed iteration and its optional, untimed per-request setup.
+        return self.model_iter_fn, None
+
+    @property
+    def tp_group(self):
+        return torch.distributed.group.WORLD if self.args.tp_size > 1 else None
+
+    def agree_on_status(self, status):
+        """
+        Returns the first status other than "pass" in rank order, so that every
+        rank of a TP group takes the same path, even if only one rank failed.
+        """
+        if self.tp_group is None:
+            return status
+        statuses = gather_across_ranks(status, self.tp_group)
+        return next((s for s in statuses if s != "pass"), "pass")
+
+    def use_model_forward_for_compilation(self):
+        return False
+
+    def get_request_tokens(self, example_inputs):
+        # Return {throughput column: tokens per timed request} for token workloads,
+        # which also report eager_latency; None for everything else.
+        return None
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2218,8 +2394,9 @@ class BenchmarkRunner:
         """
         Shared CSV + signpost writer for accuracy checks.
         """
-        headers = ["dev", "name", "batch_size", "accuracy"]
-        fields = [current_device, current_name, current_batch_size, status]
+        tp_headers, tp_fields = tensor_parallel_identity(self.args)
+        headers = ["dev", "name", "batch_size", *tp_headers, "accuracy"]
+        fields = [current_device, current_name, current_batch_size, *tp_fields, status]
 
         if tag is not None:
             headers.insert(3, "tag")
@@ -2299,6 +2476,7 @@ class BenchmarkRunner:
                     fp64_outputs,
                 )
             except Exception:
+                exit_on_tensor_parallel_error(self.args)
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
@@ -2329,16 +2507,19 @@ class BenchmarkRunner:
                         model_copy, clone_inputs(example_inputs), self.model_iter_fn
                     )
             except Exception as e:
+                exit_on_tensor_parallel_error(self.args)
                 accuracy_status = (
                     "eager_1st_run_OOM"
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
                 log.exception("")
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
                 empty_gpu_cache(current_device)
+            accuracy_status = self.agree_on_status(accuracy_status)
+            if accuracy_status != "pass":
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2351,16 +2532,19 @@ class BenchmarkRunner:
                         model_copy, clone_inputs(example_inputs), self.model_iter_fn
                     )
             except Exception as e:
+                exit_on_tensor_parallel_error(self.args)
                 accuracy_status = (
                     "eager_2nd_run_OOM"
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
                 log.exception("")
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
                 empty_gpu_cache(current_device)
+            accuracy_status = self.agree_on_status(accuracy_status)
+            if accuracy_status != "pass":
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result, within tolerance.
             # TODO If we want the above to be true, then deterministic should be set.
@@ -2386,8 +2570,10 @@ class BenchmarkRunner:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
-            if not is_same:
-                accuracy_status = "eager_two_runs_differ"
+            accuracy_status = self.agree_on_status(
+                "pass" if is_same else "eager_two_runs_differ"
+            )
+            if accuracy_status != "pass":
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             correct_rerun_result = None
@@ -2425,11 +2611,18 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
-                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # while performance compiles the forward under generate().
+                        if self.use_model_forward_for_compilation():
+                            model_copy.forward = optimize_ctx(model_copy.forward)
+                            optimized_model_iter_fn = self.model_iter_fn
+                        else:
+                            optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
                 except Exception as e:
+                    exit_on_tensor_parallel_error(self.args)
                     log.exception("")
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
@@ -2439,11 +2632,13 @@ class BenchmarkRunner:
                         if isinstance(e, torch.cuda.OutOfMemoryError)
                         else "fail_to_run"
                     )
+                finally:
+                    del model_copy
+                accuracy_status = self.agree_on_status(accuracy_status)
+                if accuracy_status != "pass":
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
-                finally:
-                    del model_copy
 
                 if name in self.skip_accuracy_check_as_eager_non_deterministic:
                     return record_status(
@@ -2526,6 +2721,10 @@ class BenchmarkRunner:
                     # Sometimes torch.allclose may throw RuntimeError
                     run_passed = False
 
+                run_passed = (
+                    self.agree_on_status("pass" if run_passed else "fail_accuracy")
+                    == "pass"
+                )
                 if run_passed:
                     pass_count += 1
 
@@ -2802,6 +3001,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
+                exit_on_tensor_parallel_error(self.args)
                 log.exception("Backend %s failed in warmup()", mode)
                 write_csv_when_exception(
                     self.args, current_name, "warmup_failed", current_device
@@ -2947,18 +3147,21 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
+        model_iter_fn, setup_fn = self.get_performance_workload()
+        tp_group = self.tp_group
+        snapshot_name = artifact_safe_name(str(self.args.only))
+        if tp_group is not None:
+            snapshot_name += f"_rank_{self.args.rank}"
         measure_iters = 5
         stabilization_iters = 0
         if getattr(self, "hf_llm", False):
-            # If we're benchmarking an llm, we want to use the generate function
-            self.model_iter_fn = self.generate
             measure_iters = 1
             stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
                 return experiment(
-                    self.model_iter_fn, *self.maybe_cast(model, example_inputs)
+                    model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
         def warmup(
@@ -2973,13 +3176,26 @@ class BenchmarkRunner:
                     empty_gpu_cache(current_device)
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
-                t0 = time.perf_counter()
-                for _ in range(measure_iters):
-                    fn(model, example_inputs)
-                t1 = time.perf_counter()
-                latency = t1 - t0
+                if setup_fn is None:
+                    t0 = time.perf_counter()
+                    for _ in range(measure_iters):
+                        fn(model, example_inputs)
+                    latency = time.perf_counter() - t0
+                else:
+                    latency = timed(
+                        model,
+                        fn,
+                        example_inputs,
+                        times=measure_iters,
+                        setup_fn=setup_fn,
+                        group=tp_group,
+                    )
                 for _ in range(stabilization_iters):
+                    if setup_fn is not None:
+                        setup_fn(model, example_inputs)
                     fn(model, example_inputs)
+                if setup_fn is not None:
+                    synchronize()
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -2989,6 +3205,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
+                exit_on_tensor_parallel_error(self.args)
                 log.exception("Backend %s failed in warmup()", mode)
                 write_csv_when_exception(
                     self.args, current_name, "warmup_failed", current_device
@@ -3018,7 +3235,7 @@ class BenchmarkRunner:
                 experiment_kwargs["tag"] = tag
             results = []
             with maybe_snapshot_memory(
-                self.args.snapshot_memory, f"eager_{self.args.only}"
+                self.args.snapshot_memory, f"eager_{snapshot_name}"
             ):
                 with torch.compiler.set_stance("force_eager"):
                     eager_model = self.deepcopy_and_maybe_parallelize(model)
@@ -3027,7 +3244,7 @@ class BenchmarkRunner:
                     self.init_optimizer(name, current_device, eager_model.parameters())
                     try:
                         eager_latency, eager_peak_mem, _ = warmup(
-                            self.model_iter_fn,
+                            model_iter_fn,
                             eager_model,
                             example_inputs,
                             "eager",
@@ -3035,7 +3252,7 @@ class BenchmarkRunner:
                         )
                         if self.args.use_warm_peak_memory:
                             _, eager_peak_mem, _ = warmup(
-                                self.model_iter_fn,
+                                model_iter_fn,
                                 eager_model,
                                 example_inputs,
                                 "eager",
@@ -3063,15 +3280,14 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 if getattr(self, "hf_llm", False):
-                    # If it's an llm, we want to optimize model.forward, and use
-                    # the generate function
+                    # Keep generation and cache setup outside the compiled forward.
                     model.forward = optimize_ctx(model.forward)
-                    optimized_model_iter_fn = self.model_iter_fn
+                    optimized_model_iter_fn = model_iter_fn
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
 
             with maybe_snapshot_memory(
-                self.args.snapshot_memory, f"compiled_{self.args.only}"
+                self.args.snapshot_memory, f"compiled_{snapshot_name}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn,
@@ -3109,6 +3325,12 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
+            if tp_group is not None:
+                eager_peak_mems = gather_across_ranks(eager_peak_mem, tp_group)
+                dynamo_peak_mems = gather_across_ranks(dynamo_peak_mem, tp_group)
+                eager_peak_mem = max(eager_peak_mems)
+                dynamo_peak_mem = max(dynamo_peak_mems)
+
             compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
@@ -3129,6 +3351,9 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if tp_group is not None:
+                    experiment_kwargs["eager_peak_mem_per_rank"] = eager_peak_mems
+                    experiment_kwargs["dynamo_peak_mem_per_rank"] = dynamo_peak_mems
                 if self.args.profile_dynamo_cache_lookup:
                     experiment_kwargs["cache_lookup_latency"] = (
                         dynamo_cache_lookup_latency
@@ -3152,11 +3377,16 @@ class BenchmarkRunner:
                 )
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            if setup_fn is not None:
+                experiment_kwargs["setup_fn"] = setup_fn
+            request_tokens = self.get_request_tokens(example_inputs)
+            if request_tokens is not None:
+                experiment_kwargs["request_tokens"] = request_tokens
+            if tp_group is not None:
+                experiment_kwargs["tp_group"] = tp_group
 
             results.append(
-                experiment(
-                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
-                )
+                experiment(model_iter_fn, model, example_inputs, **experiment_kwargs)
             )
             return " ".join(map(str, results))
 
@@ -3407,6 +3637,29 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--hf-inference-mode",
+        choices=("generate", "prefill", "decode"),
+        default="generate",
+        help="Inference workload for registered Hugging Face generation models.",
+    )
+    parser.add_argument(
+        "--prompt-length",
+        type=int,
+        help="Uniform prompt length for Hugging Face prefill and decode benchmarks (default: 1000).",
+    )
+    parser.add_argument(
+        "--decode-length",
+        type=int,
+        help="Timed decode steps per request for Hugging Face decode benchmarks (default: 128).",
+    )
+    parser.add_argument(
+        "--tp-size",
+        type=int,
+        default=1,
+        help="Hugging Face tensor-parallel degree for prefill and decode. Launch "
+        "with torchrun, one worker per GPU on a single node.",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -3980,6 +4233,52 @@ def process_entry(rank, runner, original_dir, args):
         return result
 
 
+def is_torchrun_worker():
+    return all(key in os.environ for key in ("RANK", "LOCAL_RANK", "WORLD_SIZE"))
+
+
+def tensor_parallel_entry(runner, original_dir, args):
+    """Runs one torchrun worker of a single-node tensor-parallel group."""
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    if world_size != args.tp_size:
+        raise ValueError(
+            f"--tp-size={args.tp_size} must equal WORLD_SIZE={world_size}; "
+            "only one tensor-parallel group is supported"
+        )
+    if int(os.environ.get("LOCAL_WORLD_SIZE", world_size)) != world_size:
+        raise ValueError("--tp-size supports a single node only")
+    if not args.only:
+        raise ValueError("torchrun workers require --only")
+    devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
+    if devices == ["cuda"]:
+        if local_rank >= torch.cuda.device_count():
+            raise ValueError(
+                f"LOCAL_RANK={local_rank} needs more than the "
+                f"{torch.cuda.device_count()} visible CUDA devices"
+            )
+        torch.cuda.set_device(local_rank)
+        backend, device_id = "nccl", torch.device("cuda", local_rank)
+    elif devices == ["cpu"] and torch.accelerator.current_accelerator() is None:
+        # Hugging Face places TP shards on the accelerator whenever there is one.
+        backend, device_id = "gloo", None
+    else:
+        raise ValueError(f"--tp-size does not support --devices={devices} here")
+
+    args.rank = rank
+    args.world_size = world_size
+    # Rendezvous comes from torchrun's MASTER_ADDR and MASTER_PORT.
+    try:
+        torch.distributed.init_process_group(backend, device_id=device_id)
+        result = run(runner, args, original_dir)
+    except BaseException:
+        exit_on_tensor_parallel_error(args)
+        raise
+    torch.distributed.destroy_process_group()
+    return result
+
+
 def maybe_fresh_cache(args):
     cache_dir_assigned = "TORCHINDUCTOR_CACHE_DIR" in os.environ
     if not cache_dir_assigned and (
@@ -4018,7 +4317,11 @@ def main(runner, original_dir=None, args=None):
             torch._dynamo.config.caching_precompile = True
 
         args.init_distributed = args.only and args.multiprocess
-        if args.init_distributed:
+        if args.tp_size > 1 and is_torchrun_worker():
+            tensor_parallel_entry(runner, original_dir, args)
+        elif args.tp_size > 1:
+            raise ValueError("--tp-size requires launching with torchrun")
+        elif args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
             # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
             # https://github.com/pytorch/pytorch/issues/107300
@@ -4299,6 +4602,7 @@ def run(runner, args, original_dir=None):
                 f"--quantization conflicts with --backend={args.backend}"
             )
         args.backend = "torchao"
+    runner.validate_args(args)
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -4400,7 +4704,11 @@ def run(runner, args, original_dir=None):
             inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
-        if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
+        if (
+            "CUDA_VISIBLE_DEVICES" not in os.environ
+            and not args.multiprocess
+            and args.tp_size == 1
+        ):
             args.device_index = "0"
 
         # Stricter check to disable fallbacks
@@ -4510,17 +4818,17 @@ def run(runner, args, original_dir=None):
         current_name, \
         current_device, \
         current_batch_size, \
-        current_backend, \
-        current_mode, \
-        current_dtype, \
-        current_quantization, \
-        current_settings, \
         output_filename, \
         disable_output, \
         optimize_ctx
     optimize_ctx = contextlib.nullcontext()
+    if args.tp_size > 1:
+        set_current_metadata(args)
 
     if args.disable_output:
+        disable_output = True
+    if args.tp_size > 1 and getattr(args, "rank", 0) != 0:
+        # Rank 0 writes for the TP group; its rows already reduce over all ranks.
         disable_output = True
 
     if args.overhead:
@@ -4701,6 +5009,9 @@ def run(runner, args, original_dir=None):
 
     if args.output:
         output_filename = args.output
+    elif args.hf_inference_mode != "generate" and output_filename:
+        stem, ext = os.path.splitext(output_filename)
+        output_filename = f"{stem}{hf_inference_suffix(args)}{ext}"
 
     if output_filename:
         if args.output_directory:
@@ -4743,6 +5054,8 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
+            if args.hf_inference_mode != "generate":
+                args.profiler_trace_name += hf_inference_suffix(args)
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
@@ -4787,6 +5100,7 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 name = model_name
+                load_status = None
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
@@ -4842,24 +5156,26 @@ def run(runner, args, original_dir=None):
                                     extra_args=extra_args,
                                 )
                 except Exception as e:
+                    exit_on_tensor_parallel_error(args)
                     import traceback
 
                     mode = "train" if args.training else "eval"
                     print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    status = (
+                    load_status = (
                         "model_fail_to_load"
                         if isinstance(e, NotImplementedError)
                         else "eager_fail_to_run"
                     )
-                    write_csv_when_exception(args, name, status, device)
+                if load_status is not None:
+                    write_csv_when_exception(args, name, load_status, device)
                     # NB: current_name/current_device not set, so pass
                     # explicitly
                     output_signpost(
                         {"name": name, "dev": device},
                         args,
                         runner.suite_name,
-                        error=status,
+                        error=load_status,
                     )
                     continue  # bad benchmark implementation
 
@@ -4873,23 +5189,7 @@ def run(runner, args, original_dir=None):
             current_name = name
             current_device = device
             current_batch_size = batch_size
-            current_backend = args.backend
-            current_mode = (
-                "training" if args.training else "inference" if args.inference else ""
-            )
-            if args.float16:
-                current_dtype = "float16"
-            elif args.bfloat16:
-                current_dtype = "bfloat16"
-            elif args.float32:
-                current_dtype = "float32"
-            elif args.amp:
-                current_dtype = "amp"
-            else:
-                current_dtype = ""
-            current_quantization = args.quantization
-            # Keep the remaining of the settings
-            current_settings = vars(args)
+            set_current_metadata(args)
             set_model_name(name)
 
             # Look for stuff that looks like batch size, and mark it dynamic.
