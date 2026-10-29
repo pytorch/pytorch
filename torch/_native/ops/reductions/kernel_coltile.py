@@ -5,7 +5,9 @@
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from cutlass import Int32
+import cutlass
+import cutlass.cute as cute
+from cutlass import const_expr, Int32, Int64
 
 import torch
 
@@ -41,6 +43,9 @@ class ColConfig(NamedTuple):
     threads_per_block: int
     npar: int
     vec: int
+    partial_layout: str
+    combine_columns: int = 0
+    unroll: int = 4
 
 
 def select_col_config(
@@ -70,8 +75,85 @@ def select_col_config(
         threads if threads_per_block is None else threads_per_block,
         min(_split_p(rows), max_npar) if npar is None else npar,
         min(tile.vec_size(columns, itemsize), _VEC_MAX) if vec is None else vec,
+        "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
     return cfg
+
+
+class PartialColumns:
+    """Combine partition-major states while coalescing adjacent column loads."""
+
+    def __init__(self, trait, columns, partitions, rows, tile_columns, nouts):
+        if tile_columns not in (8, 16, 32):
+            raise ValueError(f"combine columns must be 8, 16 or 32, got {tile_columns}")
+        self.trait = trait
+        self.columns = columns
+        self.partitions = partitions
+        self.rows = rows
+        self.tile_columns = tile_columns
+        self.threads = 128
+        self.groups = self.threads // tile_columns
+        self.nouts = nouts
+
+    @property
+    def cache_sig(self):
+        return (
+            self.columns,
+            self.partitions,
+            self.rows,
+            self.tile_columns,
+            self.nouts,
+        )
+
+    @cute.jit
+    def __call__(self, ins: list, outs: list, stream):
+        self.kernel(ins, outs).launch(
+            grid=[-(-self.columns // self.tile_columns), 1, 1],
+            block=[self.threads, 1, 1],
+            stream=stream,
+        )
+
+    @cute.kernel
+    def kernel(self, ins: list, outs: list):
+        tx, _, _ = cute.arch.thread_idx()
+        bx, _, _ = cute.arch.block_idx()
+        lane = Int32(tx) % Int32(self.tile_columns)
+        group = Int32(tx) // Int32(self.tile_columns)
+        col = Int32(bx) * Int32(self.tile_columns) + lane
+        safe_col = col if col < Int32(self.columns) else Int32(0)
+        trait = self.trait
+        combine, fdtypes = trait.combine, trait.fdtypes
+        nf = const_expr(trait.nfields)
+        identity = trait.init()
+        acc = identity
+        for p in cutlass.range(group, self.partitions, self.groups):
+            offset = Int64(p) * Int64(self.columns) + Int64(safe_col)
+            acc = combine(acc, tuple(fdtypes[f](ins[f][offset]) for f in range(nf)))
+        smem = cutlass.utils.SmemAllocator()
+        partials = [
+            smem.allocate_tensor(
+                fdtypes[f], cute.make_layout(self.threads), byte_alignment=8
+            )
+            for f in range(nf)
+        ]
+        for f in cutlass.range_constexpr(nf):
+            partials[f][tx] = acc[f]
+        cute.arch.barrier()
+        if group == Int32(0):
+            acc = identity
+            for g in cutlass.range_constexpr(self.groups):
+                offset = Int32(g * self.tile_columns) + lane
+                acc = combine(
+                    acc, tuple(fdtypes[f](partials[f][offset]) for f in range(nf))
+                )
+        # Keep the Python trait out of runtime branch state.
+        result = trait.project(acc, trait.acc(self.rows))
+        if (group == Int32(0)) & (col < Int32(self.columns)):
+            if const_expr(self.nouts == 1):
+                outs[0][col] = outs[0].element_type(result)
+            else:
+                for f in cutlass.range_constexpr(self.nouts):
+                    outs[f][col] = outs[f].element_type(result[f])
 
 
 def _split_p(R: int) -> int:
@@ -198,7 +280,7 @@ def _reduce_col_tile(
     q, nrows = Int32(-(-R // npar)), Int32(R)
 
     single = npar == 1
-    pc = total >= _C_THREAD_STAGE2
+    pc = cfg.partial_layout == "partition"
     op = tile.TileReduce(
         trait,
         torch2cute[kernel_x.dtype],
@@ -210,6 +292,7 @@ def _reduce_col_tile(
         vec=vec,
         batched_col=x.dim() == 3,
         pc=pc,
+        unroll=cfg.unroll,
     )
     parts = (
         []
@@ -279,6 +362,37 @@ def _reduce_col_tile(
         _stream(),
     )
     if single:
+        return tuple(outs)
+
+    if cfg.combine_columns:
+        op2 = PartialColumns(trait, total, npar, R, cfg.combine_columns, nouts)
+        pdt = tuple(pp.dtype for pp in parts)
+        key2 = (
+            (
+                "coltile2t",
+                trait_key,
+                tuple(out_dtypes[:nouts]),
+                pdt,
+                str(x.device),
+            )
+            + op2.cache_sig
+            + (("col_config", cfg),)
+        )
+        build2 = lambda: _compile(  # noqa: E731
+            op2,
+            [
+                _L.fake_compact(torch2cute[pp.dtype], (cute.sym_int64(),))
+                for pp in parts
+            ],
+            [
+                _L.fake_compact(torch2cute[out.dtype], (_L.sym(),))
+                for out in kernel_outs
+            ],
+            _stream(),
+        )
+        cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
+            [_L.read_only(pp) for pp in parts], kernel_outs, _stream()
+        )
         return tuple(outs)
 
     # Fold npar partials and project with true R; use threads per column only when C fills the GPU.
