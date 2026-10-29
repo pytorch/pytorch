@@ -2,13 +2,16 @@
 import contextlib
 import copy
 import itertools
+import threading
 import unittest
+from unittest import mock
 
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.fx_passes.quantization import (
+    _get_woq_int8pack_fusion_devices,
     register_woq_int8pack_fusion_device,
     unregister_woq_int8pack_fusion_device,
 )
@@ -1992,6 +1995,86 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
         register_woq_int8pack_fusion_device("cpu")
         self._test_common(
             M().eval(), (x, w, s), lambda: matcher_check(1), atol=0.001, rtol=0.07
+        )
+
+    @skipIfNoDynamoSupport
+    def test_register_waits_for_inflight_compile(self):
+        """Concurrent registration must not mutate the allowlist mid-compile.
+
+        The FX-graph cache key is hashed before the lowering patterns read
+        the allowlist, so an unsynchronized registration landing in between
+        would save the fused artifact under the pre-mutation key, and a
+        later compile with the key's registry state would hit that entry
+        and resurrect the fusion. register/unregister take
+        ``torch._dynamo.convert_frame.compile_lock``, which compilation
+        already holds across hashing and matching, so the registration
+        released below at key-hashing time waits for the compile to finish.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, weight, scales):
+                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        x = torch.randn(1, 1, 256, dtype=torch.bfloat16)
+        w = torch.randint(-128, 127, (12, 256), dtype=torch.int8)
+        s = torch.randn(12, dtype=torch.bfloat16)
+
+        def matcher_check(expected_count):
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], expected_count)
+
+        # fx_graph_cache must be on: the hook point is the cache-key
+        # hashing, and the second compile below must hit the entry saved
+        # under the phase-1 key (skipping the pattern pass).
+        self.ctx_stack.enter_context(config.patch({"fx_graph_cache": True}))
+
+        unregister_woq_int8pack_fusion_device("cpu")
+        self.addCleanup(register_woq_int8pack_fusion_device, "cpu")
+
+        key_hashed = threading.Event()
+        register_done = threading.Event()
+        hook_checked = [False]
+
+        def snapshot_hook():
+            if not hook_checked[0]:
+                hook_checked[0] = True
+                key_hashed.set()
+                # The registration thread was released the moment the key
+                # was hashed; it must not complete while this compile
+                # still holds compile_lock.
+                self.assertFalse(
+                    register_done.wait(1.0),
+                    "register_woq_int8pack_fusion_device mutated the "
+                    "allowlist while a compile was in flight",
+                )
+            return _get_woq_int8pack_fusion_devices()
+
+        def registerer():
+            key_hashed.wait(60.0)
+            register_woq_int8pack_fusion_device("cpu")
+            register_done.set()
+
+        thread = threading.Thread(target=registerer, name="woq-registerer")
+        thread.start()
+        self.addCleanup(thread.join, 60.0)
+
+        # Phase 1: cpu stays off the allowlist for the whole compile.
+        with mock.patch(
+            "torch._inductor.fx_passes.quantization._get_woq_int8pack_fusion_devices",
+            side_effect=snapshot_hook,
+        ):
+            self._test_common(
+                M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07
+            )
+        self.assertTrue(key_hashed.is_set(), "the cache key was never hashed")
+        # The registration could only complete after the compile finished.
+        self.assertTrue(register_done.wait(10.0))
+        unregister_woq_int8pack_fusion_device("cpu")
+
+        # Phase 2: back to the phase-1 registry state, so the compile hits
+        # the entry saved under that key: the pattern pass is skipped and
+        # the returned artifact is the non-fused one the key promised.
+        self._test_common(
+            M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07
         )
 
 

@@ -1175,15 +1175,34 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
     the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist is
     part of the FX-graph cache key, so changing it produces new cache
     entries instead of reusing stale ones.
+
+    The allowlist is only mutated while holding
+    ``torch._dynamo.convert_frame.compile_lock``: compilation already
+    holds that lock from cache-key hashing through pattern matching
+    (dynamo acquires it around backend invocation, and
+    ``compile_fx_backward`` acquires it explicitly), so a registration
+    racing an in-flight compile waits for the compile to finish instead
+    of changing the allowlist between the key and the matcher.
     """
     _validate_woq_device_type(device_type)
-    _woq_int8pack_fusion_devices.add(device_type)
+    # Lazy import, as in compile_fx.py: torch._dynamo is heavyweight and
+    # this module must not pull it in at import time.
+    from torch._dynamo.convert_frame import compile_lock
+
+    with compile_lock:
+        _woq_int8pack_fusion_devices.add(device_type)
 
 
 def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
-    """Disable the WOQ int8pack-mm fusion on ``device_type`` (e.g. teardown)."""
+    """Disable the WOQ int8pack-mm fusion on ``device_type`` (e.g. teardown).
+
+    Serialized against in-flight compilations like the register function.
+    """
     _validate_woq_device_type(device_type)
-    _woq_int8pack_fusion_devices.discard(device_type)
+    from torch._dynamo.convert_frame import compile_lock
+
+    with compile_lock:
+        _woq_int8pack_fusion_devices.discard(device_type)
 
 
 def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
