@@ -1592,6 +1592,8 @@ class _CapturePackage(CompilePackage):
     registering it, whether or not that compile is later bypassed.
     """
 
+    records_graph_break_ops = True
+
     def __init__(self, fn: Callable[..., Any]) -> None:
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
