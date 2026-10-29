@@ -1,11 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import io
 import json
 import logging
 import math
 import operator
-import io
 import os
 import pickle
 import random
@@ -243,22 +243,29 @@ class RendezvousEnvTest(TestCase):
     @requires_gloo()
     @retry_on_connect_failures
     def test_logging_init(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
-        os.environ["RANK"] = "0"
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
 
-        previous_handlers = logging.root.handlers
+            previous_handlers = logging.root.handlers
 
-        c10d.init_process_group(backend="gloo", init_method="env://")
+            c10d.init_process_group(backend="gloo", init_method="env://")
 
-        current_handlers = logging.root.handlers
-        self.assertEqual(len(previous_handlers), len(current_handlers))
-        for current, previous in zip(current_handlers, previous_handlers):
-            self.assertEqual(current, previous)
+            current_handlers = logging.root.handlers
+            self.assertEqual(len(previous_handlers), len(current_handlers))
+            for current, previous in zip(current_handlers, previous_handlers):
+                self.assertEqual(current, previous)
 
-        c10d.destroy_process_group()
-
+            c10d.destroy_process_group()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
 
     @requires_gloo()
     @retry_on_connect_failures
@@ -304,6 +311,7 @@ class RendezvousEnvTest(TestCase):
                 c10d.destroy_process_group()
             for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
                 os.environ.pop(var, None)
+
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -928,7 +936,6 @@ class ProcessGroupGlooTest(_ProcessGroupGlooBase):
         for fut in [pg.allreduce(torch.ones(i + 1)).get_future() for i in range(4)]:
             fut.wait()
 
-
     @requires_gloo()
     def test_split_world_pg_created_after_another_gloo_pg(self):
         # Regression test: ProcessGroupGloo::groupRanks() used to derive the
@@ -965,7 +972,6 @@ class ProcessGroupGlooTest(_ProcessGroupGlooBase):
         split.allreduce([tensor]).wait()
         expected = float(sum(r + 1 for r in ranks))
         self.assertEqual(tensor, torch.full_like(tensor, expected))
-
 
     @requires_gloo()
     def test_empty_tensors(self):
@@ -2169,7 +2175,9 @@ class _DistributedDataParallelTestBase(MultiProcessTestCase):
     _prepare_multi_device_module = _CommonDDP._prepare_multi_device_module
     _simple_hook = _CommonDDP._simple_hook
     _run_and_verify_hook = _CommonDDP._run_and_verify_hook
-    _gpu_model_with_builtin_ddp_comm_hook = _CommonDDP._gpu_model_with_builtin_ddp_comm_hook
+    _gpu_model_with_builtin_ddp_comm_hook = (
+        _CommonDDP._gpu_model_with_builtin_ddp_comm_hook
+    )
     _train_model = _CommonDDP._train_model
     _prepare_dummy_data = _CommonDDP._prepare_dummy_data
     _test_ddp_checkpointing = _CommonDDP._test_ddp_checkpointing
@@ -2180,7 +2188,9 @@ class _DistributedDataParallelTestBase(MultiProcessTestCase):
     _register_finalize_backward_hook = _CommonDDP._register_finalize_backward_hook
     _register_ones_comm_hook = _CommonDDP._register_ones_comm_hook
     _assert_gradients_equal = _CommonDDP._assert_gradients_equal
-    _assert_gradients_equal_across_ranks = _CommonDDP._assert_gradients_equal_across_ranks
+    _assert_gradients_equal_across_ranks = (
+        _CommonDDP._assert_gradients_equal_across_ranks
+    )
 
     @property
     def world_size(self):
@@ -2900,6 +2910,16 @@ class DistributedDataParallelCudaTest(
         ddp_state_dict = torch.load(
             io.BytesIO(object_list[0]), map_location=map_location
         )
+
+        for model in [ddp_withload, model_withload]:
+            for p in model.parameters():
+                with torch.no_grad():
+                    p.zero_()
+        ddp_withload.load_state_dict(ddp_state_dict)
+        # the non-DDP model needs to first remove the prefix of "module." from the DDP state dict
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            ddp_state_dict, "module."
+        )
         model_withload.load_state_dict(ddp_state_dict)
 
         train_loop(ddp_withload, optimizer_withload, 3)
@@ -3371,7 +3391,6 @@ class ReducerTest(TestCase):
         for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
             self.assertEqual(p_ref.grad, p_bat.grad)
 
-
     @requires_gloo()
     def test_batched_grad_copy_batches_copy_out(self):
         """batched_grad_copy also batches the bucket-to-grad copy-out."""
@@ -3404,6 +3423,7 @@ class ReducerTest(TestCase):
             "torch.distributed.ddp.reducer::copy_bucket_to_grad_batched",
             bat_events,
         )
+
 
 @skip_if_win32()
 class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
@@ -3649,7 +3669,6 @@ class CommTest(_CommTestBase):
     def test_bool_tensors(self):
         self._test_bool_tensors(backend="gloo")
 
-
     @requires_gloo()
     def test_split_group_does_not_alias_parent_options(self):
         # Regression test: ProcessGroup::splitGroup used to hand the parent
@@ -3717,6 +3736,7 @@ class CommTest(_CommTestBase):
         c10d.all_reduce(value, group=child)
         self.assertEqual(value, torch.tensor(float(sum(rank + 1 for rank in ranks))))
         c10d.destroy_process_group()
+
 
 class CommCudaTest(_CommTestBase):
     hw_classification = HardwareClassification.CUDA
