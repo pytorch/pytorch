@@ -7619,7 +7619,7 @@ if phase == "capture":
     tracer = pc.DynamoTracer(require_no_risky_drops=False)
     with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
         cap(x, w)
-    print("capture benchmarked:", benchmarked)
+    assert "sub-kernel" not in benchmarked, benchmarked
 else:
     FileCacheManager.put = recording_put
     with pc.no_compilation():
