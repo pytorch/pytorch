@@ -91,7 +91,8 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(std::string_view module_name, std::string_view class_name);
+  // Returns the memoization id assigned to this global.
+  size_t pushGlobal(std::string_view module_name, std::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
@@ -173,6 +174,9 @@ class TORCH_API Pickler {
   c10::FastMap<const void*, uint32_t> memoized_storage_map_;
 
   c10::FastMap<std::string, uint32_t> memoized_globals_map_;
+  // Memoization id of the "torch.jit._pickle"/"build_tensor_from_id" global,
+  // or -1 if it has not been pushed yet.
+  int64_t memoized_tensor_ref_global_id_ = -1;
   c10::FastMap<std::string, uint32_t> memoized_strings_map_;
   c10::FastMap<std::string, uint32_t> memoized_devices_map_;
   // when true, List and Dict objects will be wrapped in a
