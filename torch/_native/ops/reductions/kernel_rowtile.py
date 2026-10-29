@@ -119,9 +119,8 @@ class _ItreeArch(NamedTuple):
     # Most cp.async per lane and row; 0 disables combine staging.
     combine_async: int
     combine_max: int  # maximum partials staged per row
-    combine_unroll: int = (
-        0  # staged fold unroll factor; 0 retains full static unrolling
-    )
+    # Staged fold unroll factor. 0 unrolls a whole tile, which compiles for minutes.
+    combine_unroll: int = 128
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
