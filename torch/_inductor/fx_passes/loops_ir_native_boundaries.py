@@ -276,7 +276,7 @@ def _bn_backward(
     ctx: Any, g0: Tensor, g1: Tensor, g2: Tensor, g3: Tensor, g4: Tensor, g5: Tensor
 ) -> tuple[Any, ...]:
     x, w, sm, sv, reserve = ctx.saved_tensors
-    gi, gw, gb = torch.ops.loops_ir_native_bn.bn_cudnn_bwd(
+    gi, gw, gb = torch.ops.loops_ir_native_bn.bn_cudnn_bwd.default(
         x,
         g0.contiguous(),
         w,
@@ -399,6 +399,7 @@ _DROPOUT_TARGETS: tuple[Any, ...] = (
     torch.nn.functional.dropout,
     torch.ops.aten.dropout.default,
     torch.ops.aten.dropout,
+    torch.ops.aten.native_dropout,
     torch.ops.aten.native_dropout.default,
 )
 
@@ -584,7 +585,7 @@ class BatchNormNativeBoundary:
         # invert when the anchor node is erased).
         with gm.graph.inserting_before(node):
             call = gm.graph.call_function(
-                torch.ops.loops_ir_native_bn.bn_cudnn_fwd,
+                torch.ops.loops_ir_native_bn.bn_cudnn_fwd.default,
                 (x, w, b, rm, rv, True, momentum, eps, True, int(impl)),
             )
             call.meta["loops_ir_boundary"] = BoundarySpec(
@@ -642,35 +643,25 @@ class DropoutNativeBoundary:
         # rewrite (the boundary always consumes the global CUDA RNG).
         if kwargs.get("generator") is not None:
             return None
-        if node.target == torch.nn.functional.dropout:
-            if not args:
-                return None
-            if kwargs.get("inplace", args[3] if len(args) > 3 else False):
-                return None  # input mutation: never silently rewritten
-            p = kwargs.get("p", args[1] if len(args) > 1 else 0.5)
-            t = kwargs.get("training", args[2] if len(args) > 2 else True)
-            if p is None or not isinstance(t, bool):
-                return None
-            return args[0], float(p), t
-        if node.target in (torch.ops.aten.dropout.default, torch.ops.aten.dropout):
-            if not args:
-                return None
-            p = kwargs.get("p", args[1] if len(args) > 1 else 0.5)
-            t = kwargs.get(
-                "train", kwargs.get("training", args[2] if len(args) > 2 else True)
-            )
-            if p is None or not isinstance(t, bool):
-                return None
-            return args[0], float(p), t
         if not args:
             return None
-        p = kwargs.get("p", args[1] if len(args) > 1 else 0.5)
-        t = kwargs.get(
-            "train", kwargs.get("training", args[2] if len(args) > 2 else True)
-        )
-        if p is None or (t is not None and not isinstance(t, bool)):
+        if node.target == torch.nn.functional.dropout:
+            if kwargs.get("inplace", args[3] if len(args) > 3 else False):
+                return None  # input mutation: never silently rewritten
+            training = kwargs.get("training", args[2] if len(args) > 2 else True)
+        else:
+            training = kwargs.get(
+                "train", kwargs.get("training", args[2] if len(args) > 2 else True)
+            )
+            if training is None and node.target in (
+                torch.ops.aten.native_dropout,
+                torch.ops.aten.native_dropout.default,
+            ):
+                training = True
+        probability = kwargs.get("p", args[1] if len(args) > 1 else 0.5)
+        if not isinstance(probability, (int, float)) or not isinstance(training, bool):
             return None
-        return args[0], float(p), True if t is None else t
+        return args[0], float(probability), training
 
     def rewrite(self, gm: torch.fx.GraphModule, node: Any) -> bool:
         parsed = self._parse(node)
@@ -690,7 +681,7 @@ class DropoutNativeBoundary:
         # Each original site consumes the CUDA RNG exactly once.
         with gm.graph.inserting_before(node):
             call = gm.graph.call_function(
-                torch.ops.loops_ir_native_dropout.dropout_fwd,
+                torch.ops.loops_ir_native_dropout.dropout_fwd.default,
                 (x, float(p), bool(training)),
             )
             call.meta["loops_ir_boundary"] = BoundarySpec(
@@ -699,7 +690,10 @@ class DropoutNativeBoundary:
                 version=self.version,
                 effect=BoundaryEffect.RNG_CONSUMES_ORDERED,
             )
-            if node.target == torch.ops.aten.native_dropout.default:
+            if node.target in (
+                torch.ops.aten.native_dropout,
+                torch.ops.aten.native_dropout.default,
+            ):
                 getitem_users = [
                     u for u in list(node.users) if u.target == operator.getitem
                 ]
