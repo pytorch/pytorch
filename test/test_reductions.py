@@ -3465,6 +3465,23 @@ class TestReductionsDevice(TestCase):
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
 
+    @dtypes(torch.float, torch.double)
+    @expectedFailureXPU  # XPU histc (out-of-tree) still uses the bare +/-1 widening
+    @skipIfMPS
+    def test_histc_large_constant_input(self, device, dtype):
+        # float32 integer precision ends at 2**24, where the equal-bounds
+        # +/-1 widening is a no-op (see bins_edges_correction in Histogram.cpp).
+        if dtype == torch.float32:
+            expected_bin = {2.0**23: 2, 2.0**24: 1, 2.0**25: 1, -(2.0**25): 2}
+        else:
+            expected_bin = dict.fromkeys((2.0**23, 2.0**24, 2.0**25, -(2.0**25)), 2)
+        for value, bin_idx in expected_bin.items():
+            x = torch.full((5,), value, dtype=dtype, device=device)
+            actual = torch.histc(x, bins=4, min=0, max=0)
+            expected = torch.zeros(4, dtype=dtype, device=device)
+            expected[bin_idx] = 5
+            self.assertEqual(expected, actual)
+
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
