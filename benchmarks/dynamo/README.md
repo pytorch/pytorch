@@ -133,31 +133,17 @@ step across batch elements. Default output and profiler trace names get a
 #### Tensor-parallel prefill and decode
 
 `--tp-size=N` runs prefill or decode with one model and request sharded across
-`N` GPUs of one node by Hugging Face tensor parallelism (`tp_plan="auto"`). Both
-the eager baseline and the compiled forward run tensor-parallel, so `speedup`
-compares eager TP with compiled TP at the same topology. Compare against a
-single-GPU run separately to measure TP scaling.
+`N` GPUs of one node by Hugging Face tensor parallelism. It uses the model's
+`tp_plan` without tied modules such as `lm_head`, which stay replicated with the
+input embedding they share weights with. Both the eager baseline and the
+compiled forward run tensor-parallel, so `speedup` compares eager TP with
+compiled TP at the same topology. Compare against a single-GPU run separately to
+measure TP scaling.
 Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
 `Qwen/Qwen3.5-0.8B`.
 
-```
-./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
-  --backend=inductor --nopython --disable-cudagraphs --hf-inference-mode=decode \
-  --tp-size=2 --prompt-length=1000 --decode-length=128 --batch-size=1 \
-  --only=Qwen/Qwen3-0.6B
-```
-
-Without torchrun, the script launches one `torchrun --standalone
---nproc-per-node=N` worker group for each selected model (`--only`, or every
-supported model that passes `--filter`). A failed group gets a failure row if
-it did not already write a result; performance failures have zero metrics.
-The driver continues through the remaining models, then exits unsuccessfully
-if any group crashed, timed out, or produced missing or invalid results.
-Completed accuracy results are evaluated by `check_accuracy.py` against the
-expected CSV, so known accuracy failures can be recorded in the baseline.
-Performance results require positive speedup and latency values.
-It can also run as a torchrun worker directly, which
-requires `--only` and `WORLD_SIZE == N` on one node:
+Launch it with torchrun, one worker per GPU. `--only` is required and
+`WORLD_SIZE` must equal `N` on one node:
 
 ```
 torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
@@ -192,25 +178,14 @@ immediately so torchrun can stop peers blocked in model collectives. These
 execution failures remain fatal even when an accuracy failure is expected.
 The process-group timeout covers hangs that do not raise an exception.
 
-TP requires `--disable-cudagraphs` until CUDA graphs are validated with it.
+TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
+graphs are validated with it.
 Multi-node runs, several TP groups, and other parallelism styles are
 unsupported. Inductor TP requires CUDA/NCCL. On machines without an
 accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
 `--backend=aot_eager`. CPU Inductor TP is rejected because concurrent Gloo
 all-gathers can corrupt memory; this was reproduced without a model or
 compilation and is not specific to Qwen3.5.
-
-The periodic `inductor_huggingface_tp` CI job checks accuracy and measures
-performance for both phases with `--tp-size=2` and full-graph compilation on a
-multi-GPU A10G runner. Accuracy checks require exactly one result matching the
-baseline for each supported model. Update both phase baselines with
-`python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`.
-Its performance CSV names end in `_tp2_<phase>`.
-Use the numeric periodic run ID with `perf_cli.py summary` or `repro`; branch
-discovery and `launch` still select the nightly workflows. Automatic baseline
-selection requires a successful TP job on the same runner hardware. Comparisons
-pair the same hardware, phase, TP degree, model, batch size, prompt length, and
-decode length. Reproduction commands preserve those workload dimensions.
 
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```

@@ -171,8 +171,6 @@ def get_artifacts_urls(results, suites, is_rocm=False):
 
 
 def normalize_suite_filename(suite_name):
-    if suite_name == "inductor_huggingface_tp":
-        return "huggingface"
     strs = suite_name.split("_")
     subsuite = strs[-1]
     if "timm" in subsuite:
@@ -188,14 +186,12 @@ def download_single_artifact(suite, shard, url_candidates):
     (suite, phase) -> DataFrame, or None if download failed.
     """
     subsuite = normalize_suite_filename(suite)
-    is_tp = suite == "inductor_huggingface_tp"
-    phases = ("prefill", "decode") if is_tp else ("training", "inference")
     for url in url_candidates:
         try:
             resp = urlopen(url)
             artifact = ZipFile(BytesIO(resp.read()))
             result = {}
-            for phase in phases:
+            for phase in ("training", "inference"):
                 # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
                 possible_names = [
                     f"test/test-reports/{phase}_{subsuite}.csv",
@@ -213,7 +209,7 @@ def download_single_artifact(suite, shard, url_candidates):
                         break
                     except KeyError:
                         continue
-                if not found and phase != "training":
+                if not found and phase == "inference":
                     # No warning for training, since it's expected to be missing for some tests
                     print(
                         f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
@@ -320,7 +316,6 @@ if __name__ == "__main__":
             ["huggingface", "timm", "torchbench"],
         )
     }
-    suites.add("inductor_huggingface_tp")
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
     if not os.path.exists(root_path):

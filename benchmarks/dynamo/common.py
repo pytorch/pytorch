@@ -1050,7 +1050,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         name += ".json"
@@ -1065,7 +1065,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1297,15 +1298,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     first_fields += tp_fields
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    hf_inference_mode = getattr(args, "hf_inference_mode", "generate")
-    if hf_inference_mode == "prefill":
-        input_tokens = times * example_inputs["input_ids"].numel()
-        headers += ["eager_latency", "input_tokens_per_second"]
-        row += [median[0] * 1000, input_tokens / median[1]]
-    elif hf_inference_mode == "decode":
-        output_tokens = times * example_inputs["decode_ids"].numel()
-        headers += ["eager_latency", "output_tokens_per_second"]
-        row += [median[0] * 1000, output_tokens / median[1]]
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
+        headers.append("eager_latency")
+        row.append(median[0] * 1000)
+        for column, tokens in request_tokens.items():
+            headers.append(column)
+            row.append(times * tokens / median[1])
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -2178,18 +2177,23 @@ class BenchmarkRunner:
     def tp_group(self):
         return torch.distributed.group.WORLD if self.args.tp_size > 1 else None
 
-    def agree_on_status(self, status, ok_status="pass"):
+    def agree_on_status(self, status):
         """
-        Returns the first status other than ok_status in rank order, so that every
+        Returns the first status other than "pass" in rank order, so that every
         rank of a TP group takes the same path, even if only one rank failed.
         """
         if self.tp_group is None:
             return status
         statuses = gather_across_ranks(status, self.tp_group)
-        return next((s for s in statuses if s != ok_status), ok_status)
+        return next((s for s in statuses if s != "pass"), "pass")
 
     def use_model_forward_for_compilation(self):
         return False
+
+    def get_request_tokens(self, example_inputs):
+        # Return {throughput column: tokens per timed request} for token workloads,
+        # which also report eager_latency; None for everything else.
+        return None
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
@@ -2607,6 +2611,8 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
+                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # while performance compiles the forward under generate().
                         if self.use_model_forward_for_compilation():
                             model_copy.forward = optimize_ctx(model_copy.forward)
                             optimized_model_iter_fn = self.model_iter_fn
@@ -3373,6 +3379,9 @@ class BenchmarkRunner:
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
             if setup_fn is not None:
                 experiment_kwargs["setup_fn"] = setup_fn
+            request_tokens = self.get_request_tokens(example_inputs)
+            if request_tokens is not None:
+                experiment_kwargs["request_tokens"] = request_tokens
             if tp_group is not None:
                 experiment_kwargs["tp_group"] = tp_group
 
@@ -3649,8 +3658,8 @@ def parse_args(args=None):
         "--tp-size",
         type=int,
         default=1,
-        help="Hugging Face tensor-parallel degree for prefill and decode. Runs one "
-        "torchrun worker per GPU on a single node; launched automatically.",
+        help="Hugging Face tensor-parallel degree for prefill and decode. Launch "
+        "with torchrun, one worker per GPU on a single node.",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -4241,10 +4250,7 @@ def tensor_parallel_entry(runner, original_dir, args):
     if int(os.environ.get("LOCAL_WORLD_SIZE", world_size)) != world_size:
         raise ValueError("--tp-size supports a single node only")
     if not args.only:
-        raise ValueError(
-            "torchrun workers require --only; omit torchrun to launch one worker "
-            "group per selected model"
-        )
+        raise ValueError("torchrun workers require --only")
     devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
     if devices == ["cuda"]:
         if local_rank >= torch.cuda.device_count():
@@ -4271,81 +4277,6 @@ def tensor_parallel_entry(runner, original_dir, args):
         raise
     torch.distributed.destroy_process_group()
     return result
-
-
-def run_tp_worker_group(cmd, tp_size, timeout, env):
-    """Like subprocess.check_call(cmd), but as one torchrun worker per TP rank."""
-    cmd = [
-        sys.executable,
-        "-m",
-        "torch.distributed.run",
-        "--standalone",
-        f"--nproc-per-node={tp_size}",
-        *cmd[1:],
-    ]
-    proc = subprocess.Popen(cmd, env=env)
-    try:
-        returncode = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # torchrun forwards SIGTERM to its workers, which run in their own
-        # sessions, and SIGKILLs them after a grace period. Killing torchrun
-        # outright would orphan workers blocked in collectives.
-        proc.terminate()
-        try:
-            proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        raise
-    if returncode:
-        raise subprocess.CalledProcessError(returncode, cmd)
-
-
-def run_tp_model(name, cmd, args, env):
-    """Launch a model, preserving its result and reporting missing worker output."""
-    check_output = output_filename is not None and not disable_output
-
-    def read_rows():
-        if not check_output or not os.path.exists(output_filename):
-            return []
-        with open(output_filename) as f:
-            return list(csv.DictReader(f))
-
-    previous_rows = len(read_rows())
-    status = None
-    try:
-        run_tp_worker_group(cmd, args.tp_size, args.timeout, env)
-    except subprocess.TimeoutExpired:
-        status = "timeout"
-    except subprocess.CalledProcessError as exc:
-        log.error("TP workers for %s exited with code %s", name, exc.returncode)
-        status = "worker_failed"
-
-    if check_output:
-        rows = read_rows()[previous_rows:]
-        if not rows:
-            status = status or "missing_result"
-            write_csv_when_exception(args, name, status)
-        elif len(rows) != 1 or rows[0].get("name") != name:
-            status = status or "invalid_results"
-        elif args.accuracy:
-            # The baseline checker judges completed accuracy results, including
-            # expected failures. Missing results and worker crashes still fail.
-            if not rows[0].get("accuracy"):
-                status = status or "invalid_results"
-        elif args.performance:
-            try:
-                values = [float(rows[0][key]) for key in ("speedup", "abs_latency")]
-                valid = all(np.isfinite(value) and value > 0 for value in values)
-            except (KeyError, ValueError, TypeError):
-                valid = False
-            if not valid:
-                status = status or "performance_failed"
-
-    if status is not None:
-        output_signpost({"name": name}, args, "huggingface", error=status)
-        log.error("TP benchmark failed for %s: %s", name, status)
-    return status is None
 
 
 def maybe_fresh_cache(args):
@@ -4388,6 +4319,8 @@ def main(runner, original_dir=None, args=None):
         args.init_distributed = args.only and args.multiprocess
         if args.tp_size > 1 and is_torchrun_worker():
             tensor_parallel_entry(runner, original_dir, args)
+        elif args.tp_size > 1:
+            raise ValueError("--tp-size requires launching with torchrun")
         elif args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
             # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
@@ -4578,22 +4511,12 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
     print(status)
     placeholder_batch_size = 0
     devices = [device] if device is not None else args.devices
-    tp_headers, tp_fields = tensor_parallel_identity(args)
-    if args.tag is not None and (args.accuracy or args.performance):
-        tp_headers.insert(0, "tag")
-        tp_fields.insert(0, args.tag)
     if args.accuracy:
-        headers = ["dev", "name", "batch_size", *tp_headers, "accuracy"]
-        rows = [
-            [device, name, placeholder_batch_size, *tp_fields, status]
-            for device in devices
-        ]
+        headers = ["dev", "name", "batch_size", "accuracy"]
+        rows = [[device, name, placeholder_batch_size, status] for device in devices]
     elif args.performance:
-        headers = ["dev", "name", "batch_size", *tp_headers, "speedup", "abs_latency"]
-        rows = [
-            [device, name, placeholder_batch_size, *tp_fields, 0.0, 0.0]
-            for device in devices
-        ]
+        headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+        rows = [[device, name, placeholder_batch_size, 0.0, 0.0] for device in devices]
     else:
         headers = []
         rows = [[device, name, placeholder_batch_size, 0.0] for device in devices]
@@ -5141,8 +5064,6 @@ def run(runner, args, original_dir=None):
         torch.fx.experimental._config.translation_validation = False
 
     experiment = functools.partial(experiment, args)
-    # Outside torchrun, a TP run only launches worker groups.
-    launch_tp_workers = args.tp_size > 1 and not is_torchrun_worker()
 
     if args.only and should_diff_branch(args):
         import git
@@ -5162,7 +5083,7 @@ def run(runner, args, original_dir=None):
         finally:
             # Go back to main branch
             repo.git.checkout(main_branch)
-    elif args.only and not launch_tp_workers:
+    elif args.only:
         model_name = args.only
         for device in args.devices:
             batch_size = args.batch_size
@@ -5349,21 +5270,16 @@ def run(runner, args, original_dir=None):
             )
     else:
         metrics.purge_old_log_files()
-        if output_filename and not args.retain_output and not args.only:
-            output_files = [output_filename]
-            if launch_tp_workers:
-                output_files.append(os.path.splitext(output_filename)[0] + ".json")
-            for filename in output_files:
-                if os.path.exists(filename):
-                    os.unlink(filename)
+        if (
+            output_filename
+            and os.path.exists(output_filename)
+            and not args.retain_output
+        ):
+            os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
-        if args.only:
-            model_names = [args.only]
-        else:
-            model_names = list(runner.iter_model_names(args))
+        model_names = list(runner.iter_model_names(args))
         nmodels = len(model_names)
-        failed_tp_models = []
         for i, name in enumerate(model_names):
             current_name = name
             if args.progress:
@@ -5376,12 +5292,11 @@ def run(runner, args, original_dir=None):
                 env = os.environ.copy()
                 if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
                     env["TORCH_COMPILE_DEBUG"] = "1"
-                cmd = [sys.executable] + sys.argv + [f"--only={name}"]
-                if launch_tp_workers:
-                    if not run_tp_model(name, cmd, args, env):
-                        failed_tp_models.append(name)
-                else:
-                    subprocess.check_call(cmd, timeout=timeout, env=env)
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"],
+                    timeout=timeout,
+                    env=env,
+                )
             except subprocess.TimeoutExpired:
                 write_csv_when_exception(args, name, "timeout")
                 # NB: device is potentially multiple here, though we should
@@ -5394,8 +5309,6 @@ def run(runner, args, original_dir=None):
                 print("Output: ", e.output, file=sys.stderr)
                 print("Error: ", e.stderr, file=sys.stderr)
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
-        if failed_tp_models:
-            raise SystemExit(1)
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
