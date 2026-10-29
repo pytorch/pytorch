@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import itertools
 import operator
 import unittest
 import weakref
@@ -322,6 +323,24 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
             for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
+
+    def test_count_iterator_recompile_hint(self):
+        reasons = []
+
+        def fn(counter, x):
+            return x + next(counter)
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        x = torch.randn(3)
+        compiled(itertools.count(2, 3), x)
+        compiled(itertools.count(5, 3), x)
+
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("___normalize_count_iter(counter) == (2, 3)", reasons[0])
+        expected_hint = "(HINT: Expected counter to be an itertools.count iterator with next value 2 and step 3; this compiled version uses those values.)"
+        self.assertIn(expected_hint, reasons[0])
 
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
