@@ -28,18 +28,10 @@ class TestColumnConfig(TestCase):
     def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
         itemsize = 2 if dtype == torch.bfloat16 else 4
         args = dict(
-            cc=(10, 3),
-            dtype=dtype,
             rows=(size << 20) // (columns * itemsize),
             columns=columns,
-            batches=1,
             nfields=1,
-            trait_key="sum",
             itemsize=itemsize,
-            acc_bits=32,
-            nouts=1,
-            alignment=16,
-            contiguous=True,
         )
         args.update(kwargs)
         return ct.select_col_config(**args)
