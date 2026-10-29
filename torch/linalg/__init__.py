@@ -71,7 +71,7 @@ Example:
 cholesky = _add_docstr(
     _linalg.linalg_cholesky,
     r"""
-linalg.cholesky(A, *, upper=False, out=None) -> Tensor
+linalg.cholesky(input, *, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
 
@@ -87,7 +87,7 @@ where :math:`L` is a lower triangular matrix with real positive diagonal (even i
 :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex, and the transpose when :math:`L` is real-valued.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 """
@@ -108,7 +108,7 @@ the output has the same batch dimensions.
         slower to compute than the Cholesky decomposition.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric or Hermitian positive-definite matrices.
 
 Keyword args:
@@ -118,8 +118,8 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if the :attr:`A` matrix or any matrix in a batched :attr:`A` is not Hermitian
-                  (resp. symmetric) positive-definite. If :attr:`A` is a batch of matrices,
+    RuntimeError: if the :attr:`input` matrix or any matrix in a batched :attr:`input` is not Hermitian
+                  (resp. symmetric) positive-definite. If :attr:`input` is a batch of matrices,
                   the error message will include the batch index of the first matrix that fails
                   to meet this condition.
 
@@ -148,7 +148,7 @@ Examples::
 cholesky_ex = _add_docstr(
     _linalg.linalg_cholesky_ex,
     r"""
-linalg.cholesky_ex(A, *, upper=False, check_errors=False, out=None) -> (Tensor, Tensor)
+linalg.cholesky_ex(input, *, upper=False, check_errors=False, out=None) -> (Tensor, Tensor)
 
 Computes the Cholesky decomposition of a complex Hermitian or real
 symmetric positive-definite matrix.
@@ -161,10 +161,10 @@ opportunity to handle decomposition errors more gracefully or performantly
 than :func:`torch.linalg.cholesky` does.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
-If :attr:`A` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
+If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
 and one or more of them is not a Hermitian positive-definite matrix,
 then ``info`` stores a positive integer for the corresponding matrix.
 The positive integer indicates the order of the leading minor that is not positive-definite,
@@ -184,7 +184,7 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a Runtime
         :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
 
 Args:
-    A (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
+    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
@@ -474,7 +474,7 @@ Examples::
 eig = _add_docstr(
     _linalg.linalg_eig,
     r"""
-linalg.eig(A, *, out=None) -> (Tensor, Tensor)
+linalg.eig(input, *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalue decomposition of a square matrix if it exists.
 
@@ -490,7 +490,7 @@ This decomposition exists if and only if :math:`A` is `diagonalizable`_.
 This is the case when all its eigenvalues are different.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 The returned eigenvalues are not guaranteed to be in any specific order.
@@ -503,13 +503,13 @@ The returned eigenvalues are not guaranteed to be in any specific order.
 """
     + r"""
 
-.. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (for example, when all the
+.. warning:: This function assumes that :attr:`input` is `diagonalizable`_ (for example, when all the
              eigenvalues are different). If it is not diagonalizable, the returned
              eigenvalues will be correct but :math:`A \neq V \operatorname{diag}(\Lambda)V^{-1}`.
 
 .. warning:: The returned eigenvectors are normalized to have norm `1`.
              Even then, the eigenvectors of a matrix are not unique, nor are they continuous with respect to
-             :attr:`A`. Due to this lack of uniqueness, different hardware and software may compute
+             :attr:`input`. Due to this lack of uniqueness, different hardware and software may compute
              different eigenvectors.
 
              This non-uniqueness is caused by the fact that multiplying an eigenvector by
@@ -522,7 +522,7 @@ The returned eigenvalues are not guaranteed to be in any specific order.
 
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
-             :attr:`A` has distinct eigenvalues.
+             :attr:`input` has distinct eigenvalues.
              Furthermore, if the distance between any two eigenvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
@@ -544,7 +544,7 @@ The returned eigenvalues are not guaranteed to be in any specific order.
         any shape.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of diagonalizable matrices.
 
 Keyword args:
@@ -553,7 +553,7 @@ Keyword args:
 Returns:
     A named tuple `(eigenvalues, eigenvectors)` which corresponds to :math:`\Lambda` and :math:`V` above.
 
-    `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`A` is real. The eigenvectors
+    `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`input` is real. The eigenvectors
     will be given by the columns of `eigenvectors`.
 
 Examples::
@@ -584,7 +584,7 @@ Examples::
 eigvals = _add_docstr(
     _linalg.linalg_eigvals,
     r"""
-linalg.eigvals(A, *, out=None) -> Tensor
+linalg.eigvals(input, *, out=None) -> Tensor
 
 Computes the eigenvalues of a square matrix.
 
@@ -599,7 +599,7 @@ as the roots (counted with multiplicity) of the polynomial `p` of degree `n` giv
 where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 The returned eigenvalues are not guaranteed to be in any specific order.
@@ -619,13 +619,13 @@ The returned eigenvalues are not guaranteed to be in any specific order.
         :func:`torch.linalg.eig` computes the full eigenvalue decomposition.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A complex-valued tensor containing the eigenvalues even when :attr:`A` is real.
+    A complex-valued tensor containing the eigenvalues even when :attr:`input` is real.
 
 Examples::
 
@@ -642,7 +642,7 @@ Examples::
 eigh = _add_docstr(
     _linalg.linalg_eigh,
     r"""
-linalg.eigh(A, UPLO='L', *, out=None) -> (Tensor, Tensor)
+linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalue decomposition of a complex Hermitian or real symmetric matrix.
 
@@ -658,10 +658,10 @@ where :math:`Q^{\text{H}}` is the conjugate transpose when :math:`Q` is complex,
 :math:`Q` is orthogonal in the real case and unitary in the complex case.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
-:attr:`A` is assumed to be Hermitian (resp. symmetric), but this is not checked internally, instead:
+:attr:`input` is assumed to be Hermitian (resp. symmetric), but this is not checked internally, instead:
 
 - If :attr:`UPLO`\ `= 'L'` (default), only the lower triangular part of the matrix is used in the computation.
 - If :attr:`UPLO`\ `= 'U'`, only the upper triangular part of the matrix is used.
@@ -677,7 +677,7 @@ The eigenvalues are returned in ascending order.
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
 .. warning:: The eigenvectors of a symmetric matrix are not unique, nor are they continuous with
-             respect to :attr:`A`. Due to this lack of uniqueness, different hardware and
+             respect to :attr:`input`. Due to this lack of uniqueness, different hardware and
              software may compute different eigenvectors.
 
              This non-uniqueness is caused by the fact that multiplying an eigenvector by
@@ -690,7 +690,7 @@ The eigenvalues are returned in ascending order.
              of this function synchronizes that device with the CPU.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
-             :attr:`A` has distinct eigenvalues.
+             :attr:`input` has distinct eigenvalues.
              Furthermore, if the distance between any two eigenvalues is close to zero,
              the gradient will be numerically unstable, as it depends on the eigenvalues
              :math:`\lambda_i` through the computation of
@@ -723,10 +723,10 @@ The eigenvalues are returned in ascending order.
         matrices.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric or Hermitian matrices.
     UPLO ('L', 'U', optional): controls whether to use the upper or lower triangular part
-                               of :attr:`A` in the computations. Default: `'L'`.
+                               of :attr:`input` in the computations. Default: `'L'`.
 
 Keyword args:
     out (tuple, optional): output tuple of two tensors. Ignored if `None`. Default: `None`.
@@ -734,10 +734,10 @@ Keyword args:
 Returns:
     A named tuple `(eigenvalues, eigenvectors)` which corresponds to :math:`\Lambda` and :math:`Q` above.
 
-    `eigenvalues` will always be real-valued, even when :attr:`A` is complex.
+    `eigenvalues` will always be real-valued, even when :attr:`input` is complex.
     It will also be ordered in ascending order.
 
-    `eigenvectors` will have the same dtype as :attr:`A` and will contain the eigenvectors as its columns.
+    `eigenvectors` will have the same dtype as :attr:`input` and will contain the eigenvectors as its columns.
 
 Examples::
     >>> A = torch.randn(2, 2, dtype=torch.complex128)
@@ -765,7 +765,7 @@ Examples::
 eigvalsh = _add_docstr(
     _linalg.linalg_eigvalsh,
     r"""
-linalg.eigvalsh(A, UPLO='L', *, out=None) -> Tensor
+linalg.eigvalsh(input, UPLO='L', *, out=None) -> Tensor
 
 Computes the eigenvalues of a complex Hermitian or real symmetric matrix.
 
@@ -781,12 +781,12 @@ where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 The eigenvalues of a real symmetric or complex Hermitian matrix are always real.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 The eigenvalues are returned in ascending order.
 
-:attr:`A` is assumed to be Hermitian (resp. symmetric), but this is not checked internally, instead:
+:attr:`input` is assumed to be Hermitian (resp. symmetric), but this is not checked internally, instead:
 
 - If :attr:`UPLO`\ `= 'L'` (default), only the lower triangular part of the matrix is used in the computation.
 - If :attr:`UPLO`\ `= 'U'`, only the upper triangular part of the matrix is used.
@@ -802,16 +802,16 @@ The eigenvalues are returned in ascending order.
         :func:`torch.linalg.eigh` computes the full eigenvalue decomposition.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric or Hermitian matrices.
     UPLO ('L', 'U', optional): controls whether to use the upper or lower triangular part
-                               of :attr:`A` in the computations. Default: `'L'`.
+                               of :attr:`input` in the computations. Default: `'L'`.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A real-valued tensor containing the eigenvalues even when :attr:`A` is complex.
+    A real-valued tensor containing the eigenvalues even when :attr:`input` is complex.
     The eigenvalues are returned in ascending order.
 
 Examples::
@@ -836,7 +836,7 @@ Examples::
 householder_product = _add_docstr(
     _linalg.linalg_householder_product,
     r"""
-householder_product(A, tau, *, out=None) -> Tensor
+householder_product(input, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices.
 
@@ -853,7 +853,7 @@ first :math:`n` columns of the matrix
 
 where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`b^{\text{H}}` is the
 conjugate transpose when :math:`b` is complex, and the transpose when :math:`b` is real-valued.
-The output matrix is the same size as the input matrix :attr:`A`.
+The output matrix is the same size as the input matrix :attr:`input`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
@@ -875,14 +875,14 @@ the output has the same batch dimensions.
     If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
-    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tau (Tensor): tensor of shape `(*, k)` where `*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if :attr:`A` doesn't satisfy the requirement `m >= n`,
+    RuntimeError: if :attr:`input` doesn't satisfy the requirement `m >= n`,
                   or :attr:`tau` doesn't satisfy the requirement `n >= k`.
 
 Examples::
@@ -914,11 +914,11 @@ Examples::
 ldl_factor = _add_docstr(
     _linalg.linalg_ldl_factor,
     r"""
-linalg.ldl_factor(A, *, hermitian=False, out=None) -> (Tensor, Tensor)
+linalg.ldl_factor(input, *, hermitian=False, out=None) -> (Tensor, Tensor)
 
 Computes a compact representation of the LDL factorization of a Hermitian or symmetric (possibly indefinite) matrix.
 
-When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
+When :attr:`input` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
 or symmetric (:attr:`hermitian`\ `= False`).
 
 The factorization is of the form :math:`A = L D L^T`.
@@ -929,7 +929,7 @@ They follow the format specified by `LAPACK's sytrf`_ function.
 These tensors may be used in :func:`torch.linalg.ldl_solve` to solve linear systems.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 """
@@ -939,7 +939,7 @@ the output has the same batch dimensions.
     + r"""
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric or Hermitian matrices.
 
 Keyword args:
@@ -974,7 +974,7 @@ Examples::
 ldl_factor_ex = _add_docstr(
     _linalg.linalg_ldl_factor_ex,
     r"""
-linalg.ldl_factor_ex(A, *, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
+linalg.ldl_factor_ex(input, *, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
 This is a version of :func:`~ldl_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
 It also returns the :attr:`info` tensor returned by `LAPACK's sytrf`_.
@@ -993,7 +993,7 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
     + r"""
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric or Hermitian matrices.
 
 Keyword args:
@@ -1078,7 +1078,7 @@ Examples::
 lstsq = _add_docstr(
     _linalg.linalg_lstsq,
     r"""
-torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
+torch.linalg.lstsq(input, b, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes a solution to the least squares problem of a system of linear equations.
 
@@ -1100,48 +1100,48 @@ the output has the same batch dimensions.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
 To choose the best driver on CPU consider:
 
-- If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+- If :attr:`input` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
 
   - For a general matrix: `'gelsy'` (QR with pivoting) (default)
-  - If :attr:`A` is full-rank: `'gels'` (QR)
+  - If :attr:`input` is full-rank: `'gels'` (QR)
 
-- If :attr:`A` is not well-conditioned.
+- If :attr:`input` is not well-conditioned.
 
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
 
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`input` is full-rank.
 
 See also the `full description of these drivers`_
 
-:attr:`rcond` is used to determine the effective rank of the matrices in :attr:`A`
+:attr:`rcond` is used to determine the effective rank of the matrices in :attr:`input`
 when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`).
 In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing order,
 :math:`\sigma_i` will be rounded down to zero if :math:`\sigma_i \leq \text{rcond} \cdot \sigma_1`.
-If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`A` times `max(m, n)`.
+If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`input` times `max(m, n)`.
 
 This function returns the solution to the problem and some extra information in a named tuple of
-four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`A`, :attr:`B`
+four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`input`, :attr:`b`
 of shape `(*, m, n)`, `(*, m, k)` respectively, it contains
 
 - `solution`: the least squares solution. It has shape `(*, n, k)`.
 - `residuals`: the squared residuals of the solutions, that is, :math:`\|AX - B\|_F^2`.
   It has shape `(*, k)`.
-  It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
+  It is computed when `m > n` and every matrix in :attr:`input` is full-rank,
   otherwise, it is an empty tensor.
-  If :attr:`A` is a batch of matrices and any matrix in the batch is not full rank,
+  If :attr:`input` is a batch of matrices and any matrix in the batch is not full rank,
   then an empty tensor is returned. This behavior may change in a future PyTorch release.
-- `rank`: tensor of ranks of the matrices in :attr:`A`.
-  It has shape equal to the batch dimensions of :attr:`A`.
+- `rank`: tensor of ranks of the matrices in :attr:`input`.
+  It has shape equal to the batch dimensions of :attr:`input`.
   It is computed when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`),
   otherwise it is an empty tensor.
-- `singular_values`: tensor of singular values of the matrices in :attr:`A`.
+- `singular_values`: tensor of singular values of the matrices in :attr:`input`.
   It has shape `(*, min(m, n))`.
   It is computed when :attr:`driver` is one of (`'gelsd'`, `'gelss'`),
   otherwise it is an empty tensor.
 
 .. note::
-    This function computes `X = \ `:attr:`A`\ `.pinverse() @ \ `:attr:`B` in a faster and
+    This function computes `X = \ `:attr:`input`\ `.pinverse() @ \ `:attr:`b` in a faster and
     more numerically stable way than performing the computations separately.
 
 .. warning::
@@ -1150,11 +1150,11 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it contains
     breaking changes.
 
 Args:
-    A (Tensor): lhs tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    B (Tensor): rhs tensor of shape `(*, m, k)` where `*` is zero or more batch dimensions.
-    rcond (float, optional): used to determine the effective rank of :attr:`A`.
+    input (Tensor): lhs tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    b (Tensor): rhs tensor of shape `(*, m, k)` where `*` is zero or more batch dimensions.
+    rcond (float, optional): used to determine the effective rank of :attr:`input`.
                              If :attr:`rcond`\ `= None`, :attr:`rcond` is set to the machine
-                             precision of the dtype of :attr:`A` times `max(m, n)`. Default: `None`.
+                             precision of the dtype of :attr:`input` times `max(m, n)`. Default: `None`.
 
 Keyword args:
     driver (str, optional): name of the LAPACK/MAGMA method to be used.
@@ -1202,16 +1202,16 @@ Examples::
 matrix_power = _add_docstr(
     _linalg.linalg_matrix_power,
     r"""
-matrix_power(A, n, *, out=None) -> Tensor
+matrix_power(input, n, *, out=None) -> Tensor
 
 Computes the `n`-th power of a square matrix for an integer `n`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 If :attr:`n`\ `= 0`, it returns the identity matrix (or batch) of the same shape
-as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
+as :attr:`input`. If :attr:`n` is negative, it returns the inverse of each matrix
 (if invertible) raised to the power of `abs(n)`.
 
 .. note::
@@ -1225,19 +1225,19 @@ as :attr:`A`. If :attr:`n` is negative, it returns the inverse of each matrix
 
 .. seealso::
 
-        :func:`torch.linalg.solve` computes :attr:`A`\ `.inverse() @ \ `:attr:`B` with a
+        :func:`torch.linalg.solve` computes :attr:`input`\ `.inverse() @ \ `:attr:`B` with a
         numerically stable algorithm.
 
 Args:
-    A (Tensor): tensor of shape `(*, m, m)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, m, m)` where `*` is zero or more batch dimensions.
     n (int): the exponent.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if :attr:`n`\ `< 0` and the matrix :attr:`A` or any matrix in the
-                  batch of matrices :attr:`A` is not invertible.
+    RuntimeError: if :attr:`n`\ `< 0` and the matrix :attr:`input` or any matrix in the
+                  batch of matrices :attr:`input` is not invertible.
 
 Examples::
 
@@ -1263,7 +1263,7 @@ Examples::
 matrix_rank = _add_docstr(
     _linalg.linalg_matrix_rank,
     r"""
-linalg.matrix_rank(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
+linalg.matrix_rank(input, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
 
@@ -1273,24 +1273,24 @@ that are greater than :math:`\max(\text{atol}, \sigma_1 * \text{rtol})` threshol
 where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
-If :attr:`hermitian`\ `= True`, :attr:`A` is assumed to be Hermitian if complex or
+If :attr:`hermitian`\ `= True`, :attr:`input` is assumed to be Hermitian if complex or
 symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
-If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+If :attr:`rtol` is not specified and :attr:`input` is a matrix of dimensions `(m, n)`,
 the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
-and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`input` (see :class:`.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.linalg.svdvals`.
+of the singular values of :attr:`input` as returned by :func:`torch.linalg.svdvals`.
 
 .. note::
-    This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
+    This function has NumPy compatible variant `linalg.matrix_rank(input, tol, hermitian=False)`.
     However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
 
 """
@@ -1303,7 +1303,7 @@ of the singular values of :attr:`A` as returned by :func:`torch.linalg.svdvals`.
     + r"""
 
 Args:
-    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     tol (float, Tensor, optional): [NumPy Compat] Alias for :attr:`atol`. Default: `None`.
 
 Keyword args:
@@ -1311,7 +1311,7 @@ Keyword args:
                                     Default: `None`.
     rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
                                     Default: `None`.
-    hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
+    hermitian(bool): indicates whether :attr:`input` is Hermitian if complex
                      or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
@@ -1570,11 +1570,11 @@ Examples::
 matrix_norm = _add_docstr(
     _linalg.linalg_matrix_norm,
     r"""
-linalg.matrix_norm(A, ord='fro', dim=(-2, -1), keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.matrix_norm(input, ord='fro', dim=(-2, -1), keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a matrix norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+If :attr:`input` is complex valued, it computes the norm of :attr:`input`\ `.abs()`
 
 Support input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices: the norm will be computed over the
@@ -1599,7 +1599,7 @@ be treated as batch dimensions. The output will have the same batch dimensions.
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
 Args:
-    A (Tensor): tensor with two or more dimensions. By default its
+    input (Tensor): tensor with two or more dimensions. By default its
         shape is interpreted as `(*, m, n)` where `*` is zero or more
         batch dimensions, but this behavior can be controlled using :attr:`dim`.
     ord (int, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `'fro'`
@@ -1609,11 +1609,11 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified :attr:`x` is cast to
+    dtype (:class:`torch.dtype`, optional): If specified :attr:`input` is cast to
         :attr:`dtype` prior to doing the accumulation. Default: `None`
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`input` is complex.
 
 Examples::
 
@@ -1938,7 +1938,7 @@ Examples::
 cond = _add_docstr(
     _linalg.linalg_cond,
     r"""
-linalg.cond(A, p=None, *, out=None) -> Tensor
+linalg.cond(input, p=None, *, out=None) -> Tensor
 
 Computes the condition number of a matrix with respect to a matrix norm.
 
@@ -1950,11 +1950,11 @@ the **condition number** :math:`\kappa` of a matrix
 
     \kappa(A) = \|A\|_p\|A^{-1}\|_p
 
-The condition number of :attr:`A` measures the numerical stability of the linear system `AX = B`
+The condition number of :attr:`input` measures the numerical stability of the linear system `AX = B`
 with respect to a matrix norm.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 :attr:`p` defines the matrix norm that is computed. The following norms are supported:
@@ -1977,7 +1977,7 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
 
 For :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`, this function uses
 :func:`torch.linalg.norm` and :func:`torch.linalg.inv`.
-As such, in this case, the matrix (or every matrix in the batch) :attr:`A` has to be square
+As such, in this case, the matrix (or every matrix in the batch) :attr:`input` has to be square
 and invertible.
 
 For :attr:`p` in `(2, -2)`, this function can be computed in terms of the singular values
@@ -1988,7 +1988,7 @@ For :attr:`p` in `(2, -2)`, this function can be computed in terms of the singul
     \kappa_2(A) = \frac{\sigma_1}{\sigma_n}\qquad \kappa_{-2}(A) = \frac{\sigma_n}{\sigma_1}
 
 In these cases, it is computed using :func:`torch.linalg.svdvals`. For these norms, the matrix
-(or every matrix in the batch) :attr:`A` may have any shape.
+(or every matrix in the batch) :attr:`input` may have any shape.
 
 .. note :: When inputs are on a CUDA device, this function synchronizes that device with the CPU
            if :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`.
@@ -2000,7 +2000,7 @@ In these cases, it is computed using :func:`torch.linalg.svdvals`. For these nor
         :func:`torch.linalg.lstsq` for a function that solves linear systems of general matrices.
 
 Args:
-    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions
                     for :attr:`p` in `(2, -2)`, and of shape `(*, n, n)` where every matrix
                     is invertible for :attr:`p` in `('fro', 'nuc', inf, -inf, 1, -1)`.
     p (int, inf, -inf, 'fro', 'nuc', optional):
@@ -2010,12 +2010,12 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`input` is complex.
 
 Raises:
     RuntimeError:
         if :attr:`p` is one of `('fro', 'nuc', inf, -inf, 1, -1)`
-        and the :attr:`A` matrix or any matrix in the batch :attr:`A` is not square
+        and the :attr:`input` matrix or any matrix in the batch :attr:`input` is not square
         or invertible.
 
 Examples::
@@ -2056,7 +2056,7 @@ Examples::
 pinv = _add_docstr(
     _linalg.linalg_pinv,
     r"""
-linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
+linalg.pinv(input, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
 
@@ -2064,10 +2064,10 @@ The pseudoinverse may be `defined algebraically`_
 but it is more computationally convenient to understand it `through the SVD`_
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
-If :attr:`hermitian`\ `= True`, :attr:`A` is assumed to be Hermitian if complex or
+If :attr:`hermitian`\ `= True`, :attr:`input` is assumed to be Hermitian if complex or
 symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
@@ -2076,14 +2076,14 @@ that are below :math:`\max(\text{atol}, \sigma_1 \cdot \text{rtol})` threshold a
 treated as zero and discarded in the computation,
 where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
-If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+If :attr:`rtol` is not specified and :attr:`input` is a matrix of dimensions `(m, n)`,
 the relative tolerance is set to be :math:`\text{rtol} = \max(m, n) \varepsilon`
-and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`.finfo`).
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`input` (see :class:`.finfo`).
 If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than zero then
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
+of the singular values of :attr:`input` as returned by :func:`torch.linalg.svd`.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -2099,7 +2099,7 @@ of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
     numerically stable than computing the pseudoinverse explicitly.
 
 .. note::
-    This function has NumPy compatible variant `linalg.pinv(A, rcond, hermitian=False)`.
+    This function has NumPy compatible variant `linalg.pinv(input, rcond, hermitian=False)`.
     However, use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
 
 .. warning::
@@ -2112,11 +2112,11 @@ of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
 
         :func:`torch.linalg.inv` computes the inverse of a square matrix.
 
-        :func:`torch.linalg.lstsq` computes :attr:`A`\ `.pinv() @ \ `:attr:`B` with a
+        :func:`torch.linalg.lstsq` computes :attr:`input`\ `.pinv() @ \ `:attr:`b` with a
         numerically stable algorithm.
 
 Args:
-    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
     rcond (float, Tensor, optional): [NumPy Compat]. Alias for :attr:`rtol`. Default: `None`.
 
 Keyword args:
@@ -2124,7 +2124,7 @@ Keyword args:
                                     Default: `None`.
     rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
                                     Default: `None`.
-    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian if complex
                                or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
@@ -2163,7 +2163,7 @@ Examples::
 matrix_exp = _add_docstr(
     _linalg.linalg_matrix_exp,
     r"""
-linalg.matrix_exp(A) -> Tensor
+linalg.matrix_exp(input) -> Tensor
 
 Computes the matrix exponential of a square matrix.
 
@@ -2177,11 +2177,11 @@ If the matrix :math:`A` has eigenvalues :math:`\lambda_i \in \mathbb{C}`,
 the matrix :math:`\mathrm{matrix\_exp}(A)` has eigenvalues :math:`e^{\lambda_i} \in \mathbb{C}`.
 
 Supports input of bfloat16, float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
 
 Example::
 
@@ -2213,7 +2213,7 @@ Example::
 matrix_sqrth = _add_docstr(
     _linalg.linalg_matrix_sqrth,
     r"""
-linalg.matrix_sqrth(A) -> Tensor
+linalg.matrix_sqrth(input) -> Tensor
 
 Computes the principal square root of a symmetric (resp. Hermitian) positive-definite matrix.
 
@@ -2226,11 +2226,11 @@ this function returns the unique symmetric (resp. Hermitian) positive-definite m
     XX = A.
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+Also supports batches of matrices, and if :attr:`input` is a batch of matrices then
 the output has the same batch dimensions.
 
-.. note:: Only the lower triangular part of :attr:`A` is used in the computation, and
-          :attr:`A` is assumed to be symmetric (resp. Hermitian). See :func:`torch.linalg.eigh`.
+.. note:: Only the lower triangular part of :attr:`input` is used in the computation, and
+          :attr:`input` is assumed to be symmetric (resp. Hermitian). See :func:`torch.linalg.eigh`.
 
 .. seealso::
 
@@ -2238,7 +2238,7 @@ the output has the same batch dimensions.
         (resp. Hermitian) positive-definite matrix.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+    input (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
                 consisting of symmetric (resp. Hermitian) positive-definite matrices.
 
 Examples::
@@ -2365,7 +2365,7 @@ Examples::
 solve_triangular = _add_docstr(
     _linalg.linalg_solve_triangular,
     r"""
-linalg.solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
+linalg.solve_triangular(input, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
 
 Computes the solution of a triangular system of linear equations with a unique solution.
 
@@ -2386,12 +2386,12 @@ solves the system
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
+If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`input`
 will be accessed. The elements below the main diagonal will be considered to be zero and will not be accessed.
 
-If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
+If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`input` is assumed to be ones and will not be accessed.
 
-The result may contain `NaN` s if the diagonal of :attr:`A` contains zeros or elements that
+The result may contain `NaN` s if the diagonal of :attr:`input` contains zeros or elements that
 are very close to zero and :attr:`unitriangular`\ `= False` (default) or if the input matrix
 has very small eigenvalues.
 
@@ -2405,14 +2405,14 @@ the output has the same batch dimensions.
         equations with a unique solution.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
+    input (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
                 where `*` is zero or more batch dimensions.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 
 Keyword args:
-    upper (bool): whether :attr:`A` is an upper or lower triangular matrix.
+    upper (bool): whether :attr:`input` is an upper or lower triangular matrix.
     left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
-    unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
+    unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`input` are assumed to be
                                     all equal to `1`. Default: `False`.
     out (Tensor, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
                             Ignored if `None`. Default: `None`.
@@ -2731,24 +2731,24 @@ Examples::
 tensorinv = _add_docstr(
     _linalg.linalg_tensorinv,
     r"""
-linalg.tensorinv(A, ind=2, *, out=None) -> Tensor
+linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
 Computes the multiplicative inverse of :func:`torch.tensordot`.
 
-If `m` is the product of the first :attr:`ind` dimensions of :attr:`A` and `n` is the product of
+If `m` is the product of the first :attr:`ind` dimensions of :attr:`input` and `n` is the product of
 the rest of the dimensions, this function expects `m` and `n` to be equal.
 If this is the case, it computes a tensor `X` such that
-`tensordot(\ `:attr:`A`\ `, X, \ `:attr:`ind`\ `)` is the identity matrix in dimension `m`.
-`X` will have the shape of :attr:`A` but with the first :attr:`ind` dimensions pushed back to the end
+`tensordot(\ `:attr:`input`\ `, X, \ `:attr:`ind`\ `)` is the identity matrix in dimension `m`.
+`X` will have the shape of :attr:`input` but with the first :attr:`ind` dimensions pushed back to the end
 
 .. code:: text
 
-    X.shape == A.shape[ind:] + A.shape[:ind]
+    X.shape == input.shape[ind:] + input.shape[:ind]
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-.. note:: When :attr:`A` is a `2`-dimensional tensor and :attr:`ind`\ `= 1`,
-          this function computes the (multiplicative) inverse of :attr:`A`
+.. note:: When :attr:`input` is a `2`-dimensional tensor and :attr:`ind`\ `= 1`,
+          this function computes the (multiplicative) inverse of :attr:`input`
           (see :func:`torch.linalg.inv`).
 
 .. note::
@@ -2763,19 +2763,19 @@ Supports input of float, double, cfloat and cdouble dtypes.
 .. seealso::
 
         :func:`torch.linalg.tensorsolve` computes
-        `torch.tensordot(tensorinv(\ `:attr:`A`\ `), \ `:attr:`B`\ `)`.
+        `torch.tensordot(tensorinv(\ `:attr:`input`\ `), \ `:attr:`other`\ `)`.
 
 Args:
-    A (Tensor): tensor to invert. Its shape must satisfy
-                    `prod(\ `:attr:`A`\ `.shape[:\ `:attr:`ind`\ `]) ==
-                    prod(\ `:attr:`A`\ `.shape[\ `:attr:`ind`\ `:])`.
+    input (Tensor): tensor to invert. Its shape must satisfy
+                    `prod(\ `:attr:`input`\ `.shape[:\ `:attr:`ind`\ `]) ==
+                    prod(\ `:attr:`input`\ `.shape[\ `:attr:`ind`\ `:])`.
     ind (int): index at which to compute the inverse of :func:`torch.tensordot`. Default: `2`.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if the reshaped :attr:`A` is not invertible or the product of the first
+    RuntimeError: if the reshaped :attr:`input` is not invertible or the product of the first
                   :attr:`ind` dimensions is not equal to the product of the rest.
 
 Examples::
@@ -2799,22 +2799,22 @@ Examples::
 tensorsolve = _add_docstr(
     _linalg.linalg_tensorsolve,
     r"""
-linalg.tensorsolve(A, B, dims=None, *, out=None) -> Tensor
+linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
-Computes the solution `X` to the system `torch.tensordot(A, X) = B`.
+Computes the solution `X` to the system `torch.tensordot(input, X) = other`.
 
-If `m` is the product of the first :attr:`B`\ `.ndim`  dimensions of :attr:`A` and
+If `m` is the product of the first :attr:`other`\ `.ndim`  dimensions of :attr:`input` and
 `n` is the product of the rest of the dimensions, this function expects `m` and `n` to be equal.
 
 The returned tensor `x` satisfies
-`tensordot(\ `:attr:`A`\ `, x, dims=x.ndim) == \ `:attr:`B`.
-`x` has shape :attr:`A`\ `[B.ndim:]`.
+`tensordot(\ `:attr:`input`\ `, x, dims=x.ndim) == \ `:attr:`other`.
+`x` has shape :attr:`input`\ `[other.ndim:]`.
 
-If :attr:`dims` is specified, :attr:`A` will be reshaped as
+If :attr:`dims` is specified, :attr:`input` will be reshaped as
 
 .. code:: text
 
-    A = movedim(A, dims, range(len(dims) - A.ndim + 1, 0))
+    input = movedim(input, dims, range(len(dims) - input.ndim + 1, 0))
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 
@@ -2824,18 +2824,18 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
         :func:`torch.tensordot`.
 
 Args:
-    A (Tensor): tensor to solve for. Its shape must satisfy
-                    `prod(\ `:attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]) ==
-                    prod(\ `:attr:`A`\ `.shape[\ `:attr:`B`\ `.ndim:])`.
-    B (Tensor): tensor of shape :attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]`.
-    dims (Tuple[int], optional): dimensions of :attr:`A` to be moved.
+    input (Tensor): tensor to solve for. Its shape must satisfy
+                    `prod(\ `:attr:`input`\ `.shape[:\ `:attr:`other`\ `.ndim]) ==
+                    prod(\ `:attr:`input`\ `.shape[\ `:attr:`other`\ `.ndim:])`.
+    other (Tensor): tensor of shape :attr:`input`\ `.shape[:\ `:attr:`other`\ `.ndim]`.
+    dims (Tuple[int], optional): dimensions of :attr:`input` to be moved.
         If `None`, no dimensions are moved. Default: `None`.
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
-    RuntimeError: if the reshaped :attr:`A`\ `.view(m, m)` with `m` as above  is not
+    RuntimeError: if the reshaped :attr:`input`\ `.view(m, m)` with `m` as above  is not
                   invertible or the product of the first :attr:`ind` dimensions is not equal
                   to the product of the rest of the dimensions.
 
