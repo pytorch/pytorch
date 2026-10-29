@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
 
 # Bumped on breaking changes.
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "1.0"
 REPORT_SUFFIX = ".report.jsonl"
 
 
@@ -78,6 +79,7 @@ def run_record(
     return {
         "type": "run",
         "schema_version": SCHEMA_VERSION,
+        "id": str(uuid.uuid4()),
         **test._asdict(),
         "rerun_number": rerun_number,
         "outcome": outcome,
