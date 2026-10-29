@@ -982,14 +982,14 @@ Example::
 airy_ai = _add_docstr(
     _special.special_airy_ai,
     r"""
-airy_ai(input, *, out=None) -> Tensor
+airy_ai(x, *, out=None) -> Tensor
 
-Airy function :math:`\text{Ai}\left(\text{input}\right)`.
+Airy function :math:`\text{Ai}\left(x\right)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
 
 Keyword args:
     {out}
@@ -1067,27 +1067,27 @@ Keyword args:
 chebyshev_polynomial_t = _add_docstr(
     _special.special_chebyshev_polynomial_t,
     r"""
-chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+chebyshev_polynomial_t(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
+Chebyshev polynomial of the first kind :math:`T_{n}(x)`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
-is returned. If :math:`n < 6` or :math:`|\text{input}| > 1` the recursion:
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`x`
+is returned. If :math:`n < 6` or :math:`|x| > 1` the recursion:
 
 .. math::
-    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+    T_{n + 1}(x) = 2 \times x \times T_{n}(x) - T_{n - 1}(x)
 
 is evaluated. Otherwise, the explicit trigonometric formula:
 
 .. math::
-    T_{n}(\text{input}) = \text{cos}(n \times \text{arccos}(x))
+    T_{n}(x) = \text{cos}(n \times \text{arccos}(x))
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1098,28 +1098,28 @@ Keyword args:
 chebyshev_polynomial_u = _add_docstr(
     _special.special_chebyshev_polynomial_u,
     r"""
-chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
+chebyshev_polynomial_u(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+Chebyshev polynomial of the second kind :math:`U_{n}(x)`.
 
 If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
-:math:`2 \times \text{input}` is returned. If :math:`n < 6` or
-:math:`|\text{input}| > 1`, the recursion:
+:math:`2 \times x` is returned. If :math:`n < 6` or
+:math:`|x| > 1`, the recursion:
 
 .. math::
-    U_{n + 1}(\text{input}) = 2 \times \text{input} \times U_{n}(\text{input}) - U_{n - 1}(\text{input})
+    U_{n + 1}(x) = 2 \times x \times U_{n}(x) - U_{n - 1}(x)
 
 is evaluated. Otherwise, the explicit trigonometric formula:
 
 .. math::
-    \frac{\text{sin}((n + 1) \times \text{arccos}(\text{input}))}{\text{sin}(\text{arccos}(\text{input}))}
+    \frac{\text{sin}((n + 1) \times \text{arccos}(x))}{\text{sin}(\text{arccos}(x))}
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1130,14 +1130,14 @@ Keyword args:
 chebyshev_polynomial_v = _add_docstr(
     _special.special_chebyshev_polynomial_v,
     r"""
-chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+chebyshev_polynomial_v(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1148,14 +1148,14 @@ Keyword args:
 chebyshev_polynomial_w = _add_docstr(
     _special.special_chebyshev_polynomial_w,
     r"""
-chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+chebyshev_polynomial_w(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1166,22 +1166,22 @@ Keyword args:
 hermite_polynomial_h = _add_docstr(
     _special.special_hermite_polynomial_h,
     r"""
-hermite_polynomial_h(input, n, *, out=None) -> Tensor
+hermite_polynomial_h(x, n, *, out=None) -> Tensor
 
-Physicist's Hermite polynomial :math:`H_{n}(\text{input})`.
+Physicist's Hermite polynomial :math:`H_{n}(x)`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`x`
 is returned. Otherwise, the recursion:
 
 .. math::
-    H_{n + 1}(\text{input}) = 2 \times \text{input} \times H_{n}(\text{input}) - H_{n - 1}(\text{input})
+    H_{n + 1}(x) = 2 \times x \times H_{n}(x) - H_{n - 1}(x)
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1192,22 +1192,22 @@ Keyword args:
 hermite_polynomial_he = _add_docstr(
     _special.special_hermite_polynomial_he,
     r"""
-hermite_polynomial_he(input, n, *, out=None) -> Tensor
+hermite_polynomial_he(x, n, *, out=None) -> Tensor
 
-Probabilist's Hermite polynomial :math:`He_{n}(\text{input})`.
+Probabilist's Hermite polynomial :math:`He_{n}(x)`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`x`
 is returned. Otherwise, the recursion:
 
 .. math::
-    He_{n + 1}(\text{input}) = 2 \times \text{input} \times He_{n}(\text{input}) - He_{n - 1}(\text{input})
+    He_{n + 1}(x) = 2 \times x \times He_{n}(x) - He_{n - 1}(x)
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1218,22 +1218,22 @@ Keyword args:
 laguerre_polynomial_l = _add_docstr(
     _special.special_laguerre_polynomial_l,
     r"""
-laguerre_polynomial_l(input, n, *, out=None) -> Tensor
+laguerre_polynomial_l(x, n, *, out=None) -> Tensor
 
-Laguerre polynomial :math:`L_{n}(\text{input})`.
+Laguerre polynomial :math:`L_{n}(x)`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`x`
 is returned. Otherwise, the recursion:
 
 .. math::
-    L_{n + 1}(\text{input}) = 2 \times \text{input} \times L_{n}(\text{input}) - L_{n - 1}(\text{input})
+    L_{n + 1}(x) = 2 \times x \times L_{n}(x) - L_{n - 1}(x)
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1244,22 +1244,22 @@ Keyword args:
 legendre_polynomial_p = _add_docstr(
     _special.special_legendre_polynomial_p,
     r"""
-legendre_polynomial_p(input, n, *, out=None) -> Tensor
+legendre_polynomial_p(x, n, *, out=None) -> Tensor
 
-Legendre polynomial :math:`P_{n}(\text{input})`.
+Legendre polynomial :math:`P_{n}(x)`.
 
-If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`\text{input}`
+If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`, :math:`x`
 is returned. Otherwise, the recursion:
 
 .. math::
-    P_{n + 1}(\text{input}) = 2 \times \text{input} \times P_{n}(\text{input}) - P_{n - 1}(\text{input})
+    P_{n + 1}(x) = 2 \times x \times P_{n}(x) - P_{n - 1}(x)
 
 is evaluated.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1338,14 +1338,14 @@ Keyword args:
 scaled_modified_bessel_k0 = _add_docstr(
     _special.special_scaled_modified_bessel_k0,
     r"""
-scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+scaled_modified_bessel_k0(x, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`0`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
 
 Keyword args:
     {out}
@@ -1355,14 +1355,14 @@ Keyword args:
 scaled_modified_bessel_k1 = _add_docstr(
     _special.special_scaled_modified_bessel_k1,
     r"""
-scaled_modified_bessel_k1(input, *, out=None) -> Tensor
+scaled_modified_bessel_k1(x, *, out=None) -> Tensor
 
 Scaled modified Bessel function of the second kind of order :math:`1`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
 
 Keyword args:
     {out}
@@ -1372,14 +1372,14 @@ Keyword args:
 shifted_chebyshev_polynomial_t = _add_docstr(
     _special.special_shifted_chebyshev_polynomial_t,
     r"""
-shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+shifted_chebyshev_polynomial_t(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the first kind :math:`T_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1390,14 +1390,14 @@ Keyword args:
 shifted_chebyshev_polynomial_u = _add_docstr(
     _special.special_shifted_chebyshev_polynomial_u,
     r"""
-shifted_chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
+shifted_chebyshev_polynomial_u(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the second kind :math:`U_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1408,14 +1408,14 @@ Keyword args:
 shifted_chebyshev_polynomial_v = _add_docstr(
     _special.special_shifted_chebyshev_polynomial_v,
     r"""
-shifted_chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
+shifted_chebyshev_polynomial_v(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1426,14 +1426,14 @@ Keyword args:
 shifted_chebyshev_polynomial_w = _add_docstr(
     _special.special_shifted_chebyshev_polynomial_w,
     r"""
-shifted_chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
+shifted_chebyshev_polynomial_w(x, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(x)`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
     n (Tensor): Degree of the polynomial.
 
 Keyword args:
@@ -1444,14 +1444,14 @@ Keyword args:
 spherical_bessel_j0 = _add_docstr(
     _special.special_spherical_bessel_j0,
     r"""
-spherical_bessel_j0(input, *, out=None) -> Tensor
+spherical_bessel_j0(x, *, out=None) -> Tensor
 
 Spherical Bessel function of the first kind of order :math:`0`.
 
 """
     + r"""
 Args:
-    {input}
+    x (Tensor): the input tensor.
 
 Keyword args:
     {out}
