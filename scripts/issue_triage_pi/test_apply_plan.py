@@ -144,9 +144,14 @@ class PlanEffectsTest(unittest.TestCase):
         self.assertFalse(effects("label", ["module: nn"], ["redirect_to_forum"]).close)
 
     def test_request_info_posts_template_without_labels(self):
-        result = effects("request_info", templates=["request_more_info"])
-        self.assertEqual(result.comment, TEMPLATES["request_more_info"]["comment"])
-        self.assertEqual(result.add_labels, ["bot-triaged"])
+        for templates in ([], ["request_more_info"]):
+            with self.subTest(templates=templates):
+                result = effects("request_info", templates=templates)
+                self.assertEqual(
+                    result.comment, TEMPLATES["request_more_info"]["comment"]
+                )
+                self.assertEqual(result.add_labels, ["bot-triaged"])
+                self.assertFalse(result.close)
 
     def test_transfer_is_flagged_for_review(self):
         result = effects("transfer", ["module: vision"], transfer_repo="pytorch/vision")
@@ -157,17 +162,21 @@ class PlanEffectsTest(unittest.TestCase):
         posted = "Bot says: " + TEMPLATES["request_more_info"]["comment"]
         # A rerun after a partial failure (comment posted, label call failed)
         # still adds the marker, and does nothing once the marker is there.
-        rerun = effects(
-            "request_info", templates=["request_more_info"], bot_comments=[posted]
-        )
-        self.assertEqual((rerun.comment, rerun.add_labels), ("", ["bot-triaged"]))
-        done = effects(
-            "request_info",
-            templates=["request_more_info"],
-            existing={"bot-triaged"},
-            bot_comments=[posted],
-        )
-        self.assertFalse(done.mutates)
+        for templates in ([], ["request_more_info"]):
+            with self.subTest(templates=templates):
+                rerun = effects(
+                    "request_info", templates=templates, bot_comments=[posted]
+                )
+                self.assertEqual(
+                    (rerun.comment, rerun.add_labels), ("", ["bot-triaged"])
+                )
+                done = effects(
+                    "request_info",
+                    templates=templates,
+                    existing={"bot-triaged"},
+                    bot_comments=[posted],
+                )
+                self.assertFalse(done.mutates)
 
     def test_expected_numerical_behavior_closes_with_its_own_template(self):
         result = effects("close_expected_behavior", ["module: edge cases"])
@@ -176,8 +185,9 @@ class PlanEffectsTest(unittest.TestCase):
 
     def test_unknown_template_is_not_posted(self):
         result = effects("request_info", templates=["anything goes"])
-        self.assertEqual(result.comment, "")
-        self.assertFalse(result.mutates)
+        self.assertEqual(result.comment, TEMPLATES["request_more_info"]["comment"])
+        self.assertEqual(result.add_labels, ["bot-triaged"])
+        self.assertIn("dropped unknown templates ['anything goes']", result.notes)
 
 
 class PlanSchemaTest(unittest.TestCase):
