@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import struct
 import time
 import unittest
 
@@ -74,16 +73,12 @@ def build_models(dropout: float, *, mode=None, dynamic: bool = False):
 # ───────────────────────────────────────────────────────────────
 # Helpers
 # ───────────────────────────────────────────────────────────────
-def _set_seed(device, base: int = BASE_SEED):
+def _set_seed(base: int = BASE_SEED):
     torch.manual_seed(base)
-    dev_mod = torch.get_device_module(device)
-    if dev_mod.is_available():
-        dev_mod.manual_seed(base)
 
 
 def _sync(x: torch.Tensor):
-    if x.device.type != "cpu":
-        torch.get_device_module(x.device).synchronize()
+    torch.accelerator.synchronize()
 
 
 def _timed_run(model, x, backward: bool = False):
@@ -97,23 +92,17 @@ def _timed_run(model, x, backward: bool = False):
 
 
 def _rng_seed_and_offset(device):
-    """Return (seed, offset) extracted from the current device RNG state.
+    """Return (seed, offset) extracted from the RNG state of ``device``.
 
     The CUDA RNG state is a 16-byte uint8 tensor laid out as
-    seed[0:8] + offset[8:16]. The offset is read from bytes [8:16].
+    seed[0:8] + offset[8:16]. get_rng_state returns a CPU tensor, so the
+    uint64 fields are read with a direct view; the device argument is
+    forwarded so the state always matches the tensors under test.
     """
-    dev_mod = torch.get_device_module(device)
-    seed = dev_mod.initial_seed()
-    st = dev_mod.get_rng_state()
-    off = struct.unpack("<Q", st[8:16].cpu().numpy().tobytes())[0]
+    st = torch.get_device_module(device).get_rng_state(device)
+    seed = st[:8].view(torch.int64).item()
+    off = st[8:16].view(torch.int64).item()
     return seed, off
-
-
-def set_seed(device, seed):
-    torch.manual_seed(seed)
-    dev_mod = torch.get_device_module(device)
-    if dev_mod.is_available():
-        dev_mod.manual_seed(seed)
 
 
 def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
@@ -123,9 +112,9 @@ def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
     drop_e = torch.nn.Dropout(p).to(device).train()
     drop_c = torch.compile(torch.nn.Dropout(p).to(device).train())
 
-    set_seed(device, seed)
+    _set_seed(seed)
     out_e = drop_e(x)
-    set_seed(device, seed)
+    _set_seed(seed)
     out_c = drop_c(x)
 
     masks_eq = torch.equal(out_e != 0, out_c != 0)
@@ -144,12 +133,12 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
     def setUp(self):
         super().setUp()
-        self._config_ctx = config.patch(align_random_eager=True)
-        self._config_ctx.__enter__()
-
-    def tearDown(self):
-        self._config_ctx.__exit__(None, None, None)
-        super().tearDown()
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = config.patch(align_random_eager=True)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
 
     def assertSmallMismatchFraction(self, a, b, atol=1e-5, max_fraction=1e-3):
         """Assert that only a small fraction of elements differ significantly.
@@ -187,11 +176,11 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
             # same seed before both runs (align dropout masks)
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             with torch.no_grad():
                 y_eager = eager(x)
 
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             with torch.no_grad():
                 y_comp = compiled(x)
 
@@ -208,14 +197,14 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         # eager fwd+bwd
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         y_eager = eager(x)
         (y_eager.square().mean()).backward()
 
         # compiled fwd+bwd (Re-seed)
         for p in compiled.parameters():
             p.grad = None
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         y_comp = compiled(x)
         (y_comp.square().mean()).backward()
 
@@ -240,7 +229,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             x = torch.ones((H, W), device=device, dtype=dtype)
 
             # Eager
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             seed0_e, off0_e = _rng_seed_and_offset(device)
             drop_e = torch.nn.Dropout(DROPOUT_P).to(device=device, dtype=dtype).train()
             mask_e = drop_e(x) != 0
@@ -248,7 +237,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             delta_e = off1_e - off0_e
 
             # Compiled
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             seed0_c, off0_c = _rng_seed_and_offset(device)
             drop_c = torch.nn.Dropout(DROPOUT_P).to(device=device, dtype=dtype)
             drop_c = torch.compile(drop_c)
@@ -261,18 +250,14 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertLessEqual(
                 mismatch_ratio,
                 1e-4,
-                msg=lambda msg: (
-                    f"{msg}\nDropout mask mismatch ratio too high: {mismatch_ratio:.8f}"
-                ),
+                msg=f"Dropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
             )
             self.assertEqual(seed0_e, BASE_SEED)
             self.assertEqual(seed0_c, BASE_SEED)
             self.assertEqual(
                 delta_e,
                 delta_c,
-                msg=lambda msg: (
-                    f"{msg}\nRNG offset delta mismatch: eager={delta_e}, compiled={delta_c}"
-                ),
+                msg=f"RNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
             )
 
     # ───────────────────────────────────────────────────────────
@@ -293,10 +278,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             seed = BASE_SEED + i
             x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
-            _set_seed(device, seed)
+            _set_seed(seed)
             y_eager = eager(x)
 
-            _set_seed(device, seed)
+            _set_seed(seed)
             y_comp = compiled(x)
 
             mismatch_ratio = ((y_eager != 0) != (y_comp != 0)).float().mean().item()
@@ -323,10 +308,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         for shape in shapes:
             x = torch.randn(*shape, device=device)
 
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             y_eager = eager(x)
 
-            _set_seed(device, BASE_SEED)
+            _set_seed(BASE_SEED)
             y_comp = compiled(x)
 
             self.assertSmallMismatchFraction(y_eager, y_comp)
@@ -346,10 +331,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         y_eager = eager(x)
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         y_comp = compiled(x)
 
         self.assertSmallMismatchFraction(y_eager, y_comp)
@@ -423,10 +408,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         else:
             raise AssertionError(f"unknown primitive random kind: {kind}")
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         out_eager = eager()
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         out_comp = compiled()
 
         torch.testing.assert_close(out_eager, out_comp, rtol=0.0, atol=0.0)
@@ -463,10 +448,10 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         drop_compiled.load_state_dict(drop_eager.state_dict())
         drop_compiled = torch.compile(drop_compiled)
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         out_eager = drop_eager(x)
 
-        _set_seed(device, BASE_SEED)
+        _set_seed(BASE_SEED)
         out_comp = drop_compiled(x)
 
         torch.testing.assert_close(out_eager, out_comp, rtol=0.0, atol=0.0)
@@ -481,9 +466,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
                 masks_eq, _, _ = dropout_parity(device, (1024,), seed=seed)
-                self.assertTrue(
-                    masks_eq, lambda msg: f"{msg}\nseed={seed}: mask mismatch"
-                )
+                self.assertTrue(masks_eq, msg=f"seed={seed}: mask mismatch")
 
 
 instantiate_device_type_tests(
@@ -495,7 +478,5 @@ instantiate_device_type_tests(
 
 
 if __name__ == "__main__":
-    from torch.utils._triton import has_triton
-
-    if has_triton():
+    if IS_LINUX and HAS_TRITON:
         run_tests(needs="filelock")
