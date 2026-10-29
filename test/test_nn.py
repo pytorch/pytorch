@@ -9497,8 +9497,9 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.half, torch.bfloat16)
-    # The device computes source coordinates in float, the reference in double,
-    # so fp32 outputs can differ from it by ~1e-5 at non-integer scales.
+    # The device computes source coordinates in float, the reference in double.
+    # The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
+    # times the step between neighbouring inputs, so inputs stay in [-1, 1].
     @toleranceOverride({torch.float: tol(atol=1e-4, rtol=1e-5),
                         torch.half: tol(atol=1e-2, rtol=1e-2),
                         torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
@@ -9524,9 +9525,9 @@ class TestNNDeviceType(NNTestCase):
         n, c = 2, 3
         ih, iw = isize
         if layout == "noncontig_input":
-            x = make_tensor((n, c, ih, 2 * iw), device=device, dtype=dtype)[..., ::2]
+            x = make_tensor((n, c, ih, 2 * iw), device=device, dtype=dtype, low=-1, high=1)[..., ::2]
         else:
-            x = make_tensor((n, c, ih, iw), device=device, dtype=dtype)
+            x = make_tensor((n, c, ih, iw), device=device, dtype=dtype, low=-1, high=1)
         if layout == "channels_last_c3":
             x = x.contiguous(memory_format=torch.channels_last)
         if scale is None:
