@@ -210,8 +210,8 @@ it.
 # python_code you JIT -- same results either way. One caveat: an artifact whose graph
 # calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a Dynamo
 # artifact does so after its version checks; a failed import only warns, unless the
-# module is in CUSTOM_OP_KERNEL_MODULES: it registered a kernel the graph ran at
-# capture), then refuses to load unless every op in CUSTOM_OPS and every kernel key
+# module is in CUSTOM_OP_KERNEL_MODULES: its kernel the graph ran at capture
+# replaced another for the same key), then refuses to load unless every op in CUSTOM_OPS and every kernel key
 # CUSTOM_OP_KERNELS lists for it is registered. A Dynamo artifact also imports its
 # served frames' modules for ops with no recorded module, so the caller must import,
 # before load, only what the artifact cannot record: for a make_fx artifact (or a
@@ -2144,14 +2144,20 @@ def _kernel_modules(
     overload: str,
     keys: tuple[str, ...],
     file_modules: Callable[[], dict[str, str]],
+    shadowing: bool = False,
 ) -> set[str]:
     """The modules outside torch that constructed a ``torch.library.Library``
     registering the active kernel of ``op_name`` for one of ``keys``, often not the
-    module defining the op. A kernel registered through another module's Library
-    records that module, not the one calling ``impl``."""
+    module defining the op, and only for the keys where that kernel replaced another
+    if ``shadowing``. A kernel registered through another module's Library records
+    that module, not the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
     dump = torch._C._dispatch_dump(qualname)
-    # An overridden kernel's line reads "CPU (inactive): registered at ...".
+    if shadowing:
+        # A replaced kernel's line reads "CPU (inactive): registered at ...".
+        inactive = r"^(\w+)(?:\[alias\])? \(inactive\):"
+        replaced = re.findall(inactive, dump, re.MULTILINE)
+        keys = tuple(k for k in keys if k in replaced)
     pattern = r"^(\w+)(?:\[alias\])?: registered at (.+\.py):\d+ ::"
     found = re.findall(pattern, dump, re.MULTILINE)
     modules = {file_modules().get(os.path.realpath(p)) for k, p in found if k in keys}
@@ -2304,7 +2310,7 @@ def _write_custom_op_imports(
     buf: PySourceBuilder,
     modules: tuple[str, ...],
     ops: tuple[tuple[str, str], ...],
-    keys: tuple[str, ...] = _KERNEL_KEYS,
+    keys: tuple[str, ...],
     call: bool = True,
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
@@ -2333,10 +2339,11 @@ def _write_custom_op_imports(
         op_exists = torch._C._dispatch_has_kernel(qualname)
         if op_exists and (found := tuple(k for k in keys if has_kernel(qualname, k))):
             kernels[qualname] = found
-            owners |= _kernel_modules(name, overload, keys, file_modules)
+            owners |= _kernel_modules(name, overload, keys, file_modules, True)
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
-    # The dispatcher reported these as registering the kernels the graph ran, so
-    # another module's kernel under the same key cannot stand in for theirs.
+    # These registered a kernel the graph ran over another one for the same key,
+    # which would run in its place, unseen by the check above, if they failed to
+    # import.
     owners_in_order = tuple(m for m in modules if m in owners)
     buf.writeline(f"CUSTOM_OP_KERNEL_MODULES = {owners_in_order!r}")
     from torch import _precompile_driver as driver
@@ -4069,12 +4076,11 @@ def load(
     and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
     for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
     and the backend keys of the graph's tensors, that it had a kernel for at
-    capture). A module in ``CUSTOM_OP_KERNEL_MODULES``, one the dispatcher reported
-    as registering a kernel the graph ran at capture, must import: otherwise another
-    module's kernel under the same key could run in its place. Any other module,
-    a guess at the one defining an op, only warns when it fails to import and the
-    ops and kernels are registered anyway, e.g. by a module the server imported
-    under another name.
+    capture). A module in ``CUSTOM_OP_KERNEL_MODULES``, one whose kernel the graph
+    ran at capture replaced another kernel for the same dispatch key, must import:
+    otherwise the replaced kernel would run in its place. Any other module only
+    warns when it fails to import and the ops and kernels are registered anyway,
+    e.g. by a module the server imported under another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
