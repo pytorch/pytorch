@@ -32,6 +32,12 @@ class CppWrapperMps(CppWrapperGpu):
     ) -> "CppWrapperMps":
         return CppWrapperMps()
 
+    def _codegen_jit_stream_declarations(self) -> None:
+        # Metal kernels are dispatched through aoti_torch_mps_run_command_block
+        # and never take a raw stream, and the MPS device overrides have no
+        # stream type to declare.
+        pass
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
@@ -239,9 +245,6 @@ class CppWrapperMps(CppWrapperGpu):
                 AOTIMetalShaderLibraryHandle lib_handle = nullptr;
                 AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-                aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle);
-                aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
                 // RAII wrapper with custom deleter
                 auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
                     if (h) aoti_torch_mps_delete_shader_library(h);
@@ -250,8 +253,16 @@ class CppWrapperMps(CppWrapperGpu):
                 using LibDeleter = decltype(lib_deleter);
                 using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle));
+                // Owns the library now; the kernel function check below can throw.
+                LibPtr lib(lib_handle, lib_deleter);
+
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
                 // Return pair of kernel handle and library smart pointer for cleanup
-                return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+                return std::make_pair(kern_handle, std::move(lib));
             }();
             return kernel_handle.first;
         }
@@ -287,9 +298,6 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         AOTIMetalShaderLibraryHandle lib_handle = nullptr;
         AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-        aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle);
-        aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
         // RAII wrapper with custom deleter
         auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {{
             if (h) aoti_torch_mps_delete_shader_library(h);
@@ -298,8 +306,16 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         using LibDeleter = decltype(lib_deleter);
         using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle));
+        // Owns the library now; the kernel function check below can throw.
+        LibPtr lib(lib_handle, lib_deleter);
+
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
         // Return pair of kernel handle and library smart pointer for cleanup
-        return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+        return std::make_pair(kern_handle, std::move(lib));
     }}();
     return kernel_handle.first;
 }}

@@ -48,7 +48,7 @@ at::Tensor& embedding_lookup_fallback_impl(
     const int64_t output_size,
     bool include_last_offset,
     bool pruned) {
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -191,7 +191,7 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -219,7 +219,7 @@ static inline void embedding_neon_kernel(
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -288,7 +288,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     const int64_t block_size,
     const int64_t output_size,
     bool include_last_offset) {
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_sizes = weight.sizes();
@@ -606,7 +606,7 @@ void fbgemm_spmdm_report_error_(
     const OffsetType* offsets,
     const IndexType* indices) {
   for (const auto m : c10::irange(output_size)) {
-    for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
+    for (const auto i : c10::irange(offsets[m], offsets[m + 1])) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
       TORCH_CHECK(
@@ -641,7 +641,7 @@ at::Tensor& embedding_bag_nbit_impl(
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
 
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  const OffsetType* offsets_data = offsets.const_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights op.
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -702,7 +702,7 @@ at::Tensor& embedding_bag_nbit_impl(
 #ifdef USE_FBGEMM
   const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_data = weight.const_data_ptr<uint8_t>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int64_t N = weight_sizes[0];
 
   const int64_t block_size = D;
@@ -710,7 +710,11 @@ at::Tensor& embedding_bag_nbit_impl(
   constexpr int prefetch_distance = 16;
   if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
-    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitWithStrides<
+        IndexType,
+        OffsetType,
+        /*OutType=*/float,
+        /*THREAD_LOCAL=*/true>(
         /*bit rate=*/bit_width,
         /*block size=*/block_size,
         /*has weights=*/per_sample_weights_.has_value(),
@@ -737,8 +741,17 @@ at::Tensor& embedding_bag_nbit_impl(
           output_size, index_size, N, offsets_data, indices_data);
     }
   } else {
+    // OSS builds can pin an FBGEMM that predates the THREAD_LOCAL parameter on
+    // this path, in which case the globally cached kernel is used.
+#ifdef FBGEMM_HAS_SPMDM_NBIT_ROWWISE_SPARSE_THREAD_LOCAL
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<
+        IndexType,
+        OffsetType,
+        /*THREAD_LOCAL=*/true>(
+#else
     auto kernel =
         fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<IndexType, OffsetType>(
+#endif
             /*bit rate=*/bit_width,
             /*block_size=*/block_size,
             /*has weights=*/per_sample_weights_.has_value(),
@@ -812,7 +825,7 @@ at::Tensor& embedding_bag_byte_impl(
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  const OffsetType* offsets_data = offsets.const_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights.
   const int32_t* compressed_indices_mapping_data = nullptr;
@@ -872,18 +885,42 @@ at::Tensor& embedding_bag_byte_impl(
   const int64_t N = weight_sizes[0];
   const auto weight_data = weight.const_data_ptr<uint8_t>();
   const auto indices_data = indices.const_data_ptr<IndexType>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int index_size = indices.numel();
 
+  // Each template instantiation keeps one entry per thread to bound state and
+  // optimize stable shapes; alternating keys regenerate. Unkeyed
+  // normalize_by_lengths, prefetch, is_weight_positional, use_offsets, and
+  // process-wide dispatch overrides must remain fixed after first use.
   if (!pruned_weights || fallback_to_no_sparse) {
-    auto kernel_i8 =
-        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*TRHEAD_LOCAL=*/true>(
-            /*block_size=*/D,
-            /*has_weight=*/per_sample_weights_.has_value(),
-            /*normalize_by_lengths=*/false,
-            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-            /*is_weight_positional=*/false,
-            /*use_offsets=*/true);
+    using KernelType = typename fbgemm::EmbeddingSpMDMKernelSignature<
+        uint8_t,
+        IndexType,
+        OffsetType,
+        /*OutType=*/float>::Type;
+    struct KernelCache {
+      int64_t D = 0;
+      bool has_weight = false;
+      bool valid = false;
+      KernelType kernel;
+    };
+    static thread_local KernelCache kernel_cache;
+    const bool has_weight = per_sample_weights_.has_value();
+    if (!kernel_cache.valid || kernel_cache.D != D ||
+        kernel_cache.has_weight != has_weight) {
+      kernel_cache.kernel =
+          fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*THREAD_LOCAL=*/true>(
+              /*block_size=*/D,
+              /*has_weight=*/has_weight,
+              /*normalize_by_lengths=*/false,
+              /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+              /*is_weight_positional=*/false,
+              /*use_offsets=*/true);
+      kernel_cache.D = D;
+      kernel_cache.has_weight = has_weight;
+      kernel_cache.valid = true;
+    }
+    const auto& kernel_i8 = kernel_cache.kernel;
 
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
@@ -912,14 +949,34 @@ at::Tensor& embedding_bag_byte_impl(
         });
   } else {
     // pruned weights
-    auto kernel_i8_sparse = fbgemm::
-        GenerateEmbeddingSpMDMRowWiseSparse<uint8_t, IndexType, OffsetType>(
-            /*block_size=*/D,
-            /*has_weight=*/per_sample_weights_.has_value(),
-            /*normalize_by_lengths=*/false,
-            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-            /*is_weight_positional=*/false,
-            /*use_offsets=*/true);
+    using KernelType =
+        typename fbgemm::EmbeddingSpMDMRowWiseSparseKernelSignature<
+            uint8_t,
+            IndexType,
+            OffsetType>::Type;
+    struct KernelCache {
+      int64_t D = 0;
+      bool has_weight = false;
+      bool valid = false;
+      KernelType kernel;
+    };
+    static thread_local KernelCache kernel_cache;
+    const bool has_weight = per_sample_weights_.has_value();
+    if (!kernel_cache.valid || kernel_cache.D != D ||
+        kernel_cache.has_weight != has_weight) {
+      kernel_cache.kernel = fbgemm::
+          GenerateEmbeddingSpMDMRowWiseSparse<uint8_t, IndexType, OffsetType>(
+              /*block_size=*/D,
+              /*has_weight=*/has_weight,
+              /*normalize_by_lengths=*/false,
+              /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+              /*is_weight_positional=*/false,
+              /*use_offsets=*/true);
+      kernel_cache.D = D;
+      kernel_cache.has_weight = has_weight;
+      kernel_cache.valid = true;
+    }
+    const auto& kernel_i8_sparse = kernel_cache.kernel;
 
     auto success = kernel_i8_sparse(
         /*output_size=*/output_size,
