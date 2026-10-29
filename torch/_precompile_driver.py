@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     BACKEND: str = ""
     FN_NAME: str = ""
+    ENTRY_MODULE: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
     SERVED_MODULES: tuple[str, ...] = ()
@@ -112,7 +113,9 @@ def _import_custom_op_modules(served=(), import_served=None):
         # torch.distributed.tensor raises ValueError.
         except Exception as e:
             import_errors[module] = e
-    # Refused before the op check, which would report such a module's ops missing.
+    # A served module that does not import fails the load here, not at the op
+    # check, which would report its ops missing. A __main__ entry is refused
+    # before section 0 runs.
     # find_spec imports a dotted name's parents, so this follows the ordered imports.
     for module in served:
         try:
@@ -893,6 +896,12 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    if ENTRY_MODULE == "__main__":
+        raise _PrecompileError(
+            "precompile: this artifact was captured from a function defined in the "
+            "capturing script's __main__ module, which no other process can import. "
+            "Regenerate the artifact from a function defined in an importable module."
+        )
     if "_import_custom_op_modules" in globals():
 
         def _import_served(module_name):
@@ -911,12 +920,6 @@ def _build_installed_forward():
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
-    if module_name == "__main__":
-        raise _PrecompileError(
-            "precompile: this artifact was captured from a function defined in the "
-            "capturing script's __main__ module, which no other process can import. "
-            "Regenerate the artifact from a function defined in an importable module."
-        )
     try:
         fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
     # Not just ImportError, as in section 0.
