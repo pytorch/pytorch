@@ -64,6 +64,13 @@ pip_install pybind11==3.0.1 nanobind==2.10.2
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
 
+if [[ "$(uname -m)" == "aarch64" && -n "${GCC_VERSION}" ]]; then
+  # GNU ld's default 127 MiB stub groups can overflow CALL26 when linking
+  # the LLVM SDK into Triton tools. Keep groups within half the 128 MiB
+  # branch reach to leave room for linker-generated veneers.
+  export TRITON_APPEND_CMAKE_ARGS="${TRITON_APPEND_CMAKE_ARGS:-} -DCMAKE_EXE_LINKER_FLAGS=-Wl,--stub-group-size=67108864"
+fi
+
 if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
