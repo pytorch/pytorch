@@ -12,13 +12,11 @@ struct AllocationContext {
   std::optional<CaptureId_t> tracked_capture_id;
 };
 
-// Tracks conditional capture relationships and the capture that allocated each
-// block. Block lifecycle and CUDA-DAG policy are added in later changes.
+// Tracks active conditional captures and the capture responsible for each
+// allocation. Surviving allocations move to the parent when a child ends.
 class CaptureTracker {
  public:
-  void captureBegin();
   void captureBegin(const CaptureRegistration& registration);
-  void captureEnd();
   size_t captureEnd(CaptureId_t capture_id);
   bool hasActiveCaptures() const {
     return active_captures_ != 0;
@@ -31,7 +29,6 @@ class CaptureTracker {
   struct CaptureTreeNode {
     std::optional<CaptureId_t> parent_capture_id;
     CaptureId_t root_capture_id{};
-    bool is_active{false};
     size_t invalid_capture_free_count{0};
   };
 

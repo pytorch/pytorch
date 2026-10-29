@@ -6638,25 +6638,42 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
     def test_cuda_graph_conditional_allows_nested_body_free_in_ancestor(self):
         torch.cuda.empty_cache()
         pred = torch.ones((), device="cuda", dtype=torch.bool)
+        inner_pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros(64, device="cuda")
         g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
         stream = torch.cuda.Stream()
 
+        torch.cuda.synchronize()
         with torch.cuda.stream(stream):
-            g.capture_begin()
+            g.capture_begin(pool=pool)
             g.begin_capture_to_if_node(pred)
-            g.begin_capture_to_if_node(pred)
-            nested = torch.ones(64, device="cuda")
+            g.begin_capture_to_if_node(inner_pred)
+            freed_in_parent = torch.ones(64, device="cuda")
+            freed_in_root = torch.ones(64, device="cuda")
+            state.add_(freed_in_parent)
+            state.add_(freed_in_root)
             g.end_capture_to_conditional_node()
-            child_output = nested + 1
-            del nested
+            # Both immediate and more distant ancestors may free child storage.
+            self.assertEqual(live_blocks(pool), 2)
+            del freed_in_parent
+            self.assertEqual(live_blocks(pool), 1)
             g.end_capture_to_conditional_node()
-            output = child_output + 1
-            del child_output
+            del freed_in_root
+            self.assertEqual(live_blocks(pool), 0)
+            output = state + 1
             g.capture_end()
 
-        g.replay()
-        torch.cuda.synchronize()
-        self.assertEqual(output, torch.full_like(output, 3))
+        # Only state escapes the body; it is initialized even if the body is skipped.
+        for outer, inner in product((False, True), repeat=2):
+            pred.fill_(outer)
+            inner_pred.fill_(inner)
+            state.zero_()
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(
+                output, torch.full_like(output, 3 if outer and inner else 1)
+            )
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6675,13 +6692,16 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         torch.cuda.empty_cache()
         pred = torch.zeros((), device="cuda", dtype=torch.bool)
         g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
         stream = torch.cuda.Stream()
 
         with torch.cuda.stream(stream):
-            g.capture_begin()
+            g.capture_begin(pool=pool)
             parent = torch.empty(1024 * 1024, device="cuda")
             g.begin_capture_to_if_node(pred)
+            self.assertEqual(live_blocks(pool), 1)
             del parent
+            self.assertEqual(live_blocks(pool), 0)
             with self.assertRaisesRegex(
                 RuntimeError, "invalid conditional capture scope"
             ):
@@ -6695,8 +6715,11 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
             ):
                 g.instantiate()
         g.reset()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        self.assertEqual(live_blocks(pool), 0)
 
-        # The failed capture must not poison the allocator or leak its graph.
+        # A new capture on the same stream must also succeed after cleanup.
         recovery = torch.cuda.CUDAGraph()
         with torch.cuda.graph(recovery, stream=stream):
             recovered = torch.ones(1, device="cuda") + 1
@@ -6721,11 +6744,12 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         torch.cuda.empty_cache()
         pred = torch.ones((), device="cuda", dtype=torch.bool)
         g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
         stream = torch.cuda.Stream()
         auxiliary_stream = torch.cuda.Stream()
 
         with torch.cuda.stream(stream):
-            g.capture_begin()
+            g.capture_begin(pool=pool)
             g.begin_capture_to_if_node(pred)
             child_stream = torch.cuda.current_stream()
             auxiliary_stream.wait_stream(child_stream)
@@ -6736,9 +6760,12 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
             g.end_capture_to_conditional_node()
 
             output = parent_value + 1
+            self.assertEqual(live_blocks(pool), 3)
             del parent_value
+            self.assertEqual(live_blocks(pool), 2)
             g.begin_capture_to_if_node(pred)
             del sibling_value
+            self.assertEqual(live_blocks(pool), 1)
             with self.assertRaisesRegex(
                 RuntimeError, "invalid conditional capture scope"
             ):
@@ -6748,6 +6775,7 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
             ):
                 g.capture_end()
         del output
+        self.assertEqual(live_blocks(pool), 0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6841,23 +6869,30 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
     def test_graph_allocator_free_after_auxiliary_capture_invalidation(self):
         torch.cuda.empty_cache()
         g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
         capture_stream = torch.cuda.Stream()
         auxiliary_stream = torch.cuda.Stream()
 
         torch.cuda.synchronize()
         with torch.cuda.stream(capture_stream):
-            g.capture_begin()
+            g.capture_begin(pool=pool)
             root = torch.ones((), device="cuda")
             auxiliary_stream.wait_stream(capture_stream)
             with torch.cuda.stream(auxiliary_stream):
                 temporary = root + 1
+                self.assertEqual(live_blocks(pool), 2)
                 with self.assertRaises(RuntimeError):
                     temporary.item()
                 # Destruction on an invalidated captured stream must not throw.
                 del temporary
+                self.assertEqual(live_blocks(pool), 1)
+            # Older HIP may invalidate only the auxiliary stream, not the origin.
             with self.assertRaises(RuntimeError):
+                capture_stream.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "previous error during capture"):
                 g.capture_end()
         del root
+        self.assertEqual(live_blocks(pool), 0)
         g.reset()
 
         # Invalidated capture metadata must not poison the next capture.

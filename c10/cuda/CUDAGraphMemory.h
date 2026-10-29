@@ -14,8 +14,8 @@ struct CaptureRegistration {
   std::optional<CaptureId_t> parent_capture_id;
 };
 
-// Graph-aware capture lifecycle hooks. The native allocator receives the full
-// registration; other allocator backends retain their legacy capture hooks.
+// Notify the active allocator of capture lifecycle changes. End returns the
+// number of invalid conditional-scope frees observed during the capture.
 C10_CUDA_API void markCaptureBegin(
     c10::DeviceIndex device,
     const CaptureRegistration& registration);
