@@ -40,6 +40,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
     FakeTensorMode,
+    in_kernel_invocation_manager,
     is_fake_tensor,
     maybe_get_fake_constant,
     maybe_get_fake_device,
@@ -1011,10 +1012,13 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
         with torch._C._ExcludeDispatchKeyGuard(fake_key):
             self.assertEqual(t.device, torch.device("cpu"))
-        with torch._C._CppFakeInKernelInvocation():
-            self.assertTrue(torch._C._cpp_fake_in_kernel_invocation())
+        with torch._C._FakeInKernelInvocation():
+            self.assertTrue(torch._C._in_kernel_invocation())
             self.assertEqual(t.device, torch.device("meta"))
-        self.assertFalse(torch._C._cpp_fake_in_kernel_invocation())
+        self.assertFalse(torch._C._in_kernel_invocation())
+        self.assertEqual(t.device, torch.device("cpu"))
+        with in_kernel_invocation_manager(FakeTensorMode()):
+            self.assertEqual(t.device, torch.device("meta"))
         self.assertEqual(t.device, torch.device("cpu"))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
@@ -3917,14 +3921,19 @@ class TestFakeTensorProp(TestCase):
                 # mask.nonzero() is memoized.
                 self.assertTrue(statically_known_true(sx == sy))
 
-    def test_nonzero_unique_memo_invalidated_by_mutation(self):
-        for op in (torch.nonzero, torch.unique):
-            with self.subTest(op=op.__name__), FakeTensorMode(shape_env=ShapeEnv()):
+    def test_nonzero_unique_memo_invalidation(self):
+        # The memo is reused until the input is mutated or the epoch changes
+        for op in (torch.nonzero, torch.unique, torch.unique_consecutive):
+            mode = FakeTensorMode(shape_env=ShapeEnv())
+            with self.subTest(op=op.__name__), mode:
                 x = torch.randint(0, 3, (10,))
                 n = op(x).shape[0]
                 self.assertTrue(statically_known_true(op(x).shape[0] == n))
                 x.add_(1)
-                self.assertFalse(statically_known_true(op(x).shape[0] == n))
+                m = op(x).shape[0]
+                self.assertFalse(statically_known_true(m == n))
+                mode.epoch += 1
+                self.assertFalse(statically_known_true(op(x).shape[0] == m))
 
 
 make_propagate_real_tensors_cls(TestFakeTensorProp)
