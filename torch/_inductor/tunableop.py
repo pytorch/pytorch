@@ -28,6 +28,8 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
+from torch.utils._ordered_set import OrderedSet
+
 from . import config, ir
 from .virtualized import V
 
@@ -79,7 +81,7 @@ _TUNE_BLOCKING_ENV = (
 # worker with an empty results map and nothing to borrow.
 _REUSE_BLOCKING_ENV = (("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),)
 _env_warned = False
-_warned_faults: set[str] = set()
+_warned_faults: OrderedSet[str] = OrderedSet()
 
 
 def _warn_fault_once(status: WorkerStatus, detail: str) -> None:
@@ -406,7 +408,7 @@ def _insert_device_ordinal(filename: str, device: int) -> str:
 # Parameters of the search, stamped onto each job: (parent getter, worker
 # setter) pairs. These are the knobs a caller can set through the API, which
 # does not cross the pipe. Env-sourced values reach the worker by inheritance
-# instead -- which is not always benign, see _warn_if_env_blocks_recording.
+# instead -- which is not always benign, see _warn_if_env_blocks.
 #
 # Which operation to run is decided per job from the Inductor mode, and is
 # carried as BenchmarkJob fields rather than stamped here. Absent for that
