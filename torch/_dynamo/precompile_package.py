@@ -2256,7 +2256,7 @@ class PrecompileSession(Generic[_P, _R]):
             # which the driver imports only after the ops are checked.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
             modules += tuple(sorted(served - set(modules)))
-        _warn_unregistered_ops(found, sorted(served))
+        _warn_unregistered_ops(found, sorted(served - set(found.modules)))
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, modules, ops
         )

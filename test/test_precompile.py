@@ -13,6 +13,7 @@ import operator
 import os
 import pathlib
 import pickle
+import re
 import runpy
 import shutil
 import stat
@@ -10144,6 +10145,20 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(f"triton::{name}", message)
         self.assertIn("torch.cuda.init()", message)
         self.assertNotIn("set_python_module", message)
+
+    def test_the_lazy_op_setups_name_existing_functions(self):
+        from torch._precompile import _TORCH_LAZY_OP_NAMESPACES, _TORCH_LAZY_OPS
+
+        setups = [*_TORCH_LAZY_OP_NAMESPACES.values(), *_TORCH_LAZY_OPS.values()]
+        names = {n for s in setups for n in re.findall(r"(torch(?:\.\w+)+)\(\)", s)}
+        self.assertIn(
+            "torch._inductor.runtime.debug_utils.register_check_mem_op", names
+        )
+        for name in names:
+            module, attr = name.rsplit(".", 1)
+            self.assertTrue(
+                callable(getattr(importlib.import_module(module), attr)), name
+            )
 
     def test_an_op_a_torch_function_defines_is_reported_with_its_setup(self):
         from torch._precompile import (
