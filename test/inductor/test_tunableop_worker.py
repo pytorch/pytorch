@@ -673,39 +673,33 @@ class TunableopModeValidationTest(TestCase):
                 ):
                     tunableop.is_tune_mode()
 
-    def test_reuse_mode_warns_when_the_results_file_will_not_be_read(self):
-        # RECORD_UNTUNED makes the manager skip ReadFile, so the worker has an
-        # empty results map and every GEMM silently falls back to Default.
-        tunableop._env_warned = False
-        self.addCleanup(setattr, tunableop, "_env_warned", False)
-        with (
-            inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
-            mock.patch("torch.cuda.is_available", return_value=True),
-            mock.patch.dict(os.environ, {"PYTORCH_TUNABLEOP_RECORD_UNTUNED": "1"}),
-            self.assertLogs(tunableop.log, level="WARNING") as logs,
+    def test_reuse_mode_env_warnings(self):
+        # Each kill switch leaves reuse with nothing to borrow or nothing to
+        # persist; TUNING=0 is harmless because reuse never tunes.
+        for var, value, warns in (
+            ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
+            ("PYTORCH_TUNABLEOP_NEAREST_MATCH", "0", True),
+            ("PYTORCH_TUNABLEOP_RECORD_BORROWED", "0", True),
+            ("PYTORCH_TUNABLEOP_TUNING", "0", False),
         ):
-            self.assertTrue(tunableop.is_reuse_mode())
-        self.assertTrue(any("nothing to borrow" in m for m in logs.output))
-
-    def test_reuse_mode_ignores_the_tuning_kill_switch(self):
-        # TUNING=0 blocks tune mode but not reuse: it never tunes, and
-        # RecordBorrowed persists regardless.
-        tunableop._env_warned = False
-        self.addCleanup(setattr, tunableop, "_env_warned", False)
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith("PYTORCH_TUNABLEOP_")
-        }
-        with (
-            inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
-            mock.patch("torch.cuda.is_available", return_value=True),
-            mock.patch.dict(
-                os.environ, {**env, "PYTORCH_TUNABLEOP_TUNING": "0"}, clear=True
-            ),
-            self.assertNoLogs(tunableop.log, level="WARNING"),
-        ):
-            self.assertTrue(tunableop.is_reuse_mode())
+            with self.subTest(var=var):
+                tunableop._env_warned = False
+                self.addCleanup(setattr, tunableop, "_env_warned", False)
+                env = {
+                    k: v
+                    for k, v in os.environ.items()
+                    if not k.startswith("PYTORCH_TUNABLEOP_")
+                }
+                expect = self.assertLogs if warns else self.assertNoLogs
+                with (
+                    inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
+                    mock.patch("torch.cuda.is_available", return_value=True),
+                    mock.patch.dict(os.environ, {**env, var: value}, clear=True),
+                    expect(tunableop.log, level="WARNING") as logs,
+                ):
+                    self.assertTrue(tunableop.is_reuse_mode())
+                if warns:
+                    self.assertTrue(any(var in m for m in logs.output))
 
     def test_mode_is_case_normalized(self):
         # Without this "Tune" turns both passes off behind a one-time warning.
