@@ -63,6 +63,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     get_fake_value,
+    get_type_mro_no_user_code,
     istype,
     odict_items,
     odict_keys,
@@ -94,6 +95,7 @@ from .object_protocol import (
     generic_richcompare_bool,
     generic_setitem,
     generic_str,
+    mro_attr_source,
     mro_lookup,
     pysequence_contains,
     repr_guard,
@@ -137,6 +139,27 @@ def _guard_nan_key(key: VariableTracker) -> None:
     # on their identity, including NaNs nested inside tuple keys.
     if key.source and _contains_nan(_get_literal_key(key)):
         install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+
+
+def _key_has_user_hash(tx: "InstructionTranslatorBase", key: VariableTracker) -> bool:
+    key = key.realize()
+    hash_fn = mro_lookup(key.python_type(), "__hash__")
+    # Inherited hashes consume builtin storage, not overridden iteration.
+    if hash_fn is tuple.__hash__:
+        items = variables.TupleVariable.unpack_var_sequence(
+            cast(variables.TupleVariable, key), tx
+        )
+        return any(_key_has_user_hash(tx, item) for item in items)
+    if hash_fn is frozenset.__hash__:
+        items = variables.FrozensetVariable.unpack_var_sequence(
+            cast(variables.FrozensetVariable, key), tx
+        )
+        return any(_key_has_user_hash(tx, item) for item in items)
+    return not (
+        hash_fn is None
+        or isinstance(hash_fn, types.WrapperDescriptorType)
+        or hash_fn is torch.Tensor.__hash__
+    )
 
 
 # Mirror PyDict_{Check,CheckExact} in Include/cpython/dictobject.h.
@@ -230,6 +253,7 @@ class ConstDictVariable(VariableTracker):
         | dict[HashableTracker, VariableTracker],
         *,
         has_deleted_keys: bool = False,
+        has_reordered_keys: bool = False,
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -285,6 +309,7 @@ class ConstDictVariable(VariableTracker):
         self.original_items = {key.vt: value for key, value in self.items.items()}
         # Reinserting deleted keys still invalidates existing OrderedDict iterators.
         self.has_deleted_keys = has_deleted_keys
+        self.has_reordered_keys = has_reordered_keys
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts. Both forms re-enter this same instance's is_python_constant, so
         # a per-instance flag suffices.
@@ -490,11 +515,13 @@ class ConstDictVariable(VariableTracker):
                 if (
                     not self.should_reconstruct_all
                     and isinstance(key_var, ConstantVariable)
+                    and isinstance(key_var.source, ConstDictKeySource)
+                    and key_var.source.base == self.source
                     and not _contains_nan(key_var.as_python_constant())
                 ):
                     key_var = key_var.clone(source=None)
-                # Literal-key updates preserve the input's order. Rebuilding the
-                # dictionary or loading keys by storage position depends on it.
+                # Updating an existing literal key retains its identity and order.
+                # External keys and full reconstruction still need their sources.
                 if isinstance(
                     self.mutation_type,
                     (ValueMutationExisting, AttributeMutationExisting),
@@ -587,11 +614,8 @@ class ConstDictVariable(VariableTracker):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        # `ordered` selects linked order for OrderedDict, storage order otherwise;
-        # plain dicts have only storage order. Ordinary mappings always guard keys.
-        # `guard_keys` also specializes hook IDs when keys affect the trace, such as
-        # key iteration or copying. Hook values/items may guard only relative order
-        # until their sourced keys are observed, allowing equivalent modules to share.
+        # Subclasses use `ordered` for linked order and `guard_keys` for hook IDs;
+        # ordinary dictionaries always guard their keys in storage order.
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -974,23 +998,46 @@ class ConstDictVariable(VariableTracker):
         # Mirrors dict_merge(..., override=1): storage when tp_iter is dict_iter,
         # otherwise PyMapping_Keys followed by subscription. The string-only
         # shortcut also avoids tracing OrderedDict's per-key Python operations.
-        if isinstance(other, (ConstDictVariable, FrozenDictVariable)) and (
-            other.python_type().__iter__ is dict.__iter__
-            or (
-                torch._has_frozendict
-                and other.python_type().__iter__ is torch._frozendict.__iter__
-            )
-            or self._can_fast_merge(other)
-        ):
-            if isinstance(other, ConstDictVariable):
-                other.install_dict_order_guard(tx, guard_keys=True)
-            self.items.update(other.items)
-        else:
-            keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
-            for key in unpack_iterable(tx, keys):
-                value = generic_getitem(tx, other, key)
-                hkey = self._lookup_key(tx, key, container_name=container_name)
-                self.items[hkey] = value
+        if isinstance(other, (ConstDictVariable, FrozenDictVariable)):
+            side_effects = tx.output.side_effects
+            if any(
+                cls in side_effects
+                and side_effects.has_pending_mutation_of_attr(
+                    side_effects[cls], "__iter__"
+                )
+                for cls in get_type_mro_no_user_code(other.python_type())
+            ):
+                unimplemented(
+                    gb_type="Dictionary merge after iteration slot mutation",
+                    context=f"dict_merge: {other}",
+                    explanation="Dynamo cannot merge a dictionary after changing its type's __iter__.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if (
+                isinstance(other, variables.UserDefinedObjectVariable)
+                and other.cls_source
+            ):
+                source = mro_attr_source(
+                    tx, other.python_type(), other.cls_source, "__iter__"
+                )
+                if source is not None:
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            # Incompatible descriptor owners install a generic iteration slot.
+            iter_fn = mro_lookup(other.python_type(), "__iter__")
+            if (
+                (pydict_check(other) and iter_fn is dict.__iter__)
+                or (pyfrozendict_check(other) and iter_fn is torch._frozendict.__iter__)
+                or self._can_fast_merge(other)
+            ):
+                if isinstance(other, ConstDictVariable):
+                    other.install_dict_order_guard(tx, guard_keys=True)
+                self.items.update(other.items)
+                return
+        keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
+        for key in unpack_iterable(tx, keys):
+            value = generic_getitem(tx, other, key)
+            hkey = self._lookup_key(tx, key, container_name=container_name)
+            self.items[hkey] = value
 
     def dict_setdefault(
         self,
@@ -1336,12 +1383,19 @@ class OrderedDictVariable(ConstDictVariable):
         if result.as_python_constant() == (op == "__ne__"):
             return result
         # CPython's odict_richcompare checks key order only after dict equality.
-        # These iterators advance after comparison, detecting mutations even on
-        # the last pair or when comparison returns false, as `_odict_keys_equal` does.
+        # Lagging iterators detect mutations even after the last pair or a false
+        # comparison. Identity-only iteration avoids tracing internal key lookups.
         mutation_checks = tuple(
-            _iter_detecting_mutation(iter(mapping.items)) for mapping in (self, other)
+            _iter_detecting_mutation(
+                HashableTracker.iter_keys_by_identity(iter(mapping.items))
+            )
+            for mapping in (self, other)
         )
-        for left, right in _iter_detecting_mutation(zip(self.items, other.items)):
+        pairs = zip(
+            HashableTracker.iter_keys_by_identity(self.items),
+            HashableTracker.iter_keys_by_identity(other.items),
+        )
+        for left, right in _iter_detecting_mutation(pairs):
             equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
             is_equal = specialize_symnode(
                 generic_is_true(tx, equal)
@@ -1366,6 +1420,18 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.source and any(
+            _key_has_user_hash(tx, key) for key in (*self.original_items, args[0])
+        ):
+            # Replay applies native moves after tracing their hash callbacks.
+            # Skip the whole frame so fallback does not replay callbacks twice.
+            unimplemented(
+                gb_type="OrderedDict mutation with user-defined hash",
+                context="OrderedDict.move_to_end",
+                explanation="Dynamo cannot replay input OrderedDict moves without repeating user hash callbacks.",
+                hints=["Construct the OrderedDict inside the compiled function."],
+                skip_frame=True,
+            )
         self.install_dict_keys_match_guard()
         # The endpoint identity shortcut also depends on the input's key order.
         # Hook IDs cannot be exempted: a changed ID can turn a no-op into KeyError.
@@ -1381,7 +1447,11 @@ class OrderedDictVariable(ConstDictVariable):
         last = specialize_symnode(generic_is_true(tx, last_arg)).as_python_constant()
 
         _guard_nan_key(args[0])
-        endpoint = next(reversed(self.items) if last else iter(self.items))
+        endpoint = next(
+            HashableTracker.iter_keys_by_identity(
+                reversed(self.items) if last else self.items
+            )
+        )
         same_key = vt_identity_compare(args[0], endpoint.vt)
         if same_key is not None and same_key.as_python_constant():
             return ConstantVariable.create(None)
@@ -1390,6 +1460,12 @@ class OrderedDictVariable(ConstDictVariable):
             raise_observed_exception(KeyError, tx, args=[args[0]])
         tx.output.side_effects.mutation(self)
         self.items.move_to_end(key, last=last)
+        # Later moves can restore the order without restoring valid iterators.
+        self.has_reordered_keys = self.has_reordered_keys or endpoint is not next(
+            HashableTracker.iter_keys_by_identity(
+                reversed(self.items) if last else self.items
+            )
+        )
         self.should_reconstruct_all = True
         return ConstantVariable.create(None)
 
@@ -1965,18 +2041,11 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        ConstDictVariable.install_dict_order_guard(self, tx, ordered=ordered)
         if guard_keys:
             ConstDictVariable.install_dict_keys_match_guard(self)
-        if (
-            self.source
-            and not is_constant_source(self.source)
-            and ordered
-            and len(self.original_items) > 1
-        ):
-            # Hook values use storage-position sources; their order matters, but
-            # equivalent modules have different hook IDs unless keys are observed.
-            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+        super().install_dict_order_guard(
+            tx, ordered=ordered and self._cpython_type is collections.OrderedDict
+        )
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
