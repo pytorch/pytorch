@@ -75,7 +75,9 @@ class InductorOutput(ABC, Generic[TOut]):
     def pre_save(self) -> None: ...
 
     @abstractmethod
-    def load(self, example_inputs: Sequence[Any]) -> TOut: ...
+    def load(
+        self, example_inputs: Sequence[Any], fx_config: _CompileFxKwargs | None = None
+    ) -> TOut: ...
 
     @abstractmethod
     def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut: ...
@@ -101,7 +103,9 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
         self.result = disk_result
         return
 
-    def load(self, example_inputs: Sequence[Any]) -> TOutputCode:
+    def load(
+        self, example_inputs: Sequence[Any], fx_config: _CompileFxKwargs | None = None
+    ) -> TOutputCode:
         self.example_inputs = example_inputs
         return self.result
 
@@ -113,7 +117,7 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
         # Special handling for CompiledFxGraph - needs FxGraphCache.cache_hit_post_compile
         if isinstance(result, CompiledFxGraph):
             graph, cache_info = FxGraphCache.cache_hit_post_compile(
-                result, {}, constants
+                result, {}, constants, fx_config
             )
             if graph is None:
                 raise RuntimeError("Failed to reload cache entry from disk")
@@ -162,7 +166,9 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     def _is_backward(self) -> bool:
         return False
 
-    def load(self, example_inputs: Sequence[Any]) -> CompiledFxGraph:
+    def load(
+        self, example_inputs: Sequence[Any], fx_config: _CompileFxKwargs | None = None
+    ) -> CompiledFxGraph:
         from .autograd_cache import FXGraphCacheMiss
 
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
@@ -199,6 +205,7 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
             remote_cache=remote_cache,
             is_backward=self._is_backward(),
             constants=constants,
+            fx_kwargs=fx_config,
             evaluate_guards=check_exact_guard_match,
         )
         if result is None:
@@ -468,9 +475,17 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     ) -> tuple[Callable[..., Any], Callable[..., Any] | None, bool]:
         from torch._dynamo.utils import CompileEventLogger
 
-        compiled_fw_func = self.compiled_fw.load(args)
+        fw_fx_config: _CompileFxKwargs = {
+            **fx_config,
+            "is_backward": False,
+        }
+        compiled_fw_func = self.compiled_fw.load(args, fw_fx_config)
         if self.compiled_bw is not None:
-            compiled_bw_func = self.compiled_bw.load(args)
+            bw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": True,
+            }
+            compiled_bw_func = self.compiled_bw.load(args, bw_fx_config)
             needs_autograd = True
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="autograd"
@@ -478,14 +493,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             # Now that we've loaded forward and backward, call post compile on both
             # This avoids setting things like BoxedBools in fx_config until
             # after both forward and backward cache hit
-            fw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": False,
-            }
-            bw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": True,
-            }
             compiled_fw_func = self.compiled_fw.post_compile(
                 compiled_fw_func, fw_fx_config
             )
