@@ -14,6 +14,8 @@
 //   coordinates, so no floordiv/mod by zero is ever emitted and the runtime
 //   must skip the launch entirely.
 
+// Lowering entry: detail::lowerToTiledImpl below + public shim.
+
 #include "tiled_ir.h"
 
 #include <algorithm>
@@ -23,7 +25,10 @@
 #include <set>
 #include <sstream>
 
+#include "analyses.h"
 #include "kernel_ir.h"
+#include "pass_details.h"
+#include "pass_manager.h"
 
 namespace torch::inductor::loops_ir {
 namespace {
@@ -1035,14 +1040,33 @@ bool matchCanonicalOffset(
 
 } // namespace
 
-TiledProgram lower_to_tiled(
+TiledProgram detail::lowerToTiledImpl(
     const KernelProgram& program,
-    const TileOptions& options) {
+    const TileOptions& options,
+    analyses::AnalysisContext& ctx) {
   const std::string pctx = "lower_to_tiled program '" + program.name() + "'";
   if (options.block_size <= 0 || options.num_warps <= 0) {
     throw std::invalid_argument(pctx + ": TileOptions must be positive");
   }
   program.verify();
+  // Consume the shared kernel-effects facts to DRIVE the transform: every
+  // extern node is a conservative barrier and must stay eager (no tiled
+  // function emitted for it). Count cross-check before the body; the
+  // function-count post-check at the end uses the same facts.
+  const analyses::EffectFacts& eff = ctx.kernelEffects(program);
+  size_t externNodes = 0;
+  size_t kernelFunctions = 0;
+  for (const auto& n : program.nodes()) {
+    if (std::get_if<ExternCall>(&n) != nullptr) {
+      ++externNodes;
+    } else {
+      ++kernelFunctions;
+    }
+  }
+  if (eff.barrierNodes.size() != externNodes) {
+    throw std::invalid_argument(
+        "lower_to_tiled: effects facts disagree with kernel program nodes");
+  }
   if (program.numerics() == strictNumericsName()) {
     // Strict keeps explicit rounded arithmetic: no contraction, no FTZ.
     if (options.enable_fp_fusion) {
@@ -1434,7 +1458,22 @@ TiledProgram lower_to_tiled(
     out.addFunction(f);
   }
   out.verify();
+  if (out.functions().size() != kernelFunctions) {
+    throw std::invalid_argument(
+        "lower_to_tiled: tiled function count does not match kernel "
+        "functions (externs must stay eager)");
+  }
   return out;
+}
+
+// Public compatibility shim through the formal registry (same pattern as
+// the other 7 passes). The detail body above never calls this shim, so
+// there is no recursive public-shim dispatch.
+TiledProgram lower_to_tiled(
+    const KernelProgram& program,
+    const TileOptions& options) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runLowerToTiled(program, options, ctx);
 }
 
 } // namespace torch::inductor::loops_ir

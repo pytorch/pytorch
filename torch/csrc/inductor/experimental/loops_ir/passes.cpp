@@ -2,6 +2,10 @@
 // No FP constant folding, reassociation, neutral identities, FMA/FTZ.
 // Integer-only rewrites use checked arithmetic; failures are loud, never
 // silent wrong transforms. Every pass verifies before and after.
+//
+// Real transforms live in detail:: (pass_details.h) and consume the typed
+// AnalysisContext. The public functions below are thin shims dispatching
+// through pipeline:: (pass_manager.h).
 
 #include "passes.h"
 
@@ -11,6 +15,10 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+
+#include "analyses.h"
+#include "pass_details.h"
+#include "pass_manager.h"
 
 namespace torch::inductor::loops_ir {
 namespace {
@@ -207,32 +215,49 @@ Instruction mapInstructionIndexes(
 
 // --- view_inline ---
 
-Program view_inline(const Program& program) {
+Program detail::viewInlineImpl(
+    const Program& program,
+    analyses::AnalysisContext& ctx) {
   program.verify();
-  std::map<std::string, View> views;
+  // Consume the shared alias/storage-root facts to DRIVE the rewrite (no
+  // local duplicate view map or alias walker): the facts' view metadata
+  // supplies per-view sizes/strides, rootOf/composedOffset supply the
+  // resolved base + base offset. Every view_read target and compute input
+  // must be present in the facts.
+  const analyses::AliasRootFacts& alias = ctx.aliasRoots(program);
+  const std::map<std::string, View>& views = alias.views;
   for (const auto& n : program.nodes()) {
-    if (const auto* v = std::get_if<View>(&n)) {
-      views[v->name] = *v;
+    if (const auto* c = std::get_if<Compute>(&n)) {
+      for (const auto& in : c->inputs()) {
+        if (alias.rootOf.find(in) == alias.rootOf.end()) {
+          passFail("view_inline", "unresolved alias input '" + in + "'");
+        }
+      }
+      for (const auto* body : {&c->reductionBody(), &c->postBody()}) {
+        for (const auto& ins : *body) {
+          if (ins.kind() == Instruction::Kind::ViewRead) {
+            if (alias.rootOf.find(ins.view()) == alias.rootOf.end()) {
+              passFail(
+                  "view_inline", "unresolved view_read '" + ins.view() + "'");
+            }
+            if (views.find(ins.view()) == views.end()) {
+              passFail(
+                  "view_inline",
+                  "view_read '" + ins.view() +
+                      "' has no view metadata in alias facts");
+            }
+          }
+        }
+      }
     }
   }
   auto resolveBase = [&](const std::string& name) {
-    std::string cur = name;
-    __int128 off = 0;
-    std::set<std::string> seen;
-    while (true) {
-      auto it = views.find(cur);
-      if (it == views.end()) {
-        if (off > std::numeric_limits<int64_t>::max() || off < 0) {
-          passFail("view_inline", "offset overflow resolving '" + name + "'");
-        }
-        return std::make_pair(cur, (int64_t)off);
-      }
-      if (!seen.insert(cur).second) {
-        passFail("view_inline", "alias cycle at '" + cur + "'");
-      }
-      off += it->second.offset;
-      cur = it->second.source;
+    auto rit = alias.rootOf.find(name);
+    auto oit = alias.composedOffset.find(name);
+    if (rit == alias.rootOf.end() || oit == alias.composedOffset.end()) {
+      passFail("view_inline", "unresolved alias '" + name + "'");
     }
+    return std::make_pair(rit->second, oit->second);
   };
   std::vector<Program::Node> out;
   for (const auto& n : program.nodes()) {
@@ -312,8 +337,12 @@ Program view_inline(const Program& program) {
 
 // --- index_simplify ---
 
-Program index_simplify(const Program& program) {
+Program detail::indexSimplifyImpl(
+    const Program& program,
+    analyses::AnalysisContext&) {
   program.verify();
+  // Pure local rewrite over index trees; reads no cached analysis
+  // (descriptor `required` is empty). Integer-only, checked, verbatim.
   std::vector<Program::Node> out;
   for (const auto& n : program.nodes()) {
     if (const auto* c = std::get_if<Compute>(&n)) {
@@ -343,8 +372,13 @@ Program index_simplify(const Program& program) {
 
 // --- unit_range_removal ---
 
-Program unit_range_removal(const Program& program) {
+Program detail::unitRangeRemovalImpl(
+    const Program& program,
+    analyses::AnalysisContext&) {
   program.verify();
+  // Pure local transform: unit-extent classification reads the compute's
+  // own pointwise ranges directly (no cached analysis needed; descriptor
+  // `required` is empty). Substitution uses integer-only checked rewrites.
   std::vector<Program::Node> out;
   for (const auto& n : program.nodes()) {
     if (const auto* c = std::get_if<Compute>(&n)) {
@@ -452,6 +486,7 @@ std::string cseKey(const Instruction& ins) {
     }
     case Instruction::Kind::Load: {
       std::string s = "load:";
+      s += std::to_string(ins.buffer().size()) + ":";
       s += ins.buffer();
       s += ":";
       encodeIndex(ins.offset(), s);
@@ -459,6 +494,7 @@ std::string cseKey(const Instruction& ins) {
     }
     case Instruction::Kind::ViewRead: {
       std::string s = "view:";
+      s += std::to_string(ins.view().size()) + ":";
       s += ins.view();
       s += ":";
       for (const auto& c : ins.coordinates()) {
@@ -572,8 +608,12 @@ std::vector<Instruction> cseDceBody(const std::vector<Instruction>& body) {
 
 } // namespace
 
-Program local_cse_dce(const Program& program) {
+Program detail::localCseDceImpl(
+    const Program& program,
+    analyses::AnalysisContext&) {
   program.verify();
+  // Per-body typed SSA CSE + DCE (structural index equality, bit-exact
+  // constants); reads no cached analysis (descriptor `required` is empty).
   std::vector<Program::Node> out;
   for (const auto& n : program.nodes()) {
     if (const auto* c = std::get_if<Compute>(&n)) {
@@ -596,68 +636,55 @@ Program local_cse_dce(const Program& program) {
 
 // --- dead_prune ---
 
-Program dead_prune(const Program& program) {
+Program detail::deadPruneImpl(
+    const Program& program,
+    analyses::AnalysisContext& ctx) {
   program.verify();
-  std::map<std::string, View> views;
-  for (const auto& n : program.nodes()) {
-    if (const auto* v = std::get_if<View>(&n)) {
-      views[v->name] = *v;
-    }
+  // Consume the shared liveness + effects facts to DRIVE the rewrite (no
+  // parallel local walk): live.keep[i] decides node i, liveViews/
+  // liveComputes name the kept nodes, and every effects barrier
+  // (unknown-effects extern, incl. opaque RNG/global side effects) must
+  // be kept. Cross-checked per node below; any disagreement fails loudly.
+  const analyses::LivenessFacts& live = ctx.liveness(program);
+  const analyses::EffectFacts& eff = ctx.effects(program);
+  if (live.keep.size() != program.nodes().size()) {
+    passFail("dead_prune", "liveness facts disagree with program nodes");
   }
-  std::set<std::string> needed;
-  std::function<void(const std::string&)> needChain =
-      [&](const std::string& name) {
-        if (!needed.insert(name).second) {
-          return;
-        }
-        auto it = views.find(name);
-        if (it != views.end()) {
-          needChain(it->second.source);
-        }
-      };
-  for (const auto& o : program.outputs()) {
-    needChain(o.buffer);
-  }
-  // Reverse walk. Externs always kept (conservative effects); their inputs
-  // are live. Computes/views kept only when a result is needed.
-  std::vector<bool> keep(program.nodes().size(), false);
-  for (size_t i = program.nodes().size(); i-- > 0;) {
+  std::set<std::string> barriers(
+      eff.barrierNodes.begin(), eff.barrierNodes.end());
+  for (size_t i = 0; i < program.nodes().size(); ++i) {
     const auto& n = program.nodes()[i];
     if (const auto* e = std::get_if<ExternCall>(&n)) {
-      keep[i] = true;
-      for (const auto& in : e->inputs()) {
-        needChain(in);
+      if (!live.keep[i]) {
+        passFail(
+            "dead_prune",
+            "extern barrier '" + e->name() + "' not kept by liveness");
       }
-      for (const auto& b : e->results()) {
-        needed.erase(b.name);
+      if (!barriers.count(e->name())) {
+        passFail(
+            "dead_prune",
+            "extern '" + e->name() + "' missing from effects facts");
       }
     } else if (const auto* c = std::get_if<Compute>(&n)) {
-      bool live = false;
-      for (const auto& b : c->results()) {
-        if (needed.count(b.name)) {
-          live = true;
-        }
-      }
-      keep[i] = live;
-      if (live) {
-        for (const auto& in : c->inputs()) {
-          needChain(in);
-        }
-        for (const auto& b : c->results()) {
-          needed.erase(b.name);
-        }
+      bool namedLive = live.liveComputes.count(c->name()) != 0;
+      if (live.keep[i] != namedLive) {
+        passFail(
+            "dead_prune",
+            "compute '" + c->name() + "' keep flag disagrees with facts");
       }
     } else {
       const auto* v = std::get_if<View>(&n);
-      if (needed.count(v->name)) {
-        keep[i] = true;
-        needChain(v->source);
+      bool namedLive = live.liveViews.count(v->name) != 0;
+      if (live.keep[i] != namedLive) {
+        passFail(
+            "dead_prune",
+            "view '" + v->name + "' keep flag disagrees with facts");
       }
     }
   }
   std::vector<Program::Node> out;
   for (size_t i = 0; i < program.nodes().size(); ++i) {
-    if (keep[i]) {
+    if (live.keep[i]) {
       const auto& n = program.nodes()[i];
       if (const auto* v = std::get_if<View>(&n)) {
         out.emplace_back(*v);
@@ -673,47 +700,57 @@ Program dead_prune(const Program& program) {
   return result;
 }
 
-// --- pipeline ---
+// --- public compatibility shims (through the formal registry) ---
+//
+// Each shim keeps its exact legacy signature and dispatches through
+// pipeline:: with a fresh AnalysisContext. Detail bodies (detail:: above)
+// never call these shims, so there is no recursive public-shim dispatch.
+
+Program view_inline(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass("view_inline", program, ctx);
+}
+
+Program index_simplify(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass("index_simplify", program, ctx);
+}
+
+Program unit_range_removal(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass("unit_range_removal", program, ctx);
+}
+
+Program local_cse_dce(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass("local_cse_dce", program, ctx);
+}
+
+Program dead_prune(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass("dead_prune", program, ctx);
+}
 
 std::vector<std::string> pass_names() {
-  // Order matters for canonical stability: unit_range_removal runs BEFORE
-  // index_simplify so substitution-exposed constant arithmetic (e.g. a
-  // unit dim replaced by 0 inside (p*stride+r)) is simplified in the same
-  // pipeline run; unit_range_removal also normalizes its own rewrites.
-  // view_inline first (kernels reject view_read), CSE/DCE after rewrites,
-  // dead_prune last on final liveness.
-  return {
-      "view_inline",
-      "unit_range_removal",
-      "index_simplify",
-      "local_cse_dce",
-      "dead_prune"};
+  // Legacy 5 micro-pass names, order and content identical to the
+  // pre-formal pipeline (canonical stability note lives in pass_manager.h).
+  return pipeline::legacyPassNamesList();
 }
 
 Program run_pass(const std::string& name, const Program& program) {
-  if (name == "view_inline") {
-    return view_inline(program);
-  }
-  if (name == "index_simplify") {
-    return index_simplify(program);
-  }
-  if (name == "unit_range_removal") {
-    return unit_range_removal(program);
-  }
-  if (name == "local_cse_dce") {
-    return local_cse_dce(program);
-  }
-  if (name == "dead_prune") {
-    return dead_prune(program);
-  }
-  throw std::invalid_argument("unknown pass '" + name + "'");
+  // Unknown names and typed stage mismatches throw from the registry.
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedLoopsPass(name, program, ctx);
 }
 
 Program optimize_program(const Program& program) {
-  program.verify();
+  // Formal 5-stage micro-pipeline with per-pass verification, context,
+  // and invalidations. Dumps are not captured here (the registry records
+  // empty dumps); use runPipeline for the traced pipeline.
+  analyses::AnalysisContext ctx;
   Program cur = program;
-  for (const auto& name : pass_names()) {
-    cur = run_pass(name, cur);
+  for (const auto& name : pipeline::legacyPassNamesList()) {
+    cur = pipeline::runTypedLoopsPass(name, cur, ctx);
     cur.verify();
   }
   return cur;
@@ -724,7 +761,7 @@ std::map<std::string, std::string> optimize_program_dumps(
   program.verify();
   std::map<std::string, std::string> dumps;
   Program cur = program;
-  for (const auto& name : pass_names()) {
+  for (const auto& name : pipeline::legacyPassNamesList()) {
     cur = run_pass(name, cur);
     cur.verify();
     dumps[name] = cur.dump();
@@ -732,158 +769,12 @@ std::map<std::string, std::string> optimize_program_dumps(
   return dumps;
 }
 
-// --- dense/injective store proof (fusion legality only) ---
-
-namespace {
-
-// Linear decomposition: offset == base + sum coeff[var]*var. False on any
-// nonlinearity (nested mul, floordiv, mod), duplicate vars, or overflow.
-bool linearDecomp(
-    const Index& idx,
-    std::map<std::string, int64_t>& coeffs,
-    int64_t& base) {
-  if (idx.empty()) {
-    return false;
-  }
-  const IndexExpr& e = idx.expr();
-  switch (e.kind) {
-    case IndexExpr::Kind::Constant: {
-      __int128 v = (__int128)base + e.value;
-      if (v > std::numeric_limits<int64_t>::max() ||
-          v < std::numeric_limits<int64_t>::min()) {
-        return false;
-      }
-      base = (int64_t)v;
-      return true;
-    }
-    case IndexExpr::Kind::Variable: {
-      if (coeffs.count(e.name)) {
-        return false;
-      }
-      coeffs[e.name] = 1;
-      return true;
-    }
-    case IndexExpr::Kind::Binary: {
-      if (e.op == "add") {
-        return linearDecomp(Index(e.lhs), coeffs, base) &&
-            linearDecomp(Index(e.rhs), coeffs, base);
-      }
-      if (e.op == "mul") {
-        int64_t c = 0;
-        std::shared_ptr<const IndexExpr> other;
-        if (isConstVal(Index(e.lhs), c)) {
-          other = e.rhs;
-        } else if (isConstVal(Index(e.rhs), c)) {
-          other = e.lhs;
-        } else {
-          return false;
-        }
-        std::map<std::string, int64_t> sub;
-        int64_t subBase = 0;
-        if (!linearDecomp(Index(other), sub, subBase)) {
-          return false;
-        }
-        for (const auto& kv : sub) {
-          if (coeffs.count(kv.first)) {
-            return false;
-          }
-          __int128 v = (__int128)kv.second * c;
-          if (v > std::numeric_limits<int64_t>::max() ||
-              v < std::numeric_limits<int64_t>::min()) {
-            return false;
-          }
-          coeffs[kv.first] = (int64_t)v;
-        }
-        __int128 b = (__int128)base + (__int128)subBase * c;
-        if (b > std::numeric_limits<int64_t>::max() ||
-            b < std::numeric_limits<int64_t>::min()) {
-          return false;
-        }
-        base = (int64_t)b;
-        return true;
-      }
-      return false;
-    }
-  }
-  return false;
-}
-
-} // namespace
+// --- dense/injective store proof shim (single home: analyses.h) ---
 
 bool prove_dense_injective_store(
     const Compute& compute,
     const std::string& result) {
-  // Pointwise-only single-store requirement.
-  if (!compute.reductionRanges().empty() || !compute.accumulators().empty() ||
-      !compute.reductionBody().empty()) {
-    return false;
-  }
-  const Instruction* store = nullptr;
-  for (const auto& ins : compute.postBody()) {
-    if (ins.kind() == Instruction::Kind::Store && ins.buffer() == result) {
-      if (store != nullptr) {
-        return false; // multiple stores: no narrow proof
-      }
-      store = &ins;
-    }
-  }
-  if (store == nullptr) {
-    return false;
-  }
-  int64_t elements = -1;
-  for (const auto& b : compute.results()) {
-    if (b.name == result) {
-      elements = b.elements;
-      break;
-    }
-  }
-  if (elements < 0) {
-    return false;
-  }
-  std::map<std::string, int64_t> coeffs;
-  int64_t base = 0;
-  if (!linearDecomp(store->offset(), coeffs, base) || base != 0) {
-    return false;
-  }
-  // Every pointwise var exactly once; ranges start at 0 (coverage [0, N)).
-  std::map<std::string, int64_t> extents;
-  for (const auto& r : compute.pointwiseRanges()) {
-    if (r.start != 0 || r.stop <= r.start) {
-      return false;
-    }
-    // stop > start >= 0 here (r.start == 0), so the difference fits.
-    extents[r.name] = r.stop - r.start;
-  }
-  if (coeffs.size() != extents.size()) {
-    return false;
-  }
-  for (const auto& kv : extents) {
-    auto it = coeffs.find(kv.first);
-    if (it == coeffs.end() || it->second <= 0) {
-      return false;
-    }
-  }
-  // Exact coverage: product == elements, dense strides ascending.
-  __int128 product = 1;
-  for (const auto& kv : extents) {
-    product *= kv.second;
-  }
-  if (product != (__int128)elements) {
-    return false;
-  }
-  std::vector<std::pair<int64_t, int64_t>> strideExtent; // (stride, extent)
-  for (const auto& kv : extents) {
-    strideExtent.emplace_back(coeffs[kv.first], kv.second);
-  }
-  std::sort(strideExtent.begin(), strideExtent.end());
-  __int128 running = 1;
-  for (const auto& se : strideExtent) {
-    if ((__int128)se.first != running) {
-      return false;
-    }
-    running *= se.second;
-  }
-  return true;
+  return analyses::denseInjectiveProofOf(compute, result);
 }
 
 } // namespace torch::inductor::loops_ir

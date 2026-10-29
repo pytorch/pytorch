@@ -7,6 +7,7 @@
 
 #include "ir.h"
 #include "kernel_ir.h"
+#include "pass_manager.h"
 #include "passes.h"
 
 namespace pybind11 {
@@ -335,6 +336,106 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("pass_names", &pass_names);
   m.def("optimize_program_dumps", &optimize_program_dumps, py::arg("program"));
 
-  // Tiling worker's bindings (separate file, registered after core/kernel).
+  // Tiling worker's bindings (separate file). Registered here — before the
+  // formal-pipeline defs below — so TileOptions exists when run_pipeline's
+  // default argument is converted. Adds only new types; core/kernel
+  // registration above is unaffected.
   bind_tiled_ir(m);
+
+  // Formal pipeline API. PipelineResult exposes readonly
+  // optimized_program (Program), kernels_before_fusion (KernelProgram),
+  // kernel_program (fused KernelProgram), tiled_program (TiledProgram),
+  // trace (per-pass entries).
+  py::class_<pipeline::PassTraceEntry>(m, "PassTraceEntry")
+      .def_property_readonly(
+          "name", [](const pipeline::PassTraceEntry& e) { return e.name; })
+      .def_property_readonly(
+          "version",
+          [](const pipeline::PassTraceEntry& e) { return e.version; })
+      .def_property_readonly(
+          "input_ir",
+          [](const pipeline::PassTraceEntry& e) { return e.inputIr; })
+      .def_property_readonly(
+          "output_ir",
+          [](const pipeline::PassTraceEntry& e) { return e.outputIr; })
+      .def_property_readonly(
+          "numerics",
+          [](const pipeline::PassTraceEntry& e) { return e.numerics; })
+      .def_property_readonly(
+          "input_fingerprint",
+          [](const pipeline::PassTraceEntry& e) { return e.inputFingerprint; })
+      .def_property_readonly(
+          "output_fingerprint",
+          [](const pipeline::PassTraceEntry& e) { return e.outputFingerprint; })
+      .def_property_readonly(
+          "analyses_computed",
+          [](const pipeline::PassTraceEntry& e) { return e.analysesComputed; })
+      .def_property_readonly(
+          "analyses_invalidated",
+          [](const pipeline::PassTraceEntry& e) {
+            return e.analysesInvalidated;
+          })
+      .def_property_readonly(
+          "dump", [](const pipeline::PassTraceEntry& e) { return e.dump; });
+
+  py::class_<pipeline::PipelineResult>(m, "PipelineResult")
+      .def_property_readonly(
+          "optimized_program",
+          [](const pipeline::PipelineResult& r) { return r.optimizedProgram; })
+      .def_property_readonly(
+          "kernels_before_fusion",
+          [](const pipeline::PipelineResult& r) {
+            return r.kernelBeforeFusion;
+          })
+      .def_property_readonly(
+          "kernel_program",
+          [](const pipeline::PipelineResult& r) { return r.kernelProgram; })
+      .def_property_readonly(
+          "tiled_program",
+          [](const pipeline::PipelineResult& r) { return r.tiledProgram; })
+      .def_property_readonly(
+          "trace", [](const pipeline::PipelineResult& r) { return r.trace; });
+
+  m.def(
+      "run_pipeline",
+      [](const Program& program,
+         const TileOptions& tileOptions,
+         bool captureDumps) {
+        return pipeline::runPipeline(program, tileOptions, captureDumps);
+      },
+      py::arg("program"),
+      py::arg("tile_options") = TileOptions(),
+      py::arg("capture_dumps") = true);
+  m.def("pipeline_pass_names", &pipeline::pipelinePassNames);
+  m.def("_registry_self_test", &pipeline::registrySelfTest);
+  m.def("pass_descriptors", []() {
+    py::list out;
+    for (const auto& d : pipeline::passDescriptors()) {
+      py::dict entry;
+      entry["name"] = d.name;
+      entry["version"] = d.version;
+      entry["input_ir"] = analyses::toString(d.inputIr);
+      entry["output_ir"] = analyses::toString(d.outputIr);
+      py::list required;
+      for (auto k : d.required) {
+        required.append(analyses::toString(k));
+      }
+      entry["required_analyses"] = required;
+      py::list preserved;
+      for (auto k : d.preserved) {
+        preserved.append(analyses::toString(k));
+      }
+      entry["preserved_analyses"] = preserved;
+      py::list invalidated;
+      for (auto k : d.invalidated) {
+        invalidated.append(analyses::toString(k));
+      }
+      entry["invalidated_analyses"] = invalidated;
+      entry["strict_safe"] = d.strictSafe;
+      entry["consults_tile_options"] = d.consultsTileOptions;
+      entry["capability"] = d.capability;
+      out.append(std::move(entry));
+    }
+    return out;
+  });
 }

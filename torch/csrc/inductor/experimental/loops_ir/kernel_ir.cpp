@@ -2,6 +2,9 @@
 // Vertical pointwise fusion only; no horizontal/reduction fusion, no fusion
 // across extern barriers. Strict numerics: rename SSA only, preserve every
 // FP op and order. Conservative: any missing proof leaves nodes unfused.
+//
+// Real transforms live in detail:: (pass_details.h). The public
+// lower_to_kernels/fuse_kernels below are thin shims through pipeline::.
 
 #include "kernel_ir.h"
 
@@ -13,7 +16,9 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "passes.h"
+#include "analyses.h"
+#include "pass_details.h"
+#include "pass_manager.h"
 
 namespace torch::inductor::loops_ir {
 namespace {
@@ -135,36 +140,6 @@ void checkKernelRegion(const Compute& c, const std::string& ctx) {
   }
 }
 
-// Resolve a view/alias chain to its storage root. Returns "" on cycles.
-std::string viewRoot(
-    const std::string& name,
-    const std::map<std::string, View>& viewMap) {
-  std::string cur = name;
-  std::set<std::string> seen;
-  while (viewMap.count(cur)) {
-    if (!seen.insert(cur).second) {
-      return "";
-    }
-    cur = viewMap.at(cur).source;
-  }
-  return cur;
-}
-
-// Alias closure of a buffer: itself plus every view whose transitive root
-// is that buffer. Views are element aliases of storage, so reads/outputs
-// through views observe the underlying buffer.
-std::set<std::string> aliasClosure(
-    const std::string& buffer,
-    const std::map<std::string, View>& viewMap) {
-  std::set<std::string> out{buffer};
-  for (const auto& kv : viewMap) {
-    if (viewRoot(kv.first, viewMap) == buffer) {
-      out.insert(kv.first);
-    }
-  }
-  return out;
-}
-
 // Fusion legality for producer P -> consumer C (both single-region pointwise):
 //  - P has exactly one result (the fused temp), C reads it.
 //  - P's result store proven dense/injective.
@@ -173,13 +148,17 @@ std::set<std::string> aliasClosure(
 //    (same iteration map; indexEquals, never pointer equality).
 //  - no other node reads the temp (single use), temp not a program output.
 // `nodes` is the current working node list (fixed-point rounds mutate it);
-// `outputs` are the (immutable) program outputs.
+// `outputs` are the (immutable) program outputs. The dense proof and alias
+// closure come from the shared context facts (review F4/F5); the scope key
+// is the producer's canonical compute string so post-rewrite SSA changes
+// can never hit a stale proof entry.
 bool fusiblePair(
     const Compute& prod,
     const Compute& cons,
     const std::vector<KernelProgram::Node>& nodes,
     const std::vector<Descriptor>& outputs,
-    const std::map<std::string, View>& viewMap,
+    const analyses::AliasRootFacts& alias,
+    analyses::AnalysisContext& ctx,
     size_t prodIdx,
     size_t consIdx,
     std::string& temp) {
@@ -197,7 +176,7 @@ bool fusiblePair(
       return false;
     }
   }
-  if (!prove_dense_injective_store(prod, temp)) {
+  if (!ctx.denseInjective(prod, temp, analyses::canonicalKeyOf(prod))) {
     return false;
   }
   // Consumer must load the temp exactly once-shape; find its load offset.
@@ -224,9 +203,16 @@ bool fusiblePair(
     }
   }
   // Single use: no other node reads the temp, directly or through a view
-  // alias of it. Reads through views observe the same storage, so they
-  // keep the temp alive exactly like direct reads.
-  std::set<std::string> tempAliases = aliasClosure(temp, viewMap);
+  // alias of it. The alias closure is derived from the shared facts'
+  // rootOf map (same conservative contract as the old local walker):
+  // reads through views observe the same storage, so they keep the temp
+  // alive exactly like direct reads.
+  std::set<std::string> tempAliases{temp};
+  for (const auto& kv : alias.rootOf) {
+    if (kv.second == temp) {
+      tempAliases.insert(kv.first);
+    }
+  }
   for (size_t i = 0; i < nodes.size(); ++i) {
     if (i == prodIdx || i == consIdx) {
       continue;
@@ -662,8 +648,14 @@ std::string KernelProgram::dump() const {
   return os.str();
 }
 
-KernelProgram lower_to_kernels(const Program& program) {
+KernelProgram detail::lowerToKernelsImpl(
+    const Program& program,
+    analyses::AnalysisContext& ctx) {
   program.verify();
+  // Genuinely read effects facts: extern barriers must be carried in
+  // order (no reordering across them); every barrier node in the input
+  // must appear in the lowered output.
+  const analyses::EffectFacts& eff = ctx.effects(program);
   KernelProgram out(program.name(), program.numerics());
   for (const auto& b : program.inputs()) {
     out.addInput(b);
@@ -693,11 +685,53 @@ KernelProgram lower_to_kernels(const Program& program) {
   }
   out.buildDependencies();
   out.verify();
+  // Every effects-barrier node survived lowering in order.
+  {
+    std::vector<std::string> outBarriers;
+    for (const auto& n : out.nodes()) {
+      if (const auto* e = std::get_if<ExternCall>(&n)) {
+        outBarriers.push_back(e->name());
+      }
+    }
+    if (outBarriers != eff.barrierNodes) {
+      kfail("lower_to_kernels", "extern barriers not preserved in order");
+    }
+  }
   return out;
 }
 
-KernelProgram fuse_kernels(const KernelProgram& program) {
+KernelProgram detail::fuseKernelsImpl(
+    const KernelProgram& program,
+    analyses::AnalysisContext& ctx) {
   program.verify();
+  // Genuinely read dependency + effects + alias facts. The dependency
+  // guard below prunes doomed pairs before the legality proof: a producer
+  // that is not a direct dependency predecessor of the consumer (or an
+  // extern sits between them) can never fuse. Extern barriers and view
+  // aliases use the shared context facts (same conservative contract as
+  // fusiblePair's local checks).
+  const analyses::DependencyFacts& deps = ctx.dependencies(program);
+  const analyses::EffectFacts& eff = ctx.kernelEffects(program);
+  const analyses::AliasRootFacts& alias = ctx.kernelAliasRoots(program);
+  if (deps.edges.size() != program.nodes().size()) {
+    kfail("fuse_kernels", "dependency facts disagree with program nodes");
+  }
+  if (eff.barrierNodes.size() != [&]() {
+        size_t n = 0;
+        for (const auto& node : program.nodes()) {
+          if (std::get_if<ExternCall>(&node) != nullptr) {
+            ++n;
+          }
+        }
+        return n;
+      }()) {
+    kfail("fuse_kernels", "effects facts disagree with extern nodes");
+  }
+  for (const auto& in : program.inputs()) {
+    if (alias.rootOf.find(in.name) == alias.rootOf.end()) {
+      kfail("fuse_kernels", "unresolved alias input '" + in.name + "'");
+    }
+  }
   // Greedy single-use adjacent pointwise chain fusion, iterated to a stable
   // fixed point in ONE call: each round scans left to right fusing disjoint
   // adjacent pairs (same conservative legality as a single round), then
@@ -705,14 +739,39 @@ KernelProgram fuse_kernels(const KernelProgram& program) {
   // nothing, so the result is idempotent: fuse(fuse(p)) == fuse(p).
   // Never crosses extern barriers (externs split the fusion window).
   // Outputs and dependency DAG are rebuilt deterministically at the end.
-  std::map<std::string, View> viewMap;
-  for (const auto& v : program.views()) {
-    viewMap[v.name] = v;
-  }
   std::vector<KernelProgram::Node> nodes = program.nodes();
   bool changed = true;
   while (changed) {
     changed = false;
+    // Refresh the dependency guard each round: `nodes` shrinks as pairs
+    // fuse, so round-1 edges would be stale. Build a scratch program from
+    // the current working list and run the existing dependency algorithm
+    // on it (local copy; the shared context cache is untouched).
+    std::vector<std::vector<size_t>> roundDeps;
+    {
+      KernelProgram scratch(program.name(), program.numerics());
+      for (const auto& b : program.inputs()) {
+        scratch.addInput(b);
+      }
+      for (const auto& d : program.inputDescriptors()) {
+        scratch.addInputDescriptor(d);
+      }
+      for (const auto& v : program.views()) {
+        scratch.addView(v);
+      }
+      for (const auto& n : nodes) {
+        if (const auto* f = std::get_if<KernelFunction>(&n)) {
+          scratch.addFunction(*f);
+        } else {
+          scratch.addExternCall(*std::get_if<ExternCall>(&n));
+        }
+      }
+      for (const auto& d : program.outputs()) {
+        scratch.addOutput(d);
+      }
+      scratch.buildDependencies();
+      roundDeps = scratch.dependencies();
+    }
     std::vector<KernelProgram::Node> next;
     size_t i = 0;
     while (i < nodes.size()) {
@@ -723,13 +782,30 @@ KernelProgram fuse_kernels(const KernelProgram& program) {
         fj = std::get_if<KernelFunction>(&nodes[j]);
       }
       if (fi && fj && fi->regions().size() == 1 && fj->regions().size() == 1) {
+        // Dependency guard from the shared context facts (round-fresh):
+        // the producer must be a direct dependency predecessor of the
+        // consumer. Any extern between them already forces a dependency
+        // edge (conservative barriers), so a missing edge means fusion is
+        // impossible here. This only prunes; legality still requires the
+        // full fusiblePair proof below (same verdicts as before).
+        bool depAdjacent = false;
+        if (j < roundDeps.size()) {
+          for (size_t d : roundDeps[j]) {
+            if (d == i) {
+              depAdjacent = true;
+              break;
+            }
+          }
+        }
         std::string temp;
-        if (fusiblePair(
+        if (depAdjacent &&
+            fusiblePair(
                 fi->regions()[0],
                 fj->regions()[0],
                 nodes,
                 program.outputs(),
-                viewMap,
+                alias,
+                ctx,
                 i,
                 j,
                 temp)) {
@@ -770,6 +846,22 @@ KernelProgram fuse_kernels(const KernelProgram& program) {
   // only valid when it escapes nowhere (checked in fusiblePair).
   out.verify();
   return out;
+}
+
+// --- public compatibility shims (through the formal registry) ---
+//
+// Each shim keeps its exact legacy signature and dispatches through
+// pipeline:: with a fresh AnalysisContext. Detail bodies (detail:: above)
+// never call these shims, so there is no recursive public-shim dispatch.
+
+KernelProgram lower_to_kernels(const Program& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runLowerToKernels(program, ctx);
+}
+
+KernelProgram fuse_kernels(const KernelProgram& program) {
+  analyses::AnalysisContext ctx;
+  return pipeline::runTypedKernelPass("fuse_kernels", program, ctx);
 }
 
 } // namespace torch::inductor::loops_ir

@@ -2,6 +2,9 @@
 // Logical micro-passes for LoopsIR. Strict numerics: preserve all FP op
 // order/rounding. No FP constant folding, reassociation, neutral identities,
 // FMA/FTZ. Integer-only simplifications allowed with checked arithmetic.
+//
+// The bodies below are shims dispatching through the typed registry in
+// pass_manager.h. Real transforms live in detail:: (pass_details.h).
 
 #include <map>
 #include <string>
