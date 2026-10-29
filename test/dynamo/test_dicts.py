@@ -68,6 +68,26 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("key", ["a", "c"])
+    @parametrize("operation", ["setitem", "update"])
+    def test_dict_update_reordered_input_reuses_graph(self, key, operation):
+        def fn(x, mapping):
+            if operation == "setitem":
+                mapping[key] = x + 1
+            else:
+                mapping.update({key: x + 1})
+            return x + 2
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for keys in ("ab", "ba", "ab"):
+            mapping = dict.fromkeys(keys, 0)
+            expected = mapping.copy()
+            self.assertEqual(compiled(x, mapping), fn(x, expected))
+            self.assertEqual(list(mapping.items()), list(expected.items()))
+        self.assertEqual(counter.frame_count, 1)
+
     @parametrize("operation", ["del", "pop"])
     def test_ordered_dict_delete_reordered_input(self, operation):
         def fn(x, mapping):
@@ -415,6 +435,43 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(actual, fn(x, mapping))
             self.assertEqual(list(actual[1]), list(mapping))
         self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_subclass_copy_key_comparisons(self, reordered):
+        class Key:
+            def __init__(self, value, events):
+                self.value = value
+                self.events = events
+
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                self.events.append(("eq", self.value, other.value))
+                return self.value == other.value
+
+        class Mapping(OrderedDict):
+            def __getitem__(self, key):
+                key.events.append(("get", key.value))
+                return super().__getitem__(key)
+
+            def __setitem__(self, key, value):
+                key.events.append(("set", key.value))
+                super().__setitem__(key, value)
+
+        def fn(x):
+            events = []
+            first, second = Key(1, events), Key(2, events)
+            mapping = Mapping([(first, x), (second, x + 1)])
+            if reordered:
+                mapping.move_to_end(first)
+            events.clear()
+            result = mapping.copy()
+            return x + len(result), events, type(result) is Mapping
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
 
     @parametrize("failure", ["exception", "graph_break"])
     def test_ordered_dict_copy_key_comparison_exception(self, failure):
