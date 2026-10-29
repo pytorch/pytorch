@@ -83,8 +83,7 @@ __global__ void upsample_bilinear2d_out_frame_per_element(
 
 // Four consecutive w2 of one output row per thread: the row weights are
 // computed once and the outputs leave in one vector store. Requires a
-// contiguous output with width % 4 == 0 aligned to the vector size, and an
-// input with unit stride along w.
+// contiguous output with width % 4 == 0 aligned to the vector size.
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(256)
 __global__ void upsample_bilinear2d_out_frame_vec4(
@@ -117,9 +116,6 @@ __global__ void upsample_bilinear2d_out_frame_vec4(
     const accscalar_t h1lambda = h1r - h1;
     const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
 
-    const scalar_t* row0 = &idata[n][c][h1][0];
-    const scalar_t* row1 = &idata[n][c][h1 + h1p][0];
-
     vec_t out;
 #pragma unroll
     for (int k = 0; k < 4; k++) {
@@ -130,8 +126,11 @@ __global__ void upsample_bilinear2d_out_frame_vec4(
       const accscalar_t w1lambda = w1r - w1;
       const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
       const accscalar_t val = h0lambda *
-              (w0lambda * row0[w1] + w1lambda * row0[w1 + w1p]) +
-          h1lambda * (w0lambda * row1[w1] + w1lambda * row1[w1 + w1p]);
+              (w0lambda * idata[n][c][h1][w1] +
+               w1lambda * idata[n][c][h1][w1 + w1p]) +
+          h1lambda *
+              (w0lambda * idata[n][c][h1 + h1p][w1] +
+               w1lambda * idata[n][c][h1 + h1p][w1 + w1p]);
       out.val[k] = static_cast<scalar_t>(val);
     }
     *reinterpret_cast<vec_t*>(odata + static_cast<int64_t>(index4) * 4) = out;
@@ -516,7 +515,7 @@ static void upsample_bilinear2d_out_cuda_template(
       // vec4 helps only when upsampling: when downsampling, the input read
       // dominates and the scalar kernel is faster.
       const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
-          input.stride(3) == 1 && output_width % 4 == 0 &&
+          output_width % 4 == 0 &&
           reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
                   (4 * sizeof(scalar_t)) == 0 &&
           static_cast<int64_t>(input_height) * input_width <=
