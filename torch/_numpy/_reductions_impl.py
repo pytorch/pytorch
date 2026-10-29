@@ -400,7 +400,7 @@ def quantile(
     out: OutArray | None = None,
     overwrite_input: bool = False,
     method: str = "linear",
-    keepdims: KeepDims = False,
+    keepdims: bool = False,
     *,
     interpolation: NotImplementedType = None,
 ) -> torch.Tensor:
@@ -419,10 +419,9 @@ def quantile(
     if a.dtype == torch.float16:
         a = a.to(torch.float32)
 
+    q_shape = q.shape
     if axis is None:
-        a = a.flatten()
         q = q.flatten()
-        axis = (0,)
     else:
         axis = _util.normalize_axis_tuple(axis, a.ndim)
 
@@ -433,7 +432,11 @@ def quantile(
 
     q = _util.cast_if_needed(q, a.dtype)
 
-    return torch.quantile(a, q, axis, interpolation=method)
+    keepdims = bool(keepdims)
+    result = torch.quantile(a, q, axis, keepdim=keepdims, interpolation=method)
+    if axis is None and (keepdims or q_shape):
+        result = result.reshape(q_shape + result.shape[1:])
+    return result
 
 
 def percentile(
@@ -443,7 +446,7 @@ def percentile(
     out: OutArray | None = None,
     overwrite_input: bool = False,
     method: str = "linear",
-    keepdims: KeepDims = False,
+    keepdims: bool = False,
     *,
     interpolation: NotImplementedType = None,
 ) -> torch.Tensor:
@@ -468,7 +471,7 @@ def median(
     axis: int | None = None,
     out: OutArray | None = None,
     overwrite_input: bool = False,
-    keepdims: KeepDims = False,
+    keepdims: bool = False,
 ) -> torch.Tensor:
     return quantile(
         a,
