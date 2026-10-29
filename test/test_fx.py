@@ -74,7 +74,6 @@ from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     blas_library_context,
 )
 from torch.testing._internal.common_utils import (
@@ -5527,27 +5526,27 @@ class TestFXCUDA(JitTestCase):
                     "addmm_1": ("linear",),
                 },
             )
+        elif not torch.version.hip:
+            # cuBLASLt's internal capture checks vary with its kernel selection.
+            # Validate the FX metadata on every event, including those checks.
+            expected_stacks = {
+                "t": "self.linear1(x)",
+                "addmm": "self.linear1(x)",
+                "relu": "self.relu(x)",
+                "t_1": "self.linear2(x)",
+                "addmm_1": "self.linear2(x)",
+            }
+            parsed = _parse_profiler_trace_lines(actual_traces)
+            self.assertEqual({node for _, node, _ in parsed}, set(expected_stacks))
+            for event, node, stack_trace in parsed:
+                self.assertIn(expected_stacks[node], stack_trace, f"{event}: {node}")
         else:
-            # cuBLASLt added two internal cudaStreamIsCapturing checks before
-            # launching GEMM kernels starting with CUDA 13.4, which show up
-            # as extra runtime events ahead of each addmm's kernel launch.
-            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
-            capture_1, capture_2 = "", ""
-            if extra_event:
-                capture_1 = (
-                    "event=cudaStreamIsCapturing node=addmm "
-                    "stack_trace=x = self.linear1(x)\n"
-                ) * 2
-                capture_2 = (
-                    "event=cudaStreamIsCapturing node=addmm_1 "
-                    "stack_trace=x = self.linear2(x)\n"
-                ) * 2
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -5555,7 +5554,7 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
