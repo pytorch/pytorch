@@ -137,8 +137,8 @@ class TestKernelColTile(TestCase):
             for columns in (256, ct._C_THREAD_STAGE2):
                 x = torch.randn(3, 515, columns, device="cuda")
                 with self.subTest(npar=npar, pc=3 * columns >= ct._C_THREAD_STAGE2):
-                    (got,) = ct._reduce_col_tile(
-                        trait, "batched_col", x, [torch.float32], 1, None, npar, None
+                    (got,) = ct.reduce_batched_col_tile(
+                        trait, "batched_col", x, [torch.float32], 1, npar=npar
                     )
                     torch.testing.assert_close(
                         got, x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-4
@@ -184,8 +184,8 @@ class TestKernelColTile(TestCase):
             with torch.backends.python_native.cutedsl.disabled():
                 expected = torch.var_mean(x, dim=1)
             with self.subTest(pc=3 * columns >= ct._C_THREAD_STAGE2):
-                got = ct._reduce_col_tile(
-                    trait, "batched_var_mean", x, f32, 2, None, 4, None
+                got = ct.reduce_batched_col_tile(
+                    trait, "batched_var_mean", x, f32, 2, npar=4
                 )
                 for g, e in zip(got, expected):
                     torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
@@ -272,8 +272,8 @@ class TestKernelColTile(TestCase):
                 x[:, 100] = tie
                 x[:, 900] = tie
                 with self.subTest(op=name, pc=batches * columns >= ct._C_THREAD_STAGE2):
-                    vals, idx = ct._reduce_col_tile(
-                        trait, f"{name}dim_batched", x, [f32, i32], 2, None, 4, None
+                    vals, idx = ct.reduce_batched_col_tile(
+                        trait, f"{name}dim_batched", x, [f32, i32], 2, npar=4
                     )
                     self.assertEqual(vals, torch.full_like(vals, tie))
                     self.assertEqual(idx, torch.full_like(idx, 100))
