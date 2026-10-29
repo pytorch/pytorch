@@ -1631,14 +1631,15 @@ class _CapturePackage(CompilePackage):
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
         # The operators each backend graph calls, by backend id, and those Dynamo
-        # graph-breaks on and runs eagerly because fake tensors cannot run them (no
-        # fake kernel, or a data-dependent output value or shape). Ops in a
-        # torch._dynamo.disable'd function, ops past the point where Dynamo gave
-        # up on a frame it falls back on, and under the eager backend the ops of a
-        # custom op's backward formula, which no graph holds, are not recorded,
-        # nor are those of a bypassed compile, whose frame serving re-traces under
+        # graph-breaks on and runs eagerly because fake tensors failed to run them.
+        # Not recorded: the ops of a torch._dynamo.disable'd function; in a frame
+        # Dynamo falls back on, every op but the one it graph-broke on; under the
+        # eager backend the ops of a custom op's backward formula, which no graph
+        # holds; under cpp_wrapper the ops only Inductor's code calls (inserted by
+        # a post-grad pass, or in the backward), which it names in C++ strings;
+        # and those of a bypassed compile, whose frame serving re-traces under
         # allow_serve_time_compiles=True. The artifact adds the ops Inductor's
-        # code calls.
+        # Python code calls.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
