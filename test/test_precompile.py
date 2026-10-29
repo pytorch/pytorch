@@ -9933,10 +9933,12 @@ class TestPrecompileCustomOpRecording(TestCase):
             self.assertEqual(_custom_op_modules(ops), ((), ()))
         cusparselt, cutlass = logs.output
         self.assertIn("semi_structured::cusparselt_mm,", cusparselt)
-        self.assertIn("_ensure_cusparselt_mm_registered() runs", cusparselt)
+        self.assertIn(
+            "inside torch.sparse.semi_structured._ensure_cusparselt_mm", cusparselt
+        )
         self.assertNotIn("cutlass", cusparselt)
         self.assertIn("semi_structured::cutlass_mm,", cutlass)
-        self.assertIn("_ensure_cutlass_mm_registered() runs", cutlass)
+        self.assertIn("inside torch.sparse.semi_structured._ensure_cutlass_mm", cutlass)
         self.assertNotIn("cusparselt", cutlass)
 
     def test_a_prim_a_lazy_module_defines_is_imported_and_checked(self):
