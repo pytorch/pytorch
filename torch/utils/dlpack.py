@@ -31,17 +31,6 @@ class DLDeviceType(enum.IntEnum):
     kDLMAIA = 17,
 
 
-# Backends whose current_stream() can be passed to a DLPack producer, mapped
-# to (torch module name, attribute holding the stream's native pointer).
-# Public but undocumented attributes. ROCm is exposed through torch.cuda
-# (PyTorch has no separate torch.hip module).
-_DL_STREAM_BACKENDS: dict[int, tuple[str, str]] = {
-    DLDeviceType.kDLCUDA: ("cuda", "cuda_stream"),
-    DLDeviceType.kDLROCM: ("cuda", "cuda_stream"),
-    DLDeviceType.kDLOneAPI: ("xpu", "sycl_queue"),
-}
-
-
 class ReadOnlyTensorWrapper(torch.Tensor):
     r"""A zero-copy, read-only view of a tensor for DLPack interop only.
 
@@ -242,12 +231,8 @@ def from_dlpack(
 
         # If the producer's backend has a stream, pass the consumer's current
         # stream so the producer can synchronize against it.
-        backend = _DL_STREAM_BACKENDS.get(ext_device[0])
-        if backend is not None:
-            backend_name, stream_ptr_attr = backend
-            device_module = getattr(torch, backend_name)
-            stream = device_module.current_stream(f'{backend_name}:{ext_device[1]}')
-            stream_ptr = getattr(stream, stream_ptr_attr)
+        if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM, DLDeviceType.kDLOneAPI):
+            stream_ptr = torch.accelerator.current_stream(ext_device[1]).native_handle
             if ext_device[0] == DLDeviceType.kDLCUDA:
                 # The array API specifies that the default legacy stream must
                 # be passed with a value of 1 for CUDA (this convention is
