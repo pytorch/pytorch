@@ -4039,16 +4039,15 @@ def capture(
     the artifact replays each kernel with one frozen config: Inductor's
     kernels, forward included, are tuned on synthetic inputs at the size
     hints, not on the block's real calls. A ``@triton.autotune`` kernel traced
-    into a captured graph is likewise tuned on random tensors
-    (``torch._inductor.config.triton.autotune_with_sample_inputs`` defaults to
-    False), and the config it picks ships in the artifact.
-    ``triton.multi_kernel=1`` is turned off, with a warning, while each
-    captured graph lowers (user code between captured calls keeps the ambient
-    config): such a multi-kernel picks its sub-kernel by benchmarking at first
-    launch, which the artifact cannot record. A :class:`DynamoTracer` capture
-    with grad enabled lowers each backward while the forward's tensors are
-    still live, so peak device memory during the capture grows by roughly the
-    backward's working set.
+    into a captured graph is likewise tuned on random tensors, and the config
+    it picks ships in the artifact. A nonzero ``triton.multi_kernel`` is turned
+    off, with a warning, while each captured graph lowers (user code between
+    captured calls keeps the ambient config): a multi-kernel picks its
+    sub-kernel when the loaded module runs, by benchmarking at first launch or
+    from the serving process's own ``triton.multi_kernel``, which the artifact
+    cannot record. A :class:`DynamoTracer` capture with grad enabled lowers
+    each backward while the forward's tensors are still live, so peak device
+    memory during the capture grows by roughly the backward's working set.
 
     .. note::
 
