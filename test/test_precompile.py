@@ -10398,6 +10398,17 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         self.assertIn(f"CUSTOM_OPS = {((f'{ns}::op', ''),)!r}", python_code)
 
+    def test_an_op_passed_to_a_skipped_call_is_checked(self):
+        _, name = self._op("passed")
+        # The global op is still lazy when the call it is passed to breaks.
+        python_code = self._capture_module(
+            f"import torch\nop = torch.ops.{name.replace('::', '.')}.default\n"
+            "call = torch._dynamo.disable(lambda o, x: o(x))\n"
+            "def fn(x):\n    return call(op, x.sin()) + 1\n",
+            tracer=DynamoTracer(),
+        )
+        self.assertIn(f"CUSTOM_OPS = {((name, ''),)!r}", python_code)
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
     def test_a_bypassed_compiles_graph_break_op_is_not_checked(self):
@@ -10445,34 +10456,21 @@ class TestPrecompileCustomOpRecording(TestCase):
                 "lib.define('helper(Tensor x) -> Tensor')\n"
                 "lib.impl('helper', lambda x: x * 2, 'CPU')\n"
             )
-        entry = f"precompile_fake_only_entry_{uuid.uuid4().hex}"
-        with open(os.path.join(directory, entry + ".py"), "w") as f:
-            f.write(
-                "import torch\ndef fn(x):\n"
-                "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n"
-            )
         self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
         self.addCleanup(lambda: sys.modules.pop(name).lib._destroy())
-        self.addCleanup(sys.modules.pop, entry, None)
         helper = getattr(torch.ops, importlib.import_module(name).lib.ns).helper
         lib = self.enterContext(_scoped_library("precompile_fake_helper", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, key)
         torch.library.register_fake("precompile_fake_helper::op", helper, lib=lib)
-        artifact = os.path.join(directory, "artifact.py")
-        with capture(
-            importlib.import_module(entry).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
+        python_code = self._capture_module(
+            "import torch\ndef fn(x):\n"
+            "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n",
             tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
-            cap(torch.ones(4))
-        with open(artifact) as f:
-            python_code = f.read()
+        )
         self.assertIn("CUSTOM_OPS = (('precompile_fake_helper::op', ''),)", python_code)
         # The op has no known module, so only the entry's is imported.
-        self.assertIn(f"CUSTOM_OP_MODULES = {(entry,)!r}", python_code)
+        self.assertRegex(python_code, r"_MODULES = \('precompile_recording_\w+',\)")
 
     @parametrize("mode", ["standalone", "installed"])
     def test_a_served_module_that_fails_to_import_fails_the_load(self, mode):
