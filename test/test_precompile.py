@@ -9828,7 +9828,8 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
     @skipIfCrossRef
-    def test_load_imports_the_overriding_kernel_module_last(self):
+    @parametrize("override_breaks", (False, True))
+    def test_load_imports_the_overriding_kernel_module_last(self, override_breaks):
         tag = uuid.uuid4().hex
         # Alphabetical order would import the overriding module first.
         override, vendor = f"precompile_a_override_{tag}", f"precompile_z_vendor_{tag}"
@@ -9837,7 +9838,9 @@ class TestPrecompileCustomOpModules(TestCase):
         lib = f'import torch\nlib = torch.library.Library("{ns}", "IMPL")\n'
         sources = {
             vendor: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("op(Tensor x) -> Tensor")\nlib.impl("op", lambda x: x * 3, "CPU")\n',
-            override: lib + 'lib.impl("op", lambda x: x * 5, "CPU")\n',
+            override: 'import os\nif os.environ.get("PRECOMPILE_BREAK_OVERRIDE"):\n    raise ImportError("broken")\n'
+            + lib
+            + 'lib.impl("op", lambda x: x * 5, "CPU")\n',
             cuda_only: lib + 'lib.impl("op", lambda x: x * 7, "CUDA")\n',
         }
         for name, source in sources.items():
@@ -9857,20 +9860,37 @@ class TestPrecompileCustomOpModules(TestCase):
                 op = torch.ops.{ns}.op.default
                 with capture(lambda x: op(x), artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
                     torch.testing.assert_close(cap(x), x * 5)
-            else:
+            elif phase == "load":
                 torch.testing.assert_close(load(artifact, cache)(x), x * 5)
                 assert "{cuda_only}" not in sys.modules
+            else:
+                # vendor's x * 3 CPU kernel must not stand in for the override's.
+                try:
+                    load(artifact, cache)
+                except torch.compiler.PrecompileError as e:
+                    print(e)
+                else:
+                    raise AssertionError("load did not fail")
             print("ok", phase)
             """
         )
         paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
-        for phase in ("capture", "load"):
+        env = dict(os.environ)
+        for phase in ("capture", "broken" if override_breaks else "load"):
+            if phase == "broken":
+                env["PRECOMPILE_BREAK_OVERRIDE"] = "1"
             cmd = [sys.executable, "-c", script, phase, *paths]
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=900, env=env
+            )
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertIn(f"ok {phase}", out.stdout)
+        if override_breaks:
+            self.assertIn(f"failed to import: {[override]!r}", out.stdout)
         with open(paths[0]) as f:
-            self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", f.read())
+            source = f.read()
+        self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", source)
+        self.assertIn(f"CUSTOM_OP_KERNEL_MODULES = {(override,)!r}", source)
 
 
 def _decomposed_op_fn(x):
@@ -10000,7 +10020,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Only the metadata names stay in the artifact's namespace.
         names = {name for name in namespace if not name.startswith("__")}
         self.assertEqual(
-            names, {"CUSTOM_OP_MODULES", "CUSTOM_OPS", "CUSTOM_OP_KERNELS"}
+            names,
+            {
+                "CUSTOM_OP_MODULES",
+                "CUSTOM_OPS",
+                "CUSTOM_OP_KERNELS",
+                "CUSTOM_OP_KERNEL_MODULES",
+            },
         )
         with self.assertNoLogs("torch._precompile", "DEBUG"):
             with self.assertRaisesRegex(PrecompileError, "missing calling-convention"):
@@ -10066,6 +10092,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         exec(buf.getvalue(), namespace)
         expected = {f"{ns}::op": ("CPU", "CompositeExplicitAutograd")}
         self.assertEqual(namespace["CUSTOM_OP_KERNELS"], expected)
+        # A backend outside the default keys, and a layout's own key.
+        graph = torch.fx.Graph()
+        sparse, meta = graph.placeholder("sparse"), graph.placeholder("meta")
+        sparse.meta["val"] = torch.randn(2).to_sparse()
+        meta.meta["val"] = torch.randn(2, device="meta")
+        graph.output((sparse, meta))
+        keys = _graph_kernel_keys(torch.fx.GraphModule(torch.nn.Module(), graph))
+        self.assertEqual(keys[:2], ("Meta", "SparseCPU"))
+        self.assertTrue(all(k.startswith("Composite") for k in keys[2:]))
 
         # As does a Dynamo capture's.
         directory = self.enterContext(tempfile.TemporaryDirectory())
