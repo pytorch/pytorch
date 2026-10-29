@@ -66,6 +66,12 @@ def _build_blockscaled_tma_spec(
     do_dim_m = is_dual or dim == dim_k[::-1]
     row_axis, col_axis = input_matrix_axes
 
+    if do_dim_k and do_dim_m:
+        if not is_scale_swizzled:
+            raise ValueError("dual quantization does not support compact scales")
+        if is_square_scaling:
+            raise ValueError("dual quantization does not support square scaling")
+
     if not is_scale_swizzled:
         if do_dim_m:
             raise ValueError(
