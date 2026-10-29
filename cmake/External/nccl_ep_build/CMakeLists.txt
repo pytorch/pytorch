@@ -36,13 +36,13 @@ target_include_directories(nccl_ep_static BEFORE PUBLIC
   "${NCCL_EP_BUILDDIR}/include" "${NCCL_EP_BUILDDIR}/include/nccl_ep"
   "${NCCL_INCLUDE_DIR}" "${NCCL_INCLUDE_DIR}/nccl_device")
 
-# Stage the matching core NCCL headers alongside EP's headers.
-add_custom_target(nccl_ep_artifacts
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${NCCL_EP_BUILDDIR}/nccl/include"
-  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${NCCL_INCLUDE_DIR}/nccl.h" "${NCCL_INCLUDE_DIR}/nccl_device.h"
-    "${NCCL_EP_BUILDDIR}/nccl/include/"
-  COMMAND "${CMAKE_COMMAND}" -E copy_directory
-    "${NCCL_INCLUDE_DIR}/nccl_device" "${NCCL_EP_BUILDDIR}/nccl/include/nccl_device"
-  DEPENDS nccl_ep_static
-  VERBATIM)
+# Keep EP and matching NCCL headers in the tree fingerprinted by the JIT cache.
+# Refresh core headers before compilation so this tree can take precedence over
+# NCCL installations that still contain old EP headers.
+file(GLOB_RECURSE nccl_device_headers CONFIGURE_DEPENDS
+  RELATIVE "${NCCL_INCLUDE_DIR}" "${NCCL_INCLUDE_DIR}/nccl_device/*")
+foreach(header nccl.h nccl_device.h ${nccl_device_headers})
+  configure_file("${NCCL_INCLUDE_DIR}/${header}"
+    "${NCCL_EP_BUILDDIR}/include/${header}" COPYONLY)
+endforeach()
+add_custom_target(nccl_ep_artifacts DEPENDS nccl_ep_static)

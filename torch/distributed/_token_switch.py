@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -275,10 +275,12 @@ class TokenSwitch(abc.ABC):
 
 
 class TokenSwitchNCCL(TokenSwitch):
-    """Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
+    r"""Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
 
     The dispatch output layout is chosen per routing via
     :meth:`create_routing`'s ``layout`` argument.
+    Symmetric-memory token outputs and outputs used during CUDA graph capture
+    must cover ``max_recv_tokens_per_rank``.
     """
 
     def __init__(
@@ -369,14 +371,62 @@ class TokenSwitchNCCL(TokenSwitch):
         out_topk_weights: torch.Tensor | None,
         out_topk_idx: torch.Tensor | None,
     ) -> None:
+        outputs = (out_tokens, out_topk_weights, out_topk_idx)
+        capacity = self._max_recv_tokens_per_rank
+        padded = list(outputs)
+        # Fixed-budget EP requires full-capacity buffers even outside capture.
+        if any(t is not None and t.ndim > 0 and t.shape[0] < capacity for t in outputs):
+            for t in outputs:
+                if t is not None and (t.ndim == 0 or not t.is_contiguous()):
+                    raise ValueError(
+                        "nccl_ep outputs must have rank >= 1 and be contiguous"
+                    )
+            if (
+                out_topk_weights is not None
+                and out_topk_idx is not None
+                and out_topk_weights.shape != out_topk_idx.shape
+            ):
+                raise ValueError(
+                    "nccl_ep output weights and indices must have matching shapes"
+                )
+            if torch.cuda.is_current_stream_capturing():
+                raise ValueError(
+                    "CUDA graph dispatch outputs must cover the receive capacity"
+                )
+            import torch.distributed._symmetric_memory as symm_mem
+
+            if out_tokens.shape[0] < capacity and symm_mem.is_symm_mem_tensor(
+                out_tokens
+            ):
+                raise ValueError(
+                    "Symmetric-memory dispatch outputs must cover the receive capacity"
+                )
+            num_recv = cast(Any, routing.handle).get_num_recv_tokens()
+            for i, t in enumerate(outputs):
+                if t is None:
+                    continue
+                if t.shape[0] < num_recv:
+                    raise ValueError(
+                        f"Dispatch output has {t.shape[0]} rows but receives {num_recv} tokens"
+                    )
+                if t.shape[0] < capacity:
+                    full = t.new_empty((capacity, *t.shape[1:]))
+                    # All ranks must agree on whether token outputs use windows.
+                    if i == 0 and symm_mem.is_symm_mem_tensor(full):
+                        raise ValueError(
+                            "Allocate dispatch staging outside the symmetric-memory pool"
+                        )
+                    padded[i] = full
+
         self._ep._nccl_ep_dispatch(
             routing.handle,
             tokens,
             topk_weights,
-            out_tokens,
-            out_topk_weights,
-            out_topk_idx,
+            *padded,
         )
+        for original, full in zip(outputs, padded):
+            if original is not None and full is not None and full is not original:
+                original.copy_(full[: original.shape[0]])
 
     def _combine(
         self,

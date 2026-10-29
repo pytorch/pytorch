@@ -26,8 +26,8 @@ std::string torch_nccl_ep_jit_env_value(const char* name) {
     return std::filesystem::canonical(info.dli_fname).parent_path() / "share" /
         "nccl_ep";
   }();
-  return (home / (key == "NCCL_EP_JIT_SOURCE_DIR" ? "include/nccl_ep"
-                                               : "nccl/include"))
+  const auto include_dir = home / "include";
+  return (key == "NCCL_EP_JIT_SOURCE_DIR" ? include_dir / "nccl_ep" : include_dir)
       .string();
 }
 

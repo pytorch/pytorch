@@ -495,7 +495,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     # __caffe2_nccl_ep: libnccl_ep.a + nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
-    target_include_directories(_nccl_ep BEFORE PRIVATE ${NCCL_EP_INCLUDE_DIRS})
+    target_include_directories(_nccl_ep BEFORE PRIVATE
+      ${NCCL_EP_INCLUDE_DIRS} ${NCCL_INCLUDE_DIRS})
+    # The external build refreshes staged headers while building this archive.
+    set_property(SOURCE "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
+      APPEND PROPERTY OBJECT_DEPENDS "${NCCL_EP_LIBRARIES}")
     # Keep the pinned EP private when another package also loads libnccl_ep.
     target_link_options(_nccl_ep PRIVATE "-Wl,--exclude-libs,libnccl_ep.a")
     set_target_properties(_nccl_ep PROPERTIES

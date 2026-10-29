@@ -95,6 +95,4 @@ if(NOT __NCCL_EP_INCLUDED)
 
   install(DIRECTORY "${NCCL_EP_INCLUDE_DIRS}/"
     DESTINATION share/nccl_ep/include PATTERN "config.h" EXCLUDE)
-  install(DIRECTORY "${__NCCL_EP_OUTPUT_DIR}/nccl/"
-    DESTINATION share/nccl_ep/nccl)
 endif()
