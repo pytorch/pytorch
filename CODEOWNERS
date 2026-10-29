@@ -11,7 +11,9 @@
 # - The "# owner:" line directly below a "# label:" line records the group
 #   meant to own every path in that label block. These lines are
 #   informational: nothing consumes them yet, and they don't change who is
-#   notified. "none" means no owning group is recorded yet.
+#   notified. "none" means no owning group is recorded yet. Everyone an active
+#   rule in the block notifies must also be on that owner line, apart from the
+#   exceptions listed in scripts/codeowners/check_taxonomy.py.
 # - Sections are ordered from broad defaults to narrower overrides.
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
@@ -33,8 +35,8 @@
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
 # ineffective patterns, and the "# owner:" rules: every "# label:" line is
-# directly followed by one "# owner:" line, and a label list has one owner
-# list.
+# directly followed by one "# owner:" line, a label list has one owner list,
+# and an active rule's handles appear on its block's owner line.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch

@@ -67,6 +67,24 @@ FAILURE_GUIDANCE = {
         "Use the same `# owner:` list on every `# label:` line with these labels, "
         "or give one of the blocks its own label list."
     ),
+    "Reviewers missing from owner lists": (
+        "Add the reported handles to the block's `# owner:` line, or move the "
+        "rule to a block whose owners include them."
+    ),
+    "Unneeded reviewer exceptions": (
+        "Remove the reported entries from REVIEWERS_NOT_OWNERS in "
+        "scripts/codeowners/check_taxonomy.py; their handles are owners now, no "
+        "longer on the rule, or the rule is gone."
+    ),
+}
+
+# Active rules whose handles are notified without being owners of the rule's label
+# block. These predate the owner lines and are left as they are until the people
+# involved decide; every other rule's handles must be on its block's owner line.
+REVIEWERS_NOT_OWNERS = {
+    "test/functorch/test_aotdispatch.py": frozenset({"@chillee", "@ezyang"}),
+    "torch/_export/serde/schema.py": frozenset({"@sherlocknomad"}),
+    "torch/fx/proxy.py": frozenset({"@zou3519"}),
 }
 
 
@@ -80,6 +98,8 @@ class TaxonomyPattern:
     labels: tuple[str, ...] = ()
     # Handles on the block's `# owner:` line; None when the block has no owner line.
     owners: tuple[str, ...] | None = None
+    # Handles on the rule itself, who GitHub asks for review.
+    reviewers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,7 +243,9 @@ def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
         elif line.startswith(OWNER_PREFIX):
             follows_label = lines[line_number - 2].strip().startswith(LABEL_PREFIX)
             owner_lines.append(OwnerLine(line_number, line, follows_label))
-            block_owners = owner_handles(line)
+            # A misplaced owner line is reported, not used as the block's owners.
+            if follows_label:
+                block_owners = owner_handles(line)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -248,8 +270,11 @@ def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
+            reviewers = tuple(owners) if active else ()
             patterns.append(
-                TaxonomyPattern(group, pattern[1:], line_number, labels, block_owners)
+                TaxonomyPattern(
+                    group, pattern[1:], line_number, labels, block_owners, reviewers
+                )
             )
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
@@ -261,8 +286,12 @@ def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
     return ParsedCodeowners(patterns, section_groups, label_blocks, owner_lines)
 
 
-def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
-    """Check that every label block names exactly one owner list."""
+def find_ownership_errors(
+    parsed: ParsedCodeowners,
+    *,
+    reviewers_not_owners: dict[str, frozenset[str]] = REVIEWERS_NOT_OWNERS,
+) -> dict[str, list[str]]:
+    """Check that every label block names one owner list that covers its reviewers."""
     missing_owner_lines = [
         f"CODEOWNERS:{block.line_number} {LABEL_PREFIX} {', '.join(block.labels)}"
         for block in parsed.label_blocks
@@ -286,6 +315,39 @@ def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
         if block.owners is not None:
             owners = frozenset(owner.casefold() for owner in block.owners)
             owner_lists[block.labels].add(owners)
+    # GitHub handles are case-insensitive, so exceptions are too.
+    exceptions = {
+        path: {handle.casefold() for handle in handles}
+        for path, handles in reviewers_not_owners.items()
+    }
+    missing_reviewers = []
+    used_exceptions = set()
+    for pattern in parsed.patterns:
+        if not pattern.labels or pattern.owners is None:
+            continue
+        owners = {owner.casefold() for owner in pattern.owners}
+        allowed = exceptions.get(pattern.path, set())
+        missing = []
+        for reviewer in pattern.reviewers:
+            if reviewer.casefold() in owners:
+                continue
+            if reviewer.casefold() in allowed:
+                used_exceptions.add((pattern.path, reviewer.casefold()))
+            else:
+                missing.append(reviewer)
+        if missing:
+            missing_reviewers.append(
+                f"CODEOWNERS:{pattern.line_number} /{pattern.path}: "
+                f"{' '.join(missing)} not on the block's owner line"
+            )
+    # Every exception must still be needed, including ones whose rule was removed
+    # or renamed, so a stale entry can't later exempt a new rule unreviewed.
+    unneeded_exceptions = [
+        f"/{path}: {handle}"
+        for path, handles in sorted(exceptions.items())
+        for handle in sorted(handles)
+        if (path, handle) not in used_exceptions
+    ]
     conflicting_lists = [
         f"{', '.join(labels)}: "
         + " | ".join(
@@ -299,6 +361,8 @@ def find_ownership_errors(parsed: ParsedCodeowners) -> dict[str, list[str]]:
         "Misplaced owner lines": misplaced_owner_lines,
         "Invalid owner handles": invalid_handles,
         "Label lists with several owner lists": conflicting_lists,
+        "Reviewers missing from owner lists": missing_reviewers,
+        "Unneeded reviewer exceptions": unneeded_exceptions,
     }
 
 
@@ -532,7 +596,9 @@ def main() -> int:
         patterns = parsed.patterns
         section_groups = parsed.section_groups
         report = analyze(tracked_paths(repo), patterns)
-        ownership_errors = find_ownership_errors(parsed)
+        ownership_errors = find_ownership_errors(
+            parsed, reviewers_not_owners=REVIEWERS_NOT_OWNERS
+        )
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
