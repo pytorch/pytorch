@@ -515,6 +515,7 @@ def itree_plan(
             math.gcd(prm.num_batches, split_stage_rows)
             if (
                 stage is not False
+                and not vec_linear
                 and itemsize <= 4
                 and last == prm.batch_total_elements
                 and split_stage_rows
