@@ -328,8 +328,11 @@ class TestDropoutBoundarySemantics(TestCase):
                 1
                 for n in gm.graph.nodes
                 if n.op == "call_function"
-                and canonical_target_name(n.target)
-                == "loops_ir_native_dropout::dropout_fwd"
+                and n.target
+                in (
+                    torch.ops.loops_ir_native_dropout.dropout_fwd,
+                    torch.ops.loops_ir_native_dropout.dropout_fwd.default,
+                )
             )
 
         gm1 = fx.symbolic_trace(f1)
@@ -370,6 +373,60 @@ class TestDropoutBoundarySemantics(TestCase):
         self.assertFalse(adapter.rewrite(gm, node))
         self.assertTrue(adapter.rejections)
 
+    def test_dropout_dynamic_probability_rejected(self):
+        import torch.fx as fx
+
+        for target in (
+            torch.nn.functional.dropout,
+            torch.ops.aten.dropout.default,
+            torch.ops.aten.native_dropout.default,
+        ):
+            with self.subTest(target=target):
+                gm = fx.GraphModule({}, fx.Graph())
+                x = gm.graph.placeholder("x")
+                probability = gm.graph.placeholder("probability")
+                node = gm.graph.call_function(target, (x, probability, True))
+                gm.graph.output(x)
+                adapter = DropoutNativeBoundary(numerics="strict_eager")
+                self.assertFalse(adapter.rewrite(gm, node))
+                self.assertTrue(adapter.rejections)
+                self.assertIn(node, tuple(gm.graph.nodes))
+
+    def test_native_dropout_packet_preserves_tuple_abi(self):
+        import torch.fx as fx
+
+        graph = fx.Graph()
+        x_node = graph.placeholder("x")
+        result = graph.call_function(torch.ops.aten.native_dropout, (x_node, 0.5, True))
+        graph.output(result)
+        gm = fx.GraphModule({}, graph)
+        report = rewrite_dropout_boundaries(gm, numerics="strict_eager")
+        self.assertEqual(report.rewrites, 1)
+        calls = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target
+            in (
+                torch.ops.loops_ir_native_dropout.dropout_fwd,
+                torch.ops.loops_ir_native_dropout.dropout_fwd.default,
+            )
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertIs(
+            calls[0].target, torch.ops.loops_ir_native_dropout.dropout_fwd.default
+        )
+        x = torch.randn(4, 8)
+        torch.manual_seed(17)
+        expected = torch.ops.aten.native_dropout.default(x, 0.5, True)
+        torch.manual_seed(17)
+        actual = gm(x)
+        self.assertIsInstance(actual, tuple)
+        self.assertEqual(len(actual), 2)
+        for reference, output in zip(expected, actual):
+            self.assertEqual(reference.dtype, output.dtype)
+            self.assertEqual(reference.view(torch.uint8), output.view(torch.uint8))
+
     def test_native_dropout_requires_static_training_flag(self):
         import torch.fx as fx
 
@@ -390,8 +447,11 @@ class TestDropoutBoundarySemantics(TestCase):
                 self.assertEqual(
                     sum(
                         n.op == "call_function"
-                        and canonical_target_name(n.target)
-                        == "loops_ir_native_dropout::dropout_fwd"
+                        and n.target
+                        in (
+                            torch.ops.loops_ir_native_dropout.dropout_fwd,
+                            torch.ops.loops_ir_native_dropout.dropout_fwd.default,
+                        )
                         for n in gm.graph.nodes
                     ),
                     0,
@@ -788,8 +848,11 @@ class TestBatchNormGraphExecution(TestCase):
             1
             for n in gm.graph.nodes
             if n.op == "call_function"
-            and canonical_target_name(n.target)
-            == "loops_ir_native_dropout::dropout_fwd"
+            and n.target
+            in (
+                torch.ops.loops_ir_native_dropout.dropout_fwd,
+                torch.ops.loops_ir_native_dropout.dropout_fwd.default,
+            )
         )
         self.assertEqual(n_pkts, 2)
         gm.graph.lint()
