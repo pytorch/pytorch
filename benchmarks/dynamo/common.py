@@ -1050,7 +1050,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         name += ".json"
@@ -1065,7 +1065,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1297,18 +1298,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     first_fields += tp_fields
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    hf_inference_mode = getattr(args, "hf_inference_mode", "generate")
-    if hf_inference_mode == "prefill":
-        input_tokens = times * example_inputs["input_ids"].numel()
-        headers += ["eager_latency", "input_tokens_per_second"]
-        row += [median[0] * 1000, input_tokens / median[1]]
-    elif hf_inference_mode == "decode":
-        output_tokens = times * example_inputs["decode_ids"].numel()
-        headers += ["eager_latency", "output_tokens_per_second"]
-        row += [median[0] * 1000, output_tokens / median[1]]
-    elif hf_inference_mode == "encode":
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
         headers.append("eager_latency")
         row.append(median[0] * 1000)
+        for column, tokens in request_tokens.items():
+            headers.append(column)
+            row.append(times * tokens / median[1])
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -2181,18 +2177,23 @@ class BenchmarkRunner:
     def tp_group(self):
         return torch.distributed.group.WORLD if self.args.tp_size > 1 else None
 
-    def agree_on_status(self, status, ok_status="pass"):
+    def agree_on_status(self, status):
         """
-        Returns the first status other than ok_status in rank order, so that every
+        Returns the first status other than "pass" in rank order, so that every
         rank of a TP group takes the same path, even if only one rank failed.
         """
         if self.tp_group is None:
             return status
         statuses = gather_across_ranks(status, self.tp_group)
-        return next((s for s in statuses if s != ok_status), ok_status)
+        return next((s for s in statuses if s != "pass"), "pass")
 
     def use_model_forward_for_compilation(self):
         return False
+
+    def get_request_tokens(self, example_inputs):
+        # Return {throughput column: tokens per timed request} for token workloads,
+        # which also report eager_latency; None for everything else.
+        return None
 
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
@@ -2610,6 +2611,8 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
+                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # while performance compiles the forward under generate().
                         if self.use_model_forward_for_compilation():
                             model_copy.forward = optimize_ctx(model_copy.forward)
                             optimized_model_iter_fn = self.model_iter_fn
@@ -3376,6 +3379,9 @@ class BenchmarkRunner:
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
             if setup_fn is not None:
                 experiment_kwargs["setup_fn"] = setup_fn
+            request_tokens = self.get_request_tokens(example_inputs)
+            if request_tokens is not None:
+                experiment_kwargs["request_tokens"] = request_tokens
             if tp_group is not None:
                 experiment_kwargs["tp_group"] = tp_group
 

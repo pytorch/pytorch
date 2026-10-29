@@ -154,10 +154,12 @@ Default output and profiler trace names get an `_encode` suffix for encode.
 #### Tensor-parallel prefill and decode
 
 `--tp-size=N` runs prefill or decode with one model and request sharded across
-`N` GPUs of one node by Hugging Face tensor parallelism (`tp_plan="auto"`). Both
-the eager baseline and the compiled forward run tensor-parallel, so `speedup`
-compares eager TP with compiled TP at the same topology. Compare against a
-single-GPU run separately to measure TP scaling.
+`N` GPUs of one node by Hugging Face tensor parallelism. It uses the model's
+`tp_plan` without tied modules such as `lm_head`, which stay replicated with the
+input embedding they share weights with. Both the eager baseline and the
+compiled forward run tensor-parallel, so `speedup` compares eager TP with
+compiled TP at the same topology. Compare against a single-GPU run separately to
+measure TP scaling.
 Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen2.5-0.5B-Instruct`,
 `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B`.
 
@@ -213,7 +215,8 @@ immediately so torchrun can stop peers blocked in model collectives. These
 execution failures remain fatal even when an accuracy failure is expected.
 The process-group timeout covers hangs that do not raise an exception.
 
-TP requires `--disable-cudagraphs` until CUDA graphs are validated with it.
+TP requires `--disable-cudagraphs` and rejects `--backend=cudagraphs` until CUDA
+graphs are validated with it.
 Multi-node runs, several TP groups, and other parallelism styles are
 unsupported. Inductor TP requires CUDA/NCCL. On machines without an
 accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
