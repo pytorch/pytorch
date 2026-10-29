@@ -411,16 +411,6 @@ coverage_ignore_functions = [
     "get_default_qconfig_dict",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_jit
-    "convert_dynamic_jit",
-    "convert_jit",
-    "fuse_conv_bn_jit",
-    "prepare_dynamic_jit",
-    "prepare_jit",
-    "quantize_dynamic_jit",
-    "quantize_jit",
-    "script_qconfig",
-    "script_qconfig_dict",
     # torch.ao.quantization.quantize_pt2e
     "convert_pt2e",
     "prepare_pt2e",
