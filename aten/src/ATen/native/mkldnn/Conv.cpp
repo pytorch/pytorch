@@ -40,7 +40,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/detail/Conv.h>
-#include <ATen/native/mkldnn/detail/ConvBackward.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
