@@ -257,8 +257,11 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.arange(4.0, dtype=dtype)
         random.seed(0)
         expected = fn(x, random.Random(0))
-        random.seed(0)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # Compiling can draw from the global RNG (e.g. internal module
+        # initializations), so compile before reseeding.
+        opt_fn(x, random.Random(0))
+        random.seed(0)
         self.assertEqual(opt_fn(x, random.Random(0)), expected)
 
     def test_numpy_scalar_inputs_inductor(self):
