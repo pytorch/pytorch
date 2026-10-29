@@ -97,10 +97,19 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
         )
 
 
-def _get_device_module(device="cuda"):
+def _get_device_module(device: str | None = None):
+    if device is None:
+        device = DefaultDeviceType.get_device_type()
     if device == "meta":
         return torch.device("meta")
-    device_module = getattr(torch, device)
+    # getattr guard: an accelerator backend may not expose a torch.<name> module,
+    # so a bare getattr would raise AttributeError for valid accelerator types.
+    device_module = getattr(torch, device, None)
+    if device_module is None:
+        raise AttributeError(
+            f"torch.{device} module not found; the backend for device type {device!r} "
+            "must register a torch.<name> module or pass an explicit device."
+        )
     return device_module
 
 
@@ -109,7 +118,8 @@ class DefaultDeviceType:
     A class that manages the default device type for checkpointing.
 
     If no non-CPU tensors are present, the default device type will
-    be used. The default value is 'cuda'. The device type is used in
+    be used. The default value is the current accelerator, or 'cpu' if
+    there is none. The device type is used in
     the checkpointing process when determining which device states
     to save and restore for recomputation.
     """
@@ -152,13 +162,15 @@ def _infer_device_type(*args):
 
     device_types_set = set(device_types)
     if len(device_types_set) > 1:
+        # device_types is built in first-seen order; dedup preserves that order.
+        deduped_types = list(dict.fromkeys(device_types))
         warnings.warn(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
             "Device state will only be saved for devices of a single device type, and the remaining "
             "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
             "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
             "detected, it will be prioritized; otherwise, the first device encountered will be selected.)"
-            f"\nDevice types: {sorted(device_types_set)} first device type: {device_types[0]}", stacklevel=2
+            f"\nDevice types: {deduped_types} first device type: {device_types[0]}", stacklevel=2
         )
     if len(device_types) == 0:
         return DefaultDeviceType.get_device_type()
@@ -216,7 +228,9 @@ def set_device_states(devices, states, *, device_type=None) -> None:
             device_module.set_rng_state(state)
 
 
-def _get_autocast_kwargs(device_type="cuda"):
+def _get_autocast_kwargs(device_type: str | None = None):
+    if device_type is None:
+        device_type = DefaultDeviceType.get_device_type()
     if torch.amp.is_autocast_available(device_type):
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(device_type),
@@ -458,8 +472,8 @@ def checkpoint(
 
     .. warning::
 
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True`` variant, please refer to the
         note below for important considerations and potential limitations.
 
@@ -523,7 +537,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.9 we will raise an exception if
+            explicitly. In a future release, we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -558,12 +572,13 @@ def checkpoint(
             :func:`torch.autograd.graph.save_on_cpu`). Such tensors are held
             outside the autograd graph, so historically these hooks did not see
             them; a future release will make checkpoint honor the hooks by
-            default. Until then the default (``None``) keeps the legacy behavior
-            and emits a ``FutureWarning`` when a user hook is in scope; pass
-            ``True`` to opt in or ``False`` to keep the legacy behavior without
-            the warning. Has no effect without SAC (plain checkpoint recomputes
-            rather than saves) or when ``use_reentrant=True``. This argument is
-            only supported if ``use_reentrant=False``.
+            default. Until then the default (``None``) raises an error when SAC
+            saves a tensor while a user hook is in scope, so the behavior must
+            be chosen explicitly: pass ``True`` to route these tensors through
+            the hooks or ``False`` to keep the legacy behavior. Has no effect
+            without SAC (plain checkpoint recomputes rather than saves) or when
+            ``use_reentrant=True``. This argument is only supported if
+            ``use_reentrant=False``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`, or a decorator
@@ -635,7 +650,7 @@ def _checkpoint_impl(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. Starting in PyTorch 2.9, calling checkpoint "
+            "passed explicitly. In a future release, calling checkpoint "
             "without use_reentrant will raise an exception. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -708,8 +723,8 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True` variant, please see
         :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
@@ -750,7 +765,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.9 we will raise an exception if use_reentrant "
+            "In a future release, we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -1501,6 +1516,13 @@ class CheckpointPolicy(enum.Enum):
         NOT equivalent to not using checkpointing. Using such a policy would
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
+
+        For example, eager selective checkpointing overrides
+        ``PREFER_RECOMPUTE`` to save the outputs of non-aliasing operators with an
+        ordered effect. An operator may be explicitly registered with an ordered
+        effect through ``torch.library`` or inferred to have one from
+        non-whitelisted TorchBind arguments. This override does not apply to
+        ``MUST_RECOMPUTE`` or operators in the ``c10d`` namespace.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1510,9 +1532,28 @@ class CheckpointPolicy(enum.Enum):
     PREFER_CPU_OFFLOAD = 5
 
 
+# Policies for which eager SAC actually caches the output. CPU offload policies
+# currently fall through to recomputation, so they are deliberately absent.
+_SAVE_POLICIES = (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE)
+
+
 def _policy_from_bool(b):
     # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
+
+
+def _is_cacheable_effect(op) -> bool:
+    """Return whether SAC can cache an effectful op instead of replaying it.
+
+    Raw c10d launches mutate their inputs and return an asynchronous Work handle,
+    so their return value is not a valid cache boundary. They remain unsupported
+    in recomputed eager SAC regions, where they may be launched again during
+    backward. Use functional collectives instead; the AOT partitioner preserves
+    those separately.
+    """
+    from torch._higher_order_ops.effects import has_effects
+
+    return has_effects(op) and op.namespace != "c10d"
 
 
 SAC_IGNORED_OPS = {
@@ -1554,9 +1595,9 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.ac_graph_id = ac_graph_id
         # Tri-state opt-in for routing SAC-cached tensors through the
         # surrounding user saved_tensors_hooks, set by checkpoint() after this
-        # mode is constructed (like ac_graph_id). None: legacy behavior (hooks
-        # bypassed) plus a FutureWarning if user hooks are in scope; True/False:
-        # opt into the new/old behavior explicitly and silence the warning.
+        # mode is constructed (like ac_graph_id). None: error if user hooks are
+        # in scope, since the default is about to flip; True/False: opt into
+        # the new/old behavior explicitly.
         self.respect_saved_tensors_hooks: bool | None = None
         self.func_counter: Dict[Any, int] = defaultdict(int)
 
@@ -1589,6 +1630,15 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
+        # An ordered effect cannot be replayed safely. MUST_RECOMPUTE is the
+        # sole explicit request to replay; CPU-offload policies are save
+        # policies even though eager SAC does not yet implement their offload.
+        if (
+            policy not in _SAVE_POLICIES
+            and policy is not CheckpointPolicy.MUST_RECOMPUTE
+            and _is_cacheable_effect(func)
+        ):
+            policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
             if proxy_mode is not None:
@@ -1597,7 +1647,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+        if policy in _SAVE_POLICIES or is_compiling:
             # SAC caches these tensors outside the autograd graph, bypassing
             # SavedVariable, so simulate pack/unpack with the user's
             # saved-tensors hooks (if any): hooks like save_on_cpu must see
@@ -1606,24 +1656,27 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             # artifact rather than a real cache.
             #
             # Honoring the hooks is a BC break, so it is gated behind the
-            # respect_saved_tensors_hooks opt-in on checkpoint(), which defaults
-            # to the legacy behavior (hooks bypassed). When a user hook is
-            # actually in scope we warn, since the default will flip.
+            # respect_saved_tensors_hooks arg on checkpoint(). When a user hook
+            # is actually in scope and the arg was left unset, we error rather
+            # than silently pick a behavior, since the default will flip. There
+            # is intentionally no escape hatch other than passing the arg.
             user_hooks = None if is_compiling else _current_user_saved_tensors_hooks()
             if user_hooks is not None:
                 respects = self.respect_saved_tensors_hooks
                 if respects is None:
-                    warnings.warn(
+                    raise RuntimeError(
                         "A saved_tensors_hooks context (e.g. save_on_cpu) is "
-                        "active around a selective activation checkpoint region. "
-                        "Tensors that SAC saves currently bypass these hooks, but "
-                        "a future release will route them through the hooks like "
-                        "any other saved tensor. Silence this warning and choose "
-                        "the behavior explicitly by passing "
-                        "respect_saved_tensors_hooks=True|False to "
-                        "torch.utils.checkpoint.checkpoint.",
-                        FutureWarning,
-                        stacklevel=2,
+                        "active around a selective activation checkpoint (SAC) "
+                        "region. Tensors that SAC saves have historically bypassed "
+                        "these hooks, but a future release will route them through "
+                        "the hooks like any other saved tensor. Choose the behavior "
+                        "explicitly by passing respect_saved_tensors_hooks=True "
+                        "(route SAC-saved tensors through the hooks) or "
+                        "respect_saved_tensors_hooks=False (keep the legacy "
+                        "behavior) to torch.utils.checkpoint.checkpoint. If the "
+                        "checkpoint call is made by a library, ask its authors to "
+                        "set this argument. See "
+                        "https://github.com/pytorch/pytorch/issues/191236"
                     )
                 if not respects:
                     user_hooks = None
@@ -1705,6 +1758,29 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 
     Use this with `torch.utils.checkpoint.checkpoint` to control which
     operations are recomputed during the backward pass.
+
+    .. note::
+
+        This API expresses selective activation checkpointing policies at the
+        level of individual ATen operators. If you would rather define
+        save/recompute decisions over regions of source code, we recommend
+        trying the separate
+        `torch_remat <https://github.com/meta-pytorch/remat>`_ package. Its
+        region-based API lets you:
+
+        * assign different policies to different uses of the same operator;
+        * apply policies to arbitrary multi-operation code, including custom
+          :class:`torch.autograd.Function` implementations, without wrapping
+          the region in a custom operator;
+        * in eager mode, retain only tensors needed for backward or subsequent
+          recomputation instead of caching every output of a selected
+          operator; and
+        * avoid the eager-mode ``TorchDispatchMode`` overhead of per-operator
+          policies.
+
+        ``torch_remat`` also provides eager-mode tracing and memory diagnostics
+        for named regions, while its core save/recompute policy works with
+        :func:`torch.compile`.
 
     Args:
         policy_fn_or_list (Callable or List):

@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
@@ -131,16 +130,18 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth_for_shape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
-  avg_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput_,
+    /*indices=*/std::nullopt,
     nslices,
     kT, kH, kW,
     dT, dH, dW,
     padT, padH, padW,
+    1, 1, 1,
     itime, iheight, iwidth,
     otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check,
-    "avg_pool3d_backward()");
+    "avg_pool3d_backward()", /*check_input_size=*/true);
 
   /* resize output */
   set_output_raw_strided(0, input.sizes(), {}, input.options());
@@ -180,15 +181,15 @@ void avg_pool3d_out_frame(
       /* local pointers. */
       const scalar_t *ip = input_p + k * itime * iwidth * iheight;
       scalar_t *op = output_p + k * otime * owidth * oheight;
-      for (int64_t i = 0; i < otime * oheight * owidth; ++i)
+      for (const auto i : c10::irange(otime * oheight * owidth))
         *(op + i) = 0;
 
       /* loop over output */
-      for (int64_t ti = 0; ti < otime; ti++)
+      for (const auto ti : c10::irange(otime))
       {
-        for (int64_t i = 0; i < oheight; i++)
+        for (const auto i : c10::irange(oheight))
         {
-          for (int64_t j = 0; j < owidth; j++)
+          for (const auto j : c10::irange(owidth))
           {
             /* compute pool range. */
             int64_t tstart = ti * dT - padT;
@@ -223,11 +224,11 @@ void avg_pool3d_out_frame(
 
             /* compute local sum: */
             scalar_t sum = 0.0;
-            for (int64_t z = tstart; z < tend; z++)
+            for (const auto z : c10::irange(tstart, tend))
             {
-              for (int64_t y = hstart; y < hend; y++)
+              for (const auto y : c10::irange(hstart, hend))
               {
-                for (int64_t x = wstart; x < wend; x++)
+                for (const auto x : c10::irange(wstart, wend))
                 {
                   sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
                 }
@@ -287,7 +288,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
+        scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
 
         avg_pool3d_out_frame(
           input_data, output_data, nslices,
@@ -310,7 +311,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
+        scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
           for (const auto p : c10::irange(start, end)) {
@@ -360,15 +361,15 @@ void avg_pool3d_backward_out_frame(
       /* local pointers */
       scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
       const scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
-      for (int64_t i = 0; i < itime*iwidth*iheight; i++)
+      for (const auto i : c10::irange(itime*iwidth*iheight))
         *(ip + i) = 0;
 
       /* loop over output */
-      for (int64_t ti = 0; ti < otime; ti++)
+      for (const auto ti : c10::irange(otime))
       {
-        for (int64_t i = 0; i < oheight; i++)
+        for (const auto i : c10::irange(oheight))
         {
-          for (int64_t j = 0; j < owidth; j++)
+          for (const auto j : c10::irange(owidth))
           {
             int64_t tstart = ti * dT - padT;
             int64_t hstart = i  * dH - padH;
@@ -462,7 +463,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
-       scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+       scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
        const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
        avg_pool3d_backward_out_frame(
@@ -486,7 +487,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
         const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
