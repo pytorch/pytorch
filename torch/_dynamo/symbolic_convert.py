@@ -149,6 +149,7 @@ from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
     _record_graph_break_op,
+    _records_graph_break_ops,
     _tensor_device_types,
     counters,
     FrameState,
@@ -1161,7 +1162,8 @@ def break_graph_if_unsupported(
                         "expected speculation.reason is not None to be true"
                     )
                 return handle_graph_break(self, inst, speculation.reason)
-            stack: list[VariableTracker] = self.stack[:] if self.output.package else []
+            records = _records_graph_break_ops(self)
+            stack: list[VariableTracker] = self.stack[:] if records else []
             try:
                 return inner_fn(self, inst)
             except (Unsupported, UserError) as excp:
