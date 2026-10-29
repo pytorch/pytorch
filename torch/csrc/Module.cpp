@@ -3574,11 +3574,15 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_8",
           at::blas::SwizzleType::SWIZZLE_32_8,
-          "pre-swizzled block scales; the byte order depends on the device")
+          "gfx950 32x8 tile")
       .value(
           "SWIZZLE_MN_K4",
           at::blas::SwizzleType::SWIZZLE_MN_K4,
-          "MN-major scales with four values packed along K");
+          "MN-major scales with four values packed along K")
+      .value(
+          "SWIZZLE_128",
+          at::blas::SwizzleType::SWIZZLE_128,
+          "gfx1250 scales grouped by 128 along K");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
