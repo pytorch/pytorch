@@ -4,6 +4,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -14,6 +15,8 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipUnless(TEST_CUTEDSL, "requires CuTeDSL")
 class TestFullInnerTreeConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "dtype,mib,key,fields,nouts,unroll",
         [

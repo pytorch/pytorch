@@ -15,10 +15,17 @@ from torch.monitor import (
     TensorboardEventHandler,
     unregister_event_handler,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestMonitor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_interval_stat(self) -> None:
         events = []
 
@@ -108,6 +115,8 @@ class TestMonitor(TestCase):
 
 @skipIfTorchDynamo("Really weird error")
 class TestMonitorTensorboard(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         global SummaryWriter, event_multiplexer
