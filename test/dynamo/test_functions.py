@@ -42,11 +42,13 @@ from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -221,6 +223,8 @@ def deque_length_hints():
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -1824,25 +1828,10 @@ partial_fn = functools.partial(fn, scale=2)
         if x.device.type == "cpu":
             return x + 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_get_device_properties_tensor_device(a):
-        x = a.to("cuda")
-        prop = torch.cuda.get_device_properties(x.device)
-        if prop.major == 8:
-            return x + prop.multi_processor_count
-        return x + prop.max_threads_per_multi_processor
-
     @make_test
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @make_test
-    def test_tensor_type2(a, b):
-        m = a.to(device_type)
-        return m + b.type(m.type())
 
     @make_test
     def test_tensor_type3(a, b):
@@ -1852,12 +1841,6 @@ partial_fn = functools.partial(fn, scale=2)
     @make_test
     def test_tensor_type4(a, b):
         m = a.type("torch.HalfTensor")
-        return b.type(m.type())
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @make_test
-    def test_tensor_type5(a, b):
-        m = a.to(device_type).half()
         return b.type(m.type())
 
     @make_test
@@ -2600,6 +2583,25 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.ones(1)
         self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    def test_functools_wraps_name(self):
+        # https://github.com/pytorch/pytorch/issues/201123
+        def deco(func):
+            @functools.wraps(func)
+            def new_func(x):
+                return func(x)
+
+            return new_func
+
+        @deco
+        def add_(x):
+            return x + 1
+
+        def fn(x, method=add_):
+            return x + len(method.__name__) + len(method.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -4849,30 +4851,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(foo(), foo())
         self.assertEqual(foo(), foo())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_manual_seed(self):
-        import torch._inductor.config as inductor_config
-
-        seed_fns = (
-            torch.cuda.manual_seed,
-            torch.cuda.manual_seed_all,
-            torch.cuda.random.manual_seed,
-            torch.cuda.random.manual_seed_all,
-        )
-
-        with inductor_config.patch("fallback_random", True):
-            for seed_fn in seed_fns:
-                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
-                    torch._dynamo.reset()
-
-                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
-                    def foo():
-                        seed_fn(3)
-                        return torch.rand(4, device="cuda")
-
-                    self.assertEqual(foo(), foo())
-                    self.assertEqual(foo(), foo())
-
     def test_partial_across_graph_break_uninvoked(self):
         from functools import partial
 
@@ -6355,68 +6333,6 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_wrap_triton_handled_during_tracing(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
-            pid = tl.program_id(axis=0)
-            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
-
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            wrapped = torch.library.wrap_triton(sin_kernel)
-            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
-
-            return out
-
-        compiled = torch.compile(fn, fullgraph=True, backend="eager")
-
-        x = torch.randn(1024, device=device_type)
-        result = compiled(x)
-
-        self.assertEqual(result, torch.sin(x))
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_capture_triton_handled_during_tracing(self):
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
-            pid = tl.program_id(axis=0)
-            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
-
-        def fn(x: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(x)
-            n_elements = x.numel()
-
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            wrapped = torch._library.capture_triton(sin_kernel)
-            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
-
-            return out
-
-        compiled = torch.compile(fn, fullgraph=True, backend="eager")
-
-        x = torch.randn(1024, device=device_type)
-        result = compiled(x)
-
-        self.assertEqual(result, torch.sin(x))
-
     def test_property_descriptor_on_instance(self):
         class Foo:
             def __init__(self, x):
@@ -7414,6 +7330,132 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
 
+class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
+    """Tests CUDA-only device properties unavailable on other accelerators."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_get_device_properties_tensor_device(self, device):
+        def fn(a):
+            x = a.to(device)
+            prop = torch.cuda.get_device_properties(x.device)
+            if prop.major == 8:
+                return x + prop.multi_processor_count
+            return x + prop.max_threads_per_multi_processor
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_frame_count=1
+        )
+
+
+class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_device_manual_seed(self, device):
+        import torch._inductor.config as inductor_config
+
+        device_mod = torch.get_device_module(device)
+        seed_fns = (
+            device_mod.manual_seed,
+            device_mod.manual_seed_all,
+            device_mod.random.manual_seed,
+            device_mod.random.manual_seed_all,
+        )
+
+        with inductor_config.patch("fallback_random", True):
+            for seed_fn in seed_fns:
+                with self.subTest(seed_fn=f"{seed_fn.__module__}.{seed_fn.__name__}"):
+                    torch._dynamo.reset()
+
+                    @torch.compile  # noqa: UNSPECIFIED_BACKEND
+                    def foo():
+                        seed_fn(3)
+                        return torch.rand(4, device=device)
+
+                    self.assertEqual(foo(), foo())
+                    self.assertEqual(foo(), foo())
+
+    def test_tensor_type2(self, device):
+        def fn(a, b):
+            m = a.to(device)
+            return m + b.type(m.type())
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
+
+    def test_tensor_type5(self, device):
+        def fn(a, b):
+            m = a.to(device).half()
+            return b.type(m.type())
+
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
+
+    @xfailIfNoAcceleratorTriton
+    def test_wrap_triton_handled_during_tracing(self, device):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch.library.wrap_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
+    @xfailIfNoAcceleratorTriton
+    def test_capture_triton_handled_during_tracing(self, device):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch._library.capture_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
+
 def udf_mul(x, y):
     return x * y
 
@@ -7463,6 +7505,8 @@ class WrapperModule(torch.nn.Module):
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -8854,6 +8898,63 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_with_tensor_fill_value_infers_dtype(self):
+        cases = (
+            (torch.bool, True),
+            (torch.int32, 5),
+            (torch.int64, 5),
+            (torch.float16, 2.5),
+            (torch.float64, 2.5),
+        )
+
+        for fill_dtype, value in cases:
+            with self.subTest(fill_dtype=fill_dtype):
+
+                def func(fill_value):
+                    return torch.full((2,), fill_value)
+
+                fill_value = torch.tensor(value, dtype=fill_dtype)
+                expected = func(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_explicit_dtype(self):
+        def func(fill_value, dtype):
+            return torch.full((2,), fill_value, dtype=dtype)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for dtype in (None, torch.float64):
+            with self.subTest(dtype=dtype):
+                expected = func(fill_value, dtype)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, dtype
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_out_dtype(self):
+        def func(fill_value, out):
+            return torch.full((2,), fill_value, out=out)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for out_dtype in (None, torch.float64):
+            with self.subTest(out_dtype=out_dtype):
+                expected_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                result_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                expected = func(fill_value, expected_out)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, result_out
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -8903,6 +9004,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         result = func_compiled(x)
 
         self.assertEqual(result, expected)
+
+
+_FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)
+
+instantiate_device_type_tests(FunctionTestsCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    FunctionTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+def get_function_device_test_classes():
+    return [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and cls not in _FUNCTION_DEVICE_TEST_BASES
+        and issubclass(cls, _FUNCTION_DEVICE_TEST_BASES)
+    ]
 
 
 instantiate_parametrized_tests(FunctionTests)
