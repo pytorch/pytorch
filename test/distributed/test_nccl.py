@@ -291,10 +291,15 @@ class TestNCCL(TestCase):
 
 
 # Every NCCL-backend op that synchronizes ranks through PyTorch's signal pad or
-# an NCCL device communicator. put_wait_signal cannot run eagerly:
-# nccl_wait_for_signal never clears the pad.
-_NCCL_PAD_OPS = ("barrier", "put_wait_signal", "reduce_scatter_offset", "all_to_all_nd")
-_NCCL_EAGER_PAD_OPS = ("barrier", "reduce_scatter_offset", "all_to_all_nd")
+# an NCCL device communicator, with all_to_all_nd once per guarded path.
+# put_wait_signal cannot run eagerly: nccl_wait_for_signal never clears the pad.
+_NCCL_EAGER_PAD_OPS = (
+    "barrier",
+    "reduce_scatter_offset",
+    "all_to_all_nd_scatter_dim1",
+    "all_to_all_nd_scatter_dim0",
+)
+_NCCL_PAD_OPS = ("put_wait_signal",) + _NCCL_EAGER_PAD_OPS
 
 
 def _nccl_pad_op_launches(group, device) -> dict:
@@ -312,11 +317,14 @@ def _nccl_pad_op_launches(group, device) -> dict:
     a2a_in = symm_mem.empty(8, world_size * 4, device=device).fill_(rank)
     symm_mem.rendezvous(a2a_in, group=group)
     a2a_out = torch.empty(world_size * 8, 4, device=device)
+    a2a_t_in = symm_mem.empty(world_size * 8, 4, device=device).fill_(rank)
+    symm_mem.rendezvous(a2a_t_in, group=group)
+    a2a_t_out = torch.empty(8, world_size * 4, device=device)
     return {
         "barrier": [lambda: hdl.barrier(channel=0)],
         "put_wait_signal": [
-            lambda: torch.ops.symm_mem.nccl_put_with_signal(t, 1, peer),
-            lambda: torch.ops.symm_mem.nccl_wait_for_signal(t, 1),
+            lambda: torch.ops.symm_mem.nccl_put_with_signal(t, 1, peer, name),
+            lambda: torch.ops.symm_mem.nccl_wait_for_signal(t, 1, name),
         ],
         "reduce_scatter_offset": [
             lambda: symm_mem.reduce_scatter_offset(
@@ -328,9 +336,14 @@ def _nccl_pad_op_launches(group, device) -> dict:
                 dst_ranks=list(range(world_size)),
             )
         ],
-        "all_to_all_nd": [
+        "all_to_all_nd_scatter_dim1": [
             lambda: symm_mem.all_to_all_nd(
                 a2a_in, a2a_out, scatter_dim=1, gather_dim=0, group=name
+            )
+        ],
+        "all_to_all_nd_scatter_dim0": [
+            lambda: symm_mem.all_to_all_nd(
+                a2a_t_in, a2a_t_out, scatter_dim=0, gather_dim=1, group=name
             )
         ],
     }
@@ -735,13 +748,17 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             ("barrier", "barrier", True),
             ("barrier", "barrier", False),
             ("put_wait_signal", "put_wait_signal", True),
+            ("put_wait_signal", "put_wait_signal", False),
             ("barrier", "put_wait_signal", True),
             ("reduce_scatter_offset", "reduce_scatter_offset", True),
             ("reduce_scatter_offset", "reduce_scatter_offset", False),
-            ("all_to_all_nd", "all_to_all_nd", True),
-            ("all_to_all_nd", "all_to_all_nd", False),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim1", True),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim1", False),
+            ("all_to_all_nd_scatter_dim0", "all_to_all_nd_scatter_dim0", True),
+            ("all_to_all_nd_scatter_dim0", "all_to_all_nd_scatter_dim0", False),
             ("barrier", "reduce_scatter_offset", True),
-            ("reduce_scatter_offset", "all_to_all_nd", True),
+            ("reduce_scatter_offset", "all_to_all_nd_scatter_dim1", True),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim0", True),
         ],
         name_fn=lambda a, b, same: (a if a == b else f"{a}_then_{b}")
         + f"_same_group_{same}",
@@ -751,9 +768,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     ):
         """The NCCL-backend counterpart of
         SymmetricMemoryTest.test_stream_serialization_graph_order in
-        test_symmetric_memory.py, which states the ordering checked.
-        nccl_put_with_signal and nccl_wait_for_signal take no group and use
-        group "0", so they never run on a second group."""
+        test_symmetric_memory.py, which states the ordering checked."""
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
