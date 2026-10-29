@@ -286,7 +286,8 @@ struct silu_backward_functor {
   inline T operator()(const T grad_output, const T self) {
     float sf = float(self);
     float sig = 1.0f / (1.0f + ::metal::precise::exp(-sf));
-    return static_cast<T>(float(grad_output) * sig * (1.0f + sf - sf * sig));
+    return static_cast<T>(
+        float(grad_output) * sig * (1.0f + sf * (1.0f - sig)));
   }
 };
 
