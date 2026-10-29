@@ -29,7 +29,7 @@ class TestInnerTreeCombineUnroll(TestCase):
         """Apply combine unroll without changing the selected staging geometry."""
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        policy = rt._ITREE_ARCH[(10, 0)]
+        policy = rt._ITREE_ARCH[(10, 0)]._replace(combine_unroll=0)
         split = rt._ItreePlan(
             "split", 4, 16, 4, 2, (), (), (8192, 8192, 8192, 512, 512)
         )
