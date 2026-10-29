@@ -371,43 +371,37 @@ class BackendEntryPointTest(TestCase):
         from torch.distributed._backends import fake
         from torch.testing._internal.distributed import fake_pg
 
-        def ensure_registered():
-            dist.Backend._ensure_backend_registered("fake")
-
         def ensure_registered_without_entrypoint():
             with unittest.mock.patch(
                 "importlib.metadata.entry_points", return_value=[]
             ):
-                ensure_registered()
+                dist.Backend._ensure_backend_registered("fake")
 
-        cases = {
+        for name, register in {
             "fallback": ensure_registered_without_entrypoint,
             "testing_shim": lambda: importlib.reload(fake_pg),
-        }
-        # fbcode/sandcastle builds have no installed entry points.
-        if not (IS_FBCODE or IS_SANDCASTLE):
-            eps = importlib.metadata.entry_points(group="torch.distributed.backends")
-            self.assertEqual(
-                [ep.value for ep in eps if ep.name == "fake"],
-                ["torch.distributed._backends.fake:_register_fake_backend"],
-            )
-            cases["entrypoint"] = ensure_registered
-        for name, register in cases.items():
+        }.items():
             with self.subTest(name), unittest.mock.patch.dict(dist.Backend._plugins):
                 dist.Backend._plugins.pop("FAKE", None)
                 register()
                 creator = dist.Backend._plugins["FAKE"].creator_fn
                 self.assertIs(creator, fake._create_fake_pg)
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "needs installed entry points")
-    def test_fake_backend_without_import(self):
+        # fbcode/sandcastle builds have no installed entry points.
+        if IS_FBCODE or IS_SANDCASTLE:
+            return
+        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+        self.assertEqual(
+            [ep.value for ep in eps if ep.name == "fake"],
+            ["torch.distributed._backends.fake:_register_fake_backend"],
+        )
+        # A fresh process registers "fake" without importing it up front.
         script = (
             "import sys, torch, torch.distributed as dist\n"
             "print('torch.distributed._backends.fake' in sys.modules)\n"
             "dist.init_process_group('fake', rank=0, world_size=2)\n"
             "print('torch.testing._internal.distributed.fake_pg' in sys.modules)\n"
-            "pg = dist.distributed_c10d._get_default_group()\n"
-            "print(type(pg._get_backend(torch.device('cpu'))).__module__)\n"
+            "print(type(dist.get_backend_impl(device=torch.device('cpu'))).__module__)\n"
         )
         out = subprocess.check_output(
             [sys.executable, "-c", script], text=True, timeout=120

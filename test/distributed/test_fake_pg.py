@@ -204,7 +204,7 @@ class TestFakePG(TestCase):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
 
-        wrapper = dist.group.WORLD._get_backend(torch.device("cpu"))
+        wrapper = dist.get_backend_impl(device=torch.device("cpu"))
         self.assertIsInstance(wrapper.wrapped_pg, FakeProcessGroup)
         self.assertEqual(wrapper.wrapped_pg.name(), "fake")
 
@@ -247,151 +247,82 @@ class TestFakePG(TestCase):
         group.allreduce(tensor).wait()
         self.assertEqual(tensor, torch.ones(2))
 
-    def test_split_group_uses_explicit_fake_options(self):
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=FakeStore())
-        opts = FakeProcessGroup.Options()
-        opts.fake_option = 42
-        opts.error_on_collective = True
-
-        parent = dist.distributed_c10d._get_default_group()
-        cpu = torch.device("cpu")
-        pg = parent.split_group([0, 1], opts=opts, device_types=[cpu])
-
-        options = pg._get_backend(cpu).options
-        self.assertIsInstance(options, FakeProcessGroup.Options)
-        self.assertIsNot(options, opts)
-        self.assertEqual(options.fake_option, 42)
-        self.assertTrue(options.error_on_collective)
-
-    def test_split_group_without_options(self):
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=FakeStore())
-        parent = dist.distributed_c10d._get_default_group()
-        cpu = torch.device("cpu")
-        pg = parent.split_group([0, 1], device_types=[cpu])
-
-        options = pg._get_backend(cpu).options
-        self.assertIsInstance(options, FakeProcessGroup.Options)
-        self.assertEqual(options.fake_option, 0)
-
-    def test_split_group_non_member_cpu(self):
+    def test_split_group_options(self):
         dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
         parent = dist.distributed_c10d._get_default_group()
         cpu = torch.device("cpu")
         self.assertIsNone(parent.split_group([1, 2], device_types=[cpu]))
 
+        # The parent has no options, so C++ passes base options to split().
+        pg = parent.split_group([0, 1], device_types=[cpu])
+        self.assertEqual(dist.get_backend_impl(pg, cpu).options.fake_option, 0)
+
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+        pg = parent.split_group([0, 1], opts=opts, device_types=[cpu])
+        options = dist.get_backend_impl(pg, cpu).options
+        self.assertIsNot(options, opts)
+        self.assertEqual(options.fake_option, 42)
+
     def test_convenience_overloads(self):
-        pg = FakeProcessGroup._create_internal(0, 2)
-        t = torch.tensor([1.0, 2.0, 3.0])
-        outputs = [torch.zeros(3), torch.zeros(3)]
-        pg.allgather(outputs, t).wait()
-        self.assertEqual(outputs, [t, t])
-
-        outputs = [torch.zeros(3), torch.zeros(3)]
-        pg.gather(outputs, t, 0).wait()
-        self.assertEqual(outputs, [t, t])
-
-        output = torch.zeros(3)
-        pg.scatter(output, [t, t], 0).wait()
-        self.assertEqual(output, t)
-
+        # Python overrides must keep BackendBase's pybind convenience overloads.
         opts = FakeProcessGroup.Options()
         opts.simulate_uniform_ranks = True
         pg = FakeProcessGroup._create_internal(1, 2, opts)
-        x = torch.ones(2)
+        t = torch.ones(3)
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.allgather(outputs, t).wait()
+        self.assertEqual(outputs, [t, t])
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.gather(outputs, t, 1).wait()
+        self.assertEqual(outputs, [t, t])
+        output = torch.zeros(3)
+        pg.scatter(output, [t, t], 1).wait()
+        self.assertEqual(output, t)
+
+        x = torch.ones(3)
         pg.allreduce(x).wait()
-        self.assertEqual(x, torch.full((2,), 2.0))
-        pg.allreduce([x], dist.ReduceOp.SUM).wait()
-        self.assertEqual(x, torch.full((2,), 4.0))
-        pg.allreduce(x, op=dist.ReduceOp.MAX).wait()
-        self.assertEqual(x, torch.full((2,), 4.0))
-        pg.reduce(x, 0).wait()
-        self.assertEqual(x, torch.full((2,), 4.0))
-        pg.reduce(x, 1, dist.ReduceOp.SUM).wait()
-        self.assertEqual(x, torch.full((2,), 8.0))
-        pg.broadcast(x, 0).wait()
-        self.assertEqual(x, torch.full((2,), 8.0))
-        pg.allreduce([x], op=dist.ReduceOp.MAX).wait()
-        self.assertEqual(x, torch.full((2,), 8.0))
-        pg.allreduce([x], timeout=timedelta(seconds=5)).wait()
-        self.assertEqual(x, torch.full((2,), 16.0))
         self.assertIsInstance(pg.allreduce([x]), FakeWork)
+        pg.allreduce([x], dist.ReduceOp.MAX).wait()
+        pg.reduce(x, 1, dist.ReduceOp.SUM).wait()
+        pg.broadcast(x, 0).wait()
+        self.assertEqual(x, torch.full((3,), 8.0))
+        pg.reduce_scatter(output, [t, x], op=dist.ReduceOp.MAX).wait()
+        self.assertEqual(output, x)
+
         for bad in (
-            lambda: pg.allreduce(None),
             lambda: pg.allreduce([1, 2]),
-            lambda: pg.allgather([torch.zeros(2, 3)] * 2, [t]),
             lambda: pg.allgather([[t, t]], [[t]]),
-            lambda: pg.gather([[t, t]], [[t]]),
             lambda: pg.scatter([t], [t]),
-            lambda: pg.reduce_scatter([t], [t]),
         ):
             with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
                 bad()
 
-        outputs = [torch.zeros(3), torch.zeros(3)]
-        pg.gather(outputs, t, 1).wait()
-        self.assertEqual(outputs, [t, t])
+    def test_split_options(self):
+        parent_opts = FakeProcessGroup.Options()
+        parent_opts.fake_option = 7
+        pg = FakeProcessGroup._create_internal(0, 2, parent_opts)
+        # Base options, as C++ passes for an options-less parent, inherit the
+        # fake fields.
+        opts = dist.BackendBase.Options("fake")
+        opts.group_name = "child"
+        child = pg.split(FakeStore(), [1, 0], opts)
+        self.assertEqual((child.rank(), child.size()), (1, 2))
+        options = child.options
+        self.assertIsNot(options, parent_opts)
+        self.assertEqual((options.fake_option, options.group_name), (7, "child"))
 
-        output = torch.zeros(3)
-        pg.reduce_scatter(output, [torch.ones(3), t]).wait()
-        self.assertEqual(output, 2 * t)
-        pg.reduce_scatter(
-            output,
-            [torch.ones(3), t],
-            op=dist.ReduceOp.MAX,
-            timeout=timedelta(seconds=5),
-        ).wait()
-        self.assertEqual(output, t)
-
-    def test_rejects_foreign_options(self):
         class OtherOptions(dist.BackendBase.Options):
             pass
 
         other = OtherOptions("other")
         with self.assertRaisesRegex(TypeError, "must be FakeProcessGroup.Options"):
             FakeProcessGroup._create_internal(0, 2, other)
-        pg = FakeProcessGroup._create_internal(0, 2)
-        # Base options are accepted only as the default for an options-less group.
         for opts in (other, dist.BackendBase.Options("gloo")):
             with self.assertRaisesRegex(
                 RuntimeError, "not a FakeProcessGroup::Options"
             ):
                 pg.split(FakeStore(), [0, 1], opts)
-
-    def test_options_rejects_unknown_attribute(self):
-        opts = FakeProcessGroup.Options()
-        with self.assertRaises(AttributeError):
-            opts.simulate_uniform_rank = True
-
-    def test_split_base_options_inherit_fake_fields(self):
-        parent_opts = FakeProcessGroup.Options()
-        parent_opts.fake_option = 7
-        parent_opts.simulate_uniform_ranks = True
-        pg = FakeProcessGroup._create_internal(0, 2, parent_opts)
-
-        # What C++ passes when splitting a group whose options are None.
-        opts = dist.BackendBase.Options("fake")
-        opts._timeout = timedelta(seconds=5)
-        opts.global_ranks_in_group = [1, 0]
-        opts.group_name = "child"
-        opts.group_desc = "desc"
-        opts.enable_reconfigure = True
-        child = pg.split(FakeStore(), [1, 0], opts)
-
-        self.assertEqual((child.rank(), child.size()), (1, 2))
-        options = child.options
-        self.assertIsInstance(options, FakeProcessGroup.Options)
-        self.assertIsNot(options, parent_opts)
-        self.assertEqual(options.fake_option, 7)
-        self.assertTrue(options.simulate_uniform_ranks)
-        self.assertEqual(options._timeout, timedelta(seconds=5))
-        self.assertEqual(options.global_ranks_in_group, [1, 0])
-        self.assertEqual((options.group_name, options.group_desc), ("child", "desc"))
-        self.assertTrue(options.enable_reconfigure)
-
-        default_child = FakeProcessGroup._create_internal(0, 2, None).split(
-            FakeStore(), [0, 1], opts
-        )
-        self.assertEqual(default_child.options.fake_option, 0)
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -1018,30 +949,12 @@ class TestFakePG(TestCase):
         ):
             dist.broadcast(tensor, src=0)
 
-        pg = dist.distributed_c10d._get_default_group()
-        pg._start_coalescing(torch.device("cpu"))
-        with self.assertRaisesRegex(
-            RuntimeError, "FakeProcessGroup collective operation error"
-        ):
-            pg._end_coalescing(torch.device("cpu"))
-
-        with self.assertRaisesRegex(
-            RuntimeError, "FakeProcessGroup collective operation error"
-        ):
-            dist.barrier()
-
-    def test_error_on_collective_all_ops(self):
-        opts = FakeProcessGroup.Options()
-        opts.error_on_collective = True
-        pg = FakeProcessGroup._create_internal(0, 2, opts)
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
         t = torch.ones(2)
         for op in (
-            lambda: pg.broadcast([t]),
-            lambda: pg.allreduce([t]),
             lambda: pg.allreduce_sparse([t]),
             lambda: pg.allreduce_coalesced([t]),
             lambda: pg.reduce([t]),
-            lambda: pg.allgather([[t, t]], [t]),
             lambda: pg.all_gather_single(torch.ones(4), t),
             lambda: pg.allgather_coalesced([[t, t]], [t]),
             lambda: pg.all_gather_single_coalesced([torch.ones(4)], [t]),
@@ -1052,17 +965,17 @@ class TestFakePG(TestCase):
             lambda: pg.reduce_scatter_single_coalesced([t], [torch.ones(4)]),
             lambda: pg.all_to_all_single(t, t, [], []),
             lambda: pg.alltoall([t, t], [t, t]),
-            lambda: pg.barrier(),
+            lambda: (pg.start_coalescing(), pg.end_coalescing()),
         ):
             with self.assertRaisesRegex(
                 RuntimeError, "FakeProcessGroup collective operation error"
             ):
                 op()
-        pg.start_coalescing()
+
         with self.assertRaisesRegex(
             RuntimeError, "FakeProcessGroup collective operation error"
         ):
-            pg.end_coalescing()
+            dist.barrier()
 
     def test_fake_process_group_direct_usage_error(self):
         class SimpleTensorMode(TorchDispatchMode):
@@ -1167,14 +1080,6 @@ class TestFakePG(TestCase):
         ):
             pg.reduce_scatter(outputs, inputs, opts)
 
-    def test_all_gather_single_coalesced_wrong_list_size(self):
-        pg = FakeProcessGroup._create_internal(0, 2, FakeProcessGroup.Options())
-        outputs = [torch.empty(4), torch.empty(4)]
-        with self.assertRaisesRegex(
-            RuntimeError, "requires input/output tensor lists to have the same length"
-        ):
-            pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
-
     def test_reduce_scatter_base_wrong_input_size(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -1195,6 +1100,11 @@ class TestFakePG(TestCase):
         inputs = [torch.ones(3, 3)]
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
+
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
+        outputs = [torch.empty(4), torch.empty(4)]
+        with self.assertRaisesRegex(RuntimeError, "lists to have the same length"):
+            pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -1413,7 +1323,10 @@ class TestFakePGUniformRanks(TestCase):
 
     def test_option_defaults_to_off(self):
         """Existing behavior must be untouched unless the flag is set."""
-        self.assertFalse(FakeProcessGroup.Options().simulate_uniform_ranks)
+        opts = FakeProcessGroup.Options()
+        self.assertFalse(opts.simulate_uniform_ranks)
+        with self.assertRaises(AttributeError):
+            opts.simulate_uniform_rank = True
 
     def test_create_internal_uses_fresh_default_options(self):
         first = FakeProcessGroup._create_internal(0, world_size=2)

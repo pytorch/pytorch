@@ -677,7 +677,7 @@ def _create_fake_pg(common_opts, backend_opts):
     if backend_opts is None and dist.is_initialized():
         default_pg = dist.distributed_c10d._get_default_group()
         for device in default_pg._device_types:
-            default_backend = default_pg._get_backend(device)
+            default_backend = dist.get_backend_impl(default_pg, device)
             if not isinstance(default_backend, FakeProcessGroup):
                 continue
             default_options = default_backend.options
