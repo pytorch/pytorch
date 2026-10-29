@@ -10199,11 +10199,12 @@ class TestPrecompileCustomOpRecording(TestCase):
             from torch._precompile import _registration_path, _torch_source_root
             from torch._precompile import _TORCH_OP_NAMESPACES
             prefix = os.path.normcase(os.path.join(_torch_source_root(), ""))
+            tests = os.path.join(prefix, "test", "")  # Windows loads their DLLs too
             namespaces = set()
             for name in torch._C._dispatch_get_all_op_names():
                 op, _, overload = name.partition(".")
                 path = os.path.normcase(_registration_path(op, overload))
-                if path.startswith(prefix) and not path.endswith(".py"):
+                if path.startswith(prefix) and not path.startswith(tests) and not path.endswith(".py"):
                     namespaces.add(op.split("::")[0])
             print(sorted(namespaces - _TORCH_OP_NAMESPACES))
             """
