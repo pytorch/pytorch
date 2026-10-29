@@ -229,6 +229,12 @@ find_package_and_print_version(hip REQUIRED CONFIG)
 if(NOT WIN32 AND NOT APPLE AND TARGET hip::amdhip64)
   set_property(TARGET hip::amdhip64 APPEND PROPERTY
     INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib>")
+  # TheRock's vendored sysdeps (e.g. liblzma, needed by a from-source AOTriton)
+  # live outside lib/, so their DT_NEEDED entries need their own entry.
+  if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    set_property(TARGET hip::amdhip64 APPEND PROPERTY
+      INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib/rocm_sysdeps/lib>")
+  endif()
 endif()
 
 # Map lowercase hip_VERSION vars (from CONFIG mode) to uppercase HIP_VERSION
