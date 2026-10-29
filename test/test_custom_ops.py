@@ -1257,6 +1257,7 @@ int64_t count() {
             return x + 3
 
         lib.impl("pyobject_dispatch_with_keyset", cpu_impl, "CPU", with_keyset=True)
+        lib.impl("pyobject_dispatch_with_keyset", cpu_impl, "Meta", with_keyset=True)
         lib.impl(
             "pyobject_dispatch_with_keyset",
             torch.library.fallthrough_kernel,
@@ -1270,6 +1271,17 @@ int64_t count() {
         self.assertEqual(op(x), torch.full((2,), 4.0))
         self.assertEqual(len(seen_keysets), 1)
         self.assertTrue(seen_keysets[0].has(torch._C.DispatchKey.CPU))
+
+        # Calls with different key sets each get their own (the fast path
+        # reuses keyset objects across calls).
+        seen_keysets.clear()
+        devices = ["cpu", "meta"] * 3
+        for device in devices:
+            op(torch.ones(2, device=device))
+        for device, keyset in zip(devices, seen_keysets, strict=True):
+            on_cpu = keyset.has(torch._C.DispatchKey.CPU)
+            on_meta = keyset.has(torch._C.DispatchKey.Meta)
+            self.assertEqual((on_cpu, on_meta), (device == "cpu", device == "meta"))
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     @skipIfCrossRef
