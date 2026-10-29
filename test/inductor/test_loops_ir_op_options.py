@@ -1264,6 +1264,27 @@ class TestOpOptionsGpu(TestCase):
         self.assertEqual([(m.num_warps, m.num_stages) for m in meta], [(2, 2), (8, 3)])
         self.assertLess(meta[0].shared_bytes, meta[1].shared_bytes)
 
+    def test_context_constructs_with_previously_frozen_flags(self):
+        context = oo.freeze_codegen_context(
+            torch.device("cuda", self.ctx.device_index),
+            "inductor",
+            enable_fp_fusion=False,
+            disable_ftz=True,
+        )
+        self.assertFalse(context.native.enable_fp_fusion)
+        self.assertTrue(context.native.disable_ftz)
+        with self.assertRaises(AttributeError):
+            context.native.enable_fp_fusion = True
+
+    def test_explicit_flags_cannot_weaken_strict_context(self):
+        with self.assertRaisesRegex(ValueError, "strict_eager requires"):
+            oo.freeze_codegen_context(
+                torch.device("cuda", self.ctx.device_index),
+                "strict_eager",
+                enable_fp_fusion=True,
+                disable_ftz=True,
+            )
+
     def test_frozen_context_ignores_later_globals(self):
         e = E()
         sig = mm_sig_shapes(64, 512, 512)

@@ -68,6 +68,7 @@ OP_OPTIONS_NATIVE_SOURCES = (
     "op_options/op_decode.cpp",
     "op_options/op_fusion_regions.cpp",
     "op_options/op_candidates.cpp",
+    "op_options/op_autotune_region.cpp",
     "op_options/op_options_bindings.cpp",
 )
 
@@ -121,9 +122,17 @@ def _addmm_lt_policy(ext: Any) -> Any:
     return ext.AddmmLtPolicy.CUDA_DEFAULT
 
 
-def freeze_codegen_context(device: torch.device, numerics: str) -> FrozenCodegenContext:
-    """Snapshot the stock effective numerical settings for ``numerics``
-    ('strict_eager' or 'inductor'). Strict pins fp-fusion off / FTZ off."""
+def freeze_codegen_context(
+    device: torch.device,
+    numerics: str,
+    *,
+    enable_fp_fusion: bool | None = None,
+    disable_ftz: bool | None = None,
+) -> FrozenCodegenContext:
+    """Snapshot effective settings, or reuse flags already frozen by the pipeline.
+
+    Strict context validation still requires fp-fusion off and FTZ off.
+    """
     from torch._inductor import config as inductor_config
     from torch._inductor.runtime.hints import DeviceProperties
 
@@ -133,6 +142,16 @@ def freeze_codegen_context(device: torch.device, numerics: str) -> FrozenCodegen
     if device.type != "cuda" or device.index is None:
         raise ValueError("freeze_codegen_context requires an indexed CUDA device")
     strict = numerics == "strict_eager"
+    if enable_fp_fusion is None:
+        enable_fp_fusion = (
+            False if strict else not inductor_config.emulate_precision_casts
+        )
+    if disable_ftz is None:
+        disable_ftz = (
+            True if strict else bool(inductor_config.eager_numerics.disable_ftz)
+        )
+    if type(enable_fp_fusion) is not bool or type(disable_ftz) is not bool:
+        raise ValueError("frozen numerical flags must be booleans")
     props = torch.cuda.get_device_properties(device)
     precision = (
         ext.MatmulPrecision.TF32
@@ -147,12 +166,8 @@ def freeze_codegen_context(device: torch.device, numerics: str) -> FrozenCodegen
         compute_capability=props.major * 10 + props.minor,
         max_shared_memory_bytes=int(props.shared_memory_per_block_optin),
         stock_fp32_matmul_precision=precision,
-        enable_fp_fusion=False
-        if strict
-        else not inductor_config.emulate_precision_casts,
-        disable_ftz=True
-        if strict
-        else bool(inductor_config.eager_numerics.disable_ftz),
+        enable_fp_fusion=enable_fp_fusion,
+        disable_ftz=disable_ftz,
         division_rounding=bool(inductor_config.eager_numerics.division_rounding),
         device_index=device.index,
         addmm_lt_policy=_addmm_lt_policy(ext),
