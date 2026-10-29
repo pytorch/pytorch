@@ -194,8 +194,8 @@ def _concrete_device(device):
     compile-on-one-rank: these passes run on the joint graph, where a factory op's
     device operand is still a coor current_device() node -- respecialize_current_device_nodes
     does not concretise those until post_grad. Resolve it the way that pass does. Nothing
-    is pinned by doing so: the replacement is traced with compile-on-one-rank live, which
-    turns the device back into a current_device() node.
+    is pinned by doing so: replace_by_example swaps the device in the traced replacement
+    back to a current_device() node.
     """
     if _is_coor_device(device):
         from torch.fx.experimental.proxy_tensor import _coor_current_device
