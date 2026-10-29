@@ -16,22 +16,33 @@ CuteDSLCurrentStreamVariable, and the call is captured as
 ``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``.
 """
 
+import dataclasses
 import inspect
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
 
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
+    _may_overlap,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
+    CuteDSLKernel,
     MutatesArgs,
     RAW_CALL_MUTATES_ARGS,
+    TraceableCuteDSLKernelWrapper,
 )
+from torch._higher_order_ops.user_kernel_hop import _object_state, constant_key
 
 from ..exc import unimplemented
-from .base import VariableTracker
-from .functions import check_user_kernel_graph_args, split_user_kernel_args
+from ..source import (
+    AttrSource,
+    ChainedSource,
+    ConstDictKeySource,
+    DictGetItemSource,
+    GetItemSource,
+)
+from .base import NO_SUCH_SUBOBJ, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -94,36 +105,163 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     def wrap_raw(self, variable: "CuteDSLKernelVariable") -> "CuteDSLKernelVariable":
         return variable.with_mutates_args(RAW_CALL_MUTATES_ARGS)
 
+    def may_overlap(self, a: VariableTracker, b: VariableTracker) -> bool:
+        return _may_overlap(
+            a.as_proxy().node.meta["example_value"],
+            b.as_proxy().node.meta["example_value"],
+        )
+
+    def constant_object(
+        self,
+        variable: "CuteDSLKernelVariable",
+        key: str,
+        val: VariableTracker,
+        tx: "InstructionTranslatorBase",
+    ) -> Any:
+        """The value of a constant argument: a Python constant; an object from
+        outside the region (a config object, a cutlass Numeric value, a function or
+        class), passed as itself, which the side table snapshots, and guarded so
+        that the graph only runs for an equal object (see guard_contents); or a
+        tuple or list of these."""
+        from .lists import BaseListVariable
+
+        val = val.realize()
+        if isinstance(val, BaseListVariable) and val.python_type() in (tuple, list):
+            return val.python_type()(
+                self.constant_object(variable, key, item, tx) for item in val.items
+            )
+        if val.is_python_constant():
+            value = val.as_python_constant()
+            # A function or class from outside the region is passed as itself and
+            # guarded on its identity below: Dynamo's own guard on a function checks
+            # only its code, which another function made by the same def shares.
+            if val.source is None or not (
+                inspect.isfunction(value) or inspect.isclass(value)
+            ):
+                return value
+        name = CuteDSLKernel(variable.kernel, ()).name
+        obj = val.get_real_python_backed_value()
+        if val.source is None or obj is NO_SUCH_SUBOBJ:
+            self.raise_unsupported(
+                f"{name}(): cannot pass the {val.python_type_name()} in {key!r}: an "
+                "argument that is not a tensor or a scalar must be a Python constant, "
+                "an object Dynamo can pass as itself (such as a config object made "
+                "outside the compiled region), or a tuple or list of these"
+            )
+        side_effects = tx.output.side_effects
+        for other in side_effects.id_to_variable.values():
+            if not side_effects.is_modified(other):
+                continue
+            source = other.source
+            while isinstance(source, ChainedSource) and source != val.source:
+                source = source.base
+            if source == val.source:
+                # Dynamo applies the change only after the graph runs.
+                self.raise_unsupported(
+                    f"{name}(): the {val.python_type_name()} in {key!r}, or an "
+                    "object reached through it, is modified earlier in the compiled "
+                    "region, and the kernel would not see the change"
+                )
+        self.guard_contents(val.source, obj, tx)
+        return obj
+
+    def guard_contents(
+        self, source: "Source", value: object, tx: "InstructionTranslatorBase"
+    ) -> None:
+        """Guard ``value``, read from ``source``, on what the side table keys and
+        snapshots it by (see constant_key): a list, tuple or dict on its type and
+        length or keys, an object (see _object_state) on its type and, for a plain
+        object, its attribute names, then each item or attribute in turn; a Python
+        constant on its value; anything else (a function, a class, a cutlass value)
+        on its identity. A change made to the object between calls then recompiles,
+        as eager recompiles the kernel for it, instead of launching with the old
+        snapshot."""
+        from ..guards import GuardBuilder, install_guard
+        from .constant import ConstantVariable
+
+        if ConstantVariable.is_base_literal(value):
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        elif isinstance(value, (tuple, list)):
+            install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            for i, item in enumerate(value):
+                self.guard_contents(GetItemSource(source, i), item, tx)
+        elif isinstance(value, dict):
+            # constant_key keys a dict by its items in order.
+            tx.output.guard_on_key_order.add(source)
+            install_guard(
+                source.make_guard(GuardBuilder.TYPE_MATCH),
+                source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+            )
+            for i, item in enumerate(dict.values(value)):
+                item_source = DictGetItemSource(source, ConstDictKeySource(source, i))
+                self.guard_contents(item_source, item, tx)
+        elif (state := _object_state(value)) is not None:
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+            if dataclasses.is_dataclass(value):
+                for attr, item in state.items():
+                    self.guard_contents(AttrSource(source, attr), item, tx)
+            else:
+                # Read through __dict__: an attribute name can be a keyword or dotted
+                # (an argparse dest), which AttrSource cannot take; DictGetItemSource
+                # takes any exact str.
+                if any(type(attr) is not str for attr in state):
+                    self.raise_unsupported(
+                        f"cannot guard {source.name}: it has an attribute whose name "
+                        "is not an exact str"
+                    )
+                dict_source = AttrSource(source, "__dict__")
+                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+                for attr, item in state.items():
+                    self.guard_contents(DictGetItemSource(dict_source, attr), item, tx)
+        else:
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
     def call_HOP(
         self,
         variable: "CuteDSLKernelVariable",
         combined_args: dict[str, Any],
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
-        from ..guards import GuardBuilder, install_guard
         from .dicts import ConstDictVariable
 
-        # Objects that are not Python constants (a config dataclass, a cutlass dtype
-        # class or Numeric value) are constants of the launch too: pass the object,
-        # guarded on its identity.
-        objects = {}
-        for key, val in list(combined_args.items()):
-            val = val.realize()
-            if (
-                not (val.is_python_constant() or val.is_tensor() or val.is_symnode_like())
-                and val.source is not None
-                and hasattr(val, "value")
-            ):
-                install_guard(val.source.make_guard(GuardBuilder.ID_MATCH))
-                objects[key] = val.value
-                del combined_args[key]
-        constant_args, non_constant_args = split_user_kernel_args(tx, combined_args)
-        constant_args.update(objects)
-        check_user_kernel_graph_args(
-            non_constant_args, self.raise_unsupported, "CuTeDSL"
+        name = CuteDSLKernel(variable.kernel, ()).name
+        # Written tensors that may overlap would fail check_written_args_disjoint in
+        # the backend: a graph break here, as for a raw call (see unwrap_raw_args).
+        mutates_args = variable.mutates_args or ()
+        overlap = self.overlapping_args(
+            {
+                key: val
+                for key, val in combined_args.items()
+                if self.is_tensor(val)
+                and (mutates_args == "unknown" or key in mutates_args)
+            }
         )
+        if overlap is not None:
+            earlier, later = overlap
+            self.raise_unsupported(
+                f"{name}(): {earlier!r} and {later!r} are the same tensor or views "
+                "that may overlap, and both are written "
+                f"(mutates_args={mutates_args!r}), which PT2 cannot functionalize (one "
+                "write would be lost); pass tensors that do not overlap, or give "
+                "mutates_args naming only the parameters the kernel writes"
+            )
+        # Tensors and symbolic scalars are the node's arguments; every other value
+        # is a constant of the launch.
+        constant_args: dict[str, Any] = {}
+        graph_args: dict[VariableTracker, VariableTracker] = {}
+        for key, val in combined_args.items():
+            val = val.realize()
+            graphable = val.is_tensor() or val.is_symnode_like()
+            if graphable and not val.is_python_constant():
+                graph_args[VariableTracker.build(tx, key)] = val
+            else:
+                constant_args[key] = self.constant_object(variable, key, val, tx)
+        try:
+            constant_key(constant_args)
+        except TypeError as e:
+            self.raise_unsupported(f"{name}(): {e}")
         constant_args_idx = cutedsl_kernel_side_table.add_constant_args(constant_args)
-        meta = ConstDictVariable(non_constant_args)
+        meta = ConstDictVariable(graph_args)
         tx.output.create_proxy(
             "call_function",
             cutedsl_kernel_wrapper_mutation,
@@ -146,6 +284,10 @@ class CuteDSLKernelVariable(VariableTracker):
     mutates_args: MutatesArgs | None
     kernel_idx: int | None
     kernel_source: "Source | None"
+    # The class of the wrapper this stands for: TraceableCuteDSLKernelWrapper (what
+    # wrap_cutedsl returns) or the subclass of it passed in; None for the @cute.jit
+    # function itself, whose calls are raw.
+    wrapper_type: type | None
 
     def __init__(
         self,
@@ -155,27 +297,27 @@ class CuteDSLKernelVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
-        # Whether this stands for a TraceableCuteDSLKernelWrapper (what wrap_cutedsl
-        # returns) rather than the @cute.jit function itself.
-        self.is_wrapper = kwargs.pop("is_wrapper", False)
+        self.wrapper_type = kwargs.pop("wrapper_type", None)
         super().__init__(**kwargs)
         dynamo_cutedsl_hopifier_singleton.init_variable(
-            self, kernel, mutates_args, kernel_idx
+            self, kernel, mutates_args, kernel_idx, raw=not self.is_wrapper
         )
 
-    def python_type(self) -> type:
-        if self.is_wrapper:
-            from torch._higher_order_ops.cutedsl_kernel_wrap import (
-                TraceableCuteDSLKernelWrapper,
-            )
+    @property
+    def is_wrapper(self) -> bool:
+        return self.wrapper_type is not None
 
-            return TraceableCuteDSLKernelWrapper
-        return type(self.kernel)
+    def python_type(self) -> type:
+        return type(self.kernel) if self.wrapper_type is None else self.wrapper_type
+
+    def get_real_python_backed_value(self) -> object:
+        # Not the wrapper object, which one made in the region does not have.
+        return NO_SUCH_SUBOBJ if self.is_wrapper else self.kernel
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # A wrapper made by wrap_cutedsl inside the region has no source of its own:
         # rebuild it from the host function's source.
-        if self.kernel_source is None or self.mutates_args is None:
+        if not self.is_wrapper or self.kernel_source is None:
             return super().reconstruct(codegen)
         codegen.add_push_null(
             lambda: codegen.load_import_from("torch._library.cutedsl", "wrap_cutedsl")
@@ -193,17 +335,18 @@ class CuteDSLKernelVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return dynamo_cutedsl_hopifier_singleton.call_cutedsl_kernel(
-            self, list(args), kwargs, tx
+            self, list(args), kwargs, tx, raw=not self.is_wrapper
         )
 
     def with_mutates_args(self, mutates_args: object) -> "CuteDSLKernelVariable":
-        """The variable wrap_cutedsl(self.kernel, mutates_args=...) returns."""
+        """The variable wrap_cutedsl(self.kernel, mutates_args=...) returns;
+        mutates_args is validated as in eager (None is refused)."""
         return CuteDSLKernelVariable(
             self.kernel,
             mutates_args,
             None,
             kernel_source=self.kernel_source,
-            is_wrapper=True,
+            wrapper_type=TraceableCuteDSLKernelWrapper,
         )
 
     def specialize_symbolic(self, arg: Any) -> Any:
@@ -232,9 +375,8 @@ def _current_stream(
 
 class CuteDSLFromDlpackVariable(VariableTracker):
     """``cutlass.cute.runtime.from_dlpack``, whose result stands for its tensor in a
-    raw call. ``assumed_align`` is accepted and dropped: PT2 compiles the kernel for
-    the alignment it can rely on, the pointer's own in the Python launcher and the
-    export-time layout's (at most 16 bytes, checked at launch) under AOTInductor. The
+    raw call. ``assumed_align`` is accepted and dropped: the launch compiles the
+    kernel for the alignment of each tensor's own pointer, at most 16 bytes. The
     other options would change the compiled kernel, so only their defaults are
     accepted. As in eager, a tensor that requires grad is refused."""
 

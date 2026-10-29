@@ -407,6 +407,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
+        # User CuTeDSL kernels exported for this wrapper (prefix -> header + object,
+        # linked into the model .so); only CppWrapperGpu exports them.
+        self.cutedsl_exported_kernels: dict[str, Any] = {}
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
@@ -1293,6 +1296,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
+        # Each model instance holds the CUDA library of every CuTeDSL kernel (see
+        # user_kernel_aot.emit_cpp_declarations).
+        for prefix in self.cutedsl_exported_kernels:
+            self.prefix.writeline(f"    {prefix}_module_ref {prefix}_ref;")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace\n\n")
 

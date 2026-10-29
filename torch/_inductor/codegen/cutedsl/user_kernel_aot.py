@@ -1,11 +1,13 @@
-"""AOTInductor export and link support for user-defined CuTeDSL kernels.
+"""Export and link support for user-defined CuTeDSL kernels in the C++ wrapper
+(AOTInductor, and torch.compile with cpp_wrapper).
 
 A ``@cute.jit`` host function is compiled against fake tensors that mirror the
 layouts Inductor froze for it, and exported with ``export_to_c``, which writes a
 C header plus a PIC object. The header is spliced into wrapper.cpp; the object,
 the DSL's static CUDA-runtime shim archive and a few linker flags go into the
-link of the model .so. This module owns those artifacts and the C++ that loads
-and launches them. It does not depend on the IR or on the wrapper codegen.
+link of the model .so, or of the JIT wrapper's module. This module owns those
+artifacts and the C++ that loads and launches them. It does not depend on the IR
+or on the wrapper codegen.
 
 The DSL is imported lazily: importing this module never needs cutlass. Do not add
 ``from __future__ import annotations``: the DSL reads annotations at runtime and
@@ -25,7 +27,7 @@ import threading
 import types
 import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,7 @@ __all__ = [
     "ScalarParamSpec",
     "StreamParamSpec",
     "TensorParamSpec",
+    "cutedsl_cache_dir",
     "cutedsl_kernel_prefix",
     "cutedsl_link_flags",
     "cutedsl_link_inputs",
@@ -62,6 +65,7 @@ _FORMAT_VERSION = 1
 RUNTIME_ARCHIVE = "libcuda_dialect_runtime_static.a"
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ARCH = re.compile(r"sm_[0-9]+[a-z]?\Z")
+_OBJECT_ADDRESS = re.compile(r" at 0x[0-9A-Fa-f]+")
 
 
 class CuteDSLExportError(RuntimeError):
@@ -143,15 +147,15 @@ _SCALAR_CTYPES = {
     "Float64": "double",
     "Float16": "__half_raw",
 }
-# Integer C types narrower than the int64 values the wrapper computes with.
-_INT_CTYPE_RANGES: dict[str, tuple[int, int | None]] = {
+# Integer C types narrower than the int64 values the wrapper computes with (a
+# uint64_t scalar is passed as uint64_t: values from 2**63 do not fit an int64).
+_INT_CTYPE_RANGES: dict[str, tuple[int, int]] = {
     "int8_t": (-(2**7), 2**7 - 1),
     "int16_t": (-(2**15), 2**15 - 1),
     "int32_t": (-(2**31), 2**31 - 1),
     "uint8_t": (0, 2**8 - 1),
     "uint16_t": (0, 2**16 - 1),
     "uint32_t": (0, 2**32 - 1),
-    "uint64_t": (0, None),
 }
 
 
@@ -211,7 +215,8 @@ class CuteDSLExportedKernel:
 
 
 _STRUCT_FIELD = re.compile(
-    r"(?P<ctype>int32_t|int64_t)\s+(?P<field>dynamic_shapes|dynamic_strides)\s*\[\s*(?P<n>\d+)\s*\]"
+    r"(?P<ctype>int32_t|int64_t)\s+(?P<field>dynamic_shapes|dynamic_strides)"
+    r"\s*\[\s*(?P<n>\d+)\s*\]"
 )
 _WRAPPER_PARAM = re.compile(
     r"(?P<ctype>[A-Za-z_][\w\s]*?)\s*(?P<ptr>\*?)\s*(?P<name>[A-Za-z_]\w*)"
@@ -230,7 +235,8 @@ def parse_exported_header(text: str, prefix: str) -> ExportedABI:
 
     module_ctype = f"{prefix}_Kernel_Module_t"
     need(
-        rf"typedef\s+struct\s*\{{\s*cudaLibrary_t\s+module\s*;\s*\}}\s*{p}_Kernel_Module_t\s*;",
+        rf"typedef\s+struct\s*\{{\s*cudaLibrary_t\s+module\s*;\s*\}}"
+        rf"\s*{p}_Kernel_Module_t\s*;",
         "module struct",
     )
     load_fn, unload_fn = (
@@ -248,7 +254,8 @@ def parse_exported_header(text: str, prefix: str) -> ExportedABI:
 
     structs = []
     for m in re.finditer(
-        rf"typedef\s+struct\s*\{{(?P<body>[^}}]*)\}}\s*(?P<ctype>{p}_Tensor_(?P<param>\w+)_t)\s*;",
+        rf"typedef\s+struct\s*\{{(?P<body>[^}}]*)\}}"
+        rf"\s*(?P<ctype>{p}_Tensor_(?P<param>\w+)_t)\s*;",
         text,
     ):
         decls = [d.strip() for d in m.group("body").split(";") if d.strip()]
@@ -279,7 +286,8 @@ def parse_exported_header(text: str, prefix: str) -> ExportedABI:
 
     wrapper_fn = f"cute_dsl_{prefix}_wrapper"
     w = need(
-        rf"static\s+inline\s+(?P<ret>\w+)\s+{re.escape(wrapper_fn)}\s*\((?P<params>[^)]*)\)",
+        rf"static\s+inline\s+(?P<ret>\w+)\s+{re.escape(wrapper_fn)}"
+        r"\s*\((?P<params>[^)]*)\)",
         "wrapper function",
     )
     params = []
@@ -470,11 +478,20 @@ def _dsl_function_closure(host_fn: Callable[..., Any]) -> list[str]:
 
 
 def _stable_repr(value: object) -> str:
-    """repr() without object addresses, so the kernel prefix is stable across runs."""
+    """repr() made independent of the process, so that the kernel prefix is the same
+    in every process for equal constants: objects that constant_key compares by
+    content (see user_kernel_hop._object_state) by type and contents, set items
+    sorted, and object addresses removed from any other repr. A constant whose own
+    repr differs between processes in another way still changes the prefix."""
+    from torch._higher_order_ops.user_kernel_hop import _object_state
+
     if value is None or isinstance(value, (bool, int, float, str, bytes, torch.dtype)):
         return repr(value)
     if isinstance(value, (tuple, list)):
         return f"{type(value).__name__}({', '.join(_stable_repr(v) for v in value)})"
+    if isinstance(value, (set, frozenset)):
+        items = sorted(_stable_repr(v) for v in value)
+        return f"{type(value).__name__}({', '.join(items)})"
     if isinstance(value, dict):
         items = sorted((_stable_repr(k), _stable_repr(v)) for k, v in value.items())
         return "dict(" + ", ".join(f"{k}: {v}" for k, v in items) + ")"
@@ -486,12 +503,11 @@ def _stable_repr(value: object) -> str:
         value
     ):
         return "fn(" + "\n".join(_dsl_function_closure(value)) + ")"
-    if is_dataclass(value):
-        inner = ", ".join(
-            f"{f.name}={_stable_repr(getattr(value, f.name))}" for f in fields(value)
-        )
-        return f"{type(value).__module__}.{type(value).__qualname__}({inner})"
-    return f"{type(value).__module__}.{type(value).__qualname__}:{value!r}"
+    name = f"{type(value).__module__}.{type(value).__qualname__}"
+    state = _object_state(value)
+    if state is not None:
+        return f"{name}({_stable_repr(state)})"
+    return f"{name}:{_OBJECT_ADDRESS.sub('', repr(value))}"
 
 
 def _spec_key(spec: ParamSpec) -> str:
@@ -586,7 +602,8 @@ def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> Non
     names = [s.name for s in specs]
     if names != params:
         raise ValueError(
-            f"specs {names} must name every parameter of {host_fn.__name__}{params} in order"
+            f"specs {names} must name every parameter of "
+            f"{host_fn.__name__}{params} in order"
         )
     if sum(isinstance(s, StreamParamSpec) for s in specs) > 1:
         raise ValueError(f"{host_fn.__name__}: more than one stream parameter")
@@ -646,7 +663,9 @@ def export_cutedsl_kernel(
 
 
 # host function -> {export key -> its exports, one per prefix it is linked under}
-_exports: "weakref.WeakKeyDictionary[Callable[..., Any], dict[tuple[Any, ...], list[CuteDSLExportedKernel]]]" = weakref.WeakKeyDictionary()
+_exports: weakref.WeakKeyDictionary[
+    Callable[..., Any], dict[tuple[Any, ...], list[CuteDSLExportedKernel]]
+] = weakref.WeakKeyDictionary()
 _exports_lock = threading.Lock()
 
 
@@ -664,6 +683,14 @@ def _export_key(specs: Sequence[ParamSpec], arch: str) -> tuple[Any, ...]:
     )
 
 
+def cutedsl_cache_dir() -> str:
+    """Where the exports and the linker version scripts are stored, named by
+    content."""
+    from torch._inductor.runtime.cache_dir_utils import cache_dir
+
+    return os.path.join(cache_dir(), "cutedsl_user_kernels")
+
+
 def export_for_link(
     host_fn: Callable[..., Any],
     specs: Sequence[ParamSpec],
@@ -673,12 +700,15 @@ def export_for_link(
     out_root: str,
 ) -> CuteDSLExportedKernel:
     """The export of ``host_fn`` for ``specs`` and ``arch``, to link into a library
-    that already links ``linked`` (prefix -> export).
+    that already links ``linked`` (prefix -> export), under a prefix no other kernel
+    of the library uses.
 
     Exports are reused within this process only, keyed by the host function object
-    and the specs; nothing on disk is reused, since the prefix does not cover every
-    value a kernel reads. Each export goes to a fresh directory under ``out_root``,
-    under a prefix no other kernel of the library uses.
+    and the specs: the prefix does not cover every value a kernel reads, so a new
+    process exports again. The files go to ``out_root/<prefix>.<hash of their
+    bytes>``, so exporting the same kernel again under the same prefix (see
+    _stable_repr) yields the same paths (and with them the same JIT wrapper cache
+    key) and no new files.
     """
     specs = tuple(specs)
     with _exports_lock:
@@ -696,13 +726,33 @@ def export_for_link(
         n += 1
         prefix = f"{base}_{n}"
     os.makedirs(out_root, exist_ok=True)
-    exported = export_cutedsl_kernel(
-        host_fn,
-        specs,
-        out_dir=tempfile.mkdtemp(prefix=f"{prefix}.", dir=out_root),
-        prefix=prefix,
-        arch=arch,
-    )
+    tmp_dir = tempfile.mkdtemp(prefix=f".{prefix}.", dir=out_root)
+    try:
+        exported = export_cutedsl_kernel(
+            host_fn, specs, out_dir=tmp_dir, prefix=prefix, arch=arch
+        )
+        digest = hashlib.sha256()
+        for path in (exported.header_path, exported.object_path):
+            digest.update(Path(path).read_bytes())
+        out_dir = os.path.join(out_root, f"{prefix}.{digest.hexdigest()[:16]}")
+        header_path, object_path = (
+            os.path.join(out_dir, f"{prefix}{ext}") for ext in (".h", ".o")
+        )
+        for attempt in range(2):
+            try:
+                os.rename(tmp_dir, out_dir)
+                break
+            except OSError:
+                # Stored before, by this or another process: the same bytes.
+                if os.path.exists(header_path) and os.path.exists(object_path):
+                    break
+                if attempt:
+                    raise
+                # A damaged entry, e.g. files deleted by a cache cleanup.
+                shutil.rmtree(out_dir, ignore_errors=True)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    exported = replace(exported, header_path=header_path, object_path=object_path)
     with _exports_lock:
         cached.append(exported)
     return exported
@@ -716,6 +766,7 @@ def _cpp_str(text: str) -> str:
 # carry on when a CUDA call fails; make those failures throw so a failed module load
 # becomes an AOTI runtime error instead of a later illegal launch.
 _CPP_PRELUDE = r"""#include <cstdint>
+#include <iostream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -733,38 +784,71 @@ _CPP_PRELUDE = r"""#include <cstdint>
     const cudaError_t cutedsl_err_ = (err);                                \
     AOTI_RUNTIME_CHECK(                                                    \
         cutedsl_err_ == cudaSuccess,                                       \
-        std::string("CuTeDSL module load: ") +                             \
+        std::string("CuTeDSL kernel module: ") +                           \
             cudaGetErrorName(cutedsl_err_) + ": " +                        \
             cudaGetErrorString(cutedsl_err_));                             \
   } while (0)"""
 
 
-def emit_cpp_declarations(exported: CuteDSLExportedKernel) -> list[str]:
+def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list[str]:
     """File-scope C++ for one exported kernel, to emit once per prefix before any
     launch (e.g. into the wrapper header): the CUTE_DSL_CUDA_ERROR_CHECK predefine,
-    the export_to_c header, and the process-wide module with a std::call_once load.
+    the export_to_c header, ``<prefix>_module_ref`` and ``<prefix>_module()``, which
+    returns the module.
 
-    Module_Load loads the library on every visible device and stores the kernel
-    handle inside the object, so one load per model .so serves all devices and all
-    launches of the prefix.
+    Module_Load loads the library on every visible device and keeps the kernel
+    handles in globals of the object, so every launch from the library the object
+    is linked into uses one load. ``<prefix>_module_ref`` objects hold it: the first
+    loads it and the last unloads it. With ``aot``, each model instance holds one
+    (a member of AOTInductorModelKernels named ``<prefix>_ref``), so the library is
+    released with the last instance, as their Triton modules are, even when dlclose
+    leaves the model .so mapped. Otherwise (the JIT wrapper) ``<prefix>_module()``
+    holds one from the first launch until the wrapper is unloaded or the process
+    exits.
     """
     p = exported.prefix
+    abi = exported.abi
     header = "\n".join(
         line
         for line in exported.header_text.splitlines()
         if line.strip() != "#pragma once"
     )
+    unload_error = _cpp_str(f"Failed to unload CuTeDSL kernel module {p}: ")
+    header_name = os.path.basename(exported.header_path)
     return [
         *_CPP_PRELUDE.splitlines(),
-        f"// CuTeDSL user kernel {p}: export_to_c header {os.path.basename(exported.header_path)}",
+        f"// CuTeDSL user kernel {p}: export_to_c header {header_name}",
         f"#ifndef CUTEDSL_DECLARED_{p}",
         f"#define CUTEDSL_DECLARED_{p}",
         *header.splitlines(),
-        f"static {exported.abi.module_ctype} {p}_module;",
-        f"static std::once_flag {p}_module_once;",
-        f"static inline void {p}_load_module_once() {{",
-        f"  std::call_once({p}_module_once, [] {{ {exported.abi.load_fn}(&{p}_module); }});",
+        "namespace {",
+        f"std::mutex {p}_module_mutex;",
+        f"int64_t {p}_module_refs = 0;",
+        f"{abi.module_ctype} {p}_loaded_module{{}};",
+        f"struct {p}_module_ref {{",
+        f"  {p}_module_ref() {{",
+        f"    std::lock_guard<std::mutex> lock({p}_module_mutex);",
+        f"    if ({p}_module_refs == 0) {{",
+        f"      {abi.load_fn}(&{p}_loaded_module);",
+        "    }",
+        f"    ++{p}_module_refs;",
+        "  }",
+        f"  ~{p}_module_ref() {{",
+        "    try {",
+        f"      std::lock_guard<std::mutex> lock({p}_module_mutex);",
+        f"      if (--{p}_module_refs == 0) {{",
+        f"        {abi.unload_fn}(&{p}_loaded_module);",
+        "      }",
+        "    } catch (const std::exception& e) {",
+        f"      std::cerr << {unload_error} << e.what() << '\\n';",
+        "    }",
+        "  }",
+        "};",
+        f"{abi.module_ctype}* {p}_module() {{",
+        *([] if aot else [f"  static {p}_module_ref ref;"]),
+        f"  return &{p}_loaded_module;",
         "}",
+        "}  // namespace",
         f"#endif  // CUTEDSL_DECLARED_{p}",
     ]
 
@@ -783,14 +867,15 @@ def emit_cpp_launch(
     * ``tensor_args[name] = (data_ptr, sizes, strides)``: a pointer convertible to
       ``void*``, then one int64 expression per dynamic size and per dynamic stride,
       in dimension order;
-    * ``scalar_args[name]``: the value of each runtime scalar;
+    * ``scalar_args[name]``: the value of each runtime scalar (a ``uint64_t`` one
+      as an unsigned value: the caller checks its range);
     * ``stream_expr``: the ``cudaStream_t`` to launch on;
     * ``check_align[name]``: tensors whose data pointer must be checked against the
       alignment the kernel was compiled with (skip those PT2 already guarantees).
 
-    The block loads the module on first use, checks alignment and that every value
-    fits the narrower C type the ABI uses (int32 dynamic sizes, Int32 scalars...),
-    fills the tensor structs and turns a non-zero launch status into an exception.
+    The block checks alignment and that every value fits the narrower C type the ABI
+    uses (int32 dynamic sizes, Int32 scalars...), fills the tensor structs, launches
+    with ``<prefix>_module()`` and turns a non-zero launch status into an exception.
     """
     abi = exported.abi
     p = exported.prefix
@@ -812,17 +897,18 @@ def emit_cpp_launch(
         )
     if not OrderedSet(check_align) <= OrderedSet(structs):
         raise ValueError(
-            f"{p}: check_align names {sorted(set(check_align) - set(structs))} are not tensors"
+            f"{p}: check_align names {sorted(set(check_align) - set(structs))} are "
+            "not tensors"
         )
 
-    lines = ["{", f"  // CuTeDSL user kernel {p}", f"  {p}_load_module_once();"]
+    lines = ["{", f"  // CuTeDSL user kernel {p}"]
 
     def check(cond: str, msg: str) -> None:
         lines.append(
             f"  AOTI_RUNTIME_CHECK({cond}, {_cpp_str(f'CuTeDSL kernel {p}: {msg}')});"
         )
 
-    call = [f"&{p}_module"]
+    call = [f"{p}_module()"]
     for i, (ctype, name) in enumerate(abi.params):
         v = f"cutedsl_arg{i}"
         if name in structs:
@@ -834,7 +920,8 @@ def emit_cpp_launch(
             ):
                 raise ValueError(
                     f"{p}: {name} needs {st.num_dynamic_shapes} dynamic sizes and "
-                    f"{st.num_dynamic_strides} dynamic strides, got {len(sizes)} and {len(strides)}"
+                    f"{st.num_dynamic_strides} dynamic strides, got {len(sizes)} and "
+                    f"{len(strides)}"
                 )
             lines.append(f"  void* {v}_data = {data_ptr};  // {name}")
             if name in check_align:
@@ -875,7 +962,7 @@ def emit_cpp_launch(
         else:
             call.append(v)
             expr = scalar_args[name]
-            if ctype in ("float", "double"):
+            if ctype in ("float", "double", "uint64_t"):
                 lines.append(
                     f"  const {ctype} {v} = static_cast<{ctype}>({expr});  // {name}"
                 )
@@ -883,14 +970,16 @@ def emit_cpp_launch(
             if ctype == "__half_raw":
                 # Rounded once from double, as the DSL converts a Python float.
                 lines.append(
-                    f"  const __half_raw {v} = __double2half(static_cast<double>({expr}));  // {name}"
+                    f"  const __half_raw {v} = "
+                    f"__double2half(static_cast<double>({expr}));  // {name}"
                 )
                 continue
             if name in booleans:
                 # Truthiness, as the DSL converts a Python value for a Boolean (the
                 # kernel reads only the low bit).
                 lines.append(
-                    f"  const uint8_t {v} = static_cast<uint8_t>(({expr}) != 0);  // {name}"
+                    f"  const uint8_t {v} = static_cast<uint8_t>(({expr}) != 0);"
+                    f"  // {name}"
                 )
                 continue
             lines.append(
@@ -898,10 +987,10 @@ def emit_cpp_launch(
             )
             if ctype in _INT_CTYPE_RANGES:
                 lo, hi = _INT_CTYPE_RANGES[ctype]
-                cond = f"{v}_value >= {lo}LL" + (
-                    "" if hi is None else f" && {v}_value <= {hi}LL"
+                check(
+                    f"{v}_value >= {lo}LL && {v}_value <= {hi}LL",
+                    f"scalar {name} does not fit in {ctype}",
                 )
-                check(cond, f"scalar {name} does not fit in {ctype}")
             elif ctype != "int64_t":
                 raise CuteDSLExportError(
                     f"{p}: unsupported scalar C type {ctype} for {name}"
@@ -950,8 +1039,8 @@ def cutedsl_runtime_archive() -> str:
             if (d / name).is_file():
                 return str(d / name)
     raise RuntimeError(
-        f"CuTeDSL runtime archive {' or '.join(names)} not found next to {cutlass.__file__}; "
-        "it ships with the nvidia-cutlass-dsl-libs wheel"
+        f"CuTeDSL runtime archive {' or '.join(names)} not found next to "
+        f"{cutlass.__file__}; it ships with the nvidia-cutlass-dsl-libs wheel"
     )
 
 

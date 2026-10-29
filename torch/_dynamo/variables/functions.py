@@ -4070,45 +4070,6 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 
 
-def split_user_kernel_args(
-    tx: "InstructionTranslatorBase", combined_args: dict[str, Any]
-) -> tuple[dict[str, Any], dict[VariableTracker, VariableTracker]]:
-    """Split a user kernel's bound arguments into Python constants, which go to the
-    DSL's side table, and the rest, which become the HOP's ``kwargs`` (keyed by
-    ConstantVariable names)."""
-    combined_args_vt = {
-        VariableTracker.build(tx, k): v for k, v in combined_args.items()
-    }
-    # Combine args and kwargs and pass as a dict so that if user defined triton
-    # kernel uses variables as 'grid' or 'kernel', it does not conflict with
-    # parameters of the wrapper function
-    constant_args = {
-        k: v.as_python_constant()
-        for k, v in combined_args.items()
-        if isinstance(v, VariableTracker) and v.is_python_constant()
-    }
-    non_constant_args = {
-        k: v
-        for k, v in combined_args_vt.items()
-        if not (isinstance(v, VariableTracker) and v.is_python_constant())
-    }
-    return constant_args, non_constant_args
-
-
-def check_user_kernel_graph_args(
-    non_constant_args: dict[VariableTracker, VariableTracker],
-    raise_unsupported: Callable[[str], Never],
-    dsl: str,
-) -> None:
-    """Only tensors and symbolic scalars can be graph arguments of a user kernel."""
-    for v in non_constant_args.values():
-        v = v.realize()
-        if not (v.is_tensor() or v.is_symnode_like()):
-            raise_unsupported(
-                f"Unexpected argument type for a {dsl} kernel: {repr(v)}."
-            )
-
-
 class DynamoTritonHOPifier(TritonHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         unimplemented(
@@ -4251,12 +4212,28 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 tma_descriptor_metadata[k] = v.to_metadata()
                 combined_args[k] = v.get_tensor()
 
+        combined_args_vt = {
+            VariableTracker.build(tx, k): v for k, v in combined_args.items()
+        }
+
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
             triton_kernel_wrapper_mutation,
         )
 
-        constant_args, non_constant_args = split_user_kernel_args(tx, combined_args)
+        # Combine args and kwargs and pass as a dict so that if user defined triton
+        # kernel uses variables as 'grid' or 'kernel', it does not conflict with
+        # parameters of the wrapper function
+        constant_args = {
+            k: v.as_python_constant()
+            for k, v in combined_args.items()
+            if isinstance(v, VariableTracker) and v.is_python_constant()
+        }
+        non_constant_args = {
+            k: v
+            for k, v in combined_args_vt.items()
+            if not (isinstance(v, VariableTracker) and v.is_python_constant())
+        }
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
         # must be a Python constant before entering the graph. Kernel launch
@@ -4276,9 +4253,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 f"{sorted(non_const_options)!r}."
             )
 
-        check_user_kernel_graph_args(
-            non_constant_args, self.raise_unsupported, "Triton"
-        )
+        for v in non_constant_args.values():
+            v = v.realize()
+            if not (v.is_tensor() or v.is_symnode_like()):
+                self.raise_unsupported(
+                    f"Unexpected argument type for a Triton kernel: {repr(v)}."
+                )
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args)

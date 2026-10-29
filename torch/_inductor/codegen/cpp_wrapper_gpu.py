@@ -1293,9 +1293,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self.grid_id = count()
         self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
-        # User CuTeDSL kernels exported for this wrapper (prefix -> header + object,
-        # linked into the model .so) and their launchers.
-        self.cutedsl_exported_kernels: dict[str, Any] = {}
+        # Launchers of the user CuTeDSL kernels in self.cutedsl_exported_kernels.
         self._cutedsl_call_wrappers: dict[str, CuteDSLCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
@@ -2035,9 +2033,10 @@ static inline void ensure_triton_kernel_compiles_started() {{
             and current_stream_idx is not None
             and current_stream_idx != 0
         ):
-            stream = get_stream_name(current_stream_idx)
+            stream = aot_stream = get_stream_name(current_stream_idx)
         else:
             stream = self.write_get_raw_stream(device.index, graph_name)
+            aot_stream = "stream"
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
@@ -2085,15 +2084,16 @@ static inline void ensure_triton_kernel_compiles_started() {{
 
             # AOTI side uses this->device_idx_ so the model honors runtime device
             # assignment; JIT side has no this->device_idx_ in scope, so use the
-            # concrete graph device index. Similarly, AOTI side always uses the
-            # `stream` function parameter of run_impl, while JIT side uses the
+            # concrete graph device index. Similarly, AOTI side uses the `stream`
+            # function parameter of run_impl (in a user stream region, the region's
+            # stream, which its aten fallbacks run on), while JIT side uses the
             # locally-declared stream{idx} (see _codegen_entry_impl_prologue).
             aoti_device_idx = (
                 "this->device_idx_" if V.graph.aot_mode else str(device.index)
             )
             jit_device_idx = str(device.index)
             jit_call_args = [*call_args, jit_device_idx, stream]
-            aot_call_args = [*call_args, aoti_device_idx, "stream"]
+            aot_call_args = [*call_args, aoti_device_idx, aot_stream]
             debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 jit_call_args[: len(arg_types)], kernel_name, arg_types, None
@@ -2151,17 +2151,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
         C++ launcher; returns the launcher's name. The counterpart of the
         DeferredTritonCallWrapper a user Triton kernel gets: export_to_c compiles the
         host function ahead of time into a header (spliced into the wrapper) and an
-        object (linked into the model .so by AotCodeCompiler)."""
+        object (linked into the model .so by AotCodeCompiler).
+
+        Constants are compiled into the object: an AOTI package keeps the values it
+        was exported with; under torch.compile, Dynamo guards the constants a call
+        passes by content, so changing one between calls recompiles and exports again
+        (changing a default does not, see ir.UserDefinedCuteDSLKernel.split_args)."""
         from torch._inductor.codegen.cuda.compile_utils import _aoti_cuda_target_arch
 
-        from torch._inductor.runtime.cache_dir_utils import cache_dir
+        from .cutedsl.user_kernel_aot import (
+            cutedsl_cache_dir,
+            emit_cpp_declarations,
+            export_for_link,
+        )
 
-        from .cutedsl.user_kernel_aot import emit_cpp_declarations, export_for_link
-
-        if V.graph.is_dual_wrapper_mode:
-            raise NotImplementedError(
-                "User-defined CuTeDSL kernels are not supported in dual wrapper mode"
-            )
+        if V.graph.aot_mode:
+            aoti = config.aot_inductor
+            refused = {
+                "dual wrapper mode (triton.autotune_at_compile_time=False)": (
+                    V.graph.is_dual_wrapper_mode
+                ),
+                "aot_inductor.package_cpp_only": aoti.package_cpp_only,
+                "aot_inductor.emit_multi_arch_kernel": aoti.emit_multi_arch_kernel,
+                "cross-compiling for Windows": aoti.cross_target_platform == "windows",
+            }
+            for what, enabled in refused.items():
+                if enabled:
+                    raise NotImplementedError(
+                        f"User-defined CuTeDSL kernels are not supported with {what}"
+                    )
         specs, check_align = cutedsl_param_specs(kernel, runtime_args, constant_args)
         arch = f"sm_{_aoti_cuda_target_arch()}"
         exported = export_for_link(
@@ -2169,13 +2187,14 @@ static inline void ensure_triton_kernel_compiles_started() {{
             specs,
             arch,
             linked=self.cutedsl_exported_kernels,
-            out_root=os.path.join(cache_dir(), "cutedsl_user_kernels"),
+            out_root=cutedsl_cache_dir(),
         )
         prefix = exported.prefix
         wrapper_name = f"call_{prefix}"
         if prefix not in self.cutedsl_exported_kernels:
             self.cutedsl_exported_kernels[prefix] = exported
-            self.header.splice("\n".join(emit_cpp_declarations(exported)))
+            declarations = emit_cpp_declarations(exported, aot=V.graph.aot_mode)
+            self.header.splice("\n".join(declarations))
             self._cutedsl_call_wrappers[wrapper_name] = CuteDSLCallWrapper(
                 wrapper_name, exported, check_align
             )
@@ -2185,13 +2204,16 @@ static inline void ensure_triton_kernel_compiles_started() {{
         # AOTI links them in AotCodeCompiler (codecache.cutedsl_user_kernel_link_args).
         if V.graph.aot_mode or not self.cutedsl_exported_kernels:
             return []
-        from .cutedsl.user_kernel_aot import cutedsl_link_flags, cutedsl_link_inputs
+        from .cutedsl.user_kernel_aot import (
+            cutedsl_cache_dir,
+            cutedsl_link_flags,
+            cutedsl_link_inputs,
+        )
 
         kernels = list(self.cutedsl_exported_kernels.values())
-        out_dir = os.path.dirname(kernels[0].object_path)
         return [
             *cutedsl_link_inputs(kernels),
-            *cutedsl_link_flags(out_dir, [k.prefix for k in kernels]),
+            *cutedsl_link_flags(cutedsl_cache_dir(), [k.prefix for k in kernels]),
             # The JIT wrapper does not link cudart, which the DSL's runtime shims call.
             "-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"
             if config.is_fbcode()
@@ -2206,8 +2228,12 @@ static inline void ensure_triton_kernel_compiles_started() {{
         constant_args: dict[str, Any],
         device: torch.device,
     ) -> None:
+        abi = self._cutedsl_call_wrappers[kernel_name].exported.abi
+        param_ctypes = {name: ctype for ctype, name in abi.params}
         call_args = []
-        for value in runtime_args.values():
+        for name, value in runtime_args.items():
+            # The launcher takes a uint64_t scalar unsigned (see CuteDSLCallWrapper).
+            uint64 = param_ctypes.get(name) == "uint64_t"
             if isinstance(value, IRNode):
                 tensor = self.create_tmp_raii_handle_var_if_needed(
                     value.codegen_reference()
@@ -2223,14 +2249,35 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 call_args.append(str(value).lower())
             elif isinstance(value, float):
                 call_args.append(self.generate_float_value(value))
+            elif isinstance(value, int) and uint64:
+                if not 0 <= value < 2**64:
+                    raise ValueError(
+                        f"CuTeDSL kernel {kernel.name}: {value} for {name!r} does "
+                        "not fit in uint64_t"
+                    )
+                call_args.append(f"{value}ULL")
             elif isinstance(value, int):
-                call_args.append(str(value))
+                call_args.append(cexpr(sympy.Integer(value)))
             else:
-                call_args.append(self.codegen_cpp_sizevar(value))
-        # The stream a user Triton kernel launches on, also inside a user stream
-        # region (AOT Triton launches always use the model's stream), so the kernel
-        # stays ordered with the Triton kernels around it.
-        stream = self.write_get_raw_stream(device.index, V.graph.name)
+                expr = self.codegen_cpp_sizevar(value)
+                if uint64 and not V.graph.sizevars.statically_known_geq(value, 0):
+                    msg = cpp_string_literal(
+                        f"CuTeDSL kernel {kernel.name}: scalar {name} does not fit "
+                        "in uint64_t"
+                    )
+                    self.writeline(f"AOTI_RUNTIME_CHECK(({expr}) >= 0, {msg});")
+                call_args.append(expr)
+        current_stream_idx = V.graph.scheduler.current_stream_idx
+        if (
+            V.graph.aot_mode
+            and current_stream_idx is not None
+            and current_stream_idx != 0
+        ):
+            # Inside a user stream region: the region's stream, which its aten
+            # fallbacks and kernels run on (see _generate_kernel_call_helper).
+            stream = get_stream_name(current_stream_idx)
+        else:
+            stream = self.write_get_raw_stream(device.index, V.graph.name)
         self.writeline(f"{kernel_name}({', '.join([*call_args, stream])});")
 
     def prepare_triton_wrapper_args(
@@ -2316,9 +2363,9 @@ def cutedsl_param_specs(
                 # export_to_c takes the C type of a scalar from its annotation; the DSL
                 # converts an unannotated one at run time, which C cannot express.
                 raise NotImplementedError(
-                    f"CuTeDSL kernel {kernel.name}: AOTInductor needs scalar parameter "
-                    f"{name!r} annotated with a cutlass Numeric type (e.g. "
-                    "cutlass.Int32) or cutlass.Constexpr"
+                    f"CuTeDSL kernel {kernel.name}: the C++ wrapper (AOTInductor or "
+                    f"cpp_wrapper) needs scalar parameter {name!r} annotated with a "
+                    "cutlass Numeric type (e.g. cutlass.Int32) or cutlass.Constexpr"
                 )
             value = runtime_args[name]
             hint = (
@@ -2345,7 +2392,8 @@ class CuteDSLCallWrapper:
     codegen time); it is generated with the Triton launchers in finalize_prefix.
 
     Parameters: per tensor a data pointer then its dynamic sizes and strides (int64,
-    in dimension order), per scalar its value, and the stream.
+    in dimension order), per scalar its value (double for a float, uint64_t for a
+    Uint64, int64_t otherwise), and the stream.
     """
 
     wrapper_name: str
@@ -2369,8 +2417,12 @@ class CuteDSLCallWrapper:
                 params.extend(f"int64_t {v}" for v in (*sizes, *strides))
                 tensor_args[name] = (name, sizes, strides)
             elif ctype != "cudaStream_t":
-                is_float = ctype in ("float", "double", "__half_raw")
-                params.append(f"{'double' if is_float else 'int64_t'} {name}")
+                if ctype in ("float", "double", "__half_raw"):
+                    params.append(f"double {name}")
+                elif ctype == "uint64_t":
+                    params.append(f"uint64_t {name}")
+                else:
+                    params.append(f"int64_t {name}")
                 scalar_args[name] = name
         # The stream comes last whatever its position in the host function.
         params.append("cudaStream_t stream")

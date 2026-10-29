@@ -2766,33 +2766,26 @@ class CpuTritonKernelCache:
         return cls.cache.keys()
 
 
-def cutedsl_user_kernel_link_args(output_dir: str) -> list[str]:
+def cutedsl_user_kernel_link_args() -> list[str]:
     """Link arguments for the user CuTeDSL kernels the current graph's C++ wrapper
     exported: their objects, the DSL's runtime archive and flags keeping their symbols
     private (see codegen/cutedsl/user_kernel_aot.py). They go through extra_flags, not
-    the object list, whose files are deleted after linking."""
+    the object list, whose files are deleted after linking. The configurations they
+    cannot be linked in are refused when the kernels are exported."""
     kernels = list(
         getattr(V.graph.wrapper_code, "cutedsl_exported_kernels", {}).values()
     )
     if not kernels:
         return []
-    if (
-        config.aot_inductor.package_cpp_only
-        or config.aot_inductor.emit_multi_arch_kernel
-        or config.aot_inductor.cross_target_platform == "windows"
-    ):
-        raise NotImplementedError(
-            "User-defined CuTeDSL kernels support neither package_cpp_only, "
-            "emit_multi_arch_kernel nor cross-compiling for Windows"
-        )
     from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+        cutedsl_cache_dir,
         cutedsl_link_flags,
         cutedsl_link_inputs,
     )
 
     return [
         *cutedsl_link_inputs(kernels),
-        *cutedsl_link_flags(output_dir, [k.prefix for k in kernels]),
+        *cutedsl_link_flags(cutedsl_cache_dir(), [k.prefix for k in kernels]),
     ]
 
 
@@ -3672,7 +3665,7 @@ end
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
-                extra_flags=cutedsl_user_kernel_link_args(output_dir),
+                extra_flags=cutedsl_user_kernel_link_args(),
             )
 
             if gpu_kernels_o and device_type == "xpu":

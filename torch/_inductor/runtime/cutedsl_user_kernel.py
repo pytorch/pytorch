@@ -18,7 +18,9 @@ import torch
 
 
 # host function -> {argument signature -> compiled function}
-_compiled: "weakref.WeakKeyDictionary[Callable[..., Any], dict[tuple[Any, ...], Any]]" = weakref.WeakKeyDictionary()
+_compiled: weakref.WeakKeyDictionary[
+    Callable[..., Any], dict[tuple[Any, ...], Any]
+] = weakref.WeakKeyDictionary()
 
 
 def _launch_device(fn: Callable[..., Any], args: Mapping[str, Any]) -> torch.device:
@@ -31,8 +33,8 @@ def _launch_device(fn: Callable[..., Any], args: Mapping[str, Any]) -> torch.dev
         return torch.device("cuda", torch.cuda.current_device())
     if len(devices) > 1 or devices[0].type != "cuda":
         raise ValueError(
-            f"CuTeDSL kernel {getattr(fn, '__name__', fn)}: tensor arguments must be on "
-            f"one CUDA device, got {', '.join(map(str, devices))}"
+            f"CuTeDSL kernel {getattr(fn, '__name__', fn)}: tensor arguments must be "
+            f"on one CUDA device, got {', '.join(map(str, devices))}"
         )
     return devices[0]
 
@@ -119,7 +121,8 @@ class CuteDSLKernelLauncher:
     def run(self, *args: Any, stream: int) -> None:
         if len(args) != len(self.arg_names):
             raise AssertionError(
-                f"expected {len(self.arg_names)} arguments ({self.arg_names}), got {len(args)}"
+                f"expected {len(self.arg_names)} arguments ({self.arg_names}), "
+                f"got {len(args)}"
             )
         launch_cutedsl_kernel(
             self.fn, {**dict(zip(self.arg_names, args)), **self.constant_args}, stream
