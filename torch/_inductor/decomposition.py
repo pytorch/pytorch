@@ -243,13 +243,11 @@ def special_log_ndtr(a: torch.Tensor) -> torch.Tensor | NotImplementedType:
 def _cuda_trailing_sum(
     terms: list[torch.Tensor], reduction_input: torch.Tensor
 ) -> torch.Tensor:
-    """Add `terms` in the order ATen's CUDA reduction walks a short trailing dim.
+    """Match ATen's CUDA fold order for the callers' 1-16 trailing terms.
 
-    gpu_reduce_kernel (Reduce.cuh) gives the reduction dim last_pow2(n) lanes, capped
-    at the warp size. Lane t visits elements t, t+width, ... into vt0 rotating
-    accumulators and folds those left to right, then block_x_reduce halves the lanes.
-    tl.sum instead pairs adjacent elements, a different association and so a different
-    sum once the terms stop being exactly addable.
+    gpu_reduce_kernel (Reduce.cuh) uses last_pow2(n) lanes. Each lane visits at most
+    two terms, seeds each accumulator with zero, then adds the accumulators. The
+    lane-halving fold differs from tl.sum's adjacent pairing.
     """
     from torch._native.registry import native_decomp_table
 
@@ -269,23 +267,14 @@ def _cuda_trailing_sum(
             and _int32_indexing_safe(reduction_input, reduction_input.ndim - 1)
         ):
             return torch.stack(terms, dim=-1).sum(-1)
-    vt0 = 4
     n = len(terms)
-    width = min(1 << (n.bit_length() - 1), 32)
+    width = 1 << (n.bit_length() - 1)
     lanes = []
     for lane in range(width):
-        slots: list[torch.Tensor | None] = [None] * vt0
-        for visit, i in enumerate(range(lane, n, width)):
-            held = slots[visit % vt0]
-            slots[visit % vt0] = (
-                torch.zeros_like(terms[i]) + terms[i]
-                if held is None
-                else held + terms[i]
-            )
-        total = cast(torch.Tensor, slots[0])
-        for extra in slots[1:]:
-            if extra is not None:
-                total = total + extra
+        total = torch.zeros_like(terms[lane]) + terms[lane]
+        if lane + width < n:
+            second = terms[lane + width]
+            total = total + (torch.zeros_like(second) + second)
         lanes.append(total)
     while len(lanes) > 1:
         half = len(lanes) // 2
