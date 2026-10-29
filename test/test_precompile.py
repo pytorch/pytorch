@@ -9314,6 +9314,7 @@ class TestPrecompileRuntimeCache(TestCase):
             "never-run backward phase ok",
         )
 
+    @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @torch._inductor.config.patch(
         multi_kernel_hints=[64, 256],
