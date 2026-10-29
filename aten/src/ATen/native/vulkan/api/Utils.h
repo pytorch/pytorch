@@ -8,6 +8,7 @@
 #include <ATen/native/vulkan/api/vk_api.h>
 
 #include <ATen/native/vulkan/api/Exception.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_VULKAN_API
 
@@ -187,7 +188,7 @@ inline ivec4 make_ivec4_prepadded1(const std::vector<int64_t>& ints) {
 
   ivec4 result = {1, 1, 1, 1};
   size_t base = 4 - ints.size();
-  for (size_t i = 0; i < ints.size(); ++i) {
+  for (const auto i : c10::irange(ints.size())) {
     result.data[i + base] = safe_downcast<int32_t>(ints[i]);
   }
 
