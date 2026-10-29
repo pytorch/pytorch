@@ -132,6 +132,10 @@ class KernelProgram {
 // Lower a verified logical Program into a KernelProgram: pointwise-only
 // Compute nodes become single-region KernelFunctions; reduction Compute
 // nodes must already be eager ExternCalls (generated reductions rejected).
+//
+// Formal-pass-API phase: thin compatibility shim through the typed
+// registry (defined in kernel_ir.cpp). The real transform is
+// detail::lowerToKernelsImpl.
 KernelProgram lower_to_kernels(const Program& program);
 
 // Vertical pointwise fusion over the KernelProgram DAG. Fuses adjacent
@@ -140,6 +144,7 @@ KernelProgram lower_to_kernels(const Program& program);
 // descriptor layouts and live/exported intermediate stores. Rejects fusion
 // when the proof is missing. No horizontal or reduction fusion, no
 // fusion across extern barriers.
+// Thin shim through the typed registry; see detail::fuseKernelsImpl.
 KernelProgram fuse_kernels(const KernelProgram& program);
 
 } // namespace torch::inductor::loops_ir

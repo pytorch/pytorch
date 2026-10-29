@@ -296,7 +296,8 @@ class TiledProgram {
 // (eager elsewhere). Throws on: != 1 region, any reduction ranges /
 // accumulators / reduction body (must be extern), ViewRead (run view_inline
 // first), Accumulate/ReadAccumulator in post body, unknown buffers, int64
-// overflow in tile math, or bad TileOptions.
+// overflow in tile math, or bad TileOptions. Thin shim through the typed
+// registry; see detail::lowerToTiledImpl.
 TiledProgram lower_to_tiled(const KernelProgram& program, const TileOptions& options = TileOptions());
 
 } // namespace torch::inductor::loops_ir

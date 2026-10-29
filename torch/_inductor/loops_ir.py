@@ -43,18 +43,23 @@ def load_cpp_ir() -> Any:
     from torch.utils.cpp_extension import load
 
     source = Path(__file__).resolve().parents[1] / "csrc/inductor/experimental/loops_ir"
-    # Full pipeline sources. tiled_bindings.cpp is owned by the tiling worker;
-    # until it lands the extension cannot link (bindings.cpp forward-declares
-    # bind_tiled_ir). Do not trim this list to hide the dependency.
+    # Missing translation units are an explicit error, not a filtered subset.
     names = (
         "ir.cpp",
         "printer.cpp",
         "passes.cpp",
+        "analyses.cpp",
+        "pass_manager.cpp",
         "kernel_ir.cpp",
         "tiled_ir.cpp",
         "tiled_bindings.cpp",
         "bindings.cpp",
     )
+    missing = [name for name in names if not (source / name).is_file()]
+    if missing:
+        raise LoopsIrUnsupportedError(
+            "loops_ir native sources missing: " + ", ".join(sorted(missing))
+        )
     return load(
         name="inductor_experimental_loops_ir",
         sources=[str(source / name) for name in names],
