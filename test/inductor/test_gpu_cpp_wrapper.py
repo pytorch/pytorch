@@ -463,6 +463,66 @@ class TestGpuWrapper(InductorTestCase):
             )
 
     @config.patch(implicit_fallbacks=True)
+    @parametrize("runtime", ("jit", "aoti"))
+    @parametrize("empty_last_list", (False, True))
+    def test_custom_op_fallback_tensor_list_returns(self, runtime, empty_last_list):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("mylib_tensor_lists", "FRAGMENT") as m:
+            m.define("nested(Tensor x) -> (Tensor[], Tensor?, Tensor, Tensor[])")
+            m.impl(
+                "nested",
+                lambda x: (
+                    [x + 1, x + 2],
+                    None,
+                    x + 3,
+                    [] if empty_last_list else [x + 4],
+                ),
+                GPU_TYPE.upper(),
+            )
+            m.impl(
+                "nested",
+                lambda x: (
+                    [torch.empty_like(x), torch.empty_like(x)],
+                    None,
+                    torch.empty_like(x),
+                    [] if empty_last_list else [torch.empty_like(x)],
+                ),
+                "Meta",
+            )
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, _, middle, last = torch.ops.mylib_tensor_lists.nested(
+                        x.sin()
+                    )
+                    result = first[0] + first[1] + middle
+                    return result if empty_last_list else result + last[0]
+
+            model = Model().eval()
+            x = torch.randn(8, 4, device=self.device)
+            if runtime == "jit":
+                compiled = torch.compile(
+                    model, fullgraph=True, options={"cpp_wrapper": True}
+                )
+                actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+            else:
+                exported = torch.export.export(model, (x,))
+                path, code = test_torchinductor.run_and_get_cpp_code(
+                    torch._inductor.aoti_compile_and_package,
+                    exported,
+                    inductor_configs={"triton.autotune_at_compile_time": False},
+                )
+                self.assertIn("JIT wrapper code for AOT lazy autotuning", code)
+                compiled = torch._inductor.aoti_load_package(path)
+                actual = compiled(x)
+            self.assertEqual(actual, model(x))
+            self.assertIn('findSchemaOrThrow("mylib_tensor_lists::nested", "")', code)
+            self.assertIn("callBoxed", code)
+            self.assertNotIn("custom_op_wrapper", code)
+
+    @config.patch(implicit_fallbacks=True)
     def test_custom_op_fallback_boxes_none_as_undefined_tensor(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")

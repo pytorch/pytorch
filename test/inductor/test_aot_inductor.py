@@ -11929,11 +11929,11 @@ class TestCppWrapperFallbackProfiling(TestCase):
     """Test RAIIAtenRecordFunctionHandle profiling for kernel paths that the
     device-parametrized AOTInductorTestsTemplate does not reach.
 
-    The two dispatcher fallbacks only arise in cpp_wrapper mode WITHOUT AOT
-    (torch.compile with config.cpp_wrapper=True), so they are driven through
-    get_code, which generates code without compiling or running it (avoids ASAN
-    issues). The non-Triton GPU template path is AOT-only and needs a GPU, so it
-    goes through AOTIRunnerUtil rather than being parametrized over devices.
+    The StableIValue and Python JIT fallbacks are driven through get_code,
+    which generates code without compiling or running it (avoids ASAN issues).
+    Boxed JIT fallback profiling is covered in test_cpp_wrapper_custom_ops.py.
+    The non-Triton GPU template path is AOT-only and needs a GPU, so it goes
+    through AOTIRunnerUtil rather than being parametrized over devices.
     """
 
     @unittest.skipIf(
@@ -11993,15 +11993,13 @@ class TestCppWrapperFallbackProfiling(TestCase):
     def test_aoti_profiler_python_fallback(self, enable_kernel_profile):
         """Test profiling for non-AOT Python fallback path.
 
-        Custom ops whose return type is not boxed-dispatch compatible (only
-        Tensor, Tensor? and () are) go through PyObject_CallObject in non-AOT
-        cpp_wrapper mode. A Tensor[] return is the cheapest such schema; a
-        Tensor[] argument is boxed-compatible and would not reach this path.
+        Optional tensor-list returns are outside the boxed-dispatch subset
+        and still go through PyObject_CallObject in non-AOT cpp_wrapper mode.
         """
         with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
             torch.library.define(
                 "proftest::python_cat",
-                "(Tensor[] tensors, int dim=0) -> Tensor[]",
+                "(Tensor[] tensors, int dim=0) -> Tensor?[]",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
