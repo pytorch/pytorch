@@ -169,7 +169,7 @@ def select_col_config(
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
     # Partials are indexed in Int32 up to outputs * npar.
     outputs = batches * columns
-    max_npar = _INT32_LIMIT // max(1, outputs)
+    max_npar = (_INT32_LIMIT - 1) // max(1, outputs)
     if npar is not None and npar > max_npar:
         raise ValueError(f"npar={npar} overflows Int32 partials for {outputs} outputs")
     cfg = ColConfig(
