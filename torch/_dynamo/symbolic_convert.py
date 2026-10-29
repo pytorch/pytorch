@@ -1110,9 +1110,9 @@ def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None
     for v in vts:
         if isinstance(v, LazyVariableTracker):
             devices |= _tensor_device_types(v.peek_value())
-        elif isinstance(v, TensorVariable) and v.device:
+        elif isinstance(v, TensorVariable) and v.device and v.device.type != "meta":
             devices |= {v.device.type}
-    for vt in (v.unwrap() for v in popped):
+    for vt in vts:
         if isinstance(vt, LazyVariableTracker):
             package.add_graph_break_op(vt.peek_value(), device_types=devices)
         elif isinstance(vt, BaseTorchVariable):
