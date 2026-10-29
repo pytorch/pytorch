@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipIfTorchDynamo,
     slowTest,
+    subtest,
 )
 
 
@@ -2096,6 +2097,74 @@ torch.cuda.synchronize()
         self.assertEqual(
             per_sample_weights.grad,
             torch.tensor([3.0], device=device, dtype=torch.float16),
+        )
+
+    @slowTest
+    @parametrize_test(
+        "path,n,scale_grad_by_freq",
+        [
+            # n <= 3072 and no frequency scaling takes the feature kernel in
+            # Embedding.cu, everything else the sorted path in
+            # EmbeddingBackwardKernel.cu
+            subtest(("feature", 4, False), name="feature"),
+            subtest(("sorted", 4096, False), name="sorted"),
+            subtest(("scaled", 4, True), name="scaled"),
+        ],
+    )
+    @parametrize_test(
+        "bound,invalid_value",
+        [
+            subtest(("negative", -1), name="negative"),
+            subtest(("upper", 10), name="upper"),
+            # wraps to 3 when narrowed to int32, silently passing the bounds
+            # check on an unfixed build
+            subtest(("wrapped", 2**32 + 3), name="wrapped"),
+        ],
+    )
+    def test_embedding_dense_backward_rejects_invalid_indices(
+        self, device, path, n, scale_grad_by_freq, bound, invalid_value
+    ):
+        script = f"""
+import torch
+
+num_weights = 10
+weight = torch.randn(num_weights, 3, device={device!r}, requires_grad=True)
+indices = torch.ones({n}, dtype=torch.int64, device={device!r})
+indices_alias = torch.from_dlpack(indices)
+
+out = torch.nn.functional.embedding(
+    indices, weight, padding_idx=0, scale_grad_by_freq={scale_grad_by_freq!r}
+)
+indices_alias.fill_({invalid_value})
+out.sum().backward()
+torch.cuda.synchronize()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        output = proc.stdout + "\n" + proc.stderr
+        if path == "feature":
+            expected_file = "Embedding.cu"
+            expected_assert = "dst_row >= 0 && dst_row < num_weights"
+        else:
+            expected_file = "EmbeddingBackwardKernel.cu"
+            expected_assert = "target_row >= 0 && target_row < num_weights"
+        has_cuda_assert = (
+            "device-side assert triggered" in output
+            and expected_file in output
+            and expected_assert in output
+        )
+        has_hip_assert = (
+            "hipErrorLaunchFailure" in output
+            or "unspecified launch failure" in output
+            or "HSA_STATUS_ERROR_EXCEPTION" in output
+        )
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            lambda msg: f"{msg}\nExpected device assert error in output, got: {output}",
         )
 
     def test_embedding_bag_dimension_errors(self, device):

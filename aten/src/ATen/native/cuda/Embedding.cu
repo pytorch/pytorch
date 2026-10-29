@@ -47,12 +47,13 @@ __global__ void embedding_backward_feature_kernel
    scalar_t* __restrict__ grad_weight,
    int n, // OK to pass as int, we don't expect 2 billion+ samples in one shot
    int64_t stride,
-   int padding_idx)
+   int64_t padding_idx,
+   int64_t num_weights)
 {
   extern __shared__ char buf[];
   accscalar_t* smem = (accscalar_t*)buf;
   accscalar_t* my_s = smem + C10_WARP_SIZE*threadIdx.y;
-  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*C10_WARP_SIZE*blockDim.y);
+  index_t* indices_batch = (index_t*)(buf + sizeof(accscalar_t)*C10_WARP_SIZE*blockDim.y);
 
   const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
 
@@ -68,7 +69,7 @@ __global__ void embedding_backward_feature_kernel
     // Entire block cooperates to load a batch of 1024 indices to process
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
-      indices_batch[tid] = (int)indices[batch_start + tid];
+      indices_batch[tid] = indices[batch_start + tid];
 
     int batch_end = batch_start + blockDim.x*blockDim.y < n ?
                     batch_start + blockDim.x*blockDim.y : n;
@@ -84,7 +85,7 @@ __global__ void embedding_backward_feature_kernel
                          (batch_end - chunk_start) : blockDim.y;
 
       int src_row = chunk_start + threadIdx.y;
-      int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
+      index_t dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
 
       // All warps load their smem segments with incoming grad data
       if(src_row < n && f < s && dst_row != padding_idx)
@@ -99,6 +100,7 @@ __global__ void embedding_backward_feature_kernel
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx && src_row < n) // Per-warp exit condition, safe with ballot_sync
       {
+        CUDA_KERNEL_ASSERT(dst_row >= 0 && dst_row < num_weights);
         int match_found_this_thread = 0;
         if(threadIdx.x < n_this_chunk)
           match_found_this_thread = (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
@@ -298,14 +300,15 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
           embedding_backward_feature_kernel<scalar_t, accscalar_t, index_t>
             <<<grid,
                 block,
-                sizeof(accscalar_t)*warp_size*BLOCKDIMY + sizeof(int)*warp_size*BLOCKDIMY,
+                sizeof(accscalar_t)*warp_size*BLOCKDIMY + sizeof(index_t)*warp_size*BLOCKDIMY,
                 stream>>>
             (indices_contig.const_data_ptr<index_t>(),
               grad.const_data_ptr<scalar_t>(),
               grad_weight.mutable_data_ptr<scalar_t>(),
               static_cast<int>(num_indices),
               static_cast<int64_t>(stride),
-              static_cast<int>(padding_idx));
+              padding_idx,
+              num_weights);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
        });
