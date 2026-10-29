@@ -1333,6 +1333,8 @@ class TestClientProtocol(TestCase):
 
 
 class PrefixStoreBarrierTimeoutTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_barrier_respects_store_timeout(self):
         # Store::barrier(key, world_size) must use the virtual getTimeout(),
         # so PrefixStore forwards the wrapped store's timeout, not the 300s default.
