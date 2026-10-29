@@ -50,7 +50,8 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
-    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
+from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -9493,6 +9494,53 @@ class TestNNDeviceType(NNTestCase):
         out.backward(grad_cpu.to(device))
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2),
+                        torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
+    @parametrize_test("align_corners", [False, True])
+    @parametrize_test("layout", [
+        "contiguous", "noncontig_input", "noncontig_output", "misaligned_output", "channels_last_c3",
+    ])
+    @parametrize_test("isize, osize, scale", [
+        subtest(((8, 8), (16, 16), None), name="up_2x"),
+        subtest(((7, 5), (13, 11), None), name="up_odd_width"),
+        subtest(((16, 16), (8, 8), None), name="down_2x"),
+        subtest(((9, 10), (9, 32), None), name="aniso"),
+        subtest(((10, 12), None, 1.7), name="scale_factor"),
+    ])
+    def test_upsamplingBilinear2d_nchw_kernel_paths(self, device, dtype, align_corners, layout, isize, osize, scale):
+        # The NCHW forward writes 4 outputs per thread when the output is
+        # contiguous, vector-aligned, width % 4 == 0, the input has unit
+        # w-stride, and the op upsamples; every other case takes the
+        # per-element kernel. The NaN prefill catches outputs neither writes.
+        n, c = 2, 3
+        ih, iw = isize
+        if layout == "noncontig_input":
+            x = make_tensor((n, c, ih, 2 * iw), device=device, dtype=dtype)[..., ::2]
+        else:
+            x = make_tensor((n, c, ih, iw), device=device, dtype=dtype)
+        if layout == "channels_last_c3":
+            x = x.contiguous(memory_format=torch.channels_last)
+        if scale is None:
+            oh, ow = osize
+        else:
+            oh, ow = int(ih * scale), int(iw * scale)
+
+        if layout == "noncontig_output":
+            out = torch.empty(n, c, ow, oh, device=device, dtype=dtype).transpose(2, 3)
+        elif layout == "misaligned_output":
+            out = torch.empty(n * c * oh * ow + 1, device=device, dtype=dtype)[1:].view(n, c, oh, ow)
+        elif layout == "channels_last_c3":
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype).contiguous(memory_format=torch.channels_last)
+        else:
+            out = torch.empty(n, c, oh, ow, device=device, dtype=dtype)
+        out.fill_(float("nan"))
+
+        torch._C._nn.upsample_bilinear2d(x, [oh, ow], align_corners, scale, scale, out=out)
+        expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
+        self.assertEqual(out.cpu(), expected.to(dtype))
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
