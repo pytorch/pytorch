@@ -1059,8 +1059,8 @@ class TestProfiler(TestCase):
     @parametrize("autograd_profiler", [False, True])
     def test_with_modules_deprecated(self, autograd_profiler, with_modules):
         # with_modules only collects data for TorchScript models and is on its
-        # way out: passing it with any value must warn with FutureWarning at the
-        # caller's line, and not error.
+        # way out: passing it with any value must warn with FutureWarning once, at
+        # the caller's line, and not error or warn again when profiling starts.
         activities = [ProfilerActivity.CPU]
         with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated") as cm:
             if autograd_profiler:
@@ -1068,8 +1068,10 @@ class TestProfiler(TestCase):
             else:
                 prof = profile(activities=activities, with_modules=with_modules)
         self.assertEqual(cm.filename, __file__)
-        with prof:
-            torch.ones(1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            with prof:
+                torch.ones(1)
 
     @parametrize("autograd_profiler", [False, True])
     def test_with_modules_omitted_does_not_warn(self, autograd_profiler):
