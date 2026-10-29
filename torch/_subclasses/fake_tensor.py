@@ -99,6 +99,10 @@ def _dispatch_keys_has_mkldnn(dispatch_keys: torch.DispatchKeySet | None) -> boo
     return dispatch_keys is not None and dispatch_keys.has(_MKLDNN_DISPATCH_KEY)
 
 
+# Tensor's own layout getter, which FakeTensor.layout overrides.
+_tensor_layout = Tensor.layout.__get__  # type: ignore[attr-defined]
+
+
 class _FakeTensorConstructorIgnoredState(TypedDict, total=False):
     # Recompute memo descriptor state when reconstructing from
     # FakeTensor.__dict__.
@@ -1226,9 +1230,11 @@ class FakeTensor(Tensor):
     @property
     # pyrefly: ignore [bad-override]
     def layout(self) -> torch.layout:
-        if self.is_mkldnn:
+        # Read on every cached dispatch, so test dispatch_keys inline rather
+        # than through is_mkldnn.
+        if _dispatch_keys_has_mkldnn(self.dispatch_keys):
             return torch._mkldnn  # type: ignore[attr-defined]
-        return Tensor.layout.__get__(self, type(self))  # type: ignore[attr-defined]
+        return _tensor_layout(self)
 
     def to_dense(
         self,
@@ -1728,6 +1734,18 @@ def _same_int_expr(a: _MetadataIntLike, b: _MetadataIntLike) -> bool:
     if isinstance(b, (_SymIntOutputStub, SymInt)):
         return False
     return a == b
+
+
+@functools.cache
+def _hop_callable_arg_types() -> tuple[type, type]:
+    # Imported lazily (torch._higher_order_ops imports this module), but only
+    # once: _prep_args_for_hash needs these on every cache lookup.
+    from torch._higher_order_ops.auto_functionalize import (
+        FunctionalCallableWithEpilogue,
+    )
+    from torch._higher_order_ops.utils import SubgraphCallableWrapper
+
+    return SubgraphCallableWrapper, FunctionalCallableWithEpilogue
 
 
 _tensor_metadata_values = operator.attrgetter(
@@ -2418,10 +2436,9 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
-        from torch._higher_order_ops.auto_functionalize import (
-            FunctionalCallableWithEpilogue,
+        SubgraphCallableWrapper, FunctionalCallableWithEpilogue = (
+            _hop_callable_arg_types()
         )
-        from torch._higher_order_ops.utils import SubgraphCallableWrapper
 
         if isinstance(args, (list, tuple, dict)):
             result.append(type(args))
@@ -2963,8 +2980,9 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
         kwargs = kwargs or {}
-        with no_dispatch():
-            log.debug("%s %s %s", func, args, kwargs)
+        if log.isEnabledFor(logging.DEBUG):
+            with no_dispatch():
+                log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)
