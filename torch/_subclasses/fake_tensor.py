@@ -3279,10 +3279,10 @@ class FakeTensorMode(TorchDispatchMode):
         #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
         if (is_lift_func and not flat_arg_fake_tensors) or (
-            should_allow_numbers_as_tensors(func)
+            not flat_arg_fake_tensors
             and not has_symbolic_sizes
-            and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
+            and should_allow_numbers_as_tensors(func)
         ):
             if not all(t.constant is not None for t in flat_arg_fake_tensors):
                 raise AssertionError(
@@ -3769,8 +3769,10 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
     ) -> None:
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
+        if not any_constant:
+            return
         schema_info = get_schema_info(func)
-        if any_constant and schema_info.is_mutable():
+        if schema_info.is_mutable():
             _, new_kwargs = normalize_function(  # type: ignore[misc]
                 func,
                 args=args,  # type: ignore[arg-type]
