@@ -1915,22 +1915,31 @@ class TestLinalg(TestCase):
 
     # A running float32 sum stops growing once it reaches 2**24, so a norm that
     # accumulates linearly drops every small term after a large one (#65815).
-    # n is large enough for the reduction to be split across threads.
-    @dtypes(torch.float)
+    # At 4 threads, n is large enough for the reduction to be split across them.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
     def test_vector_norm_keeps_small_terms(self, device, dtype):
         n = 2**16
-        for ord, first, expected in ((1, 2.0**24, 2.0**24 + n), (2, 2.0**12, math.sqrt(2.0**24 + n))):
-            x = torch.ones(n + 1, dtype=dtype, device=device)
-            x[0] = first
-            cols = x.unsqueeze(1).repeat(1, 3)
-            for t, dim in ((x, None), (cols, 0), (cols.t().contiguous(), 1)):
-                result = torch.linalg.vector_norm(t, ord, dim=dim)
-                self.assertEqual(result, torch.full_like(result, expected), atol=0, rtol=1e-5, msg=f"ord={ord}, dim={dim}")
-        # ord=0 counts the nonzeros, so it needs more than 2**24 elements.
-        x = torch.ones((), dtype=dtype, device=device).expand(2**24 + n, 2)
-        for t, dim in ((x, 0), (x[:, 0], None)):
-            result = torch.linalg.vector_norm(t, 0, dim=dim)
-            self.assertEqual(result, torch.full_like(result, 2.0**24 + n), atol=0, rtol=0, msg=f"dim={dim}")
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for ord, first, expected in ((1, 2.0**24, 2.0**24 + n), (2, 2.0**12, math.sqrt(2.0**24 + n))):
+                    x = torch.ones(n + 1, dtype=dtype, device=device)
+                    x[0] = first
+                    cols = x.unsqueeze(1).repeat(1, 3)
+                    for t, dim in ((x, None), (cols, 0), (cols.t().contiguous(), 1)):
+                        result = torch.linalg.vector_norm(t, ord, dim=dim)
+                        msg = f"threads={threads}, ord={ord}, dim={dim}"
+                        self.assertEqual(result, torch.full_like(result, expected), atol=0, rtol=1e-5, msg=msg)
+                # ord=0 counts the nonzeros, so it needs more than 2**24 elements.
+                x = torch.ones((), dtype=dtype, device=device).expand(2**24 + n, 2)
+                for t, dim in ((x, 0), (x[:, 0], None)):
+                    result = torch.linalg.vector_norm(t, 0, dim=dim)
+                    msg = f"threads={threads}, dim={dim}"
+                    self.assertEqual(result, torch.full_like(result, 2.0**24 + n), atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
 
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
@@ -1989,11 +1998,18 @@ class TestLinalg(TestCase):
     # The two reduced dims cannot be merged, so the sum is built from 2**14 partial
     # sums of 2. Adding those in half or bfloat16 would stop at 4096 or 512.
     @dtypes(torch.half, torch.bfloat16)
-    def test_powsum_reduced_precision_accumulates_in_float(self, device, dtype):
+    def test_norm_reduced_precision_accumulates_in_float(self, device, dtype):
         x = torch.ones(2**14, 3, 2, dtype=dtype, device=device)
-        for ord in (1, 2):
-            result = torch.linalg._powsum(x, ord, dim=(0, 2))
-            self.assertEqual(result, torch.full((3,), 2.0**15, dtype=dtype, device=device), atol=0, rtol=0, msg=f"ord={ord}")
+        for fn, ord, expected in (
+            (torch.linalg._powsum, 1, 2.0**15),
+            (torch.linalg._powsum, 2, 2.0**15),
+            (torch.linalg.vector_norm, 0, 2.0**15),
+            (torch.linalg.vector_norm, 1, 2.0**15),
+            (torch.linalg.vector_norm, 2, 2.0**7.5),
+        ):
+            result = fn(x, ord, dim=(0, 2))
+            expected = torch.full((3,), expected, dtype=dtype, device=device)
+            self.assertEqual(result, expected, atol=0, rtol=0, msg=f"{fn.__name__}, ord={ord}")
 
     @onlyAccelerator
     def test_powsum_dtype_kwarg(self, device):

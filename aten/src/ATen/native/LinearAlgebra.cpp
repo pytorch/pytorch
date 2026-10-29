@@ -2887,6 +2887,24 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
+// The CPU cascade summation (see use_cascade_powsum) adds partial sums into its
+// output, so reduce half and bfloat16 into a float temporary and round once at
+// the end. Returns false when the kernel would not take that path.
+template <typename Stub>
+static bool cpu_powsum_in_float(Stub& stub, const char* name, const Tensor& result, const Tensor& self,
+                                OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
+  const auto in_dtype = self.scalar_type();
+  if (!self.is_cpu() || !isReducedFloatingType(in_dtype) || result.scalar_type() != in_dtype ||
+      !use_cascade_powsum(in_dtype, kFloat, ord, is_norm)) {
+    return false;
+  }
+  Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
+  auto iter = make_reduction(name, result_float, self, dim, keepdim, in_dtype, kFloat);
+  stub(iter.device_type(), iter, ord);
+  result.copy_(result_float);
+  return true;
+}
+
 TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, const Tensor& result) {
   // Casting a large integer to a double will just introduce an error for
   // values larger than 10^53 (same for negative numbers), so that's fine.
@@ -2949,15 +2967,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     self_ = self;
   }
 
-  // On CPU, accumulate half and bfloat16 in float and round once at the end, as
-  // mean() does. The kernel reads the low-precision input directly.
-  const auto in_dtype = self_.scalar_type();
-  if (self_.is_cpu() && (in_dtype == kHalf || in_dtype == kBFloat16) &&
-      result.scalar_type() == in_dtype && (ord == 0.0 || ord == 1.0 || ord == 2.0)) {
-    Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
-    auto iter = make_reduction("vector_norm", result_float, self_, dim, keepdim, in_dtype, kFloat);
-    norm_stub(iter.device_type(), iter, ord);
-    result.copy_(result_float);
+  if (cpu_powsum_in_float(norm_stub, "vector_norm", result, self_, dim, keepdim, ord, /*is_norm=*/true)) {
     return;
   }
 
@@ -3018,14 +3028,7 @@ Tensor linalg__powsum(
     self_ = self;
   }
 
-  // Accumulate half and bfloat16 in float on CPU, as in linalg_vector_norm_out.
-  const auto in_dtype = self_.scalar_type();
-  if (self_.is_cpu() && (in_dtype == kHalf || in_dtype == kBFloat16) &&
-      result.scalar_type() == in_dtype && (ord == 1.0 || ord == 2.0)) {
-    Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
-    auto iter = make_reduction("powsum", result_float, self_, dim, keepdim, in_dtype, kFloat);
-    powsum_stub(iter.device_type(), iter, ord);
-    result.copy_(result_float);
+  if (cpu_powsum_in_float(powsum_stub, "powsum", result, self_, dim, keepdim, ord, /*is_norm=*/false)) {
     return result;
   }
 
