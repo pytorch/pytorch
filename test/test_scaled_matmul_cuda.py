@@ -26,6 +26,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM12X,
     IS_SM90,
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
     rocm_mx_swizzle,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
@@ -55,6 +56,7 @@ from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
+    MI300_ARCH,
     MI350_ARCH,
     NAVI4_ARCH,
     NAVI_ARCH,
@@ -472,6 +474,47 @@ def make_tensorwise_scaled_addmm_inputs(
     )
 
 
+def scaled_addmm_args(
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    ScalingType,
+    torch.Tensor,
+    ScalingType,
+]:
+    """Pack tensorwise operands for a recipe the scaled_addmm accumulator supports.
+
+    ROCm implements the accumulator only for rowwise scaling, so the tensorwise
+    scales are broadcast to rowwise shapes there.
+    """
+    if not torch.version.hip:
+        return tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+    scale_a = scale_a.reshape(1, 1).expand(mat1.size(0), 1).contiguous()
+    scale_b = scale_b.reshape(1, 1).expand(1, mat2.size(1)).contiguous()
+    return (mat1, mat2, scale_a, ScalingType.RowWise, scale_b, ScalingType.RowWise)
+
+
+def scaled_addmm_out(input, args, out):
+    mat1, mat2, scale_a, recipe_a, scale_b, recipe_b = args
+    return torch.ops.aten._scaled_addmm.out(
+        input, mat1, mat2, [scale_a], [recipe_a.value], [], [scale_b], [recipe_b.value], [], out=out
+    )
+
+
+def skipIfRocmNoScaledAddmm(fn):
+    """Skip ROCm configurations where scaled_addmm has no accumulator support."""
+    fn = runOnRocmArch(MI300_ARCH + MI350_ARCH)(fn)
+    return unittest.skipIf(
+        torch.version.hip is not None and _get_torch_rocm_version() < (7, 0),
+        "scaled_addmm on ROCm requires ROCm 7.0+",
+    )(fn)
+
+
 def make_cublas_block_scale(
     recipe: ScalingType, outer: int, k: int, device: str
 ) -> torch.Tensor:
@@ -727,7 +770,6 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     return kwargs[format]
 
 class TestFP8Matmul(TestCase):
-
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
@@ -1297,7 +1339,7 @@ class TestFP8Matmul(TestCase):
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_inplace_tunableop(self, device):
         # The tunable scaled-gemm path only computes the plain product, so an
@@ -1308,7 +1350,7 @@ class TestFP8Matmul(TestCase):
         input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
             64, 48, 32, device, torch.bfloat16
         )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
         kwargs = {"beta": beta, "alpha": alpha}
         reference = (
             beta * input.float()
@@ -1327,7 +1369,7 @@ class TestFP8Matmul(TestCase):
             torch.cuda.tunable.enable(prev_enabled)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
         torch.manual_seed(42)
@@ -1337,8 +1379,8 @@ class TestFP8Matmul(TestCase):
         _, mat1_b, mat2_b, scale_a_b, scale_b_b = make_tensorwise_scaled_addmm_inputs(
             64, 48, 32, device, torch.bfloat16
         )
-        args_a = tensorwise_scaled_mm_args(mat1_a, mat2_a, scale_a_a, scale_b_a)
-        args_b = tensorwise_scaled_mm_args(mat1_b, mat2_b, scale_a_b, scale_b_b)
+        args_a = scaled_addmm_args(mat1_a, mat2_a, scale_a_a, scale_b_a)
+        args_b = scaled_addmm_args(mat1_b, mat2_b, scale_a_b, scale_b_b)
         grad = scaled_mm(*args_a, output_dtype=torch.bfloat16)
         reference = (
             grad.float()
@@ -1347,7 +1389,7 @@ class TestFP8Matmul(TestCase):
         self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
     def test_scaled_addmm_scalar_semantics(self, device, inplace):
@@ -1358,7 +1400,7 @@ class TestFP8Matmul(TestCase):
         input = torch.randn(m, n, device=device, dtype=torch.bfloat16)
         mat1 = torch.full((m, k), float("nan"), device=device, dtype=e4m3_type)
         mat2 = torch.full((n, k), float("nan"), device=device, dtype=e4m3_type).t()
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
 
         self.assertEqual(
             op(input.clone(), *args, alpha=0, beta=0.5),
@@ -1373,7 +1415,7 @@ class TestFP8Matmul(TestCase):
         )
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
     @parametrize("m,n,k", [(0, 32, 16), (32, 0, 16), (32, 32, 0)])
@@ -1384,12 +1426,12 @@ class TestFP8Matmul(TestCase):
         mat2 = torch.empty(n, k, device=device, dtype=e4m3_type).t()
         scale_a = torch.ones(1, device=device)
         scale_b = torch.ones(1, device=device)
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
 
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
     @parametrize("inplace", [False, True])
@@ -1406,7 +1448,7 @@ class TestFP8Matmul(TestCase):
             input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
                 32, 32, 32, device, torch.bfloat16
             )
-            args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+            args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
             op = scaled_addmm_ if inplace else scaled_addmm
             if not supported:
                 with self.assertRaisesRegex(
@@ -1452,13 +1494,13 @@ class TestFP8Matmul(TestCase):
                     self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_validation(self, device):
         input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
             32, 32, 32, device, torch.bfloat16
         )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
 
         with self.assertRaisesRegex(ValueError, "input must have shape"):
             scaled_addmm(input[:1], *args)
@@ -1468,19 +1510,15 @@ class TestFP8Matmul(TestCase):
             scaled_addmm(input, *args, alpha=1j)
 
         padded_out = input.new_empty_strided(input.shape, (48, 1))
-        with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
-            torch.ops.aten._scaled_addmm.out(
-                input,
-                mat1,
-                mat2,
-                [scale_a],
-                [ScalingType.TensorWise.value],
-                [],
-                [scale_b],
-                [ScalingType.TensorWise.value],
-                [],
-                out=padded_out,
-            )
+        with self.assertRaisesRegex(ValueError, "out must have canonical contiguous row-major strides"):
+            scaled_addmm_out(input, args, padded_out)
+
+        column_major_out = input.new_empty_strided(input.shape, (1, input.size(0)))
+        self.assertEqual(input.size(0), input.size(1))
+        self.assertEqual(input.stride(0), column_major_out.stride(1))
+        self.assertFalse(torch.equal(input, input.t()))
+        with self.assertRaisesRegex(ValueError, "out must have canonical contiguous row-major strides"):
+            scaled_addmm_out(input, args, column_major_out)
 
         expected = scaled_addmm(input, *args)
         misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
@@ -1506,9 +1544,9 @@ class TestFP8Matmul(TestCase):
 
         invalid_ld = input.new_empty_strided((1, 32), (1, 1))
         with self.assertRaisesRegex(ValueError, "canonical contiguous"):
-            scaled_addmm_(invalid_ld, mat1[:1], *args[1:])
+            scaled_addmm_(invalid_ld, *scaled_addmm_args(mat1[:1], mat2, scale_a, scale_b))
 
-        if not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
+        if not torch.version.hip and not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
             row_scale_a = torch.ones(32, 1, device=device)
             row_scale_b = torch.ones(1, 32, device=device)
             with self.assertRaisesRegex(
@@ -1677,7 +1715,7 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     def test_scaled_addmm_fake_tensor(self, device):
         with FakeTensorMode():
             input = torch.empty(16, 32, device=device, dtype=torch.bfloat16)
@@ -1685,7 +1723,7 @@ class TestFP8Matmul(TestCase):
             mat2 = torch.empty(16, 32, device=device, dtype=e4m3_type)
             scale_a = torch.ones(1, device=device)
             scale_b = torch.ones(1, device=device)
-            args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+            args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
 
             result = scaled_addmm(input, *args)
             self.assertEqual(result.shape, input.shape)
@@ -1693,8 +1731,15 @@ class TestFP8Matmul(TestCase):
 
             self.assertIs(scaled_addmm_(input, *args), input)
 
+            out = torch.empty_like(input)
+            self.assertIs(scaled_addmm_out(input, args, out), out)
+            for strides in ((1, input.size(0)), (48, 1)):
+                bad_out = input.new_empty_strided(input.shape, strides)
+                with self.assertRaisesRegex(ValueError, "out must have canonical contiguous row-major strides"):
+                    scaled_addmm_out(input, args, bad_out)
+
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_fullgraph(self, device):
         from torch._inductor.utils import run_and_get_code
@@ -1705,7 +1750,7 @@ class TestFP8Matmul(TestCase):
 
         def fn(input, mat1, mat2, scale_a, scale_b):
             return scaled_addmm(
-                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+                input, *scaled_addmm_args(mat1, mat2, scale_a, scale_b)
             )
 
         operands = (mat1, mat2, scale_a, scale_b)
@@ -1715,7 +1760,7 @@ class TestFP8Matmul(TestCase):
 
         def fn_(input, mat1, mat2, scale_a, scale_b):
             return scaled_addmm_(
-                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+                input, *scaled_addmm_args(mat1, mat2, scale_a, scale_b)
             )
 
         expected_inplace = fn_(input.clone(), *operands)
@@ -1737,13 +1782,13 @@ class TestFP8Matmul(TestCase):
         self.assertNotIn("triton_poi_fused_copy", source)
 
     @onlyCUDA
-    @skipIfRocm
+    @skipIfRocmNoScaledAddmm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_cudagraph(self, device):
         input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
             32, 32, 32, device, torch.bfloat16
         )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        args = scaled_addmm_args(mat1, mat2, scale_a, scale_b)
         self.assert_scaled_addmm_cudagraph(input, scaled_addmm(input, *args), args)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1797,6 +1842,143 @@ class TestFP8Matmul(TestCase):
             atol, rtol = 3e-3, 3e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    def _scaled_addmm_rocm_inputs(self, device, m=17):
+        k, n = 128, 64
+        rows = torch.arange(m, device=device)[:, None]
+        inner = torch.arange(k, device=device)[None, :]
+        cols = torch.arange(n, device=device)[:, None]
+        x = torch.where((rows == 0) | ((inner + rows) % 31 >= 15), 1.0, -1.0).to(e4m3_type)
+        y = torch.where((cols == 0) | ((inner + cols) % 67 >= 33), 1.0, -1.0).to(e4m3_type).t()
+        scale_a = (1.0 + rows.float().remainder(3) / 4) / k
+        scale_b = 1.00390625 + cols.t().float().remainder(3) / 128
+        residual = ((7 * rows + 3 * cols.t()).remainder(17) + 1).to(torch.bfloat16) / 128
+        residual = residual.clone(memory_format=torch.contiguous_format)
+        return x, y, scale_a, scale_b, residual
+
+    def _scaled_addmm_rowwise_args(self, x, y, scale_a, scale_b):
+        return (x, y, scale_a, ScalingType.RowWise, scale_b, ScalingType.RowWise)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @skipIfRocmNoScaledAddmm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("m", [1, 17, 64])
+    @parametrize("alpha_beta", [(1.0, 1.0), (0.5, -0.5), (1.0, 0.0)])
+    def test_scaled_addmm_rocm_residual(self, device, m, alpha_beta):
+        x, y, sa, sb, residual = self._scaled_addmm_rocm_inputs(device, m)
+        alpha, beta = alpha_beta
+        product = (x.float() @ y.float()) * sa * sb
+        expected = (alpha * product + beta * residual.float()).to(torch.bfloat16)
+        if beta == 0:
+            residual.fill_(float("nan"))
+        args = self._scaled_addmm_rowwise_args(x, y, sa, sb)
+        actual = scaled_addmm(residual, *args, alpha=alpha, beta=beta)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        inplace = residual.clone()
+        pointer = inplace.data_ptr()
+        self.assertIs(scaled_addmm_(inplace, *args, alpha=alpha, beta=beta), inplace)
+        self.assertEqual(inplace.data_ptr(), pointer)
+        self.assertEqual(inplace, expected, atol=0, rtol=0)
+        out = torch.empty_like(residual)
+        returned = torch.ops.aten._scaled_addmm.out(
+            residual, x, y, [sa], [ScalingType.RowWise.value], [],
+            [sb], [ScalingType.RowWise.value], [], alpha=alpha, beta=beta, out=out,
+        )
+        self.assertIs(returned, out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+        if m > 1 and alpha_beta == (1.0, 1.0):
+            self.assertFalse(torch.equal(expected, (product + residual[0].float()).to(torch.bfloat16)))
+            self.assertFalse(torch.equal(expected, product.to(torch.bfloat16) + residual))
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("invalid", ["dtype", "scaling", "mat_b_fp8_flavor"])
+    @parametrize("call", ["default", "alpha_zero", "empty_k"])
+    def test_scaled_addmm_rocm_contracts(self, device, invalid, call):
+        # The gate must reject before the alpha == 0 and empty-dimension shortcuts.
+        x, y, sa, sb, residual = self._scaled_addmm_rocm_inputs(device)
+        recipe = ScalingType.RowWise
+        error, message = NotImplementedError, "only supports rowwise FP8 scaling with BF16"
+        if invalid == "dtype":
+            residual = residual.to(torch.float16)
+        elif invalid == "scaling":
+            sa, sb = sa[0, 0].clone(), sb[0, 0].clone()
+            recipe = ScalingType.TensorWise
+        else:
+            if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+                self.skipTest("only gfx942/gfx950 reach the mat_b flavor check")
+            if _get_torch_rocm_version() < (7, 0):
+                self.skipTest("the accumulator gate rejects ROCm < 7.0 before the flavor check")
+            # gfx942 requires e4m3fnuz and gfx950 requires e4m3fn; pass the other one.
+            if isRocmArchAnyOf(MI300_ARCH):
+                wrong, required = torch.float8_e4m3fn, "at::kFloat8_e4m3fnuz,"
+            else:
+                wrong, required = torch.float8_e4m3fnuz, "at::kFloat8_e4m3fn,"
+            y = y.t().float().to(wrong).t()
+            error, message = ValueError, re.escape(f"expected mat_b.dtype() to be {required}")
+        if call == "empty_k":
+            x, y = x[:, :0].contiguous(), y[:0, :]
+        alpha = 0.0 if call == "alpha_zero" else 1.0
+        with self.assertRaisesRegex(error, message):
+            scaled_addmm(residual, x, y, sa, recipe, sb, recipe, alpha=alpha)
+
+    @onlyCUDA
+    @skipIfRocmNoScaledAddmm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("invalid", ["mat_a_col_major", "scale_a_1d", "scale_b_stride"])
+    @parametrize("call", ["default", "alpha_zero", "empty_k"])
+    def test_scaled_addmm_rowwise_contracts(self, device, invalid, call):
+        # Rowwise scale and operand-layout checks must also reject in the
+        # alpha == 0 and empty-dimension shortcuts.
+        if not torch.version.hip and not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
+            self.skipTest("the rowwise scaled_addmm accumulator needs cuBLAS on SM90")
+        x, y, sa, sb, residual = self._scaled_addmm_rocm_inputs(device, m=32)
+        if invalid == "mat_a_col_major":
+            if call == "empty_k":
+                self.skipTest("an empty GEMM has no operand layout")
+            x = x.t().contiguous().t()
+            error, message = RuntimeError, "Only multiplication of row-major and column-major matrices"
+        elif invalid == "scale_a_1d":
+            sa = sa.reshape(-1)
+            error, message = IndexError, "Dimension out of range"
+        else:
+            strided = sb.new_empty(1, 2 * sb.size(1))
+            strided[:, ::2] = sb
+            sb = strided[:, ::2]
+            error, message = ValueError, re.escape("expected scale_b.stride(1) to be 1, but got 2")
+        if call == "empty_k":
+            x, y = x[:, :0].contiguous(), y[:0, :]
+        alpha = 0.0 if call == "alpha_zero" else 1.0
+        with self.assertRaisesRegex(error, message):
+            scaled_addmm(residual, x, y, sa, ScalingType.RowWise, sb, ScalingType.RowWise, alpha=alpha)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not IS_SM90, "only SM90 cuBLASLt requires row-major x column-major operands")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLASLt accumulation requires CUDA 12.9+",
+    )
+    @parametrize("recipe", [ScalingType.TensorWise, ScalingType.BlockWise1x128])
+    @parametrize("call", ["default", "alpha_zero"])
+    def test_scaled_addmm_layout_contracts(self, device, recipe, call):
+        # The operand-layout check must also reject at alpha == 0 for non-rowwise
+        # recipes. ROCm only admits rowwise, covered by the rowwise contracts.
+        m = n = k = 256
+        input = torch.randn(m, n, device=device, dtype=torch.bfloat16)
+        mat1 = torch.eye(m, k, device=device, dtype=e4m3_type).t().contiguous().t()
+        mat2 = torch.eye(n, k, device=device, dtype=e4m3_type).t()
+        if recipe == ScalingType.TensorWise:
+            scale_a = torch.tensor(1.0, device=device)
+            scale_b = torch.tensor(1.0, device=device)
+        else:
+            scale_a = make_cublas_block_scale(recipe, m, k, device)
+            scale_b = make_cublas_block_scale(recipe, n, k, device)
+        alpha = 0.0 if call == "alpha_zero" else 1.0
+        with self.assertRaisesRegex(RuntimeError, "Only multiplication of row-major and column-major matrices"):
+            scaled_addmm(input, mat1, mat2, scale_a, recipe, scale_b, recipe, alpha=alpha)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
