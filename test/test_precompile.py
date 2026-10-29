@@ -3126,7 +3126,7 @@ class TestPrecompile(TestCase):
         for code in entry.codes:
             code.python_module = module
         python_code, cache = _build_multigraph_artifact(
-            entry, backends, summary, "eager", step, (), (), ()
+            entry, backends, summary, "eager", step
         )
         meta = _parse_artifact_metadata(python_code)
         self.assertEqual(meta["TRACER"], "dynamo")
@@ -3160,16 +3160,12 @@ class TestPrecompile(TestCase):
         # Defaults ride in the artifact, so one that does not pickle is refused.
         with mock.patch.object(step, "__kwdefaults__", {"scale": lambda: 2.0}):
             with self.assertRaisesRegex(PrecompileError, "defaults must be picklable"):
-                _build_multigraph_artifact(
-                    entry, backends, summary, "eager", step, (), (), ()
-                )
+                _build_multigraph_artifact(entry, backends, summary, "eager", step)
         # A bypassed entry reaches no continuation; it is refused as bypassed,
         # not as a capture whose continuation is unreachable.
         entry.codes[0].bypassed, entry.codes[0].guarded_codes = True, []
         with self.assertRaisesRegex(PrecompileError, "entry frame was BYPASSED"):
-            _build_multigraph_artifact(
-                entry, backends, summary, "eager", step, (), (), ()
-            )
+            _build_multigraph_artifact(entry, backends, summary, "eager", step)
 
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_multigraph_artifact_installs_a_frame_the_entry_cannot_reach(self):
@@ -3195,9 +3191,7 @@ class TestPrecompile(TestCase):
             guarded_codes=0,
             backend_graphs=0,
         )
-        python_code, _ = _build_multigraph_artifact(
-            entry, {}, summary, "eager", step, (), (), ()
-        )
+        python_code, _ = _build_multigraph_artifact(entry, {}, summary, "eager", step)
         self.assertIn('SERVING_MODE = "installed"', python_code)
         self.assertIn("UNREACHABLE_WITHOUT_INSTALL = [", python_code)
         self.assertIn("forward = _build_installed_forward()", python_code)
@@ -9407,49 +9401,40 @@ def bump(x: torch.Tensor) -> None:
 def _(x):
     return None
 
-
 lib = torch.library.Library("{ns}", "FRAGMENT")
 lib.define("cpu_only(Tensor x) -> Tensor")
 lib.impl("cpu_only", lambda x: x * 2, "CPU")
 lib.define("fragment(Tensor x) -> Tensor")
-lib.impl("fragment", lambda x: x * 2, "CompositeExplicitAutograd")
-
+lib.impl("fragment", torch.Tensor.clone, "CompositeExplicitAutograd")
 
 # Dynamo graph-breaks on each of these and runs it eagerly, outside every graph.
 @torch.library.custom_op("{ns}::unfakeable", mutates_args=())
 def unfakeable(x: torch.Tensor) -> torch.Tensor:
     return x * 2
 
-
 @unfakeable.register_fake
 def _(x):
     return torch.ops.{ns}.cpu_only.default(x)
-
 
 @torch.library.custom_op("{ns}::not_implemented", mutates_args=())
 def not_implemented(x: torch.Tensor) -> torch.Tensor:
     return x * 2
 
-
 @not_implemented.register_fake
 def _(x):
     raise NotImplementedError("no fake result for this input")
-
 
 @torch.library.custom_op("{ns}::data_dependent", mutates_args=())
 def data_dependent(x: torch.Tensor) -> torch.Tensor:
     return x * 2
 
-
 @data_dependent.register_fake
 def _(x):
     return x.new_empty(int(x.sum().item()))
 
-
 @torch.library.custom_op("{ns}::dynamic_shape", mutates_args=())
 def dynamic_shape(x: torch.Tensor) -> torch.Tensor:
     return x * 2
-
 
 @dynamic_shape.register_fake
 def _(x):
@@ -9468,16 +9453,13 @@ def fn(x):
     torch.ops.{ns}.bump.default(y)
     return torch.ops.{ns}.triple.default(y) + 1
 
-
 class Child(torch.nn.Module):
     def forward(self, x):
         y = torch.ops.{ns}.triple.default(x.sin())
         torch._dynamo.graph_break()
         return y + 1
 
-
 child = Child()
-
 
 def step(x):
     return child(x * 2) + 1
@@ -9488,7 +9470,6 @@ def train_fn(x):
     y = torch.ops.{ns}.triple.default(x.sin())
     y.sum().backward()
     return x.grad + y.detach()
-
 
 def cond_fn(x):
     return torch.cond(
@@ -9501,29 +9482,28 @@ def cond_fn(x):
 def unfakeable_fn(x):
     return torch.ops.{ns}.unfakeable.default(x.sin()) + 1
 
-
 def not_implemented_fn(x):
     return torch.ops.{ns}.not_implemented.default(x.sin()) + 1
-
 
 def data_dependent_fn(x):
     return torch.ops.{ns}.data_dependent.default(x.sin()) + 1
 
-
 def dynamic_shape_fn(x):
     return torch.ops.{ns}.dynamic_shape.default(x.sin()) + 1
-
 
 # torch.library.define records itself, so the artifact knows no module for this op.
 torch.library.define("{ns}::entry_op", "(Tensor x) -> Tensor")
 torch.library.impl("{ns}::entry_op", "CPU", func=lambda x: x * 2)
 torch.library.impl("{ns}::entry_op", "Meta", func=torch.empty_like)
 
-
 def library_fn(x):
     return torch.ops.{ns}.entry_op.default(torch.ops.{ns}.triple.default(x.sin())) + 1
 
 def fragment_fn(x):
+    return torch.ops.{ns}.fragment.default(x.sin()) + 1
+
+# Under only_allow_pt2_compliant_ops, Dynamo graph-breaks on the untagged fragment.
+def fragment_break_fn(x):
     return torch.ops.{ns}.fragment.default(x.sin()) + 1
 """
 
@@ -9642,6 +9622,7 @@ if phase == "capture":
     __import__(unused)
     fn = getattr(__import__(entries), entry)
     torch._dynamo.config.nested_graph_breaks = False
+    torch._dynamo.config.only_allow_pt2_compliant_ops = entry == "fragment_break_fn"
     with pc.capture(
         fn,
         artifact_path=artifact,
@@ -9711,6 +9692,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "eager", "library_fn", "standalone"),
             ("dynamo", "inductor", "library_fn", "standalone"),
             ("dynamo", "eager", "fragment_fn", "standalone"),
+            ("dynamo", "eager", "fragment_break_fn", "standalone"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -9760,7 +9742,7 @@ class TestPrecompileCustomOpModules(TestCase):
             # are registered from a Library in a module no frame runs in, and are
             # recorded by its file. In the order their imports finished at capture.
             modules = (bwmod, module) if traced_bw else (module,)
-            fallback = tracer == "dynamo" and entry != "fragment_fn"
+            fallback = tracer == "dynamo" and not entry.startswith("fragment")
             modules += (entries,) if fallback else ()
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
             if traced_bw:
@@ -11344,9 +11326,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         with open(os.path.join(root, package, "__init__.py"), "w") as f:
             f.write("raise ValueError('half initialized')\n")
         # A frame module defined in __main__, even a frame other than the entry's,
-        # or one that does not import is refused before the op check too.
+        # or one that does not import is refused before the op check too, without
+        # blaming the torch build for the module's own error.
         for modules, error in (
-            ((f"{package}.mod",), f"'{package}.mod'.*not importable.*half initialized"),
+            (
+                (f"{package}.mod",),
+                rf"'{package}.mod'.*not importable.*initialized\)\.$",
+            ),
             (("unittest",), "not registered here"),
             (("__main__",), "__main__ module"),
             ((name, "__main__"), "__main__ module"),

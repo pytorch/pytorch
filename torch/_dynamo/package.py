@@ -1424,10 +1424,10 @@ class CompilePackage:
         failed_op: object = None,
         device_types: frozenset[str] = frozenset(),
     ) -> None:
-        """Called with the target of a node fake tensors failed to run (an op, or
-        not an op) on ``device_types``, as Dynamo graph-breaks on the node and runs
-        it eagerly between graphs; and with the op that failed when it has no fake
-        kernel or a data-dependent output value or shape."""
+        """Called with each torch callable (an op, or not an op) on the stack of an
+        instruction Dynamo graph-breaks on, which runs eagerly between graphs on
+        ``device_types``; and with the op that failed when fake tensors could not
+        run it for lack of a fake kernel or a data-dependent output value or shape."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.

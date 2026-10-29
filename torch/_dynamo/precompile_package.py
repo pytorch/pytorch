@@ -1662,7 +1662,7 @@ class _CapturePackage(CompilePackage):
         super().__init__(fn)
         self.computing_frames: set[tuple[str, str, int]] = set()
         # The operators each backend graph calls, by backend id, and those Dynamo
-        # graph-breaks on and runs eagerly because fake tensors failed to run them.
+        # graph-breaks on and runs eagerly, for any reason.
         # Not recorded: the ops of a torch._dynamo.disable'd function; in a frame
         # Dynamo falls back on, every op but the one it graph-broke on; under the
         # eager backend the ops of a custom op's backward formula, which no graph
@@ -2313,10 +2313,10 @@ class PrecompileSession(Generic[_P, _R]):
         found = _custom_op_modules(ops, keys)
         served: set[str] = set()
         if found.unrecorded or found.unrecorded_kernels:
-            # An op or kernel with no known module (torch.library.define,
-            # register_kernel, a C++ extension's load_library) is likely registered
-            # by a module the frames run in, which the driver imports only after
-            # the ops are checked.
+            # An op or kernel with no known module (torch.library.define, any
+            # custom_op's kernels, which torch's helpers register, a C++ extension)
+            # may be registered by a module the frames run in, which the driver
+            # imports only after the ops are checked. Torch's own ops skip this.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
         wanted = {*found.modules, *served}
         modules = tuple(m for m in sys.modules if m in wanted)

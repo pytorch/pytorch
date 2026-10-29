@@ -583,13 +583,17 @@ def _build_multigraph_forward():
             return importlib.import_module(module_name)
         # Not just ImportError, as in section 0.
         except Exception as _e:
-            # The torch-build / environment lock, surfaced per the documented
-            # contract rather than as a raw ModuleNotFoundError.
+            hint = ""
+            if isinstance(_e, (ImportError, AttributeError)):
+                # The torch-build / environment lock, surfaced per the documented
+                # contract rather than as a raw ModuleNotFoundError.
+                hint = (
+                    " It was produced against a different torch build or "
+                    "environment; regenerate the artifact in this one."
+                )
             raise _PrecompileError(
                 f"precompile: this artifact references module {module_name!r}, "
-                f"which is not importable here ({_e}). It was produced against a "
-                f"different torch build or environment; regenerate the artifact "
-                f"in this one."
+                f"which is not importable here ({_e}).{hint}"
             ) from _e
 
     if "_import_custom_op_modules" in globals():
@@ -911,7 +915,8 @@ def _build_installed_forward():
     module_name = dynamo.codes[0].python_module
     try:
         fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
-    except (ImportError, AttributeError) as _e:
+    # Not just ImportError, as in section 0.
+    except Exception as _e:
         raise _PrecompileError(
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
