@@ -37,11 +37,13 @@ Particularly, {class}`torch.distributed.GradBucket` represents a bucket of gradi
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks
+.. autoclass:: DDPCommHookType
 .. autofunction:: register_ddp_comm_hook
 ```
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
+.. autoclass:: PostLocalSGDState
 .. autofunction:: post_localSGD_hook
 ```
 
@@ -108,6 +110,17 @@ instead.
 ```{eval-rst}
 .. autofunction:: powerSGD_hook
 .. autofunction:: batched_powerSGD_hook
+```
+## Model Averaging
+
+Utilities for averaging parameters across ranks, for example after training locally with
+{func}`~torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook.post_localSGD_hook`.
+
+```{eval-rst}
+.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
+.. autofunction:: average_parameters
+.. autofunction:: average_parameters_or_parameter_groups
+.. autofunction:: get_params_to_average
 ```
 ## Debugging Communication Hooks
 

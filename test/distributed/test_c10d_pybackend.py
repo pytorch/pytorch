@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
+import gc
 import inspect
 import os
 import types
@@ -10,7 +12,6 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
     _create_work_from_future,
-    Backend as C10DBackend,
     ErrorType,
     FakeStore,
     ReconfigureOptions,
@@ -75,7 +76,7 @@ if is_gloo_available():
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 
 
-class RecordingWork(dist._Work):
+class RecordingWork(dist.Work):
     def __init__(self, result, backend):
         super().__init__()
         self.result_ = result
@@ -92,11 +93,11 @@ class RecordingWork(dist._Work):
         return self.future_
 
 
-class RecordingBackend(C10DBackend):
+class RecordingBackend(dist.BackendBase):
     def __init__(self, rank, world, name="python-backend"):
         super().__init__(rank, world)
         self._name = name
-        self._options = C10DBackend.Options(name, timeout=timedelta(seconds=5))
+        self._options = dist.BackendBase.Options(name, timeout=timedelta(seconds=5))
         self.wait_count = 0
         self.get_future_count = 0
         self.calls = []
@@ -774,7 +775,7 @@ class TestPyBackend(TestCase):
         self.assertTrue(backend.collectives_timing_enabled)
 
         store = dist.HashStore()
-        split_opts = C10DBackend.Options("split")
+        split_opts = dist.BackendBase.Options("split")
         split = group.split_group([0], opts=split_opts)
         self.assertEqual(
             split._get_backend(torch.device("cpu")).name(), "split-backend"
@@ -837,17 +838,17 @@ CAPABILITY_PROPERTIES = (
 )
 
 
-class BareBackend(C10DBackend):
+class BareBackend(dist.BackendBase):
     """Overrides none of the capability properties or options."""
 
     def getBackendName(self):
         return "bare-python-backend"
 
 
-class PropertyOverrideBackend(C10DBackend):
+class PropertyOverrideBackend(dist.BackendBase):
     def __init__(self, rank, world):
         super().__init__(rank, world)
-        self._options = C10DBackend.Options(
+        self._options = dist.BackendBase.Options(
             "property-override", timeout=timedelta(seconds=5)
         )
 
@@ -884,7 +885,7 @@ class PropertyOverrideBackend(C10DBackend):
         return self._options
 
 
-class ClassAttributeOverrideBackend(C10DBackend):
+class ClassAttributeOverrideBackend(dist.BackendBase):
     supports_splitting = True
     supports_coalescing = True
     _supports_time_estimate = True
@@ -892,7 +893,7 @@ class ClassAttributeOverrideBackend(C10DBackend):
     supports_reconfigure = True
     supports_window = True
     supports_abort_hooks = True
-    options = C10DBackend.Options("class-attribute", timeout=timedelta(seconds=5))
+    options = dist.BackendBase.Options("class-attribute", timeout=timedelta(seconds=5))
 
 
 class SuperDelegatingBackend(BareBackend):
@@ -1019,7 +1020,7 @@ class TestPyBackendPropertyOverrides(TestCase):
         )
 
 
-class SplittableBackend(C10DBackend):
+class SplittableBackend(dist.BackendBase):
     """Minimal backend that only declares supports_splitting."""
 
     def getBackendName(self):
@@ -1038,6 +1039,258 @@ class SplittableBackend(C10DBackend):
 
     def split(self, store, ranks, opts):
         return SplittableBackend(ranks.index(self.rank()), len(ranks))
+
+
+class FieldOptions(dist.BackendBase.Options):
+    def __init__(self, value):
+        super().__init__("field-options")
+        self.value = value
+
+
+class SlotOptions(dist.BackendBase.Options):
+    __slots__ = ("value", "unset")
+
+    def __init__(self, value):
+        super().__init__("slot-options")
+        self.value = value
+
+
+class CustomCopyOptions(FieldOptions):
+    def __copy__(self):
+        copied = super().__copy__()
+        copied.value += 1
+        return copied
+
+
+class SelfCopyOptions(FieldOptions):
+    def __copy__(self):
+        return self
+
+
+class SlicingCopyOptions(FieldOptions):
+    def __copy__(self):
+        return dist.BackendBase.Options(self)
+
+
+class OptionsBackend(SplittableBackend):
+    """Exposes options built by make_options and records split's options."""
+
+    def __init__(self, rank, size, make_options):
+        super().__init__(rank, size)
+        self.make_options = make_options
+        self.split_opts = None
+        self.merge_opts = None
+
+    @property
+    def options(self):
+        return self.make_options()
+
+    def split(self, store, ranks, opts):
+        self.split_opts = opts
+        return super().split(store, ranks, opts)
+
+    def merge(self, store, opts, rank, size):
+        self.merge_opts = opts
+        return SplittableBackend(rank, size)
+
+
+@instantiate_parametrized_tests
+class TestPyBackendOptions(TestCase):
+    def test_copy_base_options(self) -> None:
+        opts = dist.BackendBase.Options("base", timedelta(seconds=7))
+        opts.group_desc = "desc"
+        opts.global_ranks_in_group = [3, 4]
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), dist.BackendBase.Options)
+        self.assertIsNot(copied, opts)
+        self.assertEqual(copied.backend, "base")
+        self.assertEqual(copied._timeout, timedelta(seconds=7))
+        self.assertEqual(copied.group_desc, "desc")
+        self.assertEqual(copied.global_ranks_in_group, [3, 4])
+
+    def test_copy_python_options(self) -> None:
+        opts = FieldOptions([1])
+        opts.group_desc = "desc"
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), FieldOptions)
+        self.assertIsNot(copied, opts)
+        # Shallow, like copy.copy of a plain Python object.
+        self.assertIs(copied.value, opts.value)
+        self.assertEqual(copied.backend, "field-options")
+        self.assertEqual(copied.group_desc, "desc")
+        copied.group_desc = "other"
+        self.assertEqual(opts.group_desc, "desc")
+
+    def test_deepcopy_python_options(self) -> None:
+        opts = FieldOptions([1])
+        opts.global_ranks_in_group = [2]
+        opts.self_ref = opts
+        copied = copy.deepcopy(opts)
+        self.assertIs(type(copied), FieldOptions)
+        self.assertEqual(copied.value, [1])
+        self.assertIsNot(copied.value, opts.value)
+        self.assertIs(copied.self_ref, copied)
+        self.assertEqual(copied.global_ranks_in_group, [2])
+
+    def test_copy_slotted_python_options(self) -> None:
+        opts = SlotOptions([1])
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), SlotOptions)
+        self.assertIs(copied.value, opts.value)
+        self.assertFalse(hasattr(copied, "unset"))
+        deep = copy.deepcopy(opts)
+        self.assertEqual(deep.value, [1])
+        self.assertIsNot(deep.value, opts.value)
+
+    def test_copy_ignores_pickle_state_hooks(self) -> None:
+        class StateOptions(FieldOptions):
+            def __getstate__(self):
+                raise AssertionError("__getstate__ called")
+
+            def __setstate__(self, state):
+                raise AssertionError("__setstate__ called")
+
+        opts = StateOptions([1])
+        self.assertIs(copy.copy(opts).value, opts.value)
+        self.assertEqual(copy.deepcopy(opts).value, [1])
+
+    def test_deepcopy_base_options(self) -> None:
+        opts = dist.BackendBase.Options("base")
+        opts.group_desc = "desc"
+        copied = copy.deepcopy(opts)
+        self.assertIs(type(copied), dist.BackendBase.Options)
+        self.assertIsNot(copied, opts)
+        self.assertEqual(copied.group_desc, "desc")
+
+    def test_copy_constructor(self) -> None:
+        opts = FieldOptions(1)
+        opts.group_desc = "desc"
+        copied = dist.BackendBase.Options(opts)
+        self.assertIs(type(copied), dist.BackendBase.Options)
+        self.assertEqual(copied.backend, "field-options")
+        self.assertEqual(copied.group_desc, "desc")
+        with self.assertRaisesRegex(TypeError, "incompatible constructor"):
+            dist.BackendBase.Options(other=opts)
+
+    def test_split_group_python_options(self) -> None:
+        parent_opts = FieldOptions(1)
+        backend = OptionsBackend(0, 1, lambda: parent_opts)
+        create_process_group(backend).split_group([0])
+        child_opts = backend.split_opts
+        self.assertIs(type(child_opts), FieldOptions)
+        self.assertIsNot(child_opts, parent_opts)
+        self.assertEqual(child_opts.value, 1)
+        # splitGroup writes the child's group name into its copy only.
+        self.assertNotEqual(child_opts.group_name, parent_opts.group_name)
+
+    def test_split_group_slotted_python_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: SlotOptions(2))
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), SlotOptions)
+        self.assertEqual(backend.split_opts.value, 2)
+
+    def test_split_group_temporary_python_options(self) -> None:
+        # Only C++ references the options and their copy, so their Python
+        # objects must be kept alive to preserve the attributes.
+        backend = OptionsBackend(0, 1, lambda: FieldOptions(2))
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), FieldOptions)
+        self.assertEqual(backend.split_opts.value, 2)
+
+    def test_split_group_releases_python_options(self) -> None:
+        refs = []
+
+        def make_options():
+            opts = FieldOptions(2)
+            refs.append(weakref.ref(opts))
+            return opts
+
+        backend = OptionsBackend(0, 1, make_options)
+        group = create_process_group(backend)
+        group.split_group([0])
+        refs.append(weakref.ref(backend.split_opts))
+        del group, backend
+        gc.collect()
+        self.assertEqual([ref() for ref in refs], [None, None])
+
+    def test_split_group_custom_copy(self) -> None:
+        parent_opts = CustomCopyOptions(1)
+        parent_opts.global_ranks_in_group = [5]
+        backend = OptionsBackend(0, 1, lambda: parent_opts)
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), CustomCopyOptions)
+        self.assertEqual(backend.split_opts.value, 2)
+        self.assertEqual(backend.split_opts.global_ranks_in_group, [5])
+        self.assertEqual(parent_opts.value, 1)
+
+    def test_split_group_explicit_python_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: FieldOptions(1))
+        opts = FieldOptions(3)
+        create_process_group(backend).split_group([0], opts=opts)
+        self.assertIs(type(backend.split_opts), FieldOptions)
+        self.assertIsNot(backend.split_opts, opts)
+        self.assertEqual(backend.split_opts.value, 3)
+        refs = [weakref.ref(opts), weakref.ref(backend.split_opts)]
+        del opts, backend
+        gc.collect()
+        self.assertEqual([ref() for ref in refs], [None, None])
+
+    def test_merge_remote_group_python_options(self) -> None:
+        parent_opts = FieldOptions(4)
+        backend = OptionsBackend(0, 1, lambda: parent_opts)
+        create_process_group(backend).merge_remote_group(dist.HashStore(), 1)
+        self.assertIs(type(backend.merge_opts), FieldOptions)
+        self.assertIsNot(backend.merge_opts, parent_opts)
+        self.assertEqual(backend.merge_opts.value, 4)
+
+    def test_split_group_none_options(self) -> None:
+        # None options mean defaults; splitGroup must not dereference null.
+        backend = OptionsBackend(0, 1, lambda: None)
+        create_process_group(backend).split_group([0])
+        self.assertIs(type(backend.split_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.split_opts.backend, "splittable-python-backend")
+        self.assertEqual(backend.split_opts._timeout, timedelta(minutes=30))
+
+    def test_merge_remote_group_none_options(self) -> None:
+        backend = OptionsBackend(0, 1, lambda: None)
+        timeout = timedelta(seconds=7)
+        create_process_group(backend).merge_remote_group(dist.HashStore(), 1, timeout)
+        self.assertIs(type(backend.merge_opts), dist.BackendBase.Options)
+        self.assertEqual(backend.merge_opts.backend, "splittable-python-backend")
+        self.assertEqual(backend.merge_opts._timeout, timeout)
+
+    @parametrize("cls", [SelfCopyOptions, SlicingCopyOptions])
+    def test_split_group_bad_copy(self, cls) -> None:
+        parent_opts = cls(1)
+        parent_opts.group_name = "parent"
+        backend = OptionsBackend(0, 1, lambda: parent_opts)
+        with self.assertRaisesRegex(TypeError, "must return a new instance"):
+            create_process_group(backend).split_group([0])
+        self.assertIsNone(backend.split_opts)
+        self.assertEqual(parent_opts.group_name, "parent")
+
+    @requires_gloo()
+    def test_copy_cpp_subclass_options(self) -> None:
+        opts = dist.ProcessGroupGloo._Options()
+        opts._threads = 3
+        copied = copy.copy(opts)
+        self.assertIs(type(copied), dist.ProcessGroupGloo._Options)
+        self.assertIsNot(copied, opts)
+        self.assertEqual(copied._threads, 3)
+        deep = copy.deepcopy(opts)
+        self.assertIs(type(deep), dist.ProcessGroupGloo._Options)
+        self.assertEqual(deep._threads, 3)
+
+    @requires_gloo()
+    def test_copy_python_subclass_of_cpp_options(self) -> None:
+        # clone() would slice to the C++ type, so copying raises instead.
+        class GlooSubclassOptions(dist.ProcessGroupGloo._Options):
+            pass
+
+        with self.assertRaisesRegex(TypeError, "must return a new instance"):
+            copy.copy(GlooSubclassOptions())
+        with self.assertRaisesRegex(TypeError, "must return a new instance"):
+            copy.deepcopy(GlooSubclassOptions())
 
 
 class TestPyBackendSplitGroup(TestCase):
@@ -1061,7 +1314,8 @@ class TestPyBackendSplitGroup(TestCase):
             ):
                 dist.split_group(split_ranks=[[0]])
             split = dist.split_group(
-                split_ranks=[[0]], pg_options=C10DBackend.Options("pybackend_split")
+                split_ranks=[[0]],
+                pg_options=dist.BackendBase.Options("pybackend_split"),
             )
             backend = split._get_backend(torch.device("cpu"))
             self.assertIsInstance(backend, SplittableBackend)
@@ -1100,7 +1354,7 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
 
         pg = _get_default_group()
         backend = pg._get_backend(torch.device("cpu"))
-        self.assertIsInstance(backend, C10DBackend)
+        self.assertIsInstance(backend, dist.BackendBase)
         self.assertNotIsInstance(backend, dist.ProcessGroup)
         self.assertEqual(backend.name(), "registered-python-backend")
 

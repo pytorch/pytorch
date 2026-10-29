@@ -549,6 +549,121 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(graph0, graph1)
         self.assertNotIn("index=0", graph0)
 
+    @staticmethod
+    def _rng_fn(x):
+        a = torch.nn.functional.dropout(x, 0.5, True)
+        b = torch.rand_like(x) * torch.randn_like(x)
+        return a + b + torch.randint_like(x, 0, 10)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @parametrize("align_random_eager", (False, True))
+    def test_rng_ops_compile_under_coor(self, align_random_eager):
+        # replace_random/replace_randint run on the joint graph, where a factory's
+        # device operand is still a coor current_device() node. Handing that node to
+        # inductor_prims.seed() failed every RNG op:
+        #
+        #   RuntimeError: prims::inductor_seed() Expected a value of type 'Device'
+        #                 for argument 'device' but instead found type 'Node'
+        #
+        # Comparing against CooR off also checks that the per-replacement
+        # current_device() nodes still fuse into one seed; otherwise the values shift.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        x = torch.randn(64, 128, device="cuda", requires_grad=True)
+
+        def run(coor):
+            torch._dynamo.reset()
+            with (
+                compiler_config.patch(compile_on_one_rank=coor),
+                torch._inductor.config.patch(align_random_eager=align_random_eager),
+                fresh_cache(),
+            ):
+                torch.manual_seed(0)
+                compiled = torch.compile(self._rng_fn, backend="inductor")
+                return run_and_get_code(compiled, x)
+
+        out, codes = run(True)
+        ref, _ = run(False)
+        self.assertEqual(out, ref)
+        self._assert_no_baked_device("\n".join(codes))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("align_random_eager", (False, True))
+    def test_rng_replacements_rank_agnostic_before_post_grad(self, align_random_eager):
+        # The fx graph cache key hashes the graph before post_grad respecializes
+        # current_device(), so a replacement that bakes the compiling rank's device
+        # there is invisible in the output code but still splits the cache per rank.
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.utils import fresh_cache
+
+        graphs = []
+
+        class Capture(CustomGraphPass):
+            def __call__(self, graph):
+                graphs.append(graph.python_code("self").src)
+
+            def uuid(self):
+                return None
+
+        def graphs_on(dev):
+            graphs.clear()
+            torch._dynamo.reset()
+            cfg = torch._inductor.config.patch(
+                align_random_eager=align_random_eager,
+                post_grad_custom_pre_pass=Capture(),
+            )
+            with torch.cuda.device(dev), cfg, fresh_cache():
+                x = torch.randn(64, 128, device=f"cuda:{dev}", requires_grad=True)
+                torch.compile(self._rng_fn, backend="inductor")(x).sum().backward()
+            return "\n".join(graphs)
+
+        graph0, graph1 = graphs_on(0), graphs_on(1)
+        self.assertIn("coor.current_device", graph0)
+        self.assertNotIn("index=0", graph0)
+        self.assertEqual(graph0, graph1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_post_grad_replacement_with_device_under_coor(self):
+        # pointless_cumsum_replacement builds an arange on the matched device, and it
+        # runs after respecialize_current_device_nodes. Tracing it with CooR live would
+        # splice in a current_device() node that nothing concretises before lowering.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def f(x):
+            return torch.full([4, 128], 1.0, device=x.device).cumsum(1) * x
+
+        torch._dynamo.reset()
+        x = torch.randn(4, 128, device="cuda")
+        with fresh_cache():
+            out, codes = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(out, f(x))
+        self._assert_no_baked_device("\n".join(codes))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mutating_custom_op_with_device_arg_under_coor(self):
+        # decompose_auto_functionalized re-traces its replacement graph; with CooR
+        # live that replays a current_device() node, which make_fx cannot handle.
+        with torch.library._scoped_library("coor_test", "FRAGMENT") as lib:
+            lib.define("fill_ones(Tensor(a!) out, Device d) -> ()")
+
+            def fill_ones(out, d):
+                out.copy_(torch.ones(out.shape, device=d))
+
+            lib.impl("fill_ones", fill_ones, "CompositeExplicitAutograd")
+            lib.impl("fill_ones", lambda out, d: None, "Meta")
+
+            def f(x):
+                y = x.clone()
+                torch.ops.coor_test.fill_ones(y, x.device)
+                return y + x
+
+            torch._dynamo.reset()
+            x = torch.randn(8, device="cuda")
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
     # ---- tensor guards must be rank-invariant without losing their teeth ----
     # A TENSOR_MATCH guard records the device as two independent pieces: the type
     # rides in the DispatchKeySet, and the index is a separate scalar rendered as
@@ -1012,9 +1127,16 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         from contextlib import nullcontext
 
         from torch._inductor import utils as inductor_utils
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        def mask_configs(table):
+            return re.sub(r": \{.*\},$", ": {...},", table.group(0), flags=re.MULTILINE)
 
         def norm(s):
-            return re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            s = re.sub(r"AOT ID: \['\d+_", "AOT ID: ['N_", s)
+            # Each device autotunes on its own, so the configs it pins can differ.
+            table = r"^KERNEL_CONFIGS = \{\n(?:    .*\n)*?\}"
+            return re.sub(table, mask_configs, s, flags=re.MULTILINE)
 
         cases = {
             "benchmark_kernel": (
@@ -1061,7 +1183,21 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         if path == "user_defined_triton":
             fn = fn()
 
+        # The python wrapper runs the compile-time autotune block without writing it
+        # into the module, so record the block's code and check it with the module's.
+        run_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
         def code_on(dev):
+            tuning = []
+
+            def record_block(w):
+                for buf in (w.kernel_autotune_defs, w.kernel_autotune_calls):
+                    tuning.append(buf.getvalue())
+                return run_block(w)
+
+            block_spy = patch.object(
+                PythonWrapperCodegen, "generate_and_run_autotune_block", record_block
+            )
             big_gpu = (
                 patch.object(inductor_utils, "is_big_gpu", return_value=True)
                 if force_big_gpu
@@ -1071,8 +1207,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 torch._inductor.config.patch(**cfg),
                 inductor_utils.fresh_cache(),
                 big_gpu,
+                block_spy,
             ):
-                return self._inductor_code_on_device(dev, fn, input_shapes)
+                code = self._inductor_code_on_device(dev, fn, input_shapes)
+            return "\n".join([code, *tuning])
 
         code0 = code_on(0)
         code1 = code_on(1)
@@ -1092,6 +1230,8 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             self.assertIn("triton_tem_fused", code0)
         elif path == "combo_kernel":
             self.assertIn("combo_grid_meta", code0)
+        elif path == "compile_time_autotune":
+            self.assertIn("generate_example_value(", code0)
         self._assert_no_baked_device(code0)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")

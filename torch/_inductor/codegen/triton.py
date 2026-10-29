@@ -5101,7 +5101,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         if not self._enable_pdl_codegen():
             return
-        current_node = V.kernel.current_node
         prev_node = (
             V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
         )
@@ -5109,14 +5108,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def matching_dep(dep):
             if prev_node is None:
                 raise AssertionError("prev_node must not be None")
-            if current_node is None:
-                raise AssertionError("current_node must not be None")
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            real = V.graph.scheduler.mutation_real_name
             return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+                real.get(dep, dep) == real.get(w.name, w.name) for w in prev_deps
             )
 
         if not dependencies:
@@ -6896,7 +6893,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        self._handle_pdl_before_access(self.post_loop_store, var)
+        self._handle_pdl_before_access(self.post_loop_store, name)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
@@ -7763,6 +7760,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return "pointwise"
 
     @classmethod
+    def gen_driver_setup(cls, device_type: str) -> str:
+        """
+        Code that selects the Triton driver when the kernel module is imported, or ""
+        to leave the active driver alone. Backends that trace on one device but run
+        kernels on another override this.
+        """
+        if device_type == "cpu":
+            return "triton_helpers.set_driver_to_cpu()"
+        return "triton_helpers.set_driver_to_gpu()"
+
+    @classmethod
     @lru_cache(None)
     def gen_common_triton_imports(cls) -> str:
         imports = IndentedBuffer()
@@ -8074,10 +8082,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if name is None:
             code.splice(self.gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
-            if device_type == "cpu":
-                code.splice("triton_helpers.set_driver_to_cpu()")
-            else:
-                code.splice("triton_helpers.set_driver_to_gpu()")
+            if driver_setup := self.gen_driver_setup(device_type):
+                code.splice(driver_setup)
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -9054,8 +9060,8 @@ class TritonScheduling(SIMDScheduling):
 
         current_device = V.graph.get_current_device_or_throw()
 
-        # The default wrapper's async_compile.triton literal is this dedented, stripped
-        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # A string-form wrapper's (C++, FX) async_compile.triton literal is this dedented,
+        # stripped source; the eager submission must be the same bytes so CompiledTritonKernels
         # (keyed on the exact string) hits at wrapper time instead of compiling the
         # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
@@ -9086,6 +9092,10 @@ class TritonScheduling(SIMDScheduling):
             src_code,
             current_device.type,
             metadata=metadata_comment,
+            # A template is built with its one config already.
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):

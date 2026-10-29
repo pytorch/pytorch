@@ -62,7 +62,12 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    proxy_args_kwargs,
+    set_example_value,
+    specialize_symnode,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -762,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -827,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -2366,6 +2371,16 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, fn=str)
 
     def call_function(
         self,
@@ -4192,12 +4207,16 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-def _guard_dict_keys(vt: VariableTracker) -> None:
-    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+def _guard_flex_gemm_constant(vt: VariableTracker) -> Any:
+    """Specialize static metadata and guard nested option key sets."""
+    vt = vt.realize()
     if isinstance(vt, ConstDictVariable):
         vt.install_dict_keys_match_guard()
-        for value in vt.items.values():
-            _guard_dict_keys(value)
+        return {
+            key.vt.as_python_constant(): _guard_flex_gemm_constant(value)
+            for key, value in vt.items.items()
+        }
+    return specialize_symnode(vt).as_python_constant()
 
 
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
@@ -4240,12 +4259,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
-        # as_python_constant guards the present values only; an option added
-        # later (fast_math, backend, a config knob) must recompile.
-        _guard_dict_keys(args[3])
-        _guard_dict_keys(args[4])
-        fn_kwargs = args[3].as_python_constant()
-        kernel_options = args[4].as_python_constant()
+        # Numeric options can be symbolic under dynamic=True, but are static
+        # HOP metadata. Guard key sets too so newly added options recompile.
+        fn_kwargs = _guard_flex_gemm_constant(args[3])
+        kernel_options = _guard_flex_gemm_constant(args[4])
         if self._HOP_NAME is None:
             raise AssertionError("_HOP_NAME must be set")
         (

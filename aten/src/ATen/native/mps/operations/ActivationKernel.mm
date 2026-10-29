@@ -106,7 +106,7 @@ static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, co
 }
 
 static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND3(c10::kHalf, c10::kBFloat16, c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "threshold_mps", [&]() {
     ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
     lib.exec_binary_kernel_with_params(
         iter,
@@ -120,7 +120,29 @@ static void prelu_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "prelu");
 }
 
+static void prelu_backward_kernel(TensorIterator& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "prelu_backward not implemented for ", iter.dtype());
+  auto input_iter = TensorIteratorConfig()
+                        .add_output(iter.output(0))
+                        .add_const_input(iter.input(0))
+                        .add_const_input(iter.input(1))
+                        .add_const_input(iter.input(2))
+                        .build();
+  auto weight_iter = TensorIteratorConfig()
+                         .add_output(iter.output(1))
+                         .add_const_input(iter.input(0))
+                         .add_const_input(iter.input(1))
+                         .add_const_input(iter.input(2))
+                         .build();
+  lib.exec_ternary_kernel(input_iter, "prelu_backward");
+  lib.exec_ternary_kernel(weight_iter, "prelu_backward_weight");
+}
+
 static void silu_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype()),
+                              "\"silu_mps\" not implemented for '",
+                              iter.common_dtype(),
+                              "'");
   if (isComplexType(iter.common_dtype())) {
     auto out = iter.output(0);
     auto self = iter.input(0);
@@ -378,6 +400,7 @@ REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(threshold_stub, threshold_kernel);
 REGISTER_DISPATCH(prelu_stub, prelu_kernel);
+REGISTER_DISPATCH(prelu_backward_stub, prelu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, mish_kernel);

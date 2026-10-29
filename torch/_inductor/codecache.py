@@ -49,6 +49,7 @@ import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import (
+    DeviceInterface,
     get_interface_for_device,
     get_registered_device_interfaces,
 )
@@ -1067,16 +1068,6 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
-# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
-_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
-
-
-def prefetch_cache_keys() -> None:
-    """Start computing torch_key and triton_key in a background thread."""
-    for prefetch in _cache_key_prefetchers:
-        prefetch()
-
-
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1569,20 +1560,21 @@ class FxGraphHashDetails:
                     device_types.add(factory_device)
         return device_types
 
-    @classmethod
-    def _mm_template_allow_tf32(
-        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    @staticmethod
+    def _template_allow_tf32(
+        device_types: OrderedSet[str],
+        allow_tf32: Callable[[type[DeviceInterface]], bool],
     ) -> tuple[tuple[str, bool], ...]:
         # NotImplementedError means this device has no DeviceInterface.
-        # allow_tf32() itself is not caught: a broken implementation should
+        # allow_tf32 itself is not caught: a broken implementation should
         # fail the compile instead of being cached as ALLOW_TF32=False.
         flags: list[tuple[str, bool]] = []
-        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+        for device_type in sorted(device_types):
             try:
                 iface = get_interface_for_device(device_type)
             except NotImplementedError:
                 continue
-            flags.append((device_type, bool(iface.allow_tf32())))
+            flags.append((device_type, bool(allow_tf32(iface))))
         return tuple(flags)
 
     def __init__(
@@ -1724,7 +1716,15 @@ class FxGraphHashDetails:
         # precision string is already in cuda_matmul_settings; this records the
         # resolved flag for every device in the graph so other backends
         # invalidate the FX graph cache when their flag changes.
-        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
+        device_types = self._graph_device_types(gm, example_inputs)
+        self.mm_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.allow_tf32()
+        )
+        # The conv templates follow DeviceInterface.conv_allow_tf32, which no
+        # other field here covers.
+        self.conv_template_allow_tf32 = self._template_allow_tf32(
+            device_types, lambda iface: iface.conv_allow_tf32()
+        )
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
@@ -3001,7 +3001,7 @@ class AotCodeCompiler:
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
-                consts: bytes | bytearray, align_bytes: int, symbol_prefix: str
+                consts: bytes | bytearray, align_bytes: int
             ) -> tuple[str, str]:
                 consts_size = len(consts)
                 asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
@@ -3013,7 +3013,9 @@ class AotCodeCompiler:
 ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp = asan_attr
                 const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                const_cpp += (
+                    f"unsigned char _binary_constants_bin_start[{consts_size}] = {{\t\n"
+                )
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -3021,7 +3023,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * _binary_constants_bin_end;\t\n"
                 return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
@@ -3080,9 +3082,7 @@ end
                         ALIGN_BYTES, symbol_prefix
                     )
                 else:
-                    consts_code, code_ext = format_consts_to_cpp(
-                        consts, ALIGN_BYTES, symbol_prefix
-                    )
+                    consts_code, code_ext = format_consts_to_cpp(consts, ALIGN_BYTES)
 
             _, consts_s = write(
                 consts_code,
@@ -4026,7 +4026,17 @@ class CppCodeCache:
     be compiled, while compilation flags are set by CppBuilder."""
 
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    # Shared by subclasses and never cleared: a key hashes the source and build
+    # command, and every miss rewrites its entry for the current cache directory.
+    _binary_paths: dict[str, str] = {}
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_cpp_kernels
+
+        CppCodeCache.cache.clear()
+        clear_cpp_kernels()
+
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
@@ -4150,14 +4160,23 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
+            from torch.compiler._runtime_cache import (
+                has_frozen_cpp_kernel,
+                restore_cpp_kernel,
+            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            # if requested, pre-compile any headers. A frozen binary is restored
+            # below and never built, so it needs no header.
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and not has_frozen_cpp_kernel(key)
+            ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4221,6 +4240,9 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            cls._binary_paths[key] = binary_path
+            restore_cpp_kernel(key, binary_path)
+
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
@@ -4245,6 +4267,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
+        from torch.compiler._runtime_cache import record_cpp_kernel
+
+        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
@@ -4259,6 +4284,8 @@ def _worker_compile_cpp(
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if os.path.exists(cpp_builders[-1].get_target_file_path()):
+            return
         for builder in cpp_builders:
             if not os.path.exists(builder.get_target_file_path()):
                 builder.build()
@@ -5000,6 +5027,18 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 def touch(filename: str) -> None:
     with open(filename, "a"):
         pass
+
+
+def exec_from_cache_file(code: str, name: str) -> dict[str, Any]:
+    """Exec ``code`` as module ``name`` from a file in the cache dir, which a
+    module-level Triton kernel needs: @triton.jit reads its source back from it."""
+    # write() keeps a file already at its path, so key on the exact text (not the
+    # stripped default) and apart from PyCodeCache's modules, which may be hand-edited:
+    # the file the kernels read their lines from must hold exactly the code being run.
+    _, path = write(code, "py", key=get_hash(code, "exec_from_cache_file"))
+    namespace: dict[str, Any] = {"__name__": name, "__file__": path}
+    exec(compile(code, path, "exec"), namespace)
+    return namespace
 
 
 @clear_on_fresh_cache

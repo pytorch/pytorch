@@ -24,6 +24,16 @@
 #define AT_ROCM_CK_SDPA_ARCHS "gfx942,gfx950"
 #endif
 
+#if defined(USE_ROCM) && defined(__has_include) && \
+    __has_include(<ATen/ROCmCKGEMMConfig.h>)
+#include <ATen/ROCmCKGEMMConfig.h>
+#endif
+#ifndef TORCH_CK_GEMM_ARCH_LIST
+// Non-CMake ROCm builds (e.g. Buck) do not generate the header; fall back to
+// the default CK GEMM allowlist.
+#define TORCH_CK_GEMM_ARCH_LIST "gfx90a,gfx942,gfx950"
+#endif
+
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
@@ -628,24 +638,32 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
+#ifdef USE_ROCM
+namespace {
+// Split a comma-separated arch list (from the generated AT_ROCM_CK_SDPA_ARCHS /
+// TORCH_CK_GEMM_ARCH_LIST configuration headers) into individual arch strings.
+std::vector<std::string> parseArchList(std::string_view archs) {
+  std::vector<std::string> result;
+  while (!archs.empty()) {
+    const auto comma = archs.find(',');
+    result.emplace_back(archs.substr(0, comma));
+    if (comma == std::string_view::npos) {
+      break;
+    }
+    archs.remove_prefix(comma + 1);
+  }
+  return result;
+}
+} // namespace
+#endif
+
 bool Context::ckSDPASupported() {
 #ifdef USE_ROCM
   // CK SDPA is only built for a subset of architectures to limit compile time.
   // AT_ROCM_CK_SDPA_ARCHS is the set this build was compiled for, so the check
   // stays in step with the build. It is empty when CK SDPA was not built.
-  static const std::vector<std::string> supported_archs = [] {
-    std::vector<std::string> archs;
-    std::string_view rest{AT_ROCM_CK_SDPA_ARCHS};
-    while (!rest.empty()) {
-      const auto comma = rest.find(',');
-      archs.emplace_back(rest.substr(0, comma));
-      if (comma == std::string_view::npos) {
-        break;
-      }
-      rest.remove_prefix(comma + 1);
-    }
-    return archs;
-  }();
+  static const std::vector<std::string> supported_archs =
+      parseArchList(AT_ROCM_CK_SDPA_ARCHS);
   if (supported_archs.empty()) {
     return false;
   }
@@ -665,21 +683,26 @@ bool Context::ckSDPASupported() {
 
 bool Context::ckGemmSupported() {
 #ifdef USE_ROCM
-  // CK GEMM support is broader than CK SDPA.
-  static const std::vector<std::string> supported_archs = {
-      "gfx90a",
-      "gfx942",
-      "gfx950",
-  };
-  for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
-    if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
-      TORCH_WARN_ONCE(
-          "Attempting to use CK GEMM on an unsupported architecture! Cannot set "
-          "blas backend to CK");
+  // TORCH_CK_GEMM_ARCH_LIST is the allowlist this build was compiled for (the
+  // same list that drives the ck_gemm build arch filter), so the check stays in
+  // step with the build. It is empty if overridden empty. Cached because the
+  // CK GEMM dispatch calls this on every GEMM.
+  static const bool supported = [] {
+    const auto supported_archs = parseArchList(TORCH_CK_GEMM_ARCH_LIST);
+    if (supported_archs.empty()) {
       return false;
     }
-  }
-  return true;
+    for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
+      if (!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
+        TORCH_WARN_ONCE(
+            "Attempting to use CK GEMM on an unsupported architecture! Cannot "
+            "set blas backend to CK");
+        return false;
+      }
+    }
+    return true;
+  }();
+  return supported;
 #else
   return false;
 #endif

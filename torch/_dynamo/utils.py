@@ -49,7 +49,6 @@ import weakref
 from collections import Counter, OrderedDict
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
-from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
@@ -2626,11 +2625,12 @@ class CleanupHook:
         return CleanupHook(scope, name, token)
 
     @staticmethod
-    def disown(scope: dict[str, Any], name: str) -> None:
+    def disown(scope: dict[str, Any], name: str) -> bool:
         """Invalidate whichever hook currently owns (scope, name), so that if
         its code object outlives this call, firing later is a no-op instead of
-        deleting a binding something else has since taken over."""
-        _cleanup_owners.pop((id(scope), name), None)
+        deleting a binding something else has since taken over. Returns whether
+        a hook owned it."""
+        return _cleanup_owners.pop((id(scope), name), None) is not None
 
 
 class CleanupManager(ExactWeakKeyDictionary):
@@ -3006,17 +3006,6 @@ def timed(
 
 def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
-
-
-@lru_cache(32)
-def rot_n_helper(n: int) -> Callable[..., Any]:
-    if n <= 1:
-        raise AssertionError(f"Expected n > 1, got {n}")
-    vars = [f"v{i}" for i in range(n)]
-    rotated = reversed(vars[-1:] + vars[:-1])
-    fn = eval(f"lambda {','.join(vars)}: ({','.join(rotated)})")
-    fn.__name__ = f"rot_{n}_helper"
-    return fn
 
 
 common_constant_types: set[type] = {
@@ -5236,9 +5225,6 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
         - for indexing, the location of the brackets.
     `segment` is expected to be a valid Python expression
     """
-    if sys.version_info < (3, 11):
-        raise AssertionError(f"Python >= 3.11 required, got {sys.version_info}")
-
     import ast
 
     tree: Any | None = None
@@ -6037,12 +6023,6 @@ class FrameState(enum.Enum):
     FRAME_EXECUTING = 0
     FRAME_COMPLETED = 1
     FRAME_CLEARED = 4
-
-
-class PySendResult(enum.Enum):
-    PYGEN_RETURN = 0
-    PYGEN_ERROR = -1
-    PYGEN_NEXT = 1
 
 
 class CompileTimeInstructionCounter:

@@ -1992,9 +1992,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
         output_handle: str | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
+        _ = tunable_dyn_dims_mask
         # We can do this unconditionally, since we cache this call.
         self.add_device_include(device)
 
@@ -2085,6 +2087,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=extern_kernel.tunable_dyn_dims_mask,
         )
 
         if extern_kernel.python_kernel_name in (
@@ -2154,6 +2157,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             args,
             device,
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=fallback_kernel.tunable_dyn_dims_mask,
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
@@ -2167,6 +2171,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -2183,6 +2188,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             stack_traces=stack_traces,
             profiling_args=profiling_args,
             output_handle=out_name,
+            tunable_dyn_dims_mask=tunable_dyn_dims_mask,
         )
 
     def _get_scatter_reduce_enum(self, reduce):
