@@ -13,6 +13,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/util/SmallVector.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -42,6 +43,7 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
+#include <algorithm>
 #include <optional>
 #include <set>
 #include <unordered_set>
@@ -1156,10 +1158,8 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-template <bool skip_tensors_in_non_tensorlist>
-static bool visit(
-    PyObject* o,
-    const std::function<bool(const at::Tensor&)>& visit_tensor) {
+template <bool skip_tensors_in_non_tensorlist, typename VisitTensor>
+static bool visit(PyObject* o, const VisitTensor& visit_tensor) {
   if (THPVariable_Check(o)) {
     if (visit_tensor(THPVariable_Unpack(o))) {
       return true;
@@ -1187,11 +1187,11 @@ static bool visit(
 // only List container is visited.
 // skip_tensors_in_non_tensorlist will skip any List with non-Tensor.
 // Lambda returning true means short circuit, traversal stops after that.
-template <bool skip_tensors_in_non_tensorlist>
+template <bool skip_tensors_in_non_tensorlist, typename VisitTensor>
 static void visit_tensors(
     PyObject* args,
     PyObject* kwargs,
-    const std::function<bool(const at::Tensor&)>& visit_tensor) {
+    const VisitTensor& visit_tensor) {
   if (args && PyTuple_Check(args)) {
     for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
       if (visit<skip_tensors_in_non_tensorlist>(
@@ -1200,7 +1200,7 @@ static void visit_tensors(
       }
     }
   }
-  if (kwargs && PyDict_Check(kwargs)) {
+  if (kwargs && PyDict_Check(kwargs) && PyDict_GET_SIZE(kwargs) != 0) {
     auto vals = THPObjectPtr{PyDict_Values(kwargs)};
     for (const auto i : c10::irange(PyList_Size(vals))) {
       if (visit<skip_tensors_in_non_tensorlist>(
@@ -1238,7 +1238,7 @@ static PyObject* any_requires_grad(
 // Args:
 // args[0] - inputs args
 // args[1] - inputs kwargs
-// args[2] - outputs
+// args[2] - outputs: a tuple of them, or a single output
 // Only List container is supported.
 // Tensors in Lists that has not only Tensor are checked.
 static PyObject* any_output_is_alias_to_input_or_output(
@@ -1248,33 +1248,36 @@ static PyObject* any_output_is_alias_to_input_or_output(
   PyObject* inps = PyTuple_GET_ITEM(args, 0);
   PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
-  std::unordered_set<void*> s;
-  visit_tensors<false>(inps, inps_kwargs, [&s](const at::Tensor& t) {
-    if (!t.has_storage()) {
+  using Storages = c10::SmallVector<const c10::StorageImpl*, 8>;
+  Storages inp_storages;
+  Storages out_storages;
+  auto collect_into = [](Storages& storages) {
+    return [&storages](const at::Tensor& t) {
+      if (t.has_storage()) {
+        if (const auto* cp = t.storage().unsafeGetStorageImpl()) {
+          storages.push_back(cp);
+        }
+      }
       return false;
-    }
-    auto* cp = t.storage().unsafeGetStorageImpl();
-    if (cp) {
-      s.insert(cp);
-    }
-    return false;
-  });
-  bool ret = false;
-  visit_tensors<false>(outs, nullptr, [&s, &ret](const at::Tensor& t) {
-    if (!t.has_storage()) {
-      return false;
-    }
-    auto* cp = t.storage().unsafeGetStorageImpl();
-    if (!cp) {
-      return false;
-    }
-    if (s.contains(cp)) {
-      ret = true;
-      return true;
-    }
-    s.insert(cp);
-    return false;
-  });
+    };
+  };
+  visit_tensors<false>(inps, inps_kwargs, collect_into(inp_storages));
+  if (PyTuple_Check(outs)) {
+    visit_tensors<false>(outs, nullptr, collect_into(out_storages));
+  } else {
+    visit<false>(outs, collect_into(out_storages));
+  }
+  // Sorted vectors rather than a hash set: no allocation for the usual few
+  // tensors, and still O(n log n) for long Tensor lists.
+  std::sort(inp_storages.begin(), inp_storages.end());
+  std::sort(out_storages.begin(), out_storages.end());
+  const auto is_input = [&inp_storages](const c10::StorageImpl* cp) {
+    return std::binary_search(inp_storages.begin(), inp_storages.end(), cp);
+  };
+  const auto outs_begin = out_storages.begin();
+  const auto outs_end = out_storages.end();
+  const bool ret = std::adjacent_find(outs_begin, outs_end) != outs_end ||
+      std::any_of(outs_begin, outs_end, is_input);
   if (ret) {
     Py_RETURN_TRUE;
   }
