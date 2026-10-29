@@ -7330,7 +7330,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @largeTensorTest("20GB")
-    @expectedFailureMPS  # MPS pooling does not support 64-bit indexing
     def test_large_max_pool2d_ch_last(self, device):
         # https://github.com/pytorch/pytorch/issues/165297
         N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
@@ -7981,6 +7980,7 @@ class TestNNDeviceType(NNTestCase):
         m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
                       (32, 32), (1024, 32), (1024, 1024),
                       (33, 33), (1025, 33), (1025, 1025),
+                      (1024, 130), (1024, 256), (1024, 320), (1024, 322), (1024, 640),
                       (128 * 1024, 32), (32, 128 * 1024)]
         boolean = [True, False]
         combinations = itertools.product(boolean, repeat=2)
@@ -8001,10 +8001,26 @@ class TestNNDeviceType(NNTestCase):
                 if m > 64 * 1024:
                     atol = 1e-3
                     rtol = 1e-3
+                self.assertEqual(x.grad, x_device.grad, lambda msg: f"{msg}\ninput grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if elementwise_affine:
                     self.assertEqual(ln.weight.grad, ln_device.weight.grad, lambda msg: f"{msg}\nweight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
                     self.assertEqual(ln.bias.grad, ln_device.bias.grad, lambda msg: f"{msg}\nbias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
+
+    @onlyAccelerator
+    def test_rms_norm_backwards(self, device):
+        dtype = torch.float
+        m_x_n_list = [(1024, 32), (1024, 130), (1024, 256), (1024, 320), (1024, 322), (1024, 640), (1024, 1024)]
+        for elementwise_affine in [True, False]:
+            for m, n in m_x_n_list:
+                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+                grad_output = torch.rand_like(x)
+                x_device = x.clone().detach().to(device).requires_grad_()
+                rms = nn.RMSNorm(n, dtype=dtype, elementwise_affine=elementwise_affine)
+                rms_device = nn.RMSNorm(n, device=device, dtype=dtype, elementwise_affine=elementwise_affine)
+                rms(x).backward(grad_output)
+                rms_device(x_device).backward(grad_output.to(device))
+                self.assertEqual(x.grad, x_device.grad, lambda msg: f"{msg}\ninput grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
     @onlyAccelerator
     @largeTensorTest("40GB")
@@ -12769,6 +12785,14 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_silu_backward_large_positive(self, device, dtype):
+        value = 255 + 2**-16 if dtype == torch.float32 else 2**24
+        # The derivative rounds to 1 at these finite inputs in both dtypes.
+        x = torch.tensor([value], device=device, dtype=dtype, requires_grad=True)
+        F.silu(x).backward()
+        self.assertEqual(x.grad, torch.ones_like(x), atol=0, rtol=0)
+
     @onlyNativeDeviceTypes
     def test_mish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
@@ -14807,10 +14831,17 @@ class TestNNDeviceType(NNTestCase):
 
         # Positive control: a supported prob target takes the chunked
         # path with no fallback warning.
-        out = self.assertNotWarn(
-            lambda: nn.functional.linear_cross_entropy(
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            out = nn.functional.linear_cross_entropy(
                 inp, lw, target, reduction="mean", options=options,
             )
+        unexpected = [
+            w for w in ws
+            if "forcing allow_retain_graph=True under torch.compile" not in str(w.message)
+        ]
+        self.assertFalse(
+            unexpected, f"supported prob target unexpectedly warned: {unexpected}"
         )
 
         # target.requires_grad: falls back; the target gradient flows.
@@ -15691,7 +15722,6 @@ class TestNNDeviceType(NNTestCase):
             # Check that backward does not cause a hard error
             outs[0].sum().backward()
 
-    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
@@ -17507,6 +17537,40 @@ if __name__ == '__main__':
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize_test("op", ["layer_norm", "rms_norm"])
+    def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
+        # Two 32-row tiles contribute ~3.6e5 each to weight.grad[0] with opposite signs,
+        # leaving a small exact total. Partial sums rounded to dtype overflow fp16 (inf - inf)
+        # and swallow the remainder in bf16; fp32 accumulation must recover it.
+        M, N = 131072, 128
+        x = torch.zeros(M, N, dtype=dtype)
+        x[:, 0] = 1
+        grad_out = torch.zeros(M, N, dtype=dtype)
+        grad_out[:32, 0] = 1000
+        grad_out[32:64, 0] = -1000
+        grad_out[0, 0] = 1008
+        weight = torch.ones(N, dtype=dtype)
+        bias = torch.zeros(N, dtype=dtype) if op == "layer_norm" else None
+
+        grads = []
+        for dev, dt in ((device, dtype), ("cpu", torch.float64)):
+            w = weight.to(dev, dt).requires_grad_(True)
+            b = bias.to(dev, dt).requires_grad_(True) if bias is not None else None
+            # Keep rms_norm on the ATen kernels when a Python-native override is installed.
+            with torch.backends.python_native.operations_disabled("_fused_rms_norm", "_fused_rms_norm_backward"):
+                if op == "layer_norm":
+                    out = torch.nn.functional.layer_norm(x.to(dev, dt), [N], w, b, 1e-5)
+                else:
+                    out = torch.nn.functional.rms_norm(x.to(dev, dt), [N], w, 1e-5)
+                out.backward(grad_out.to(dev, dt))
+            grads.append((w.grad, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+        self.assertEqual(dgamma.cpu().double(), dgamma_ref, atol=1, rtol=1e-2)
+        if dbeta_ref is not None:
+            self.assertEqual(dbeta.cpu().double(), dbeta_ref, atol=1, rtol=1e-2)
+
 
 class TestFunctionalPickle(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -17689,6 +17753,8 @@ class TestFusedRMSNormOverrideRouting(TestCase):
 
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
         w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(_fused_rms_norm_cond(x, [128], w, 1e-5))
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(w))
@@ -17888,6 +17954,8 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         gout = torch.randn(*shape, dtype=torch.float16, device="cuda")._lazy_clone()
         rstd = torch.empty(shape[0], dtype=torch.float32, device="cuda")._lazy_clone()
         tensors = (gout, x, rstd, w)
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(
             _fused_rms_norm_backward_cond(gout, x, [128], rstd, w, [True, True])
         )
@@ -17916,6 +17984,8 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
     def test_fwd_preserves_cow_inputs(self):
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")._lazy_clone()
         w = torch.randn(128, dtype=torch.float16, device="cuda")._lazy_clone()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(w))
@@ -17934,6 +18004,8 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
             rstd_base._lazy_clone(),
             w_base._lazy_clone(),
         )
+        if not torch._C._is_cow_tensor(tensors[0]):
+            self.skipTest("allocator does not support COW sharing")
         gout, x, rstd, w = tensors
         torch.ops.aten._fused_rms_norm_backward(
             gout, x, [128], rstd, w, [True, True]

@@ -1956,8 +1956,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         Return the type name for the Python type this VariableTracker represents.
 
-        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). In Python 3.10+,
-        type.__name__ matches CPython's tp_name exactly (e.g., "list", "NoneType").
+        Mirrors CPython's tp_name slot (PyTypeObject.tp_name). type.__name__
+        matches CPython's tp_name exactly (e.g., "list", "NoneType").
 
         Note: There are no external callers outside torch._dynamo that rely on this.
         Internal uses should prefer this over hardcoded type name strings.
@@ -2090,6 +2090,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             is_richcompare_not_implemented,
             vt_identity_compare,
         )
+
+        if self.source:
+            real_type = type(tx.output.resolve_source_value(self.source))
+            if getattr(real_type, op) is not getattr(object, op):
+                unimplemented(
+                    gb_type="Missing tp_richcompare_impl override",
+                    context=f"tp_richcompare_impl {self} {op}",
+                    explanation=f"{type(self).__name__} wraps "
+                    f"{real_type.__name__} which has a non-default "
+                    f"tp_richcompare. Add a tp_richcompare_impl override to "
+                    f"{type(self).__name__}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
 
         if op == "__eq__":
             identity = vt_identity_compare(self, other)

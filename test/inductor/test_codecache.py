@@ -56,7 +56,6 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     TensorMetadata,
     TensorMetadataAndValues,
-    triton_key,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -138,12 +137,6 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
-    def setUp(self):
-        super().setUp()
-        # These tests expect triton_key to be recomputed under their patches;
-        # an earlier compile may have cached (or be prefetching) the real value.
-        triton_key.clear()
-
     @parametrize("backend_precision", ("bfx9", "tf32"))
     def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
@@ -767,6 +760,25 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_bundled_autotune_remote_cache_flag_is_not_in_the_cache_key(self):
+        # Precompile capture and CompilePackage.install() turn the flag off; a
+        # hashed flag would make them miss entries a flag-on compile wrote.
+        def fn(x, y):
+            return x * 2 + (y @ y).view(25)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+        with config.patch(bundled_autotune_remote_cache=True):
+            torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.reset()
+        with config.patch(bundled_autotune_remote_cache=False):
+            self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
@@ -6073,6 +6085,7 @@ class TestCompilationEventLogging(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class TestAutotuneCacheExtraOptions(TestCase):
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
@@ -6081,6 +6094,121 @@ class TestAutotuneCacheExtraOptions(TestCase):
     options alongside the standard Triton config. These tests verify that
     extra_options is correctly preserved when saving and loading from cache.
     """
+
+    @requires_triton()
+    @parametrize("other_options", [None, {"tile": (8, 16)}])
+    def test_cache_hit_returns_original_extra_options_winner(self, other_options):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for options in (other_options, {"tile": (2, 4)}):
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            cfg.extra_options = options
+            configs.append(cfg)
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIs(result, configs[1])
+        self.assertEqual(result.num_ctas, 2)
+        self.assertEqual(result.extra_options, {"tile": [2, 4]})
+
+    @requires_triton()
+    def test_cache_hit_restores_tuned_extra_options(self):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        initial = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+        initial.extra_options = {"option": 2}
+        configs_hash = hash_configs([initial])
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "kernel.py")
+            cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+            self.assertIsNotNone(cache)
+            initial.extra_options = {"option": 4}
+            cache.save(initial, time_taken_ns=1000)
+
+            candidate = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            candidate.extra_options = {"option": 2}
+            cache = AutotuneCache.create(
+                inductor_meta, filename, hash_configs([candidate])
+            )
+            self.assertIsNotNone(cache)
+            result = cache.read_best(inductor_meta, [candidate])
+
+        self.assertIs(result, candidate)
+        self.assertEqual(result.extra_options, {"option": 4})
+        self.assertEqual(result.num_ctas, 2)
+
+    @requires_triton()
+    @parametrize(
+        "options, winner_options",
+        [
+            ([{"option": 2}, {"option": 3}], {"option": 4}),
+            ([None, None], {"option": 4}),
+            ([None, None], None),
+            ([{"option": 4}, {"option": 4}], {"option": 4}),
+        ],
+    )
+    def test_conflicting_or_ambiguous_extra_options_reconstruct(
+        self, options, winner_options
+    ):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for extra_options in options:
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = extra_options
+            configs.append(cfg)
+        winner = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = winner_options
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(winner, time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kwargs, winner.kwargs)
+        self.assertEqual(result.num_warps, winner.num_warps)
+        self.assertEqual(result.num_stages, winner.num_stages)
+        self.assertEqual(result.extra_options, winner_options)
+        for cfg in configs:
+            self.assertIsNot(result, cfg)
+        self.assertEqual([cfg.extra_options for cfg in configs], options)
 
     @requires_triton()
     def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):

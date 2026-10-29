@@ -1997,6 +1997,50 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
 
         self._assert_fn_matches_eager(fn, torch.ones(1))
 
+    def test_object_richcompare_missing_override_graph_breaks(self):
+        import logging
+
+        from torch._dynamo.exc import Unsupported
+
+        class CustomEqLogger(logging.Logger):
+            def __eq__(self, other):
+                return "custom"
+
+        logger = CustomEqLogger("custom_eq")
+
+        def fn(x):
+            return x + 1, logger == logger
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_object_richcompare_missing_override_graph_breaks_ordering(self):
+        import logging
+
+        from torch._dynamo.exc import Unsupported
+
+        class CustomLtLogger(logging.Logger):
+            def __lt__(self, other):
+                return "custom"
+
+        logger = CustomLtLogger("custom_lt")
+
+        def fn(x):
+            return x + 1, logger < logger
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_skip_function_richcompare(self):
+        import time
+
+        def fn(a, b, x):
+            return x + 1, a == b, a != b, a == time.monotonic
+
+        self._assert_fn_matches_eager(fn, time.time, time.time, torch.ones(1))
+
 
 # =====================================================================
 # Event comparison (EventVariable)

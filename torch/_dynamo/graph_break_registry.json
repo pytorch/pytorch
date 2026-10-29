@@ -689,6 +689,16 @@
       ]
     }
   ],
+  "GB5108": [
+    {
+      "Gb_type": "autograd inputs from an external mapping proxy",
+      "Context": "",
+      "Explanation": "Dynamo cannot identify the underlying mapping or its items/values overrides.",
+      "Hints": [
+        "Construct the mapping proxy inside the compiled region."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
@@ -1436,6 +1446,16 @@
       ]
     }
   ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -1813,6 +1833,16 @@
       ]
     }
   ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2043,6 +2073,16 @@
       "Context": "call_method {self} resize_as_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_as_()`.",
       "Hints": []
+    }
+  ],
+  "GB9613": [
+    {
+      "Gb_type": "current_stream device mismatch",
+      "Context": "requested={requested_type}, tracking={tracked_type}",
+      "Explanation": "Dynamo stream mismatch: Requested '{requested_type}' stream, but SymbolicStreamState is tracking '{tracked_type}'. Dynamo only tracks streams of the default accelerator (plus stream contexts entered during tracing). Please ensure you are using the default accelerator.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB9186": [
@@ -3204,6 +3244,14 @@
     {
       "Gb_type": "Missing tp_richcompare_impl override",
       "Context": "tp_richcompare_impl {self} {op}",
+      "Explanation": "{type(self).__name__} wraps {real_type.__name__} which has a non-default tp_richcompare. Add a tp_richcompare_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    },
+    {
+      "Gb_type": "Missing tp_richcompare_impl override",
+      "Context": "tp_richcompare_impl {self} {op}",
       "Explanation": "{type(self).__name__} does not implement tp_richcompare_impl. Add a tp_richcompare_impl override to {type(self).__name__}.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
@@ -3630,6 +3678,16 @@
       "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
       "Hints": [
         "Write the repr method in Python"
+      ]
+    }
+  ],
+  "GB8395": [
+    {
+      "Gb_type": "mapping proxy of class with pending attribute mutation",
+      "Context": "class: {vt.value}",
+      "Explanation": "The class __dict__ does not reflect class attributes set earlier in the traced code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

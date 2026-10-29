@@ -5,6 +5,7 @@ import contextlib
 import ctypes
 import functools
 import gc
+import importlib.util
 import json
 import os
 import pickle
@@ -187,6 +188,14 @@ def skip_background_threads_on_windows(f):
     return wrapped
 
 
+def skip_unless_blas_library_selectable(backend):
+    # Windows ignores the setter; archs without hipBLASLt fall back to hipBLAS.
+    with blas_library_context(backend):
+        effective = torch.backends.cuda.preferred_blas_library()
+    if effective != torch.backends.cuda._BlasBackends[backend]:
+        raise unittest.SkipTest(f"cannot select {backend}, BLAS runs on {effective}")
+
+
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
@@ -310,7 +319,12 @@ class TestAmdSmiImport(TestCase):
                 )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
-            if provide_sdk_library:
+            # A real _rocm_sdk_core (TheRock wheels) already provides the SDK
+            # fallback, and a stub would shadow it during torch's SDK preload.
+            if (
+                provide_sdk_library
+                and importlib.util.find_spec("_rocm_sdk_core") is None
+            ):
                 sdk_lib_dir = os.path.join(tmpdir, "_rocm_sdk_core", "lib")
                 os.makedirs(sdk_lib_dir)
                 with open(
@@ -1389,6 +1403,7 @@ print(public_active, active, allocated)
     @serialTest()
     @blas_library_context("cublaslt")
     def test_cublaslt_workspace_eager_resize_and_zero(self):
+        skip_unless_blas_library_selectable("cublaslt")
         a = torch.randn(128, 128, device="cuda")
         out = torch.empty_like(a)
 
@@ -1588,6 +1603,7 @@ print(mem_after_first, torch.cuda.memory_allocated())
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cached_lazy_reallocation(self, backend):
+        skip_unless_blas_library_selectable(backend)
         test_script = f"""
 import torch
 torch.backends.cuda.preferred_blas_library("{backend}")
@@ -7756,6 +7772,7 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(not torch.profiler.kineto_available(), "Kineto is required")
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
