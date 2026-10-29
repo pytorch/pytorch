@@ -10226,7 +10226,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Not mock.patch.dict, which would drop the modules the compile imports.
         sys.modules[module.__name__] = module
         self.addCleanup(sys.modules.pop, module.__name__)
-        op._init_fn.__module__ = module.__name__
+        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
         op.register_fake(torch.empty_like)
         inputs, tracer = [(torch.ones(4),)], MakeFxTracer()
         with self.assertNoLogs("torch._precompile", level="WARNING"):
@@ -10243,24 +10243,42 @@ class TestPrecompileCustomOpRecording(TestCase):
         (warning,) = [m for m in logs.output if qualname in m]
         self.assertIn(f"run the kernels {qualname} (CPU), which no recorded", warning)
 
-    def test_a_kernel_register_kernel_adds_outside_the_ops_module_is_reported(self):
+    def test_the_module_calling_register_kernel_registers_the_kernel(self):
         from torch._precompile import _custom_op_modules, _warn_unregistered_ops
 
         op, qualname = self._op("overridden")
-        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
-        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
-        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
-        op._init_fn.__module__ = module.__name__
-        in_module, in_main = (lambda x: x + 1), (lambda x: x + 2)
-        in_module.__module__, in_main.__module__ = module.__name__, "__main__"
-        op.register_kernel("cpu", in_module)
-        keys = ("CPU", "CUDA", "CompositeExplicitAutograd")
-        found = _custom_op_modules([(qualname, "")], keys)
+        module, other = (
+            types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+            for _ in range(2)
+        )
+        for m in (module, other):
+            m.__spec__ = importlib.machinery.ModuleSpec(m.__name__, None)
+        modules = {module.__name__: module, other.__name__: other}
+        self.enterContext(mock.patch.dict(sys.modules, modules))
+        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
+        keys = ("CPU", "CUDA", "XPU", "CompositeExplicitAutograd")
+
+        def register(caller, device, kernel):
+            code = "torch.library.register_kernel(qualname, device, kernel)"
+            scope = {"qualname": qualname, "device": device, "kernel": kernel}
+            exec(code, {"__name__": caller, "torch": torch}, scope)
+            return _custom_op_modules([(qualname, "")], keys)
+
+        # The calling module counts, not the kernel's: the op's module registers a
+        # functools.partial, another importable module a function of the op's
+        # module, which the artifact then imports, and __main__ one as well.
+        in_module = lambda x: x + 2  # noqa: E731
+        in_module.__module__ = module.__name__
+        found = register(module.__name__, "cpu", functools.partial(torch.add, other=1))
         self.assertEqual(
             (found.modules, found.untracked_kernels), ((module.__name__,), ())
         )
-        torch.library.register_kernel(qualname, "cuda", in_main)
-        found = _custom_op_modules([(qualname, "")], keys)
+        found = register(other.__name__, "xpu", in_module)
+        self.assertEqual(
+            (found.modules, found.untracked_kernels),
+            ((module.__name__, other.__name__), ()),
+        )
+        found = register("__main__", "cuda", in_module)
         self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             _warn_unregistered_ops(found)
@@ -10681,6 +10699,25 @@ class TestPrecompileCustomOpRecording(TestCase):
         (warning,) = [m for m in logs.output if "precompile_defined::op" in m]
         self.assertIn(f"imports {name}, the modules its frames run in", warning)
         self.assertIn("as a best-effort fallback", warning)
+
+    def test_a_kernel_registered_from_main_warns_that_the_frame_modules_are_a_fallback(
+        self,
+    ):
+        op, qualname = self._op("overridden")
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        # Not mock.patch.dict, which would drop the modules the compile imports.
+        sys.modules[module.__name__] = module
+        self.addCleanup(sys.modules.pop, module.__name__)
+        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
+        register = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
+        exec(register, {"__name__": "__main__", "torch": torch}, {"qualname": qualname})
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            line, name, _ = self._render_with_ops([(qualname, "")])
+        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module.__name__, name)!r}")
+        (warning,) = [m for m in logs.output if qualname in m]
+        self.assertIn(f"run the kernels {qualname} (CPU), which no recorded", warning)
+        self.assertIn(f"imports {name}, the modules its frames run in", warning)
 
     def test_an_op_dynamo_graph_breaks_on_is_checked(self):
         from torch.library import _scoped_library
