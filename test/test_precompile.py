@@ -103,6 +103,12 @@ def _precompile_pair(fn, *args, **kwargs):
     return python_code, compiled.to_cache_bytes(python_code)
 
 
+def _build_multigraph_artifact(*args):
+    # For a capture that calls no custom op.
+    no_ops = dict.fromkeys(("custom_op_modules", "custom_ops", "custom_op_keys"), ())
+    return torch._precompile._build_multigraph_artifact(*args, **no_ops)
+
+
 def _load_pair(python_code, cache):
     """Reconstruct a runnable from an in-memory (python_code, cache) pair."""
     return torch._precompile._runnable_from_pair(python_code, cache)
@@ -3084,11 +3090,7 @@ class TestPrecompile(TestCase):
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import (
-            _build_multigraph_artifact,
-            _parse_artifact_metadata,
-            _runnable_from_pair,
-        )
+        from torch._precompile import _parse_artifact_metadata, _runnable_from_pair
         from torch.compiler.precompile import PrecompileSummary
 
         def step(model, x, *, scale=2.0):
@@ -3174,7 +3176,6 @@ class TestPrecompile(TestCase):
         # cannot intercept, so the capture is served by installing instead.
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import _build_multigraph_artifact
         from torch.compiler.precompile import PrecompileSummary
 
         def step(child, x):
@@ -9316,6 +9317,22 @@ def fragment_fn(x):
 # Under only_allow_pt2_compliant_ops, Dynamo graph-breaks on the untagged fragment.
 def fragment_break_fn(x):
     return torch.ops.{ns}.fragment.default(x.sin()) + 1
+
+# Frames it cannot resume after that break: it runs the rest of them eagerly.
+def fragment_try_break_fn(x):
+    return in_try(x.sin()) + in_loop(x.cos())
+
+def in_try(y):
+    torch._dynamo.graph_break()
+    try:
+        return torch.ops.{ns}.fragment.default(y.cos())
+    finally:
+        pass
+
+def in_loop(y):
+    for _ in range(2):
+        y = torch.ops.{ns}.fragment.default(y)
+    return y
 """
 
 
@@ -9433,7 +9450,7 @@ if phase == "capture":
     __import__(unused)
     fn = getattr(__import__(entries), entry)
     torch._dynamo.config.nested_graph_breaks = False
-    torch._dynamo.config.only_allow_pt2_compliant_ops = entry == "fragment_break_fn"
+    torch._dynamo.config.only_allow_pt2_compliant_ops = entry.endswith("break_fn")
     with pc.capture(
         fn,
         artifact_path=artifact,
@@ -9504,6 +9521,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "inductor", "library_fn", "standalone"),
             ("dynamo", "eager", "fragment_fn", "standalone"),
             ("dynamo", "eager", "fragment_break_fn", "standalone"),
+            ("dynamo", "eager", "fragment_try_break_fn", "installed"),
         ],
     )
     def test_load_imports_only_the_modules_of_the_custom_ops_it_calls(
@@ -10278,6 +10296,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             (found.modules, found.untracked_kernels),
             ((module.__name__, other.__name__), ()),
         )
+        # Under python -m, __main__ has a spec but is the loading process's own.
+        spec = importlib.machinery.ModuleSpec("precompile_train", None)
+        self.enterContext(mock.patch.object(sys.modules["__main__"], "__spec__", spec))
         found = register("__main__", "cuda", in_module)
         self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
@@ -10712,6 +10733,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
         register = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
         exec(register, {"__name__": "__main__", "torch": torch}, {"qualname": qualname})
+        # As under python -m, where __main__ has a spec.
+        spec = importlib.machinery.ModuleSpec("precompile_train", None)
+        self.enterContext(mock.patch.object(sys.modules["__main__"], "__spec__", spec))
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             line, name, _ = self._render_with_ops([(qualname, "")])
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module.__name__, name)!r}")
@@ -10761,18 +10785,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib = self.enterContext(_scoped_library("precompile_no_fake", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, "CPU")
-        with tempfile.TemporaryDirectory() as directory:
-            artifact = os.path.join(directory, "artifact.py")
-            with capture(
-                _eager_fallback_op_fn,
-                artifact_path=artifact,
-                cache_path=os.path.join(directory, "artifact.cache"),
-                tracer=DynamoTracer(),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-            with open(artifact) as f:
-                python_code = f.read()
+        python_code = self._capture_fn(_eager_fallback_op_fn, tracer=DynamoTracer())
         expected = (("precompile_no_fake::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
@@ -10810,18 +10823,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, "CPU")
         torch.library.register_fake("precompile_fake_type_error::op", fake, lib=lib)
-        with tempfile.TemporaryDirectory() as directory:
-            artifact = os.path.join(directory, "artifact.py")
-            with capture(
-                _fake_type_error_fn,
-                artifact_path=artifact,
-                cache_path=os.path.join(directory, "artifact.cache"),
-                tracer=DynamoTracer(),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-            with open(artifact) as f:
-                python_code = f.read()
+        python_code = self._capture_fn(_fake_type_error_fn, tracer=DynamoTracer())
         expected = (("precompile_fake_type_error::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
@@ -10836,32 +10838,16 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, "CPU")
         torch.library.register_fake("precompile_unsupported_fake::op", fake, lib=lib)
-        with tempfile.TemporaryDirectory() as directory:
-            artifact = os.path.join(directory, "artifact.py")
-            with capture(
-                _unsupported_fake_fn,
-                artifact_path=artifact,
-                cache_path=os.path.join(directory, "artifact.cache"),
-                tracer=DynamoTracer(),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-            with open(artifact) as f:
-                python_code = f.read()
+        python_code = self._capture_fn(_unsupported_fake_fn, tracer=DynamoTracer())
         expected = (("precompile_unsupported_fake::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
-    def _capture_module(self, source, **kwargs):
-        # Captures fn of a temp module with source; returns the artifact's text.
+    def _capture_fn(self, fn, **kwargs):
+        # Captures fn; returns the artifact's text.
         directory = self.enterContext(tempfile.TemporaryDirectory())
-        name = f"precompile_recording_{uuid.uuid4().hex}"
-        with open(os.path.join(directory, name + ".py"), "w") as f:
-            f.write(source)
-        self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
-        self.addCleanup(sys.modules.pop, name, None)
         artifact = os.path.join(directory, "artifact.py")
         with capture(
-            importlib.import_module(name).fn,
+            fn,
             artifact_path=artifact,
             cache_path=os.path.join(directory, "artifact.cache"),
             backend="eager",
@@ -10870,6 +10856,16 @@ class TestPrecompileCustomOpRecording(TestCase):
             cap(torch.ones(4))
         with open(artifact) as f:
             return f.read()
+
+    def _capture_module(self, source, **kwargs):
+        # Captures fn of a temp module with source.
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        name = f"precompile_recording_{uuid.uuid4().hex}"
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(source)
+        self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
+        self.addCleanup(sys.modules.pop, name, None)
+        return self._capture_fn(importlib.import_module(name).fn, **kwargs)
 
     def test_an_op_whose_fake_impl_the_trace_registers_is_checked(self):
         ns = f"precompile_pending_fake_{uuid.uuid4().hex}"
