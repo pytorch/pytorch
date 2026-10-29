@@ -952,6 +952,8 @@ def _impl(
         else:
             for key in keys:
                 use_lib.impl(qualname, func, key)
+        for key in keys:
+            torch._library.utils.record_kernel_caller(qualname, key)
 
     if func is None:
         return register_

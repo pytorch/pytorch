@@ -1810,40 +1810,6 @@ class TestFX(JitTestCase):
         targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
         self.assertIn(leaf_fn, targets)
 
-    def test_symbolic_trace_resolves_lazy_globals_of_autowrap_modules_first(self):
-        from torch.fx._symbolic_trace import _wrapped_fns_to_patch
-
-        def leaf_fn(x):
-            return x * 3
-
-        def resolve(d):
-            _wrapped_fns_to_patch[(id(d), "_leaf_fn")] = d
-            return 1
-
-        # Private, so autowrap_modules does not wrap it on its own.
-        lazy_scope = self._lazy_globals("helper", resolve, _leaf_fn=leaf_fn)
-
-        class LazyModule(types.ModuleType):
-            @property
-            def __dict__(self):
-                return lazy_scope
-
-        def f(x):
-            return lazy_scope["_leaf_fn"](x)
-
-        tracer = torch.fx.Tracer(autowrap_modules=(LazyModule("lazy_mod"),))
-        # Tracer.__init__ resolved it while collecting autowrap ids; the trace must
-        # also resolve a lazy global that is still pending when it starts.
-        dict.__setitem__(lazy_scope, "helper", self._LAZY)
-        del _wrapped_fns_to_patch[(id(lazy_scope), "_leaf_fn")]
-        try:
-            with self._patch_is_lazy_import():
-                graph = tracer.trace(f)
-        finally:
-            _wrapped_fns_to_patch.pop((id(lazy_scope), "_leaf_fn"), None)
-        targets = [n.target for n in graph.nodes if n.op == "call_function"]
-        self.assertIn(leaf_fn, targets)
-
     def test_wrap_registered_while_patching_wrapped_functions_is_applied(self):
         from torch.fx._symbolic_trace import (
             _Patcher,

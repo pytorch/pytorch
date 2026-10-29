@@ -923,11 +923,9 @@ class Tracer(TracerBase):
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
-                # Resolve the lazy globals of the scanned scopes before patching, so a
-                # torch.fx.wrap their module bodies call applies to this trace.
+                # Resolve fn's lazy globals before patching, so a torch.fx.wrap their
+                # module bodies call applies to this trace.
                 _resolve_lazy_imports(patcher, fn_globals)
-                for module in self._autowrap_search:
-                    _resolve_lazy_imports(patcher, module.__dict__)
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
