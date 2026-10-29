@@ -3959,7 +3959,7 @@ def istft(
         )
         if not onesided_:
             input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
-        input = torch.fft.irfft(input, dim=-1, norm=norm)
+        input = torch.fft.irfft(input, n=n_fft, dim=-1, norm=norm)
 
     if input.size(2) != n_fft:
         raise AssertionError(
