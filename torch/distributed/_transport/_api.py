@@ -13,6 +13,8 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -21,6 +23,22 @@ class MemoryView(Protocol):
     """A read-only view of registered memory."""
 
     def size(self) -> int: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a view of a byte range of this one.
+
+        ``offset`` is relative to this view and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this view.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``view[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -45,6 +63,24 @@ class RemoteBuffer(Protocol):
 
     @classmethod
     def deserialize(cls, data: bytes) -> Self: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a descriptor for a byte range of this one.
+
+        ``offset`` is relative to this descriptor and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this descriptor. The
+        result shares this descriptor's registration and lifetime, and does not
+        restrict access to the rest of the registration.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``buffer[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -75,8 +111,9 @@ class Transport(ABC):
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
 
-    Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
-    one outgoing peer; no process group, ranks, or matching receives are needed.
+    Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
+    connect to multiple peers, and remote descriptors identify their peer. No
+    process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
     plane. Registration is valid until unregistration or close, including after bind/connect.
 
@@ -127,13 +164,18 @@ class Transport(ABC):
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         """Connect to a bound peer and return zero on success.
 
+        Connecting to additional peers keeps existing connections; reconnecting
+        with the same connection bytes is a no-op. There is no per-peer
+        disconnect; ``close`` releases all peers. Transfers to descriptors naming
+        an unconnected peer raise ``ValueError``.
+
         Rank-to-endpoint lookup belongs in a separate application control-plane
         adapter; this interface addresses peers using opaque connection bytes.
         """
 
     @abstractmethod
     def connected(self) -> bool:
-        """Return whether the endpoint is connected to its peer."""
+        """Return whether the endpoint is connected to any peer."""
 
     @abstractmethod
     def register_memory(
@@ -141,7 +183,7 @@ class Transport(ABC):
     ) -> Memory:
         """Register a contiguous tensor, including after bind/connect or transfers.
 
-        Exchange its remote-buffer descriptor with the peer before remote access.
+        Exchange its remote-buffer descriptor with peers before remote access.
         """
 
     def unregister_memory(
