@@ -7691,6 +7691,119 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    def test_temporary_directory_cleanup(self):
+        counter = CompileCounter()
+
+        def fn(x, tmpdir):
+            y = x + 1
+            tmpdir.cleanup()
+            return y + 1
+
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        for _ in range(3):
+            tmpdir = tempfile.TemporaryDirectory()
+            with tmpdir:
+                self.assertEqual(compiled(x, tmpdir), x + 2)
+                self.assertFalse(os.path.exists(tmpdir.name))
+            self.assertEqual(counter.frame_count, 2)
+
+        tmpdir = tempfile.TemporaryDirectory()
+        with tmpdir:
+            reason = "uses the finalizer registry"
+            with self.assertRaisesRegex(Unsupported, reason):
+                torch.compile(fn, backend="eager", fullgraph=True)(x, tmpdir)
+            self.assertTrue(os.path.exists(tmpdir.name))
+
+    @parametrize(
+        "operation", ["call", "detach", "peek", "alive", "atexit", "set_atexit", "repr"]
+    )
+    def test_weakref_finalize_registry(self, operation):
+        class Target:
+            pass
+
+        obj = Target()
+        token = object()
+        calls = []
+
+        def callback(arg, *, kwarg):
+            calls.append((arg, kwarg))
+            return 7
+
+        finalizer = weakref.finalize(obj, callback, token, kwarg=token)
+        self.addCleanup(finalizer.detach)
+        original = finalizer.peek()
+
+        def operate(finalizer):
+            if operation == "call":
+                value = finalizer()
+            elif operation == "detach":
+                value = finalizer.detach()
+            elif operation == "peek":
+                value = finalizer.peek()
+            elif operation == "alive":
+                value = finalizer.alive
+            elif operation == "atexit":
+                value = finalizer.atexit
+            elif operation == "set_atexit":
+                finalizer.atexit = False
+                value = None
+            else:
+                value = repr(finalizer)
+            return value
+
+        def fn(x, finalizer):
+            y = x + 1
+            value = operate(finalizer)
+            return y + 1, value
+
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        for iteration in range(4):
+            other = weakref.finalize(obj, lambda: None)
+            self.addCleanup(other.detach)
+            if iteration == 1:
+                finalizer.atexit = False
+            elif iteration == 2:
+                finalizer.detach()
+            alive, atexit = finalizer.alive, finalizer.atexit
+            expected_repr = repr(finalizer)
+            frames = 3 if operation in ("detach", "peek") and not alive else 2
+            result, value = compiled(x, finalizer)
+            self.assertEqual(result, x + 2)
+            if operation == "call":
+                self.assertEqual(value, 7 if alive else None)
+                self.assertEqual(calls, [(token, token)])
+            elif operation in ("detach", "peek"):
+                if alive:
+                    self.assertEqual(value, original)
+                    for actual, expected in zip(value, original):
+                        self.assertIs(actual, expected)
+                else:
+                    self.assertIsNone(value)
+                self.assertEqual(calls, [])
+            elif operation == "alive":
+                self.assertIs(value, alive)
+            elif operation == "atexit":
+                self.assertIs(value, atexit)
+            elif operation == "set_atexit":
+                self.assertIsNone(value)
+                self.assertFalse(finalizer.atexit)
+            else:
+                self.assertEqual(value, expected_repr)
+            self.assertTrue(other.alive)
+            self.assertEqual(counter.frame_count, frames)
+
+        finalizer = weakref.finalize(obj, callback, token, kwarg=token)
+        self.addCleanup(finalizer.detach)
+        reason = "uses the finalizer registry"
+        with self.assertRaisesRegex(Unsupported, reason):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, finalizer)
+        self.assertTrue(finalizer.alive)
+        self.assertTrue(finalizer.atexit)
+        self.assertEqual(calls, [(token, token)] if operation == "call" else [])
+
     @skipIfWindows(
         msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
     )
