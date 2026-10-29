@@ -1909,8 +1909,11 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    def test_device_index_symbol_preserves_zero_one(self):
-        # Accelerator indices zero and one must remain valid symbolic values.
+    def test_device_index_symbol_is_not_size_like(self):
+        # The index is unbacked, but it is not a *size*. Allocating it with
+        # new_dynamic_size() files it under ShapeEnv.size_like, which carries the
+        # size-oblivious assumption that a value is never 0 or 1 -- here, that this
+        # rank is never cuda:0 or cuda:1.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -1918,10 +1921,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with FakeTensorMode(shape_env=shape_env):
             index = torch.ops.coor.current_device_index.default()
 
-        index_range = shape_env.var_to_range[index.node.expr]
-        self.assertEqual(index_range.lower, 0)
-        self.assertIn(0, index_range)
-        self.assertIn(1, index_range)
+        self.assertEqual(shape_env.size_like, set())
+        # The >= 0 bound is the part worth keeping.
+        self.assertEqual(shape_env.var_to_range[index.node.expr].lower, 0)
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
