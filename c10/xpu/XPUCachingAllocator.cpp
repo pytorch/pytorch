@@ -268,7 +268,7 @@ struct ExpandableSegment {
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(begin < end);
 
-    auto get_handle_data = [&](size_t i) -> syclex::ipc::handle_data_t {
+    auto get_handle_data = [&](size_t i) -> const syclex::ipc::handle_data_t& {
       auto& maybe_handle = handles_.at(i);
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
       if (!maybe_handle->shareable_handle) {
@@ -279,7 +279,7 @@ struct ExpandableSegment {
     };
 
     // All handles have the same size; reuse the first one for the header.
-    auto first_handle_data = get_handle_data(begin);
+    const auto& first_handle_data = get_handle_data(begin);
     const auto handle_size = first_handle_data.size();
 
     ShareHeader header{};
@@ -290,7 +290,7 @@ struct ExpandableSegment {
     ss.write(
         reinterpret_cast<const char*>(first_handle_data.data()), handle_size);
     for (const auto i : c10::irange(begin + 1, end)) {
-      auto handle_data = get_handle_data(i);
+      const auto& handle_data = get_handle_data(i);
       TORCH_INTERNAL_ASSERT(
           handle_data.size() == handle_size,
           "Expected all IPC handles have the same size.");
