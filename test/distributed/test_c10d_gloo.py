@@ -1441,6 +1441,37 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Take a column of 2D tensor, such that memory is not dense
         self._test_gather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
+    @requires_gloo()
+    def test_gather_permuted_input(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/74809:
+        # a dense but non-contiguous (transposed) input must arrive intact.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        def make_input(rank):
+            return (torch.arange(10.0) + 100 * rank).reshape(2, 5).t()
+
+        input = [make_input(self.rank)]
+        self.assertFalse(input[0].is_contiguous())
+
+        futures = []
+        outputs = [torch.zeros(5, 2) for _ in range(self.world_size)]
+        for root in range(self.world_size):
+            opts = c10d.GatherOptions()
+            opts.rootRank = root
+            if root == self.rank:
+                futures.append(pg.gather([outputs], input, opts).get_future())
+            else:
+                futures.append(pg.gather([], input, opts).get_future())
+
+        for root in range(self.world_size):
+            futures[root].wait()
+            if root == self.rank:
+                expected = [make_input(r) for r in range(self.world_size)]
+                self.assertEqual(expected, futures[root].value()[0])
+
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -1578,6 +1609,25 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allgather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
         self._test_allgather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
+
+    @requires_gloo()
+    def test_allgather_permuted_input(self):
+        # Companion of test_gather_permuted_input (issue 74809) for allgather.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        def make_input(rank):
+            return (torch.arange(10.0) + 100 * rank).reshape(2, 5).t()
+
+        input = [make_input(self.rank)]
+        self.assertFalse(input[0].is_contiguous())
+        output = [[torch.zeros(5, 2) for _ in range(self.world_size)]]
+        fut = pg.allgather(output, input).get_future()
+        fut.wait()
+        expected = [make_input(r) for r in range(self.world_size)]
+        self.assertEqual(expected, fut.value()[0])
 
     @requires_gloo()
     def test_allgather_inference_mode(self):
