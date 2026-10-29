@@ -2012,8 +2012,10 @@ def _library_op_module(
 def _kernel_modules(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> set[str]:
-    """The modules outside torch whose import registers a kernel of ``op_name``
-    with ``Library.impl``, which is often not the module defining the op."""
+    """The modules outside torch that constructed a ``torch.library.Library``
+    registering a kernel of ``op_name``, often not the module defining the op. A
+    kernel registered through another module's Library records that module, not
+    the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
     dump = torch._C._dispatch_dump(qualname)
     paths = re.findall(r"^[^:\n]+: registered at (.+\.py):\d+ ::", dump, re.MULTILINE)
@@ -2059,9 +2061,11 @@ def _write_custom_op_imports(
     buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module that registers the op. The recorded module is a best
-    # guess (and an op defined with torch.library.define or from __main__ has
-    # none), so the imports are best effort and the ops themselves are checked.
+    # path imports the module that registers the op. The recorded modules are the
+    # ones that constructed each Library used for the op's define and impls, which
+    # misses a module calling impl on another module's Library (and an op defined
+    # with torch.library.define or from __main__ has none), so the imports are best
+    # effort and the ops and their kernels are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
