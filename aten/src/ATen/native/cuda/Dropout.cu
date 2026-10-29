@@ -32,7 +32,6 @@ namespace {
 
 // philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
 // for all members of float4 to be consumed UNROLL has to be 4. Don't change!
-// Note: VEC <= 4 (and in most real-world cases will be 4), so same logic applies.
 const int UNROLL = 4;
 
 template <
@@ -86,8 +85,8 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
       // sets up the last two values we generated last iteration to be used this iteration.
       rand[0].x = rand[0].z;
       rand[0].y = rand[0].w;
-      gridxvec_loop_state ^= 1;
     }
+    gridxvec_loop_state ^= 1;
 
     rand[0].x = rand[0].x < p;
     rand[0].y = rand[0].y < p;
@@ -217,7 +216,6 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     const int optimal_vec_size = 16 / static_cast<int>(sizeof(scalar_t));
     vec_size = std::min<int>(optimal_vec_size, vec_size);
 
-    // make sure we don't break assumption that we can't have > 4 elements / thread
     TORCH_INTERNAL_ASSERT(vec_size <= 8, "Value of VEC must be in [2, 4, 8]");
 #endif
   }
@@ -238,7 +236,7 @@ inline void launcher(
     Tensor& mask,
     double p,
     const int64_t nelem,
-    const PhiloxCudaState rng_engine_inputs,
+    CUDAGeneratorImpl* gen,
     dim3 grid,
     dim3 dim_block) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -261,6 +259,18 @@ inline void launcher(
                                   // contiguous tensor
 
         int vec_size = get_vector_size<scalar_t>(self, ret, mask);
+
+        // Reserve one philox value per element a thread handles, rounded up to whole
+        // curand_uniform4 calls (4 values each). vec_size < 4 shares one call across two iterations.
+        const int64_t rand_per_iter = std::max(vec_size, UNROLL);
+        const int64_t total_threads = static_cast<int64_t>(dim_block.x) * grid.x;
+        const int64_t counter_offset = ((nelem - 1) / (total_threads * rand_per_iter) + 1) * rand_per_iter;
+        PhiloxCudaState rng_engine_inputs;
+        {
+          // See Note [Acquire lock when using random generators]
+          std::lock_guard<std::mutex> lock(gen->mutex_);
+          rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+        }
 
         if (vec_size > 1) {
           switch (vec_size) {
@@ -395,20 +405,12 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-//number of times random will be generated per thread, to offset philox counter in thc random state
-  int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
-  PhiloxCudaState rng_engine_inputs;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
-  }
   if (cuda::detail::canUse32BitIndexMath(self)){
     launcher<unsigned int, mask_t>(
-        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, gen, grid, dim_block);
   } else {
     launcher<uint64_t, mask_t>(
-        self, ret, mask, p, nelem, rng_engine_inputs, grid, dim_block);
+        self, ret, mask, p, nelem, gen, grid, dim_block);
   }
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
