@@ -5350,9 +5350,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_forward_graph(tx, ctx, fwd_tracer, args, kwargs)
         )
 
-        bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
-            self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
-        )
+        with tx.output.ignore_speculative_input_mutations(tx, backward=True):
+            bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
+            )
 
         self.rewire_bwd_graph_outputs(
             fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
@@ -5471,7 +5472,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
         # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
         # TODO - revisit if we need the python dispatcher
-        with enable_python_dispatcher():
+        with (
+            enable_python_dispatcher(),
+            tx.output.ignore_speculative_input_mutations(tx),
+        ):
             with tx.output.fake_mode:
                 fwd_freevars_args = [_get_fake_value(arg) for arg in fwd_freevars]
 

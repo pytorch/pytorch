@@ -215,6 +215,7 @@ class RuntimeWrapper(CompilerWrapper):
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
             disable_amp=self.disable_amp,
+            input_mutation_barriers=aot_config.input_mutation_barriers,
         )
 
 
@@ -990,6 +991,9 @@ def _create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
+    input_mutation_barriers: tuple[
+        tuple[int, int | torch.device, int | None, str], ...
+    ],
 ) -> Callable[..., Any]:
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
@@ -1179,6 +1183,13 @@ def _create_runtime_wrapper(
         artifact_name="runtime_wrapper_orchestration",
     )
     buf.bind(torch=torch)
+
+    if input_mutation_barriers:
+        from torch._dynamo.variables.streams import check_input_mutation_barriers
+
+        buf.add_global("_check_input_mutation_barriers_", check_input_mutation_barriers)
+        buf.add_global("_input_mutation_barriers_", input_mutation_barriers)
+        buf.emit("_check_input_mutation_barriers_(_input_mutation_barriers_)", indent=1)
 
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)

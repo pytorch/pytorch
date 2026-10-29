@@ -154,6 +154,10 @@ class ScopeContextManager:
 
 
 _COPY_META_FIELDS = [
+    "input_mutation_origin",
+    "input_mutation_streams",
+    "input_mutation_stack",
+    "input_mutation_barrier",
     "nn_module_stack",
     "torch_fn",
     "source_fn_stack",

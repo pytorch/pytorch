@@ -1088,6 +1088,40 @@ class InlinedCodeCache:
     code_options: CodeOptions
 
 
+class InputMutationBarrier(NamedTuple):
+    r"""A graph input write preceding a user stream barrier, pending AOT classification.
+
+    Stream integers index the active graph-bytecode object registry, not native
+    handles. Dynamo retains stream objects through backend capture; runtime checks
+    resolve the registry again on each call. A device observes all its streams.
+    ``waiter_stream=None`` denotes synchronization or event recording.
+
+    ``inputs`` contains graph argument indices, ``(argument, pytree leaf)`` pairs,
+    or parameter/buffer names. ``None`` matches any DATA input; ``()`` matches
+    none. AOT remaps these sources to flat inputs, then retains only checks
+    with deferred DATA writes. Classified runtime checks omit input attribution.
+    ``backward=True`` keeps backward-local writes separate from forward writes.
+    AOT permits only DATA mutations of saved inputs in backward and checks those
+    candidates independently of the forward mutation mask.
+
+    FX copies must preserve node ``input_mutation_origin`` identities, mutation
+    ``input_mutation_streams`` (stream index, origins) and ``input_mutation_stack``,
+    and ``input_mutation_barrier`` (observed stream/device, waiter, error, is_event).
+    Tensor metadata uses ``example_value`` or ``val`` for aliases and loop counts.
+    GraphModule ``input_mutation_barrier_provenance=True`` declares complete node
+    attribution; an absent flag is inferred from nodes. Incomplete adapters carry
+    ``input_mutation_barriers`` with remapped sources, using ``inputs=None`` when
+    the mapping is unknown.
+    """
+
+    mutation_stream: int
+    observed_stream_or_device: int | torch.device
+    waiter_stream: int | None
+    error: str
+    inputs: tuple[int | str | tuple[int, int], ...] | None
+    backward: bool = False
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -1128,6 +1162,7 @@ class TracingContext:
         self.loc_in_frame_positions: dis.Positions | None = None
         # this is only set after aot_autograd
         self.fw_metadata: ViewAndMutationMeta | None = None
+        self.input_mutation_barriers: tuple[InputMutationBarrier, ...] = ()
         # this is only set when the DDPOptimizer is used
         self.ddp_optimizer_ctx: DDPOptimizerContext | None = None
         # this is only set after aot_autograd

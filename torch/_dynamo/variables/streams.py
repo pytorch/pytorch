@@ -1,11 +1,14 @@
 import collections
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, cast, Optional
 
 import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.lists import TupleVariable
+from torch._guards import InputMutationBarrier
+from torch._ops import HigherOrderOperator
 from torch.fx import has_side_effect, Proxy
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
@@ -81,6 +84,191 @@ def _get_stream_by_index(index: int) -> torch.Stream:
             f"Fork/join stream expected a stream object at index {index}"
         )
     return stream
+
+
+def _stream_identity(stream: torch.Stream) -> tuple[torch.device, int]:
+    if stream.device.type == "cpu":
+        # The CPU has a single stream and no native accelerator handle.
+        return stream.device, 0
+    # Accelerator streams expose native handles; the base torch.Stream type
+    # stub does not yet declare the attribute.
+    return stream.device, stream.native_handle  # pyrefly: ignore[missing-attribute]
+
+
+def _input_mutation_leaves(
+    node: torch.fx.Node,
+) -> list[tuple[Any, torch.Tensor | None, int | None]]:
+    origin = node.meta.get("input_mutation_origin", node.name)
+    value = node.meta.get("example_value", node.meta.get("val"))
+    if isinstance(value, torch.Tensor):
+        leaves: list[tuple[Any, torch.Tensor | None, int | None]] = [
+            (origin, value, None)
+        ]
+    else:
+        leaves = [
+            ((origin, index), leaf, index)
+            for index, leaf in enumerate(torch.utils._pytree.tree_leaves(value))
+            if isinstance(leaf, torch.Tensor)
+        ]
+    index = 0
+    while index < len(leaves):
+        source, tensor, leaf_index = leaves[index]
+        index += 1
+        if is_traceable_wrapper_subclass(tensor):
+            attrs, _ = tensor.__tensor_flatten__()
+            leaves.extend(
+                (source, inner, leaf_index)
+                for attr in attrs
+                if isinstance(inner := getattr(tensor, attr), torch.Tensor)
+            )
+    return leaves or [(origin, None, None)]
+
+
+def collect_input_mutation_barriers(
+    gm: torch.fx.GraphModule,
+) -> tuple[InputMutationBarrier, ...]:
+    from torch._functorch.autograd_function import autograd_function_apply
+    from torch._higher_order_ops.cond import cond_op
+    from torch._higher_order_ops.map import map_impl
+    from torch._higher_order_ops.scan import scan_op
+    from torch._higher_order_ops.switch import switch_op
+    from torch._higher_order_ops.while_loop import while_loop_op
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    inputs = [node for node in gm.graph.nodes if node.op in ("placeholder", "get_attr")]
+    positions = {
+        node: index
+        for index, node in enumerate(n for n in inputs if n.op == "placeholder")
+    }
+    input_values = []
+    for inp in inputs:
+        for origin, value, leaf in _input_mutation_leaves(inp):
+            position = positions[inp] if inp.op == "placeholder" else str(inp.target)
+            if leaf is not None and isinstance(position, int):
+                position = (position, leaf)
+            input_values.append((origin, value, position))
+    barriers: list[InputMutationBarrier] = []
+
+    def collect(
+        graph_module: torch.fx.GraphModule,
+        mutations: dict[tuple[int, int | str | tuple[int, int]], str],
+        backward: bool = False,
+    ) -> None:
+        modules = dict(graph_module.named_modules())
+        for node in graph_module.graph.nodes:
+            children: list[torch.fx.GraphModule] = []
+            if node.op == "call_function" and isinstance(
+                node.target, HigherOrderOperator
+            ):
+                for source in node.all_input_nodes:
+                    if source.op == "get_attr":
+                        child = modules.get(str(source.target))
+                        if isinstance(child, torch.fx.GraphModule):
+                            children.append(child)
+            elif node.op == "call_module":
+                child = modules.get(str(node.target))
+                if isinstance(child, torch.fx.GraphModule):
+                    children.append(child)
+
+            if node.target is autograd_function_apply:
+                for child in children[1:]:
+                    collect(child, {}, backward=True)
+                children = children[:1]
+
+            repeats = node.target is while_loop_op
+            if node.target in (scan_op, map_impl):
+                xs = node.args[2 if node.target is scan_op else 1]
+                source = torch.utils._pytree.tree_leaves(xs)[0]
+                value = (
+                    source.meta.get("example_value", source.meta.get("val"))
+                    if isinstance(source, torch.fx.Node)
+                    else source
+                )
+                count = value.shape[0] if isinstance(value, torch.Tensor) else None
+                repeats = count is None or not statically_known_true(count <= 1)
+
+            if node.target in (cond_op, switch_op):
+                branches: list[dict[tuple[int, int | str | tuple[int, int]], str]] = []
+                for child in children:
+                    branch = mutations.copy()
+                    collect(child, branch, backward)
+                    branches.append(branch)
+                for branch in branches:
+                    mutations.update(branch)
+            elif repeats:
+                # Propagate writes from earlier iterations into each loop body.
+                while True:
+                    before = len(mutations)
+                    for child in children:
+                        collect(child, mutations, backward)
+                    if len(mutations) == before:
+                        break
+            else:
+                for child in children:
+                    collect(child, mutations, backward)
+
+            for stream, targets in node.meta.get("input_mutation_streams", ()):
+                sources = [
+                    value
+                    for source in node.all_input_nodes
+                    for origin, value, _ in _input_mutation_leaves(source)
+                    if origin in targets and isinstance(value, torch.Tensor)
+                ]
+                for origin, inp_value, position in input_values:
+                    is_input = origin in targets or (
+                        isinstance(inp_value, torch.Tensor)
+                        and any(
+                            torch._C._is_alias_of(  # pyrefly: ignore[missing-attribute]
+                                value, inp_value
+                            )
+                            for value in sources
+                        )
+                    )
+                    if is_input:
+                        mutations.setdefault(
+                            (stream, position), node.meta["input_mutation_stack"]
+                        )
+            barrier = node.meta.get("input_mutation_barrier")
+            if barrier is not None:
+                observed, waiter, error, is_event = barrier
+                for (stream, position), stack in mutations.items():
+                    message = error
+                    if is_event:
+                        message += "\nInput mutation occurred here:\n" + stack
+                    barriers.append(
+                        InputMutationBarrier(
+                            stream, observed, waiter, message, (position,), backward
+                        )
+                    )
+
+    collect(gm, {})
+    return tuple(dict.fromkeys(barriers))
+
+
+def check_input_mutation_barriers(
+    barriers: tuple[tuple[int, int | torch.device, int | None, str], ...],
+) -> None:
+    for mutation, observed, waiter, error in barriers:
+        mutation_stream = _get_stream_by_index(mutation)
+        if isinstance(observed, torch.device):
+            if mutation_stream.device.type != observed.type:
+                continue
+            device = (
+                torch.accelerator.current_stream(observed).device
+                if observed.index is None
+                else observed
+            )
+            if mutation_stream.device == device:
+                raise RuntimeError(error)
+            continue
+        observed_id = _stream_identity(_get_stream_by_index(observed))
+        if _stream_identity(mutation_stream) != observed_id:
+            continue
+        if (
+            waiter is None
+            or _stream_identity(_get_stream_by_index(waiter)) != observed_id
+        ):
+            raise RuntimeError(error)
 
 
 def _get_event_by_index(index: int) -> torch.Event:
@@ -309,7 +497,13 @@ class SymbolicStreamState:
         mark_current_stream_used()
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
+                value = (
+                    cast(torch.Stream, stream.peek_value())
+                    if isinstance(stream, LazyVariableTracker)
+                    and not stream.is_realized()
+                    else stream.value
+                )
+                if value.device == device:
                     return stream
 
         return self.cur_stream_stack[-1]
@@ -366,6 +560,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.enter_stream(self.get_stream())
         return super().enter(tx)
 
@@ -374,6 +569,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.exit_stream()
         return super().exit(tx, *args)
 
@@ -508,11 +704,15 @@ class StreamVariable(StreamContextVariable):
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
-        tx.output.create_proxy(
+        tx.output.check_input_mutation_on_current_stream(tx)
+        proxy = tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
             (self.user_object_index, other_stream.user_object_index),
             {},
+        )
+        tx.output.check_stream_barrier_after_input_mutation(
+            other_stream, proxy.node, self.user_object_index
         )
         return ConstantVariable.create(None)
 
@@ -522,12 +722,14 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tx.output.create_proxy(
+        tx.output.check_input_mutation_on_current_stream(tx)
+        proxy = tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_stream,
             (self.user_object_index,),
             {},
         )
+        tx.output.check_stream_barrier_after_input_mutation(self, proxy.node)
         return ConstantVariable.create(None)
 
     def query(
@@ -555,7 +757,7 @@ class StreamVariable(StreamContextVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        tx.output.check_event_record_after_input_mutation(id(self.value))
+        tx.output.check_input_mutation_on_current_stream(tx)
         if args and isinstance(args[0], EventVariable):
             event_var = args[0]
             event = event_var.value
@@ -568,12 +770,13 @@ class StreamVariable(StreamContextVariable):
                     TupleVariable([]), ConstDictVariable({})
                 ),
             )
-        tx.output.create_proxy(
+        proxy = tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,
             (event_index, self.user_object_index),
             {},
         )
+        tx.output.check_event_record_after_input_mutation(self, proxy.node)
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
@@ -780,8 +983,8 @@ class EventVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
-        tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
-        tx.output.create_proxy(
+        tx.output.check_input_mutation_on_current_stream(tx)
+        proxy = tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,
             (
@@ -790,6 +993,7 @@ class EventVariable(VariableTracker):
             ),
             {},
         )
+        tx.output.check_event_record_after_input_mutation(stream_arg, proxy.node)
         return ConstantVariable.create(None)
 
     def synchronize(

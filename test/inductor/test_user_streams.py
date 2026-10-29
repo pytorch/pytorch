@@ -37,6 +37,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     TEST_WITH_ROCM,
     xfailIfNoAcceleratorTriton,
 )
@@ -2912,6 +2913,32 @@ class TestAOTIUserStreams(InductorTestCase):
             code.count(self._runtime_name("cudaStreamWaitEvent")), 2
         )
         self.assertIn("_aoti_aux_stream_cache.get(2", code)
+
+    @parametrize("mutation", ("input", "buffer"))
+    @parametrize("new_tracer", (False, True))
+    def test_event_after_input_mutation(self, mutation, new_tracer):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1024, device="cuda"))
+
+            def forward(self, x):
+                s = torch.cuda.Stream()
+                with torch.cuda.stream(s):
+                    y = x if mutation == "input" else self.buf
+                    y.add_(1)
+                event = s.record_event()
+                event.wait()
+                return y * 2
+
+        model = Model()
+        inputs = (torch.zeros(1024, device="cuda"),)
+        torch.cuda.synchronize()
+        with torch._export.config.patch(use_new_tracer_experimental=new_tracer):
+            with self.assertRaisesRegex(RuntimeError, "runtime epilogue"):
+                self._compile_and_run(model, inputs)
+        self.assertEqual(inputs[0], torch.zeros_like(inputs[0]))
+        self.assertEqual(model.buf, torch.zeros_like(model.buf))
 
     def test_stream_synchronize_raises(self):
         class Model(torch.nn.Module):

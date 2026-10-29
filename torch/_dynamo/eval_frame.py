@@ -2217,6 +2217,14 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
             result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta[
                 "unbacked_bindings"
             ]
+        for key in (
+            "input_mutation_origin",
+            "input_mutation_streams",
+            "input_mutation_stack",
+            "input_mutation_barrier",
+        ):
+            if key in n.meta:
+                result_proxy.node.meta[key] = n.meta[key]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
@@ -2231,6 +2239,10 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
             ]
         if "dynamo_compile_id" in self.module.meta:  # type: ignore[operator]
             result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]  # type: ignore[index]
+        metadata = cast(dict[str, Any], self.module.meta)
+        for key in ("input_mutation_barriers", "input_mutation_barrier_provenance"):
+            if key in metadata:
+                result_gm.meta[key] = metadata[key]
         return result_gm
 
 

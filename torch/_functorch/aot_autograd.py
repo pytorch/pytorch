@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import inspect
 import itertools
 import time
+import types
 from contextlib import nullcontext
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, cast, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
@@ -26,7 +28,7 @@ from torch._dynamo.utils import (
     preserve_rng_state,
     set_feature_use,
 )
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, InputMutationBarrier
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
 # Runtime annotation consumers still resolve BoxedBool from module globals.
@@ -702,6 +704,40 @@ Functionalized RNG is not currently supported in the aot_export workflow. Please
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             )
 
+    if aot_config.input_mutation_barriers:
+        from torch._dynamo.variables.streams import check_input_mutation_barriers
+
+        data_inputs = {
+            i for i, info in enumerate(fw_metadata.input_info) if info.mutates_data
+        }
+        # Supported backward input mutations are DATA writes copied in backward;
+        # they do not appear in the forward input mutation mask.
+        barriers = tuple(
+            dict.fromkeys(
+                barrier
+                for barrier, indices, backward in zip(
+                    aot_config.input_mutation_barriers,
+                    aot_config.input_mutation_barrier_input_indices,
+                    aot_config.input_mutation_barrier_backward,
+                    strict=True,
+                )
+                if (
+                    needs_autograd and (indices is None or bool(indices))
+                    if backward
+                    else bool(data_inputs)
+                    if indices is None
+                    else any(i in data_inputs for i in indices)
+                )
+            )
+        )
+        aot_config = dataclasses.replace(
+            aot_config,
+            input_mutation_barriers=barriers,
+            input_mutation_barrier_input_indices=(),
+            input_mutation_barrier_backward=(),
+        )
+        check_input_mutation_barriers(barriers)
+
     return AOTState(
         needs_autograd=needs_autograd,
         flat_args=_dup_fake_script_obj(fake_flat_args),
@@ -711,6 +747,233 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         aot_config=aot_config,
         stack=stack,
         fake_mode=fake_mode,
+    )
+
+
+def _get_input_mutation_barriers(
+    fn: Any,
+) -> tuple[InputMutationBarrier, ...]:
+    if isinstance(fn, partial):
+        return _get_input_mutation_barriers(fn.func)
+    graph_module = fn.__self__ if isinstance(fn, types.MethodType) else fn
+    if isinstance(graph_module, torch._dynamo.utils.GmWrapper):
+        barriers = []
+        for barrier in _get_input_mutation_barriers(graph_module.gm):
+            if barrier.inputs is None:
+                barriers.append(barrier)
+                continue
+            if graph_module.flat_input_indices is None and any(
+                not isinstance(source, str) for source in barrier.inputs
+            ):
+                barriers.append(barrier._replace(inputs=None))
+                continue
+            inputs: list[int | str] = []
+            groups = cast(tuple[tuple[int, ...], ...], graph_module.flat_input_indices)
+            for source in barrier.inputs:
+                if isinstance(source, str):
+                    inputs.append(f"gm.{source}")
+                elif isinstance(source, tuple):
+                    inputs.append(groups[source[0]][source[1]])
+                else:
+                    inputs.extend(groups[source])
+            barriers.append(barrier._replace(inputs=tuple(inputs)))
+        return tuple(barriers)
+    if isinstance(graph_module, torch.fx.GraphModule):
+        provenance = graph_module.meta.get("input_mutation_barrier_provenance")
+        if provenance is None:
+            provenance = any(
+                node.meta.get("input_mutation_barrier")
+                or node.meta.get("input_mutation_streams")
+                for child in graph_module.modules()
+                if isinstance(child, torch.fx.GraphModule)
+                for node in child.graph.nodes
+            )
+        if provenance:
+            from torch._dynamo.variables.streams import collect_input_mutation_barriers
+
+            return collect_input_mutation_barriers(graph_module)
+    if (
+        isinstance(graph_module, torch.fx.GraphModule)
+        and "input_mutation_barriers" in graph_module.meta
+    ):
+        return graph_module.meta["input_mutation_barriers"]
+    if tracing_context := torch._guards.TracingContext.try_get():
+        # An opaque callable can reorder the graph inputs.
+        return tuple(
+            barrier._replace(inputs=None)
+            for barrier in tracing_context.input_mutation_barriers
+        )
+    return ()
+
+
+_InputMutationInputMap = tuple[tuple[tuple[int | str, ...], ...] | None, ...]
+
+
+def _remap_input_mutation_barriers(
+    barriers: tuple[InputMutationBarrier, ...],
+    offset: int = 0,
+    param_names: Sequence[str] = (),
+    flat_input_indices: _InputMutationInputMap | None = None,
+) -> tuple[InputMutationBarrier, ...]:
+    params = {name: i for i, name in enumerate(param_names)}
+    result: list[InputMutationBarrier] = []
+    for barrier in barriers:
+        if barrier.inputs is None:
+            result.append(barrier)
+            continue
+        if flat_input_indices is None and any(
+            isinstance(source, tuple) for source in barrier.inputs
+        ):
+            result.append(barrier._replace(inputs=None))
+            continue
+        indices: list[int] = []
+        unknown = False
+        for source in barrier.inputs:
+            if isinstance(source, str):
+                if source in params:
+                    indices.append(params[source])
+                continue
+            position = source[0] if isinstance(source, tuple) else source
+            leaves = (
+                ((position,),)
+                if flat_input_indices is None
+                else flat_input_indices[position]
+            )
+            if leaves is None:
+                unknown = True
+                break
+            if isinstance(source, tuple):
+                leaves = (leaves[source[1]],)
+            for origins in leaves:
+                indices.extend(
+                    params[i] if isinstance(i, str) else i + offset
+                    for i in origins
+                    if not isinstance(i, str) or i in params
+                )
+        result.append(barrier._replace(inputs=None if unknown else tuple(indices)))
+    return tuple(result)
+
+
+def _get_input_mutation_flat_indices(
+    mod: Any,
+    args: Iterable[Any],
+    kwargs: dict[str, Any],
+    *,
+    use_graph_interpreter: bool = False,
+) -> _InputMutationInputMap:
+    from torch._dynamo.functional_export import _DynamoBytecodeCodeGen
+    from torch._dynamo.variables.streams import _input_mutation_leaves
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    # Each graph leaf maps to its AOT inputs. Bound constants map to no inputs;
+    # groups with an unknown layout stay conservative.
+    args = tuple(args)
+    origins: dict[int, list[int | str]] = {}
+
+    def add_origin(value: Any, source: int | str) -> None:
+        pending = [value]
+        while pending:
+            tensor = pending.pop()
+            origins.setdefault(id(tensor), []).append(source)
+            if is_traceable_wrapper_subclass(tensor):
+                attrs, _ = tensor.__tensor_flatten__()
+                pending.extend(getattr(tensor, attr) for attr in attrs)
+
+    for i, value in enumerate(pytree.arg_tree_leaves(*args, **kwargs)):
+        add_origin(value, i)
+    target = mod.func if isinstance(mod, partial) else mod
+    graph_module = target.__self__ if isinstance(target, types.MethodType) else target
+    if isinstance(graph_module, torch.nn.Module):
+        for name, value in itertools.chain(
+            graph_module.named_parameters(remove_duplicate=False),
+            graph_module.named_buffers(remove_duplicate=False),
+        ):
+            add_origin(value, name)
+    bound_args = mod.args if isinstance(mod, partial) else ()
+    bound_kwargs = mod.keywords if isinstance(mod, partial) else {}
+    args = (*bound_args, *args)
+    kwargs = {**bound_kwargs, **kwargs}
+    if not isinstance(graph_module, torch.fx.GraphModule):
+        return tuple(
+            tuple(tuple(origins.get(id(leaf), ())) for leaf in pytree.tree_leaves(v))
+            for v in (*args, *kwargs.values())
+        )
+    bound = inspect.signature(graph_module.forward).bind_partial(*args, **kwargs)
+    bound.apply_defaults()
+    values = list(bound.arguments.values())
+    placeholders = list(graph_module.graph.find_nodes(op="placeholder"))
+    codegen = graph_module.graph._codegen
+    if isinstance(
+        codegen, (torch.fx.graph._PyTreeCodeGen, _DynamoBytecodeCodeGen)
+    ) and all(
+        leaf is None
+        for node in placeholders
+        for _, _, leaf in _input_mutation_leaves(node)
+    ):
+        if isinstance(codegen, _DynamoBytecodeCodeGen):
+            flat = codegen.dynamo_bytecode_flatten(*bound.args)
+        elif isinstance(codegen, torch.fx.graph._ExportCodeGen):
+            flat_inputs = pytree.tree_leaves(bound.args)
+            if codegen.root is not None:
+                flat_inputs.insert(0, codegen.root)
+            flat = codegen.in_shuffle_graph(*flat_inputs)
+        elif use_graph_interpreter:
+            # _PyTreeCodeGen.process_inputs follows the supplied tree's order.
+            flat = pytree.arg_tree_leaves(*bound.args, *bound.kwargs.values())
+        else:
+            from torch.fx._pytree import tree_flatten_spec
+
+            in_spec = codegen.pytree_info.in_spec
+            has_kwargs = (
+                in_spec.type is tuple
+                and in_spec.num_children == 2
+                and in_spec.child(0).type is tuple
+                and in_spec.child(1).type is dict
+            )
+            structured: Any = values
+            if has_kwargs:
+                count = in_spec.child(0).num_children
+                structured = (
+                    values[:count],
+                    dict(zip(in_spec.child(1).context, values[count:])),
+                )
+            flat = tree_flatten_spec(structured, in_spec)
+        return tuple((tuple(origins.get(id(value), ())),) for value in flat)
+    groups = []
+    for node, value in zip(placeholders, values, strict=True):
+        example = node.meta.get("example_value", node.meta.get("val"))
+        leaves = pytree.tree_leaves(value)
+        if any(leaf is not None for _, _, leaf in _input_mutation_leaves(node)):
+            original, _ = pytree.tree_flatten_with_path(example)
+            current, _ = pytree.tree_flatten_with_path(value)
+            positions = dict(current)
+            if not all(path in positions for path, _ in original):
+                groups.append(None)
+                continue
+            leaves = [positions[path] for path, _ in original]
+        groups.append(tuple(tuple(origins.get(id(leaf), ())) for leaf in leaves))
+    return tuple(groups)
+
+
+def _configure_input_mutation_barriers(
+    aot_config: AOTConfig,
+    barriers: tuple[InputMutationBarrier, ...],
+    param_names: Sequence[str] = (),
+    flat_input_indices: _InputMutationInputMap | None = None,
+) -> AOTConfig:
+    mapped = _remap_input_mutation_barriers(
+        barriers, len(param_names), param_names, flat_input_indices
+    )
+    return dataclasses.replace(
+        aot_config,
+        input_mutation_barriers=tuple(
+            (b.mutation_stream, b.observed_stream_or_device, b.waiter_stream, b.error)
+            for b in mapped
+        ),
+        input_mutation_barrier_input_indices=tuple(
+            cast(tuple[int, ...] | None, b.inputs) for b in mapped
+        ),
+        input_mutation_barrier_backward=tuple(b.backward for b in mapped),
     )
 
 
@@ -729,6 +992,9 @@ def aot_function(
     enable_log: bool = True,
     disable_functionalization: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    _input_mutation_barriers: tuple[InputMutationBarrier, ...] | None = None,
+    _input_mutation_param_names: tuple[str, ...] | None = None,
+    _input_mutation_graph_module: torch.fx.GraphModule | None = None,
 ) -> Callable[_P, Any]:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -782,6 +1048,16 @@ def aot_function(
         >>> aot_fn(x)
     """
 
+    input_mutation_barriers = (
+        (
+            _input_mutation_barriers
+            if _input_mutation_barriers is not None
+            else _get_input_mutation_barriers(fn)
+        )
+        if not disable_functionalization
+        else ()
+    )
+
     aot_config = AOTConfig(
         fw_compiler=None,
         bw_compiler=None,
@@ -799,17 +1075,55 @@ def aot_function(
         disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
+    target = fn.func if isinstance(fn, partial) else fn
+    graph_module = target.__self__ if isinstance(target, types.MethodType) else target
+    call_signature = None
+    if input_mutation_barriers and isinstance(graph_module, torch.fx.GraphModule):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(graph_module)
+        forward = graph_module.forward
+        if isinstance(fn, partial):
+            forward = partial(forward, *fn.args, **fn.keywords)
+        call_signature = inspect.signature(forward)
     cached_res = None
 
     @wraps(fn)
     def returned_function(*args: _P.args, **kwargs: _P.kwargs) -> Any:
-        nonlocal cached_res
+        nonlocal cached_res, aot_config
+        call_args: tuple[Any, ...] = args
+        call_kwargs: dict[str, Any] = kwargs
+        if call_signature is not None:
+            bound = call_signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            call_args, call_kwargs = bound.args, bound.kwargs
         # Now flatten the tensor args
-        flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+        flat_args = pytree.arg_tree_leaves(*call_args, **call_kwargs)
 
         # Compile the function and save it in the cache
         if cached_res is None:
-            flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
+            if input_mutation_barriers:
+                # aot_module prepends parameter and buffer dictionaries.
+                graph_args = (
+                    call_args if _input_mutation_param_names is None else call_args[2:]
+                )
+                mutation_graph = (
+                    fn
+                    if isinstance(fn, partial)
+                    else graph_module
+                    if _input_mutation_graph_module is None
+                    else _input_mutation_graph_module
+                )
+                groups = _get_input_mutation_flat_indices(
+                    mutation_graph, graph_args, call_kwargs
+                )
+                aot_config = _configure_input_mutation_barriers(
+                    aot_config,
+                    input_mutation_barriers,
+                    _input_mutation_param_names or (),
+                    groups,
+                )
+            flat_fn, out_spec = create_tree_flattened_fn(fn, call_args, call_kwargs)
             (fake_mode, shape_env) = construct_fake_mode(flat_args, aot_config)
             fake_flat_args: FakifiedFlatArgs
             fake_flat_args, act_input_paths = process_inputs(
@@ -886,11 +1200,23 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
     named_params = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
+    input_mutation_barriers = _get_input_mutation_barriers(mod)
+    call_signature = None
+    if input_mutation_barriers and isinstance(mod, torch.fx.GraphModule):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        _LazyGraphModule.force_recompile(mod)
+        call_signature = inspect.signature(mod.forward)
     compiled_f = aot_function(
         functional_call,
         *args,
         # pyrefly: ignore[bad-keyword-argument]
         num_params_buffers=num_params_buffers,
+        _input_mutation_barriers=input_mutation_barriers,
+        _input_mutation_param_names=(*named_params, *named_buffers),
+        _input_mutation_graph_module=mod
+        if isinstance(mod, torch.fx.GraphModule)
+        else None,
         **kwargs,
     )
 
@@ -900,6 +1226,10 @@ def aot_module(mod: nn.Module, *args: Any, **kwargs: Any) -> nn.Module:
             self.orig_module = mod
 
         def forward(self, *args: Any, **kwargs: Any) -> Any:
+            if call_signature is not None:
+                bound = call_signature.bind(*args, **kwargs)
+                bound.apply_defaults()
+                args, kwargs = bound.args, bound.kwargs
             return compiled_f(
                 named_params,
                 named_buffers,
@@ -1078,6 +1408,21 @@ def prepare_aot_module_simplified(
     elif kwargs is None:
         kwargs = {}
 
+    input_mutation_barriers = (
+        _get_input_mutation_barriers(mod)
+        if flatten and not disable_functionalization
+        else ()
+    )
+    if input_mutation_barriers:
+        args = tuple(args)
+        if isinstance(mod, torch.fx.GraphModule):
+            from torch.fx._lazy_graph_module import _LazyGraphModule
+
+            _LazyGraphModule.force_recompile(mod)
+            bound = inspect.signature(mod.forward).bind(*args, **(kwargs or {}))
+            bound.apply_defaults()
+            args, kwargs = bound.args, bound.kwargs
+
     (
         params_buffers_flat,
         params_spec,
@@ -1097,6 +1442,15 @@ def prepare_aot_module_simplified(
     )
 
     params_buffers_spec = params_spec + buffers_spec
+    if input_mutation_barriers:
+        aot_config = _configure_input_mutation_barriers(
+            aot_config,
+            input_mutation_barriers,
+            params_buffers_spec,
+            _get_input_mutation_flat_indices(
+                mod, args, kwargs or {}, use_graph_interpreter=True
+            ),
+        )
 
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
@@ -1175,6 +1529,9 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
+    input_mutation_barriers = (
+        _get_input_mutation_barriers(mod) if not disable_functionalization else ()
+    )
 
     pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
 
@@ -1189,8 +1546,8 @@ def aot_module_simplified(
         (
             functional_call,
             params_buffers_flat,
-            _params_spec,
-            _buffers_spec,
+            params_spec,
+            buffers_spec,
             fake_flat_args,
             full_args_descs,
             aot_config,
@@ -1210,6 +1567,11 @@ def aot_module_simplified(
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
             disable_functionalization=disable_functionalization,
         )
+
+        if input_mutation_barriers:
+            aot_config = _configure_input_mutation_barriers(
+                aot_config, input_mutation_barriers, (*params_spec, *buffers_spec)
+            )
 
         compiled_fn = None
 
@@ -1634,6 +1996,24 @@ def aot_export_module(
     params_len = len(params_and_buffers_flat)
 
     kwargs = kwargs or {}
+    input_mutation_barriers = _get_input_mutation_barriers(mod)
+    if input_mutation_barriers:
+        args = tuple(args)
+        if isinstance(mod, torch.fx.GraphModule):
+            from torch.fx._lazy_graph_module import _LazyGraphModule
+
+            _LazyGraphModule.force_recompile(mod)
+            bound = inspect.signature(mod.forward).bind(*args, **kwargs)
+            bound.apply_defaults()
+            args, kwargs = bound.args, bound.kwargs
+        input_mutation_barriers = _remap_input_mutation_barriers(
+            input_mutation_barriers,
+            params_len,
+            tuple(params_and_buffers),
+            _get_input_mutation_flat_indices(
+                mod, args, kwargs, use_graph_interpreter=True
+            ),
+        )
 
     functional_call = create_functional_call(
         mod, params_spec, params_len, store_orig_mod=True
@@ -1720,6 +2100,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             dynamic_shapes=dynamic_shapes,
             trace_joint=trace_joint,
             kwargs=kwargs,
+            _input_mutation_barriers=input_mutation_barriers,
         )
 
     # TODO: subsume this path with the aot_stage2_graph_capture path
@@ -1929,6 +2310,7 @@ def _aot_export_function(
     # Under export, configures whether we are getting inference or training IR
     trace_joint: bool = False,
     kwargs: dict[str, Any] | None = None,
+    _input_mutation_barriers: tuple[InputMutationBarrier, ...] = (),
 ) -> tuple[
     Callable[..., Any], ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec | None
 ]:
@@ -1973,6 +2355,10 @@ def _aot_export_function(
         pre_dispatch=pre_dispatch,
         export_trace_joint=trace_joint,
     )
+    if _input_mutation_barriers:
+        aot_config = _configure_input_mutation_barriers(
+            aot_config, _input_mutation_barriers
+        )
     if fake_mode is None:
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
     else:

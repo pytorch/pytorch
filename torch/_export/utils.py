@@ -212,8 +212,14 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
             for arg in node._input_nodes:
                 if arg.op == "get_attr":
                     for entry in torch.fx.proxy._COPY_META_FIELDS:
-                        #  the custom field should not be copied
-                        if entry == "custom":
+                        # These fields describe the operation, not its input.
+                        if entry in (
+                            "custom",
+                            "input_mutation_origin",
+                            "input_mutation_streams",
+                            "input_mutation_stack",
+                            "input_mutation_barrier",
+                        ):
                             continue
                         if entry in meta:
                             params_buffers_to_node_meta[arg.target][entry] = meta[entry]

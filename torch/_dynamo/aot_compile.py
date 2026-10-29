@@ -1373,6 +1373,9 @@ def aot_compile_fullgraph(
             )
         tracing_context = TracingContext(backend_input.fake_mode)
         tracing_context.tensor_to_context = backend_input.tensor_to_context
+        tracing_context.input_mutation_barriers = backend_input.graph_module.meta.get(
+            "input_mutation_barriers", ()
+        )
         with (
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(

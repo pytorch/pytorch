@@ -410,7 +410,15 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy important metadata
         if hasattr(result, "node") and result.node is not n:
-            for key in ["val", "example_value", "unbacked_bindings"]:
+            for key in (
+                "val",
+                "example_value",
+                "unbacked_bindings",
+                "input_mutation_origin",
+                "input_mutation_streams",
+                "input_mutation_stack",
+                "input_mutation_barrier",
+            ):
                 if key in n.meta:
                     result.node.meta[key] = n.meta[key]
 
@@ -441,6 +449,10 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                     "dynamo_compile_id"
                 ]
 
+        metadata = cast(dict[str, Any], self.module.meta)
+        for key in ("input_mutation_barriers", "input_mutation_barrier_provenance"):
+            if key in metadata:
+                result_gm.meta[key] = metadata[key]
         return result_gm
 
 
