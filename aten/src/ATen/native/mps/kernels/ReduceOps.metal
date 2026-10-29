@@ -1583,6 +1583,7 @@ REGISTER_ARG_REDUCTIONS_FOR_TYPE(char);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(uchar);
 
 template <typename T, bool STRIDED>
+[[max_total_threads_per_threadgroup(MAX_THREADGROUP_SIZE)]]
 kernel void dot_reduce(
     device const T* a [[buffer(0)]],
     device const T* b [[buffer(1)]],
