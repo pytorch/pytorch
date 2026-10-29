@@ -374,6 +374,15 @@ jobs:
           skip-s3: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
+      - name: Upload native convolution diagnostic operands and kernels
+        if: always() && startsWith(matrix.config, 'triton_pin_conv') && steps.test.conclusion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: triton-pin-conv-capture-${{ github.run_id }}-${{ steps.get-job-id.outputs.job-id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: test/debug/triton-pin-conv/**/*
+
       - name: Collect backtraces from coredumps (if any)
         if: always()
         run: |
