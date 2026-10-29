@@ -455,6 +455,44 @@ print(f"{r1}, {r2}")
         x = torch.xpu.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_concurrent_pre_init(self):
+        # Several threads querying device_count() before XPU is initialized
+        # must not interleave their rebuilds of the Sysman device list, and
+        # must not leave an inflated count cached behind them (which would
+        # make every later torch.manual_seed() walk off default_generators).
+        test_script = """\
+import threading
+import torch
+
+num_threads = 16
+counts = [None] * num_threads
+barrier = threading.Barrier(num_threads)
+
+def query(i):
+    barrier.wait()
+    counts[i] = torch.xpu.device_count()
+
+threads = [threading.Thread(target=query, args=(i,)) for i in range(num_threads)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch.xpu.init()
+expected = torch._C._xpu_getDeviceCount()
+torch.manual_seed(0)
+print(set(counts) == {expected}, torch.xpu.device_count() == expected)
+"""
+
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script])
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual("True True", r)
+
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_cached_zes_device_infos(self):
