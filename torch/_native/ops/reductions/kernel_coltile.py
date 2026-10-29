@@ -14,7 +14,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
-from .kernel_general import _launch, ReduceBlock
+from .kernel_general import _INT32_LIMIT, _launch, ReduceBlock
 
 
 _compile = _L.compile_kernel
@@ -160,7 +160,7 @@ def _reduce_col_tile(
             raise AssertionError(f"want contiguous batched input, got {x.stride()}")
         B, R, C = x.shape
         # Stage one indexes batched rows as batch * R + row in Int32.
-        if B * R >= 2**31:
+        if B * R >= _INT32_LIMIT:
             raise AssertionError(f"want B * R < 2^31, got B={B}, R={R}")
         rows = x.reshape(B * R, C)
         out_shape = (B, C)
@@ -243,7 +243,7 @@ def _reduce_col_tile(
             ],
             [_L.fake_compact(torch2cute[d.dtype], (_L.sym(),)) for d in kernel_dsts],
             nchunks,
-            batch_chunks,
+            batch_chunks,  # nwaves slot: column chunks per batch
             nrows,
             q,
             Int32(npar),
