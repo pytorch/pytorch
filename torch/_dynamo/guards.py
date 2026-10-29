@@ -126,13 +126,10 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
-from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
-    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
-    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -1129,23 +1126,6 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
-
-
-def convert_sizes_to_concrete_values(sizes: Sequence[Any]) -> list[int | None]:
-    # Preserve the same size wildcards before serialization loses SymInt provenance.
-    concrete_sizes = convert_to_concrete_values(sizes)
-    for i, dim in enumerate(sizes):
-        if (
-            concrete_sizes[i] in (0, 1)
-            and isinstance(dim, torch.SymInt)
-            and isinstance(dim.node, SymNode)
-            and dim.node.shape_env is not None
-        ):
-            expr = _get_placeholder_expr(dim.node)
-            if expr.is_Symbol and has_free_unbacked_symbols(expr):
-                # Runtime checks, not input guards, enforce this refinement.
-                concrete_sizes[i] = None
-    return concrete_sizes
 
 
 def _guard_device_index_is_current(
@@ -3086,12 +3066,25 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
+            reason = (
+                f"{class_name}.__metadata_guard__() rejected the metadata "
+                f"for {ref}. Keep the metadata stable or change the check "
+                "if this difference is safe."
+            )
         else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
+            _validate_default_subclass_metadata_guard(metadata, cls)
+            reason = (
+                f"Metadata from {class_name}.__tensor_flatten__() for "
+                f"{ref} no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe."
+            )
 
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
@@ -3116,7 +3109,7 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker,
-            get_verbose_code_parts(global_name, guard),
+            get_verbose_code_parts(global_name, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3569,18 +3562,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -4290,7 +4288,7 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
-                size = convert_sizes_to_concrete_values(metadata["size"])
+                size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
                     value, output_graph.compile_on_one_rank
@@ -6275,15 +6273,7 @@ class CheckFunctionManager:
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
-                {
-                    source: {
-                        **metadata,
-                        "size": convert_sizes_to_concrete_values(metadata["size"]),
-                    }
-                    for source, metadata in (
-                        output_graph_guards_state.input_source_to_sizes_strides.items()
-                    )
-                },
+                output_graph_guards_state.input_source_to_sizes_strides,
             ),
             skip_guards_check=True,
         )
