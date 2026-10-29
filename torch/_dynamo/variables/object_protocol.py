@@ -2275,34 +2275,29 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
 ) -> "DictGetItemSource | None":
-    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+    r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
     Reading the attribute back as ``klass_source.name`` would go through
     ``type.__getattribute__``, where a data descriptor on the metaclass wins over
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Guards absence in every skipped class, including a complete MRO miss.
+    Returns None on a complete miss; callers decide whether that is an error.
     """
     entries = tuple(iter_mro_static_dicts(klass))
     for idx, (base, namespace) in enumerate(entries):
         if name not in namespace:
+            # Guard skipped classes, including a complete miss.
+            absent_key = (id(base), name)
+            if absent_key not in tx.output.guarded_mro_absent_keys:
+                tx.output.guarded_mro_absent_keys.add(absent_key)
+                install_guard(
+                    TypeDictSource(
+                        _mro_entry_source(klass, klass_source, idx)
+                    ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
+                )
             continue
-
-        # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*. Deduplicated by (id(klass), name): the
-        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        for absent_idx in range(idx):
-            absent_key = (id(entries[absent_idx][0]), name)
-            if absent_key in tx.output.guarded_mro_absent_keys:
-                continue
-            tx.output.guarded_mro_absent_keys.add(absent_key)
-            install_guard(
-                TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
-                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-            )
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
