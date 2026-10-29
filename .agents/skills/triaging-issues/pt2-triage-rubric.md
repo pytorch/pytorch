@@ -70,6 +70,11 @@ If eager and traced results diverge numerically for a specific op, suspect a bad
 - The bug is in FakeTensor implementation
 - The bug is in custom operator registration/dispatch
 
+When one of these applies, add `module: pt2-dispatcher` **together with** the specific
+label for that layer (`module: aotdispatch`, `module: functionalization`,
+`module: fakeTensor`, or `module: custom-operators`). The specific label alone is not
+enough: `module: pt2-dispatcher` is the umbrella the PT2 dispatcher owners filter on.
+
 **Don't add pt2-dispatcher when:**
 - AOT autograd just happens to be on the stack trace
 - The actual bug is in functorch transforms (use `module: functorch` instead)
