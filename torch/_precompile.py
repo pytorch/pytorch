@@ -214,10 +214,11 @@ it.
 # overrode another for the same key), then refuses to load unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same module's
-# file. A Dynamo artifact also imports its
-# served frames' modules for ops with no recorded module, so the caller must import,
-# before load, only what the artifact cannot record: for a make_fx artifact (or a
-# Dynamo one whose op is registered outside every served frame's module), C++
+# file. A Dynamo artifact also imports its served frames' modules, in the order
+# their imports finished, when an op or one of its kernels has no recorded module,
+# so the caller must import, before load, only what the artifact cannot record: for
+# a make_fx artifact (or a Dynamo one whose op or kernel is registered outside every
+# served frame's module), C++
 # extension ops, ops from torch.library.define or __main__, and kernels registered
 # through @torch.library.impl, register_kernel or another module's Library. The eager
 # backend has no kernels to accelerate, so the eager cache carries no compiled artifact
@@ -2205,6 +2206,9 @@ class _CustomOpModules(NamedTuple):
     unrecorded: tuple[tuple[str, str], ...]
     # The ops torch defines only at runtime, by the setup that defines them.
     lazy: tuple[tuple[str, tuple[str, ...]], ...]
+    # The custom ops with a kernel for the keys no importable module is known to
+    # register (a torch helper's, a C++ extension's or __main__'s).
+    unrecorded_kernels: tuple[tuple[str, str], ...] = ()
 
 
 def _custom_op_modules(
@@ -2212,8 +2216,10 @@ def _custom_op_modules(
 ) -> _CustomOpModules:
     """What registers the ops among ``op_names`` and their active kernels for
     ``keys``; pass it to ``_warn_unregistered_ops``."""
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
+    unrecorded_kernels: set[tuple[str, str]] = set()
     lazy: dict[str, set[str]] = {}
     file_modules = functools.cache(_file_modules)
     for op_name, overload in op_names:
@@ -2221,14 +2227,23 @@ def _custom_op_modules(
         if kind == "lazy":
             lazy.setdefault(value, set()).add(op_name)
             continue
-        modules.update(_kernel_modules(op_name, overload, keys, file_modules).values())
+        kernels = _kernel_modules(op_name, overload, keys, file_modules)
+        modules.update(kernels.values())
         if kind == "module":
             modules.add(value)
         elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
+        # torch registers the kernels of its own ops.
+        if kind == "torch" or value.partition(".")[0] == "torch":
+            continue
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        if any(k not in kernels and has_kernel(qualname, k) for k in keys):
+            unrecorded_kernels.add((op_name, overload))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
-    return _CustomOpModules(ordered, tuple(sorted(unrecorded)), lazy_ops)
+    return _CustomOpModules(
+        ordered, tuple(sorted(unrecorded)), lazy_ops, tuple(sorted(unrecorded_kernels))
+    )
 
 
 def _warn_unregistered_ops(
