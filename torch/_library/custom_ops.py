@@ -455,26 +455,33 @@ class CustomOpDef:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
+        def get_module():
+            return inspect.getmodule(self._backend_fns[device_type])
+
+        is_inplace = self._is_inplace
+        is_out = self._is_out
+        out_kwarg_names = self._out_kwarg_names
+        schema = self._opoverload._schema
+        check_aliasing = not (is_inplace or is_out or schema._is_view_op())
+        any_output_is_alias = _C._any_output_is_alias_to_input_or_output
+
         def backend_impl(*args, **kwargs):
             if device_type in self._disabled_kernel:
                 result = self._init_fn_without_dynamo(*args, **kwargs)
             else:
                 result = self._backend_fns[device_type](*args, **kwargs)
 
-            def get_module():
-                fn = self._backend_fns[device_type]
-                return inspect.getmodule(fn)
-
-            schema = self._opoverload._schema
-            if self._is_inplace:
+            if check_aliasing:
+                if any_output_is_alias(args, kwargs, result):
+                    raise utils._aliasing_constraint_error(self._name, get_module)
+            elif is_inplace:
                 if result is not args[0]:
                     raise RuntimeError(
                         f"{self._name} (with implementation in {get_module()}): "
                         "An operator tagged with torch.Tag.inplace must "
                         "return its first argument."
                     )
-            elif self._is_out:
-                out_kwarg_names = self._out_kwarg_names
+            elif is_out:
                 if len(out_kwarg_names) == 1:
                     returns_out_args = result is kwargs[out_kwarg_names[0]]
                 else:
@@ -492,14 +499,6 @@ class CustomOpDef:
                         "An operator tagged with torch.Tag.out must "
                         "return its mutable keyword-only arguments."
                     )
-            elif not schema._is_view_op():
-                utils._c_check_aliasing_constraint(
-                    self._name,
-                    args,
-                    kwargs,
-                    result,
-                    get_module,
-                )
             return result
 
         return backend_impl

@@ -6421,6 +6421,17 @@ Please use `add.register_fake` to add an fake impl.""",
                 ([x.t()], x + 1),
             )
         )
+        # A single output may be passed without a tuple.
+        self.assertTrue(test_fn((x,), {}, x.t()))
+        self.assertFalse(test_fn((x,), {}, y))
+        self.assertTrue(test_fn((x,), {}, [y, x.view(-1)]))
+        # Outputs may not alias each other.
+        self.assertTrue(test_fn((x,), {}, (y, y.view(-1))))
+        self.assertTrue(test_fn((x,), {}, ([y, y.t()],)))
+        xs = [torch.randn(1) for _ in range(100)]
+        ys = [torch.randn(1) for _ in range(100)]
+        self.assertFalse(test_fn((xs,), {}, (ys,)))
+        self.assertTrue(test_fn((xs,), {}, (ys + [xs[57].view(-1)],)))
 
     def test_library_get_kernel(self):
         """Test registering a custom kernel, using it, then deregistering and verifying error."""
