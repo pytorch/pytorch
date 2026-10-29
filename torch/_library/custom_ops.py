@@ -2,7 +2,6 @@
 import collections
 import inspect
 import logging
-import sys
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -297,8 +296,6 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
-        # The module that called register_kernel for each device type.
-        self._backend_fn_modules: dict[str | None, str | None] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -434,12 +431,6 @@ class CustomOpDef:
         """
 
         def inner(fn):
-            frame = sys._getframe(1)
-            while frame.f_back and frame.f_globals.get("__name__", "").startswith(
-                ("torch._library", "torch.library")
-            ):
-                frame = frame.f_back
-            caller = frame.f_globals.get("__name__")
             if device_types is None or isinstance(device_types, str):
                 dtypes: list[str | None] = [device_types]
             else:
@@ -512,7 +503,10 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-                self._backend_fn_modules[device_type] = caller
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
+                utils.record_kernel_caller(self._qualname, key)
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
