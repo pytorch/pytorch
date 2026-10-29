@@ -3187,6 +3187,14 @@ class PrecompiledModule(PrecompiledRunnable):
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
+        #
+        # _frozen_kernel_config() is the Triton config shared with the Dynamo capture
+        # (and may log its "precompile capture overrides ..." warnings here). Its
+        # multi_kernel=0 is load-bearing on this path: under autotune_at_compile_time,
+        # _write_multi_kernel_defs emits multi-kernel defs only into the compile-time
+        # autotune block, so the module would raise NameError on multi_kernel_N. Its
+        # autotune_at_compile_time is redundant (inductor's compile_to_python already
+        # patches it) and is passed only so the two tracers cannot drift.
         options: dict[str, object] = {"size_asserts": True, **_frozen_kernel_config()}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
