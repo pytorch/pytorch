@@ -502,12 +502,17 @@ def main() -> None:
         rocm_home = discover_rocm_home()
         env_out["ROCM_HOME"] = rocm_home
         # A from-source AOTriton build (no prebuilt runtime for this HIP) finds
-        # hip via ROCM_PATH and liblzma via pkg-config; the SDK vendors the latter.
+        # hip via ROCM_PATH and the SDK-vendored liblzma via pkg-config; later
+        # links need rpath-link to resolve that liblzma through libaotriton.
         env_out["ROCM_PATH"] = rocm_home
-        pkg_config_dirs = [str(Path(rocm_home) / "lib/rocm_sysdeps/lib/pkgconfig")]
+        sysdeps_lib = Path(rocm_home) / "lib/rocm_sysdeps/lib"
+        pkg_config_dirs = [str(sysdeps_lib / "pkgconfig")]
         if os.environ.get("PKG_CONFIG_PATH"):
             pkg_config_dirs.append(os.environ["PKG_CONFIG_PATH"])
         env_out["PKG_CONFIG_PATH"] = os.pathsep.join(pkg_config_dirs)
+        env_out["LDFLAGS"] = " ".join(
+            filter(None, [f"-Wl,-rpath-link,{sysdeps_lib}", os.environ.get("LDFLAGS")])
+        )
         # DESIRED_CUDA is "rocmX.Y.Z" -- normalize so build_amd.py and
         # downstream tools see the rocm-prefixed form (matches build_rocm.sh).
         desired = os.environ.get("DESIRED_CUDA", "")
