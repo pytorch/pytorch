@@ -8242,13 +8242,11 @@ def div(a, b):
     if dtype is not None and dtype in (torch.float16, torch.bfloat16):
 
         def narrow_div(a, b):
-            quotient = ops.div_rn(
+            return ops.div_rn(
                 ops.to_dtype(a, torch.float32), ops.to_dtype(b, torch.float32)
             )
-            result = ops.to_dtype(quotient, dtype, use_compute_types=False)
-            return ops.to_dtype(result, torch.float32)
 
-        return make_pointwise(narrow_div)(a, b)
+        return make_pointwise(narrow_div, force_output_cast=True)(a, b)
     return div_prim(a, b)
 
 
