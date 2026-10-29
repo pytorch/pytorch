@@ -2257,15 +2257,15 @@ class PrecompileSession(Generic[_P, _R]):
         ops = _custom_ops(op_names)
         keys = _device_kernel_keys(device_types)
         found = _custom_op_modules(ops, keys)
-        modules = found.modules
         served: set[str] = set()
         if found.unrecorded:
             # An op with no known module (torch.library.define, a C++ extension's
             # load_library) is likely registered by a module the frames run in,
             # which the driver imports only after the ops are checked.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
-            modules += tuple(sorted(served - set(modules)))
-        _warn_unregistered_ops(found, sorted(served - set(found.modules)))
+        fallback = tuple(sorted(served - set(found.modules)))
+        modules = found.modules + fallback
+        _warn_unregistered_ops(found, fallback)
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, modules, ops, keys
         )
