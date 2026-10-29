@@ -10229,6 +10229,57 @@ class TestPrecompileCustomOpRecording(TestCase):
         (warning,) = [m for m in logs.output if qualname in m]
         self.assertIn("no importable module is known to register", warning)
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_a_single_graph_capture_warns_about_a_kernel_registered_from_main(
+        self, backend
+    ):
+        op, qualname = self._op("overridden")
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        # Not mock.patch.dict, which would drop the modules the compile imports.
+        sys.modules[module.__name__] = module
+        self.addCleanup(sys.modules.pop, module.__name__)
+        op._init_fn.__module__ = module.__name__
+        op.register_fake(torch.empty_like)
+        inputs, tracer = [(torch.ones(4),)], MakeFxTracer()
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _capture_files(self, lambda x: op(x) + 1, inputs, backend, tracer=tracer)
+        # As a script run as __main__ overrides the op's CPU kernel.
+        src = "lib = Library(ns, 'IMPL')\nlib.impl(name, torch.neg, 'CPU')"
+        path = os.path.join(tempfile.gettempdir(), "precompile_main.py")
+        scope = {"Library": torch.library.Library, "torch": torch}
+        scope.update(ns=op._namespace, name=op._name)
+        exec(compile(src, path, "exec"), scope)
+        self.addCleanup(scope["lib"]._destroy)
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            _capture_files(self, lambda x: op(x) + 1, inputs, backend, tracer=tracer)
+        (warning,) = [m for m in logs.output if qualname in m]
+        self.assertIn(f"run the kernels {qualname} (CPU), which no recorded", warning)
+
+    def test_a_kernel_register_kernel_adds_outside_the_ops_module_is_reported(self):
+        from torch._precompile import _custom_op_modules, _warn_unregistered_ops
+
+        op, qualname = self._op("overridden")
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        op._init_fn.__module__ = module.__name__
+        in_module, in_main = (lambda x: x + 1), (lambda x: x + 2)
+        in_module.__module__, in_main.__module__ = module.__name__, "__main__"
+        op.register_kernel("cpu", in_module)
+        keys = ("CPU", "CUDA", "CompositeExplicitAutograd")
+        found = _custom_op_modules([(qualname, "")], keys)
+        self.assertEqual(
+            (found.modules, found.untracked_kernels), ((module.__name__,), ())
+        )
+        torch.library.register_kernel(qualname, "cuda", in_main)
+        found = _custom_op_modules([(qualname, "")], keys)
+        self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            _warn_unregistered_ops(found)
+        (warning,) = logs.output
+        self.assertIn(f"run the kernels {qualname} (CUDA), which no recorded", warning)
+
     def test_custom_op_modules_reports_the_ops_no_module_registers(self):
         from torch._native import registry as native_registry
         from torch._precompile import _custom_op_modules, _warn_unregistered_ops
@@ -10303,6 +10354,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         # torch/cuda/__init__.py defines torch's triton ops this way at CUDA init.
         key = f"precompile_{uuid.uuid4().hex}"
         self.enterContext(mock.patch.dict(torch._TritonLibrary.ops_table))
+        lib = self.enterContext(torch.library._scoped_library("triton", "FRAGMENT"))
+        self.enterContext(mock.patch.object(torch._TritonLibrary, "lib", lib))
         torch._TritonLibrary.registerOp(
             key, f"{key}(Tensor x) -> Tensor", torch.clone, "CPU"
         )
@@ -10410,6 +10463,44 @@ class TestPrecompileCustomOpRecording(TestCase):
         for name, module in expected.items():
             found = _custom_op_modules([(f"prims::{name}", "")], ("CPU",))
             self.assertEqual(found, _CustomOpModules((module,), (), ()))
+
+    def test_a_prim_another_module_defines_records_that_module(self):
+        from torch._precompile import _custom_op_modules
+
+        name = f"precompile_{uuid.uuid4().hex}"
+        source = textwrap.dedent(
+            f"""
+            import torch
+            from torch._prims import _make_prim, RETURN_TYPE
+
+            lib = torch.library.Library("prims", "FRAGMENT")
+            lib.define("{name}_fragment(Tensor x) -> Tensor")
+            lib.impl("{name}_fragment", torch.clone, "CompositeExplicitAutograd")
+            made = _make_prim(
+                schema="{name}_made(Tensor a) -> Tensor",
+                return_type=RETURN_TYPE.NEW,
+                meta=torch.empty_like,
+                impl_aten=torch.clone,
+                doc="",
+            )
+            """
+        )
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        path = os.path.join(directory, f"{name}.py")
+        with open(path, "w") as f:
+            f.write(source)
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        self.addCleanup(sys.modules.pop, name)
+        spec.loader.exec_module(module)
+        self.addCleanup(module.lib._destroy)
+        found = _custom_op_modules([(f"prims::{name}_fragment", "")], ("CPU",))
+        self.assertEqual((found.modules, found.unrecorded), ((name,), ()))
+        # _make_prim registers it from torch._prims, which does not define it.
+        found = _custom_op_modules([(f"prims::{name}_made", "")], ("CPU",))
+        self.assertEqual(found.unrecorded, ((f"prims::{name}_made", ""),))
+        self.assertNotIn("torch._prims", found.modules)
 
     @unittest.skipIf(IS_WINDOWS or IS_MACOS, "forks")
     def test_no_op_torch_registers_is_reported(self):
