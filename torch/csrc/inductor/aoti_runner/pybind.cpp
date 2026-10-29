@@ -128,6 +128,12 @@ void initAOTIRunnerBindings(PyObject* module) {
           py::arg("use_inactive"),
           py::arg("validate_full_updates"))
       .def(
+          "run_const_fold",
+          [](AOTIModelContainerRunnerCuda& self, bool use_inactive) {
+            self.run_const_fold(use_inactive);
+          },
+          py::arg("use_inactive"))
+      .def(
           "swap_constant_buffer",
           &AOTIModelContainerRunnerCuda::swap_constant_buffer)
       .def(

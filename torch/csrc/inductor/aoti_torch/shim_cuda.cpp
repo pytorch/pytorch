@@ -148,7 +148,8 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
     CUDAMemPoolHandle pool) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(graph != nullptr && pool != nullptr, "Null CUDA graph handle");
+    TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
+    TORCH_CHECK(pool != nullptr, "Null CUDA memory pool handle");
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
     // On another device, the allocator would quietly route the capture to a
     // new pool on that device.
@@ -167,11 +168,15 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
 }
 
 AOTITorchError aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { reinterpret_cast<at::cuda::CUDAGraph*>(graph)->capture_end(); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
+    reinterpret_cast<at::cuda::CUDAGraph*>(graph)->capture_end();
+  });
 }
 
 AOTITorchError aoti_torch_cuda_graph_replay(CUDAGraphHandle graph) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { reinterpret_cast<at::cuda::CUDAGraph*>(graph)->replay(); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
+    reinterpret_cast<at::cuda::CUDAGraph*>(graph)->replay();
+  });
 }
