@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
+     skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -12096,7 +12096,9 @@ class TestGroupedMM(TestCase):
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK_TILE"}[backend]
-        with mock.patch.dict(os.environ, {env_var: "1"}):
+        # Uninitialized memory filled with NaN: ck_tile allocates the 2D x 2D output with at::empty, so a group its
+        # kernels leave unwritten (e.g. K == 0, which zero_empty_k_groups must zero) fails instead of passing on stale zeros.
+        with mock.patch.dict(os.environ, {env_var: "1"}), DeterministicGuard(True, warn_only=True, fill_uninitialized_memory=True):
             self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
 
     @onlyCUDA
