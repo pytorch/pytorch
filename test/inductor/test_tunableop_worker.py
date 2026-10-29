@@ -656,10 +656,11 @@ class TunableopModeValidationTest(TestCase):
         # Each kill switch leaves the mode with nothing to record or borrow;
         # TUNING=0 is harmless in reuse, which never tunes. Deliberately no
         # _env_warned reset between cases: one mode's warning must not silence
-        # the other's, and repeating a case must stay quiet rather than warn
-        # once per GEMM.
+        # the other's, and a repeat must stay quiet rather than warn per GEMM.
         self.addCleanup(tunableop._env_warned.clear)
         tunableop._env_warned.clear()
+        prefix = "PYTORCH_TUNABLEOP_"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(prefix)}
         for mode, var, value, warns in (
             ("tune", "PYTORCH_TUNABLEOP_TUNING", "0", True),
             ("tune", "PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
@@ -667,13 +668,10 @@ class TunableopModeValidationTest(TestCase):
             ("reuse", "PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0", True),
             ("reuse", "PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0", True),
             ("reuse", "PYTORCH_TUNABLEOP_TUNING", "0", False),
+            ("tune", "PYTORCH_TUNABLEOP_FILENAME", "", True),
+            ("reuse", "PYTORCH_TUNABLEOP_FILENAME", "", True),
         ):
             with self.subTest(mode=mode, var=var):
-                env = {
-                    k: v
-                    for k, v in os.environ.items()
-                    if not k.startswith("PYTORCH_TUNABLEOP_")
-                }
                 is_mode = getattr(tunableop, f"is_{mode}_mode")
                 # Second pass must never warn: once per mode and variable.
                 for expect in (
