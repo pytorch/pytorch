@@ -838,36 +838,13 @@ kernel void reduction_flat(
   using TA = typename OP::acc_t;
   const uint E = params.y;
   device const TI* in = input + tgid * E;
-  const uint n_quads = E / 4;
-
-  metal::array<TA, NCHAINS> acc;
-  for (uint j = 0; j < NCHAINS; j++) {
-    acc[j] = OP::identity();
-  }
-  const uint stride = tptg * NCHAINS;
-  uint i = tid;
-  for (; i + (NCHAINS - 1) * tptg < n_quads; i += stride) {
-    for (uint j = 0; j < NCHAINS; j++) {
-      const uint base = (i + j * tptg) * 4;
-#pragma unroll
-      for (uint k = 0; k < 4; k++) {
-        acc[j] = OP::combine(acc[j], OP::load(in[base + k]));
-      }
-    }
-  }
-  for (; i < n_quads; i += tptg) {
-#pragma unroll
-    for (uint k = 0; k < 4; k++) {
-      acc[0] = OP::combine(acc[0], OP::load(in[i * 4 + k]));
-    }
-  }
-  for (uint k = n_quads * 4 + tid; k < E; k += tptg) {
-    acc[0] = OP::combine(acc[0], OP::load(in[k]));
-  }
-  TA val = acc[0];
-  for (uint j = 1; j < NCHAINS; j++) {
-    val = OP::combine(val, acc[j]);
-  }
+  TA val = thread_reduce_flat<NCHAINS>(
+      [&](uint i) { return OP::load(in[i]); },
+      [](TA a, TA b) { return OP::combine(a, b); },
+      OP::identity(),
+      E,
+      tid,
+      tptg);
   threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
   val = OP::threadgroup_reduce(shared, val, tid, tptg);
   if (tid == 0) {
