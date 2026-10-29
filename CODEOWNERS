@@ -18,6 +18,9 @@
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
 #   before the first "# label:" line in a section have no single label.
+# - A label list identifies one ownership area, so each label list (compared
+#   as a set) appears on exactly one "# label:" line. When a list extends a
+#   sibling's, the shared labels come first and the distinguishing label last.
 # - Oncall queues are implied by module labels and are not repeated on label
 #   lines; a label line keeps an oncall only when none of its modules implies
 #   it:
@@ -25,7 +28,7 @@
 #     oncall: mobile: android, vulkan
 #     oncall: pt2: ProxyTensor, aotdispatch, compiled autograd, dynamic shapes, dynamo, fakeTensor, higher order operators, inductor
 # - Labels planned but not yet created on GitHub (issues can't be routed to
-#   them until they exist): module: tvm
+#   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
@@ -34,9 +37,9 @@
 # Every tracked path resolves to one review surface. Every listed pattern must
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
-# ineffective patterns, and the "# owner:" rules: every "# label:" line is
-# directly followed by one "# owner:" line, a label list has one owner list,
-# and an active rule's handles appear on its block's owner line.
+# ineffective patterns, and the "# label:" and "# owner:" rules: each label
+# list appears on one "# label:" line, which is directly followed by one
+# "# owner:" line, and an active rule's handles appear on its block's owner line.
 #
 # Review-surface hierarchy:
 # - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
@@ -699,7 +702,7 @@
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
-# label: oncall: mobile
+# label: oncall: mobile, module: ios
 # owner: none
 # /aten/src/ATen/metal/
 # /test/metal/
@@ -819,11 +822,11 @@
 # owner: @aorenste
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
-# label: module: abi
+# label: module: abi, module: headeronly
 # owner: @janeyx99
 /torch/header_only_apis.txt @janeyx99
 /torch/headeronly/ @janeyx99
-# label: module: rocm
+# label: module: rocm, module: hipify
 # owner: @jeffdaily @jithunnair-amd
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: pytree
@@ -835,7 +838,7 @@
 # label: module: nn
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
-# label: module: dsl-native-ops
+# label: module: dsl-native-ops, module: nn
 # owner: @drisspg @pearu @slayton58
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
@@ -1014,7 +1017,7 @@
 # /test/mobile/custom_build/
 #
 # [mobile_delegates]
-# label: oncall: mobile
+# label: oncall: mobile, module: mobile delegates
 # owner: none
 # /test/test_vulkan.py
 # /test/test_xnnpack_integration.py
@@ -1041,7 +1044,7 @@
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
-# label: module: ci
+# label: module: ci, module: github automation
 # owner: @pytorch/pytorch-dev-infra
 /.github/ @pytorch/pytorch-dev-infra
 #
@@ -1081,7 +1084,7 @@
 # /version.txt
 #
 # [third_party_core_build_deps]
-# label: module: third_party
+# label: module: third_party, module: build
 # owner: none
 # /.gitmodules
 # /requirements-build.txt
@@ -1117,12 +1120,14 @@
 /third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
-# label: module: third_party
+# label: module: third_party, module: serialization
 # owner: none
 # /third_party/flatbuffers
 # /third_party/miniz-3.0.2/
-# /third_party/onnx
 # /third_party/protobuf
+# label: module: third_party, module: onnx
+# owner: none
+# /third_party/onnx
 #
 # [benchmark_compiler]
 # label: module: benchmark
@@ -1175,7 +1180,7 @@
 # /binaries/
 # /scripts/
 # /tools/
-# label: module: rocm
+# label: module: rocm, module: build
 # owner: @jeffdaily @jithunnair-amd
 /tools/amd_build/ @jeffdaily @jithunnair-amd
 #
@@ -1242,7 +1247,7 @@
 /torch/testing/_internal/hop_db.py @tugsbayasgalan @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
-# label: module: benchmark
+# label: module: benchmark, module: operator benchmarks
 # owner: none
 # /benchmarks/framework_overhead_benchmark/
 # /benchmarks/functional_autograd_benchmark/
@@ -1256,7 +1261,7 @@
 # /test/test_functional_autograd_benchmark.py
 #
 # [benchmark_models]
-# label: module: benchmark
+# label: module: benchmark, module: models
 # owner: none
 # /benchmarks/compare-fastrnn-results.py
 # /benchmarks/data/
