@@ -1910,6 +1910,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "CUSTOM_OP_KERNELS",
         "CUSTOM_OP_OVERRIDE_MODULES",
         "SERVED_MODULES",
+        "ENTRY_MODULE",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2011,13 +2012,19 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if name is not None and _importable_module(name) else None
 
 
-def _registration_path(op_name: str, overload: str) -> str:
-    """The file that defined ``op_name``, as recorded at build time ("" if none)."""
+def _registration_site(op_name: str, overload: str) -> str:
+    """The ``file:line`` that defined ``op_name``, as recorded at build time ("" if
+    none)."""
     try:
         debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     except RuntimeError:
         return ""
-    return debug.removeprefix("registered at ").rpartition(":")[0]
+    return debug.removeprefix("registered at ")
+
+
+def _registration_path(op_name: str, overload: str) -> str:
+    """The file that defined ``op_name``, as recorded at build time ("" if none)."""
+    return _registration_site(op_name, overload).rpartition(":")[0]
 
 
 @functools.cache
@@ -2092,8 +2099,8 @@ _TORCH_OP_NAMESPACES = frozenset(
     }
 )
 _TORCH_DIR = os.path.dirname(torch.__file__)
-# torch's helpers that build a Library for the caller's namespace record themselves,
-# so the torch modules defining ops through them are listed by op.
+# torch's helpers that build a Library for the caller's namespace record themselves;
+# torch.library.define and impl record their caller in REGISTRATION_CALLERS instead.
 _TORCH_OP_HELPERS = tuple(
     os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
 )
@@ -2136,8 +2143,15 @@ def _library_op_module(
     """The module whose import registers ``op_name``, if a loaded module defines it:
     the one creating the ``torch.library.Library`` that defines it, or whose body
     calls ``torch.library.define``. ``file_modules`` is ``_file_modules``."""
+    from torch._library.utils import REGISTRATION_CALLERS
+
     path = _registration_path(op_name, overload)
-    if not path.endswith(".py") or path.startswith(_TORCH_OP_HELPERS):
+    if path.startswith(_TORCH_OP_HELPERS):
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        module, site = REGISTRATION_CALLERS.get((qualname, ""), ("__main__", ""))
+        defined = site == _registration_site(op_name, overload)
+        return module if defined and _importable_module(module) else None
+    if not path.endswith(".py"):
         return None
     return file_modules().get(os.path.realpath(path))
 
@@ -2151,27 +2165,34 @@ def _kernel_paths(qualname: str) -> dict[str, str]:
 def _kernel_modules(
     qualname: str,
     paths: dict[str, str],
+    callers: dict[str, str],
     keys: tuple[str, ...],
     file_modules: Callable[[], dict[str, str]],
     shadowing: bool = False,
 ) -> dict[str, str]:
-    """The modules outside torch that constructed a ``torch.library.Library``
-    registering the active kernel of ``qualname`` for each of ``keys``, by key, often
-    not the module defining the op, and only for the keys where that kernel replaced
-    another if ``shadowing``. ``paths`` is ``_kernel_paths(qualname)``. A kernel
-    registered through another module's Library records that module, not the one
-    calling ``impl``."""
+    """The importable modules outside torch registering the active kernel of
+    ``qualname`` for each of ``keys``, by key: the one whose body called
+    ``torch.library.impl`` or ``register_kernel`` for it, else the one that
+    constructed its ``torch.library.Library``. Often not the module defining the op,
+    and only for the keys where that kernel replaced another if ``shadowing``.
+    ``paths`` is ``_kernel_paths(qualname)`` and ``callers`` is ``kernel_callers``'s.
+    A kernel registered through another module's Library records that module, not
+    the one calling ``impl``."""
     if shadowing:
         # A replaced kernel's line reads "CPU (inactive): registered at ...".
         inactive = r"^(\w+)(?:\[alias\])? \(inactive\):"
         replaced = re.findall(inactive, torch._C._dispatch_dump(qualname), re.MULTILINE)
         keys = tuple(k for k in keys if k in replaced)
     modules = {
-        k: file_modules().get(os.path.realpath(p))
+        k: callers.get(k) or file_modules().get(os.path.realpath(p))
         for k, p in paths.items()
         if k in keys and p.endswith(".py")
     }
-    return {k: m for k, m in modules.items() if m and m.partition(".")[0] != "torch"}
+    return {
+        k: m
+        for k, m in modules.items()
+        if m and m.partition(".")[0] != "torch" and _importable_module(m)
+    }
 
 
 def _op_registration(
@@ -2231,7 +2252,7 @@ def _custom_op_modules(
 ) -> _CustomOpModules:
     """What registers the ops in ``op_keys`` and their active kernels for the op's
     keys; pass it to ``_warn_unregistered_ops``."""
-    from torch._library.custom_ops import OPDEFS
+    from torch._library.utils import kernel_callers
 
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
@@ -2248,7 +2269,8 @@ def _custom_op_modules(
             continue
         qualname = f"{op_name}.{overload}" if overload else op_name
         paths = _kernel_paths(qualname)
-        kernels = _kernel_modules(qualname, paths, keys, file_modules)
+        callers = kernel_callers(qualname)
+        kernels = _kernel_modules(qualname, paths, callers, keys, file_modules)
         modules.update(kernels.values())
         if kind == "module":
             modules.add(value)
@@ -2257,8 +2279,6 @@ def _custom_op_modules(
         # torch registers the kernels of its own ops.
         if kind == "torch" or value.partition(".")[0] == "torch":
             continue
-        opdef = OPDEFS.get(qualname)
-        callers = opdef._backend_fn_callers if opdef is not None else {}
         for k in keys:
             if k in kernels or not has_kernel(qualname, k):
                 continue
@@ -2272,14 +2292,10 @@ def _custom_op_modules(
                 untracked_kernels.add((op_name, k))
                 unrecorded_kernels.add((op_name, overload))
             elif caller is None:
-                # Through a Library torch made, as _scoped_library's.
+                # Through a Library torch made, as _scoped_library's, and not by
+                # the last register_kernel or torch.library.impl call recorded.
                 unrecorded_kernels.add((op_name, overload))
-            elif caller == value or caller.partition(".")[0] == "torch":
-                continue
-            elif _importable_module(caller):
-                # An importable module adding a kernel to another module's op.
-                modules.add(caller)
-            else:
+            elif caller.partition(".")[0] != "torch":
                 untracked_kernels.add((op_name, k))
                 unrecorded_kernels.add((op_name, overload))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
@@ -2401,10 +2417,10 @@ def _write_custom_op_imports(
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
     # path imports the module that registers the op. The recorded modules are the
-    # ones that constructed each Library used for the op's define and impls, which
-    # misses a module calling impl on another module's Library (and an op defined
-    # from __main__ has none), so the imports are best
-    # effort and the ops and their kernels are checked.
+    # ones that constructed each Library used for the op's define and impls, or whose
+    # body called torch.library.define, impl or register_kernel. That misses a module
+    # calling impl on another module's Library (and an op defined from __main__ has
+    # none), so the imports are best effort and the ops and their kernels are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
@@ -2418,6 +2434,7 @@ def _write_custom_op_imports(
     kernels = {}
     file_modules = functools.cache(_file_modules)
     from torch._library import custom_ops
+    from torch._library.utils import kernel_callers
 
     custom_ops_file = os.path.realpath(custom_ops.__file__)
     overrides = {}
@@ -2434,8 +2451,7 @@ def _write_custom_op_imports(
             paths = _kernel_paths(qualname)
             # register_kernel from another module replaces only the kernel the
             # custom_op's own dispatcher kernel calls, so its caller is recorded.
-            opdef = custom_ops.OPDEFS.get(qualname)
-            callers = opdef._backend_fn_callers if opdef is not None else {}
+            callers = kernel_callers(qualname)
             own = _custom_op_module(name, overload)
             owners = {
                 k: c
@@ -2446,7 +2462,9 @@ def _write_custom_op_imports(
                 and _importable_module(c)
                 and os.path.realpath(paths.get(k, "")) == custom_ops_file
             }
-            owners |= _kernel_modules(qualname, paths, op_keys, file_modules, True)
+            owners |= _kernel_modules(
+                qualname, paths, callers, op_keys, file_modules, True
+            )
             if owners:
                 overrides[qualname] = owners
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
@@ -2895,6 +2913,8 @@ def _build_multigraph_python_source(
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    if mode == "installed":
+        buf.writeline(f"ENTRY_MODULE = {entry.codes[0].python_module!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
     buf.writeline("# Frame modules: section 0 imports those CUSTOM_OP_MODULES lists,")
