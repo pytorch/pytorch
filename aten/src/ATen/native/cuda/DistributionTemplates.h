@@ -597,7 +597,9 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda_, RNG gen) {
           float q = standard_exponential(x);
           if constexpr (std::is_same_v<scalar_t, at::Half>) {
             // Keep the old 2^-24 floor (the smallest Half) so lambda <= 1 cannot round the result to 0.
-            q = fmaxf(q, 0x1p-24f);
+            q = fmaxf(
+                q,
+                static_cast<float>(std::numeric_limits<scalar_t>::denorm_min()));
           }
           return static_cast<scalar_t>(1.f / lambda * q);
         });
