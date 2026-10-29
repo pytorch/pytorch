@@ -68,6 +68,26 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("key", ["a", "c"])
+    @parametrize("operation", ["setitem", "update"])
+    def test_dict_update_reordered_input_reuses_graph(self, key, operation):
+        def fn(x, mapping):
+            if operation == "setitem":
+                mapping[key] = x + 1
+            else:
+                mapping.update({key: x + 1})
+            return x + 2
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for keys in ("ab", "ba", "ab"):
+            mapping = dict.fromkeys(keys, 0)
+            expected = mapping.copy()
+            self.assertEqual(compiled(x, mapping), fn(x, expected))
+            self.assertEqual(list(mapping.items()), list(expected.items()))
+        self.assertEqual(counter.frame_count, 1)
+
     @parametrize("operation", ["del", "pop"])
     def test_ordered_dict_delete_reordered_input(self, operation):
         def fn(x, mapping):
