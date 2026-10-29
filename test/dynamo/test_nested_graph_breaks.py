@@ -6,7 +6,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as python_pytree
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 try:
@@ -64,6 +68,7 @@ class GraphBreakingInt(int):
         return GraphBreakingInt(int(self) + other)
 
 
+@instantiate_parametrized_tests
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -647,6 +652,65 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # 4 additions from f5+f4, 2 x 4 additions from f2+f1 (i == 5, i != 5)
         self.assertEqual(cnts.op_count, 12)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 6)
+
+    @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
+    @parametrize("num_iters", [12, 24])
+    def test_nested_step_graph_break_in_loop(self, num_iters):
+        def step(x):
+            y = x + 1
+            positive = torch.all(y > 0)
+            try:
+                if positive:
+                    return y * 2
+            except ValueError:
+                return x
+            return y
+
+        def loop(x, n):
+            for _ in range(n):
+                x = step(x)
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(loop, backend=cnts)
+        x = torch.zeros(3)
+        expected = loop(x, num_iters)
+        self.assertEqual(opt_fn(x, num_iters), expected)
+        frame_count = cnts.frame_count
+        self.assertGreater(frame_count, 0)
+        self.assertEqual(opt_fn(x, num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+        expected = loop(x, 2 * num_iters)
+        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+        self.assertEqual(opt_fn(x, 2 * num_iters), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+
+    @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
+    @parametrize("num_iters", [12, 24])
+    def test_nested_step_graph_break_in_leaf_loop(self, num_iters):
+        def helper(x, n):
+            x = (x + 1).relu()
+            for _ in range(n):
+                y = x + 1
+                positive = torch.all(y > 0)
+                try:
+                    if positive:
+                        x = y * 2
+                except ValueError:
+                    pass
+            return x
+
+        def caller(x, n):
+            return helper(x + 2, n) + 3
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(caller, backend=cnts, dynamic=True)
+        x = torch.ones(3)
+        for n in (num_iters, num_iters, 2 * num_iters, 2 * num_iters):
+            self.assertEqual(opt_fn(x, n), caller(x, n))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 4)
 
     def test_nested_graph_break_in_try_block(self):
         # NOTE: this also tests nested step_graph_break

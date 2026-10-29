@@ -1921,6 +1921,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -5300,7 +5303,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
