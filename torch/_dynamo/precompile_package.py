@@ -2176,6 +2176,7 @@ class PrecompileSession(Generic[_P, _R]):
             _custom_op_modules,
             _custom_ops,
             _device_kernel_keys,
+            _KERNEL_KEYS,
             _multigraph_frames,
             _served_modules,
             _warn_unregistered_ops,
@@ -2203,7 +2204,8 @@ class PrecompileSession(Generic[_P, _R]):
                         op_names |= _called_op_names(result.source_code)
         entry = self._served_entry()[0]
         ops = _custom_ops(op_names)
-        keys = _device_kernel_keys(device_types)
+        # No compiled graph names a device for graph-break ops to run on.
+        keys = _device_kernel_keys(device_types) if device_types else _KERNEL_KEYS
         found = _custom_op_modules(ops, keys)
         served: set[str] = set()
         if found.unrecorded:
