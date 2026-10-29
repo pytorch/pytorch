@@ -54,6 +54,14 @@ run_if_exists cuda_event_test
 run_if_exists cuda_cublas_handle_pool_test
 run_if_exists cuda_tunable_nearest_test
 
+# Read once into function-local statics, so the TunableOp kill switches need a
+# process started with them set, and every other case in that binary needs them
+# unset. Hence a second, filtered invocation.
+if [[ -x "${CPP_TESTS_DIR}/cuda_tunable_nearest_test" ]]; then
+  PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED=0 PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED=0 \
+    "${CPP_TESTS_DIR}/cuda_tunable_nearest_test" --gtest_filter='*EnvKillSwitch*'
+fi
+
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's
   # unclear if valgrind -> python -> gtest would work
