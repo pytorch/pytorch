@@ -9,6 +9,8 @@ import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfNoCuteDSL,
     TestCase,
@@ -47,28 +49,28 @@ class TestCuTeDSLReductionWiring(TestCase):
                 setattr(kg, nm, orig[nm])
         return n[0]
 
-    def test_supported_call_fires(self):
+    @parametrize("op", ["sum", "mean", "amax", "amin", "prod"])
+    def test_supported_call_fires(self, op):
         """Route every registered core operation instead of silently falling back."""
         x = torch.randn(128, 512, device="cuda")
-        for op in (torch.sum, torch.mean, torch.amax, torch.amin, torch.prod):
-            with self.subTest(op=op):
-                self.assertEqual(self._fired_count(lambda: op(x, dim=-1)), 1)
+        fn = getattr(torch, op)
+        self.assertEqual(self._fired_count(lambda: fn(x, dim=-1)), 1)
 
     def test_unsupported_dtype_falls_back(self):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""
         xi = torch.randint(0, 9, (64, 64), device="cuda")
         self.assertEqual(self._fired_count(lambda: torch.sum(xi, dim=-1)), 0)
 
-    def test_noncontiguous_is_served(self):
+    @parametrize(
+        "dim", [-1, 0, None], name_fn=lambda d: "all" if d is None else f"dim{d}"
+    )
+    def test_noncontiguous_is_served(self, dim):
         """Serve noncontiguous dimension and full reductions through indexed addressing."""
         xt = torch.randn(64, 128, device="cuda").t()
-        for fn in (
-            lambda t: torch.sum(t, dim=-1),
-            lambda t: torch.sum(t, dim=0),
-            lambda t: torch.sum(t),  # reduce-ALL of a non-contiguous input
-        ):
-            with self.subTest(fn=fn):
-                self.assertEqual(self._fired_count(lambda: fn(xt)), 1)
+        fn = (
+            (lambda: torch.sum(xt)) if dim is None else (lambda: torch.sum(xt, dim=dim))
+        )
+        self.assertEqual(self._fired_count(fn), 1)
 
     def test_scalar_falls_back(self):
         """Decline scalar input without dividing dimension indices by zero."""
@@ -119,6 +121,8 @@ class TestCuTeDSLReductionWiring(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
 
+
+instantiate_parametrized_tests(TestCuTeDSLReductionWiring)
 
 if __name__ == "__main__":
     run_tests()
