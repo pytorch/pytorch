@@ -2510,6 +2510,7 @@ class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
             expected = fn(x, *args)
             opt_fn = torch.compile(fn, backend=cnts)
             self.assertEqual(opt_fn(x, *args), expected)
+            self.assertEqual(cnts.frame_count, frame_count)
             # Re-running must reuse the compiled frames and resume functions.
             self.assertEqual(opt_fn(x, *args), expected)
         self.assertEqual(cnts.frame_count, frame_count)
