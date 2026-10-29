@@ -13,12 +13,23 @@ from torch._inductor.codegen.loops_ir_op_options import (
     LaunchSchema,
     NativeCall,
 )
-from torch._inductor.codegen.loops_ir_op_plan import freeze_option_step
+from torch._inductor.codegen.loops_ir_op_plan import (
+    freeze_option_step,
+    replace_option_step,
+)
 from torch._inductor.codegen.loops_ir_wrapper import (
     emit_loops_ir_wrapper,
     load_loops_ir_wrapper,
 )
-from torch._inductor.loops_ir_backend import _OutputPlan
+from torch._inductor.loops_ir_backend import (
+    _ExternInput,
+    _ExternResult,
+    _ExternStep,
+    _FrozenPlan,
+    _KernelStep,
+    _OutputPlan,
+    _TensorKey,
+)
 
 
 def variant():
@@ -93,6 +104,33 @@ class FreezeOptionStepTests(unittest.TestCase):
         frozen = freeze_option_step(artifact, variant())
         self.assertEqual(frozen.step.arg_views[0].base, "extra")
         self.assertEqual(frozen.step.arg_views[0].rel, 0)
+
+    def test_shifted_generated_store_keeps_root_pointer(self):
+        live = variant()
+        live.output_binding.root_offset = 2
+        live.output_binding.root_elements = 8
+        artifact = generated(
+            args=(
+                *input_args(),
+                KernelArg(
+                    ArgRole.OUTPUT,
+                    "out",
+                    0,
+                    (2, 2),
+                    (2, 1),
+                    required_elements=6,
+                ),
+            )
+        )
+        frozen = freeze_option_step(artifact, live)
+        self.assertEqual(frozen.step.arg_views[-1].rel, 0)
+        self.assertEqual(frozen.generated_span, ("y", 8))
+
+    def test_shifted_native_root_is_rejected(self):
+        live = variant()
+        live.output_binding.root_offset = 1
+        with self.assertRaisesRegex(ValueError, "offset-zero"):
+            freeze_option_step(native(), live)
 
     def test_native_returns_output_without_preallocated_copy(self):
         frozen = freeze_option_step(native(), variant())
@@ -191,12 +229,181 @@ class FreezeOptionStepTests(unittest.TestCase):
     def test_native_output_extent_is_checked(self):
         live = variant()
         live.output_binding.root_elements = 3
-        with self.assertRaisesRegex(ValueError, "output exceeds"):
+        with self.assertRaisesRegex(ValueError, "output extent"):
             freeze_option_step(native(), live)
+
+
+def baseline_plan():
+    mm = _ExternStep(
+        "mm",
+        None,
+        "aten.mm.default",
+        (
+            _ExternInput("lhs", "a", 1, (2, 3), (4, 1), 8),
+            _ExternInput("rhs", "b", 0, (3, 2), (2, 1), 6),
+        ),
+        (_TensorKey("lhs"), _TensorKey("rhs")),
+        (),
+        (_ExternResult("mm", torch.float32, (2, 2), (2, 1)),),
+        "tensor",
+    )
+    relu = _KernelStep(
+        "baseline_relu", ("mm", "y"), (1, 1, 1), 4, False, False, False, None
+    )
+    return _FrozenPlan(
+        device_index=0,
+        num_inputs=2,
+        input_bases=("a", "b"),
+        gen_spans=(("y", 4),),
+        span_full_coverage=(True,),
+        steps=[("extern", mm), ("kernel", relu)],
+        out_plans=(_OutputPlan("y", 0, (2, 2), (2, 1)),),
+        out_spec=None,
+        kernel_sources={"baseline_relu": "baseline source"},
+        kernel_names=["baseline_relu"],
+        kernel_params={"baseline_relu": ["mm", "y"]},
+        kernel_grids={"baseline_relu": (1, 1, 1)},
+        input_layouts=(("a", (8,), (1,)), ("b", (3, 2), (2, 1))),
+        result_layouts=(("mm", (2, 2), (2, 1)),),
+        num_generated_kernels=1,
+        num_extern_calls=1,
+        kernels_before_fusion=1,
+        program_dump="",
+        optimized_program_dump="",
+        kernel_dump="",
+        tiled_dump="",
+    )
+
+
+class ReplaceOptionStepTests(unittest.TestCase):
+    def apply(self, plan, option=None, **overrides):
+        arguments = dict(
+            consumed_buffers=frozenset(("mm", "y")),
+            step_outputs=(("mm",), ("y",)),
+            step_positions=(2, 3),
+            placement=3,
+        )
+        arguments.update(overrides)
+        if option is None:
+            live = variant()
+            live.fused_loops.epilogue = NS(store_offset=0)
+            artifact = dataclasses.replace(
+                native(),
+                source=(
+                    "def selected_native(lhs, rhs):\n"
+                    "    return torch.relu(torch.mm(lhs, rhs))\n"
+                ),
+            )
+            option = freeze_option_step(artifact, live)
+        return replace_option_step(plan, option, **arguments)
+
+    def test_whole_region_replaces_steps_without_copy_or_stale_sources(self):
+        baseline = baseline_plan()
+        updated, outputs, positions = self.apply(baseline)
+        self.assertEqual(len(baseline.steps), 2)
+        self.assertEqual(len(updated.steps), 1)
+        self.assertEqual(updated.steps[0][0], "extern")
+        self.assertEqual(updated.gen_spans, ())
+        self.assertEqual(updated.kernel_sources, {})
+        self.assertEqual(updated.kernel_names, [])
+        self.assertEqual(updated.num_generated_kernels, 0)
+        self.assertEqual(updated.num_extern_calls, 1)
+        self.assertEqual(updated.result_layouts, (("y", (2, 2), (2, 1)),))
+        self.assertEqual(outputs, (("y",),))
+        self.assertEqual(positions, (3,))
+
+    def test_generated_output_gets_span_but_not_stale_native_layout(self):
+        updated, _, _ = self.apply(
+            baseline_plan(), freeze_option_step(generated(), variant())
+        )
+        self.assertEqual(updated.gen_spans, (("y", 4),))
+        self.assertEqual(updated.span_full_coverage, (False,))
+        self.assertEqual(updated.result_layouts, ())
+        self.assertEqual(updated.kernel_names, ["selected_kernel"])
+        self.assertEqual(updated.num_generated_kernels, 1)
+        self.assertEqual(updated.num_extern_calls, 0)
+
+    def test_partial_multioutput_step_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "partially consumes"):
+            self.apply(baseline_plan(), step_outputs=(("mm",), ("y", "other")))
+
+    def test_graph_output_cannot_be_eliminated(self):
+        baseline = baseline_plan()._replace(
+            out_plans=(_OutputPlan("mm", 0, (2, 2), (2, 1)),)
+        )
+        with self.assertRaisesRegex(ValueError, "graph output"):
+            self.apply(baseline)
+
+    def test_absorbed_prologue_frontier_cannot_be_read(self):
+        live = variant()
+        live.input_bindings[0].root = "absorbed_temp"
+        option = freeze_option_step(native(), live)
+        with self.assertRaisesRegex(ValueError, "frontier is unavailable"):
+            self.apply(baseline_plan(), option)
+
+    def test_unclaimed_group_cannot_keep_reading_removed_anchor(self):
+        baseline = baseline_plan()
+        extra = _KernelStep(
+            "tail", ("mm", "z"), (1, 1, 1), 4, False, False, False, None
+        )
+        baseline = baseline._replace(steps=[*baseline.steps, ("kernel", extra)])
+        with self.assertRaisesRegex(ValueError, "remaining step reads"):
+            self.apply(
+                baseline,
+                step_outputs=(("mm",), ("y",), ("z",)),
+                step_positions=(2, 3, 4),
+            )
+
+    def test_late_placement_cannot_delay_visible_consumer(self):
+        baseline = baseline_plan()
+        extra = _KernelStep("tail", ("y", "z"), (1, 1, 1), 4, False, False, False, None)
+        baseline = baseline._replace(steps=[*baseline.steps, ("kernel", extra)])
+        with self.assertRaisesRegex(ValueError, "needed before"):
+            self.apply(
+                baseline,
+                step_outputs=(("mm",), ("y",), ("z",)),
+                step_positions=(2, 3, 4),
+                placement=5,
+            )
+
+    def test_graph_input_cannot_be_claimed_as_an_intermediate(self):
+        with self.assertRaisesRegex(ValueError, "graph input"):
+            self.apply(baseline_plan(), consumed_buffers=frozenset(("a", "mm", "y")))
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
 class FreezeOptionExecutionTests(unittest.TestCase):
+    def test_replaced_mm_relu_region_executes_without_original_kernel(self):
+        from torch._inductor.loops_ir_backend import _emit_and_load_wrapper
+
+        live = variant()
+        live.fused_loops.epilogue = NS(store_offset=0)
+        artifact = dataclasses.replace(
+            native(),
+            source=(
+                "def selected_native(lhs, rhs):\n"
+                "    return torch.relu(torch.mm(lhs, rhs))\n"
+            ),
+        )
+        option = freeze_option_step(artifact, live)
+        updated, _, _ = replace_option_step(
+            baseline_plan(),
+            option,
+            consumed_buffers=frozenset(("mm", "y")),
+            step_outputs=(("mm",), ("y",)),
+            step_positions=(2, 3),
+            placement=3,
+        )
+        self.assertEqual(updated.kernel_sources, {})
+        module, _ = _emit_and_load_wrapper(updated)
+        a = torch.arange(8, dtype=torch.float32, device="cuda") - 4
+        b = torch.arange(6, dtype=torch.float32, device="cuda").reshape(3, 2) - 2
+        expected = torch.relu(torch.mm(torch.as_strided(a, (2, 3), (4, 1), 1), b))
+        actual = module.call([a, b])[0]
+        self.assertTrue(
+            torch.equal(actual.view(torch.int32), expected.view(torch.int32))
+        )
+
     def test_frozen_native_mm_executes_through_production_wrapper(self):
         frozen = freeze_option_step(native(), variant())
         source = emit_loops_ir_wrapper(
