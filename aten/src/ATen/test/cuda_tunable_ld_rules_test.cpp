@@ -12,6 +12,7 @@
 
 using at::cuda::tunable::GemmLeadingDims;
 using at::cuda::tunable::GemmShape;
+using at::cuda::tunable::IsTight;
 using at::cuda::tunable::LdMayVary;
 using at::cuda::tunable::LdsCompatibleWhenMVaries;
 using at::cuda::tunable::LdsCompatibleWhenNVaries;
@@ -47,6 +48,12 @@ TEST(TunableLdRules, LdbTracksKOnlyWhenBNotTransposed) {
   EXPECT_FALSE(UsesKForLdb('T'));
   EXPECT_FALSE(UsesKForLdb('C'));
   EXPECT_FALSE(UsesKForLdb('c'));
+}
+
+TEST(TunableLdRules, IsTightOnlyWhenLdEqualsItsExtent) {
+  // The single definition LdMayVary and ShouldWildcardLd* both build on.
+  EXPECT_TRUE(IsTight(32, 32));
+  EXPECT_FALSE(IsTight(40, 32));  // padded
 }
 
 TEST(TunableLdRules, LdMayVaryOnlyWhenEqualOrTightInBoth) {
