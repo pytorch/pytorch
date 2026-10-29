@@ -42,66 +42,30 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/LossOps_metallib.h>
 #endif
 
-static std::string reductionToString(int64_t reduction) {
-  switch (reduction) {
-    case Reduction::Mean:
-      return "Mean";
-    case Reduction::Sum:
-      return "Sum";
-    default:
-      return "None";
-  }
-}
-
-// namespace to localize the CachedGraph struct for Binary Cross Entropy
-namespace BCELoss {
-
-struct CachedGraph : public MPSCachedGraph {
-  CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
-  MPSGraphTensor *weightTensor = nil, *gradOutputTensor = nil, *gradInputTensor = nil;
-};
-
-static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
-  MPSGraph* mpsGraph = bceGraph->graph();
-  const auto inputType = [bceGraph->inputTensor dataType];
-
-  // Backward BCE: d(L)/d(x) = -w (y - x) / (x - x^2)
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
-  // epsilon used to clamp the grad input denominator
-  MPSGraphTensor* epsilon = [mpsGraph constantWithScalar:1e-12 dataType:inputType];
-  // 1 - x
-  MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
-                                                     secondaryTensor:bceGraph->inputTensor
-                                                                name:nil];
-  // x * (1 - x)
-  MPSGraphTensor* inputTimes1_Input = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->inputTensor
-                                                                secondaryTensor:one_Input
-                                                                           name:nil];
-  // max(x * (1 - x), epsilon)
-  MPSGraphTensor* gradInputDenominator = [mpsGraph maximumWithPrimaryTensor:inputTimes1_Input
-                                                            secondaryTensor:epsilon
-                                                                       name:nil];
-  // (x - y)
-  MPSGraphTensor* input_target = [mpsGraph subtractionWithPrimaryTensor:bceGraph->inputTensor
-                                                        secondaryTensor:bceGraph->targetTensor
-                                                                   name:nil];
-  // (x - y) / max(x * (1 - x), epsilon)
-  MPSGraphTensor* inputDivGradInputDenom = [mpsGraph divisionWithPrimaryTensor:input_target
-                                                               secondaryTensor:gradInputDenominator
-                                                                          name:nil];
-  // gradOutput * (((x - y) / max(x * (1 - x), epsilon)))
-  MPSGraphTensor* gradInput = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->gradOutputTensor
-                                                        secondaryTensor:inputDivGradInputDenom
-                                                                   name:nil];
-  return gradInput;
-}
-
 static void bce_loss_forward_impl(const Tensor& input_arg,
                                   const Tensor& target_arg,
-                                  const Tensor& weight,
+                                  const std::optional<Tensor>& weight_opt,
                                   int64_t reduction,
                                   Tensor& loss) {
+  TORCH_CHECK(target_arg.is_same_size(input_arg),
+              "binary_cross_entropy: target and input tensors must have identical shapes");
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  loss.resize_(reduction == Reduction::None ? target_arg.sizes() : IntArrayRef({}));
+  TORCH_CHECK(loss.is_mps());
+
+  // A zero-sized input has no Metal buffer to bind, so the kernels below cannot run
+  // on it at all. CPU returns an empty tensor for Reduction::None, 0 for Sum and
+  // NaN for Mean; reproduce that rather than tripping the placeholder assert.
+  if (input_arg.numel() == 0) {
+    if (loss.numel() != 0) {
+      loss.fill_(reduction == at::Reduction::Mean ? std::numeric_limits<double>::quiet_NaN() : 0.0);
+    }
+    return;
+  }
+
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
                               "binary_cross_entropy is not implemented for ",
                               input_arg.scalar_type(),
@@ -167,91 +131,6 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
     loss.copy_(unreduced);
   }
 }
-
-// Binary Cross Enropy (Forward/Backward BCELoss)
-// NOTE: "loss" tensor would be "grad_input" if it's a backward pass
-static Tensor& bce_loss_out_impl(const Tensor& input,
-                                 const Tensor& target,
-                                 const std::optional<Tensor>& weight_opt,
-                                 int64_t reduction,
-                                 Tensor& loss,
-                                 const std::optional<Tensor>& grad_output_opt,
-                                 const std::string& op_name) {
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
-
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  c10::MaybeOwned<Tensor> grad_output_maybe_owned = at::borrow_from_optional_tensor(grad_output_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& grad_output = *grad_output_maybe_owned;
-
-  loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
-  TORCH_CHECK(loss.is_mps());
-
-  // A zero-sized input has no Metal buffer to bind, so the graph below cannot run
-  // on it at all. CPU returns an empty tensor for Reduction::None, 0 for Sum and
-  // NaN for Mean; reproduce that rather than tripping the placeholder assert.
-  if (input.numel() == 0) {
-    if (loss.numel() != 0) {
-      loss.fill_(reduction == at::Reduction::Mean ? std::numeric_limits<double>::quiet_NaN() : 0.0);
-    }
-    return loss;
-  }
-
-  if (!grad_output.defined()) {
-    bce_loss_forward_impl(input, target, weight, reduction, loss);
-    return loss;
-  }
-
-  @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-
-      newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-      MPSGraphTensor* bceLossUnweighted = bce_backward_mps(newCachedGraph);
-
-      MPSGraphTensor* bceLoss = bceLossUnweighted;
-      if (weight.defined()) {
-        newCachedGraph->weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
-        bceLoss = [mpsGraph multiplicationWithPrimaryTensor:bceLossUnweighted
-                                            secondaryTensor:newCachedGraph->weightTensor
-                                                       name:nil];
-      }
-
-      if (reduction == at::Reduction::Mean) {
-        MPSGraphTensor* inputNumel = [mpsGraph constantWithScalar:static_cast<double>(input.numel())
-                                                         dataType:[bceLoss dataType]];
-        newCachedGraph->gradInputTensor = [mpsGraph divisionWithPrimaryTensor:bceLoss
-                                                              secondaryTensor:inputNumel
-                                                                         name:nil];
-      } else {
-        newCachedGraph->gradInputTensor = bceLoss;
-      }
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->gradInputTensor, loss);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
-    if (weight.defined()) {
-      Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor, weight);
-      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-    }
-    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
-    feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, lossPlaceholder);
-  }
-
-  return loss;
-}
-
-} // namespace BCELoss
 
 // NLLLoss
 // `t` is the tensor the kernel indexes by class: input for forward, grad_input for backward
@@ -504,7 +383,8 @@ Tensor& binary_cross_entropy_out_mps(const Tensor& input,
                                      const std::optional<Tensor>& weight_opt,
                                      int64_t reduction,
                                      Tensor& loss) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
+  mps::bce_loss_forward_impl(input, target, weight_opt, reduction, loss);
+  return loss;
 }
 
 Tensor binary_cross_entropy_mps(const Tensor& input,
@@ -512,7 +392,7 @@ Tensor binary_cross_entropy_mps(const Tensor& input,
                                 const std::optional<Tensor>& weight_opt,
                                 int64_t reduction) {
   Tensor loss = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, loss, std::nullopt, __func__);
+  return binary_cross_entropy_out_mps(input, target, weight_opt, reduction, loss);
 }
 
 Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
@@ -521,7 +401,16 @@ Tensor& binary_cross_entropy_backward_out_mps(const Tensor& grad_output,
                                               const std::optional<Tensor>& weight_opt,
                                               int64_t reduction,
                                               Tensor& grad_input) {
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
+  const auto grad = weight_opt && weight_opt->defined() ? grad_output.mul(*weight_opt) : grad_output;
+  auto iter = TensorIteratorConfig()
+                  .add_output(grad_input)
+                  .add_const_input(input)
+                  .add_const_input(target)
+                  .add_const_input(grad)
+                  .build();
+  const double norm = reduction == Reduction::Mean ? 1.0 / input.numel() : 1.0;
+  mps::lib.exec_ternary_kernel(iter, "bce_backward", norm, at::toOpMathType(iter.common_dtype()));
+  return grad_input;
 }
 
 Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
@@ -530,7 +419,7 @@ Tensor binary_cross_entropy_backward_mps(const Tensor& grad_output,
                                          const std::optional<Tensor>& weight_opt,
                                          int64_t reduction) {
   Tensor grad_input = at::empty_like(input);
-  return mps::BCELoss::bce_loss_out_impl(input, target, weight_opt, reduction, grad_input, grad_output, __func__);
+  return binary_cross_entropy_backward_out_mps(grad_output, input, target, weight_opt, reduction, grad_input);
 }
 
 // SmoothL1Loss
