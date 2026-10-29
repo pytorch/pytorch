@@ -7388,6 +7388,76 @@ class Scheduler:
 
         return (fut, mod)
 
+    def _multi_template_fusion_decision(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> FusionResult | None:
+        """
+        Ask V.choices.multi_template_fusion_decision about a MultiTemplateBuffer
+        pair; None keeps the benchmark-based decision.
+
+        The decision is immediate: _try_fusion_pairs commits an accepted
+        immediate fusion right away, so the buffer is finalized only for a fusion
+        that is committed. Pending (competing) template fusions are not used.
+
+        An accepted decision still has to pass the legality checks the benchmark
+        path applies (layout conflicts, atomic-add producers, producer-fusion
+        support of the chosen template), and needs a template: an explicit Triton template
+        choice of this buffer, or, without one, the template the buffer is
+        already finalized to. Otherwise the fusion is declined.
+        """
+        if config.multi_kernel_hints:
+            return None
+        epilogue = isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+        multi_node = (node1 if epilogue else node2).get_template_node()
+        if not isinstance(multi_node, ir.MultiTemplateBuffer):
+            return None
+        other = node2 if epilogue else node1
+        decision = V.choices.multi_template_fusion_decision(
+            self, multi_node, other.get_nodes(), epilogue
+        )
+        if decision is None:
+            return None
+        if not decision.fuse:
+            return FusionResult.fuse(False)
+
+        why = WhyNoFuse(node1, node2)
+        committed = multi_node._render_caller
+        choice = decision.choice
+        if choice is None:
+            if multi_node._render_kind != "triton" or committed is None:
+                why("fusion decision has no template choice for an unfinalized buffer")
+                return FusionResult.fuse(False)
+            choice = committed
+        if not isinstance(
+            choice, torch._inductor.select_algorithm.TritonTemplateCaller
+        ) or not any(choice is c for c in multi_node.choices):
+            why("fusion decision choice is not a Triton template choice of this buffer")
+            return FusionResult.fuse(False)
+        if (
+            choice.layout.size != multi_node.get_size()
+            or choice.layout.stride != multi_node.get_stride()
+        ):
+            why("fusion decision choice has a different output layout")
+            return FusionResult.fuse(False)
+        if committed is not None and committed is not choice:
+            why("buffer is already finalized to a different choice")
+            return FusionResult.fuse(False)
+        if not epilogue and (
+            self._any_atomic_add([*node1.get_nodes(), *node2.get_nodes()])
+            or (
+                hasattr(choice, "load_input_fusion_allowed_inputs")
+                and _producer_fusion_enabled_inputs(node2, choice)
+                != _producer_fusion_enabled_inputs(node2)
+            )
+        ):
+            why("template choice does not support this producer fusion")
+            return FusionResult.fuse(False)
+        if self._has_layout_conflict_for_template(multi_node):
+            why("template would conflict with a buffer layout constraint")
+            return FusionResult.fuse(False)
+        multi_node.finalize_as_triton_caller(choice)
+        return FusionResult.fuse(True)
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusionResult:
@@ -7406,6 +7476,11 @@ class Scheduler:
         ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
+
+        if is_multi_template:
+            decision = self._multi_template_fusion_decision(node1, node2)
+            if decision is not None:
+                return decision
 
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
