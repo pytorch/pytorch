@@ -90,14 +90,6 @@ class TextGenerationBenchmark(Benchmark):
 
         if inference_mode == "prefill":
             total_length = prompt_length + TextGenerationBenchmark.OUTPUT_LENGTH
-            text_config = model.config.get_text_config(decoder=True)
-            context_length = getattr(text_config, "max_position_embeddings", None)
-            if context_length is not None and total_length > context_length:
-                raise ValueError(
-                    f"prompt length {prompt_length} plus "
-                    f"{TextGenerationBenchmark.OUTPUT_LENGTH} generated-token slots exceeds "
-                    f"{model_name}'s context length {context_length}"
-                )
             # Match the static cache generate() allocates for this request, so prefill
             # attends over the same KV length as generate's first forward.
             cache_capacity = total_length - 1

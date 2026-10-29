@@ -952,7 +952,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         name += ".json"
@@ -967,7 +967,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1191,10 +1192,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    if getattr(args, "hf_inference_mode", "generate") == "prefill":
-        input_tokens = times * example_inputs["input_ids"].numel()
-        headers += ["eager_latency", "input_tokens_per_second"]
-        row += [median[0] * 1000, input_tokens / median[1]]
+    request_tokens = kwargs.get("request_tokens")
+    if request_tokens is not None:
+        headers.append("eager_latency")
+        row.append(median[0] * 1000)
+        for column, tokens in request_tokens.items():
+            headers.append(column)
+            row.append(times * tokens / median[1])
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -2057,6 +2061,11 @@ class BenchmarkRunner:
     def use_model_forward_for_compilation(self):
         return False
 
+    def get_request_tokens(self, example_inputs):
+        # Return {throughput column: tokens per timed request} for token workloads,
+        # which also report eager_latency; None for everything else.
+        return None
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2463,6 +2472,8 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
+                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # while performance compiles the forward under generate().
                         if self.use_model_forward_for_compilation():
                             model_copy.forward = optimize_ctx(model_copy.forward)
                             optimized_model_iter_fn = self.model_iter_fn
@@ -3206,6 +3217,9 @@ class BenchmarkRunner:
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
             if setup_fn is not None:
                 experiment_kwargs["setup_fn"] = setup_fn
+            request_tokens = self.get_request_tokens(example_inputs)
+            if request_tokens is not None:
+                experiment_kwargs["request_tokens"] = request_tokens
 
             results.append(
                 experiment(model_iter_fn, model, example_inputs, **experiment_kwargs)

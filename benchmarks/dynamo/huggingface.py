@@ -472,6 +472,19 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 "--hf-inference-mode=prefill requires --backend or --inductor"
             )
+        if args.prompt_length is not None:
+            # Checked here so an invalid flag isn't recorded as a model failure.
+            for name in [args.only] if args.only else self.iter_model_names(args):
+                output_length = HF_LLM_MODELS[name].OUTPUT_LENGTH
+                total_length = args.prompt_length + output_length
+                config = AutoConfig.from_pretrained(name).get_text_config(decoder=True)
+                context_length = getattr(config, "max_position_embeddings", None)
+                if context_length is not None and total_length > context_length:
+                    raise ValueError(
+                        f"--prompt-length={args.prompt_length} plus {output_length} "
+                        f"generated-token slots exceeds {name}'s context length "
+                        f"{context_length}"
+                    )
 
     def get_performance_workload(self):
         if self.args.hf_inference_mode == "prefill":
@@ -482,6 +495,11 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def use_model_forward_for_compilation(self):
         return self.args.hf_inference_mode == "prefill"
+
+    def get_request_tokens(self, example_inputs):
+        if self.args.hf_inference_mode == "prefill":
+            return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
+        return None
 
     def setup_prefill(self, model, example_inputs):
         torch.compiler.cudagraph_mark_step_begin()

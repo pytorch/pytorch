@@ -639,7 +639,7 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
 
   std::vector<std::vector<uint8_t>> result;
   result.reserve(keys.size());
-  for (size_t i = 0; i < keys.size(); ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(keys.size())) {
     result.emplace_back(client_->receiveBits());
   }
   return result;
