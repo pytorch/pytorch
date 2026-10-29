@@ -1483,6 +1483,190 @@ class TestBotCommandsAreDefused(unittest.TestCase):
                 self.assertNotRegex(text, r"(?i)@pytorch(merge)?bot", text)
 
 
+ORIGINAL = (
+    MARKER
+    + "\n**Automated review** of cccccccccccc: changes requested before human review."
+    + "\n\nOne bug.\n\n<details>\n<summary>x</summary>\n\nminor\n</details>"
+    + "\n\n<sub>f</sub>"
+)
+
+
+def mark(gh, run_id):
+    post_review.mark_pending(gh, 1, SHA, AUTHOR, run_id, "no automated review")
+
+
+def marked_body(gh):
+    return [r for r in gh.reviews if r["id"] == 5][0]["body"]
+
+
+class TestAReviewInProgressIsMarked(unittest.TestCase):
+    def test_the_newest_visible_review_is_collapsed_under_a_status_line(self):
+        old = old_review(4, body=ORIGINAL)
+        hidden = {**old_review(6, body=ORIGINAL), "minimized": True}
+        gh = FakeGitHub(reviews=[old, old_review(5, body=ORIGINAL), hidden])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        body = marked_body(gh)
+        lines = body.split("\n")
+        self.assertEqual(lines[0], MARKER)
+        self.assertEqual(post_review.pending_run(body), "77")
+        self.assertIn("Automated review in progress** for aaaaaaaaaaaa", lines[2])
+        self.assertIn("/o/r/actions/runs/77", lines[2])
+        self.assertTrue(lines[4].startswith("<details><summary>Previous automated"))
+        self.assertTrue(body.endswith("\n</details>"))
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+
+    def test_nothing_is_marked_when_the_head_moved_or_the_review_is_folded(self):
+        gh = FakeGitHub(head="b" * 40, reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+        folded = old_review(5, body=post_review.folded(old_review(5, body=ORIGINAL)))
+        gh = FakeGitHub(reviews=[folded])
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [])
+
+    def test_a_newer_run_takes_over_the_mark_without_nesting(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        mark(gh, "77")
+        mark(gh, "88")
+        self.assertEqual(folds(gh), [5, 5])
+        body = marked_body(gh)
+        self.assertEqual(post_review.pending_run(body), "88")
+        self.assertEqual(body.count("in progress"), 1)
+        self.assertEqual(post_review.unwrapped(body), ORIGINAL)
+        # The older run ends without a review: the newer mark stays.
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_older_run_never_takes_over_a_newer_runs_mark(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "88")
+        mark(gh, "77")
+        self.assertEqual(folds(gh), [5])
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(post_review.pending_run(marked_body(gh)), "88")
+
+    def test_an_opted_out_pr_is_not_marked(self):
+        gh = FakeGitHub(
+            labels=["No Automated Review"], reviews=[old_review(5, body=ORIGINAL)]
+        )
+        with redirect_stdout(io.StringIO()):
+            mark(gh, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_run_that_posts_nothing_puts_the_body_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh, row(status="model_error"))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+        self.assertEqual(gh.posted(), [])
+
+    def test_a_replaced_review_is_folded_from_its_original_body(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        go(gh)
+        body = marked_body(gh)
+        self.assertTrue(body.startswith(MARKER + "\n<details><summary>Outdated"))
+        self.assertNotIn("in progress", body)
+        self.assertIsNone(post_review.pending_run(body))
+        self.assertIn("One bug.", body)
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_request_left_standing_after_a_clean_verdict_is_put_back(self):
+        old = old_review(5, body=ORIGINAL, state="CHANGES_REQUESTED")
+        gh = FakeGitHub(reviews=[old])
+        mark(gh, "77")
+        real = gh.request
+
+        def refuse_dismissal(method, path, body=None, idempotent=None):
+            if path.endswith("/dismissals"):
+                raise GitHubError(403, "no")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_dismissal
+        with redirect_stdout(io.StringIO()):
+            go(gh, row(verdict="ready_for_human_review", findings=[]))
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(marked_body(gh), ORIGINAL)
+
+    def test_only_this_workflows_reviews_are_put_back(self):
+        theirs = old_review(5, author="someone", body=ORIGINAL)
+        theirs["body"] = post_review.pending(theirs, "77", SHA, "o/r")
+        gh = FakeGitHub(reviews=[theirs])
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_the_marked_body_is_defused(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=MARKER + "\n@pytorchbot merge")])
+        mark(gh, "77")
+        self.assertNotIn("@pytorchbot", marked_body(gh))
+
+    def test_a_body_not_in_our_shape_is_left_as_it_is(self):
+        body = MARKER + "\n<!-- hardened-pr-review-pending run=77 -->\nedited"
+        self.assertEqual(post_review.unwrapped(body), body)
+        gh = FakeGitHub(reviews=[old_review(5, body=body)])
+        with redirect_stdout(io.StringIO()):
+            post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.writes(), [])
+
+    def test_crlf_line_endings_still_read_back(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=ORIGINAL)])
+        mark(gh, "77")
+        crlf = marked_body(gh).replace("\n", "\r\n")
+        self.assertEqual(post_review.pending_run(crlf), "77")
+        self.assertEqual(post_review.unwrapped(crlf), ORIGINAL)
+
+
+class TestPendingModesReadTheirInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "RUN_ID": "77",
+        "OPT_OUT_LABEL": "skip me",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", flag]),
+            mock.patch.object(post_review, "mark_pending") as mark_,
+            mock.patch.object(post_review, "restore_pending") as restore,
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            rc = post_review.main()
+        return rc, mark_, restore, out.getvalue()
+
+    def test_each_mode_passes_its_inputs(self):
+        rc, mark_, restore, _ = self.main("--mark-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        mark_.assert_called_once()
+        self.assertEqual(mark_.call_args.args[1:], (1, SHA, AUTHOR, "77", "skip me"))
+        restore.assert_not_called()
+        rc, mark_, restore, _ = self.main("--restore-pending", self.ENV)
+        self.assertEqual(rc, 0)
+        restore.assert_called_once()
+        self.assertEqual(restore.call_args.args[1:], (1, AUTHOR, "77"))
+        mark_.assert_not_called()
+
+    def test_a_missing_or_bad_run_id_warns_and_does_nothing(self):
+        missing = {k: v for k, v in self.ENV.items() if k != "RUN_ID"}
+        for flag in ("--mark-pending", "--restore-pending"):
+            for env in (missing, {**self.ENV, "RUN_ID": "77; rm"}):
+                with self.subTest(flag=flag, run_id=env.get("RUN_ID")):
+                    rc, mark_, restore, out = self.main(flag, env)
+                    self.assertEqual(rc, 0)
+                    mark_.assert_not_called()
+                    restore.assert_not_called()
+                    self.assertIn("::warning::automated review not", out)
+
+
 class TestWorkflowWiring(unittest.TestCase):
     def test_publish_job_runs_the_script_on_the_row_with_a_write_token(self):
         text = WORKFLOW.read_text()
