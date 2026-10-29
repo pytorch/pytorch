@@ -2,7 +2,16 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from torch._inductor.codecache import _build_cpp_code_hash
+import torch
+
+from torch._inductor import config
+from torch._inductor.codecache import (
+    _build_cpp_code_hash,
+    _collect_cpp_ir_constant_metadata_for_hash,
+    FxGraphCachePickler,
+    FxGraphHashDetails,
+)
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -66,6 +75,115 @@ class TestLoopsIrNativeSourceHash(TestCase):
             self.assertEqual(
                 hashlib.sha256().digest(), self.digest(Path(directory) / "missing")
             )
+
+
+class TestLoopsIrConstantCache(TestCase):
+    def graph(self, value, *, nested=False, read_padding=False):
+        root = torch.nn.Module()
+        owner = root
+        target = "table"
+        if nested:
+            root.child = torch.nn.Module()
+            owner = root.child
+            target = "child.table"
+        owner.register_buffer("table", value)
+        graph = torch.fx.Graph()
+        table = graph.get_attr(target)
+        result = table
+        if read_padding:
+            result = graph.call_function(
+                torch.ops.aten.as_strided.default, (table, [3], [1], 1)
+            )
+        graph.output((result,))
+        return torch.fx.GraphModule(root, graph)
+
+    def key(self, gm):
+        details = FxGraphHashDetails(gm, [], {}, [])
+        return FxGraphCachePickler(gm).dumps(details)
+
+    def test_cpp_offset_changes_key_with_equal_logical_values(self):
+        left = self.graph(torch.tensor([9, 0, 2, 9])[1:3])
+        right = self.graph(torch.tensor([9, 9, 0, 2])[2:4])
+        self.assertEqual(left.table, right.table)
+        self.assertNotEqual(left.table.storage_offset(), right.table.storage_offset())
+        with config.patch(experimental_cpp_ir=True):
+            self.assertNotEqual(self.key(left), self.key(right))
+
+    def test_cpp_constant_values_still_change_key(self):
+        left = self.graph(torch.tensor([0, 2]))
+        right = self.graph(torch.tensor([0, 3]))
+        self.assertEqual(
+            _collect_cpp_ir_constant_metadata_for_hash(left)[0][:2],
+            _collect_cpp_ir_constant_metadata_for_hash(right)[0][:2],
+        )
+        with config.patch(experimental_cpp_ir=True):
+            self.assertNotEqual(self.key(left), self.key(right))
+
+    def test_cpp_storage_extent_is_preserved(self):
+        left = self.graph(torch.tensor([9, 0, 2, 9])[1:3])
+        right = self.graph(torch.tensor([9, 0, 2, 9, 9])[1:3])
+        self.assertEqual(left.table, right.table)
+        self.assertNotEqual(
+            _collect_cpp_ir_constant_metadata_for_hash(left),
+            _collect_cpp_ir_constant_metadata_for_hash(right),
+        )
+
+    def test_nested_attribute_metadata_uses_structured_resolver(self):
+        gm = self.graph(torch.tensor([9, 0, 2])[1:], nested=True)
+        ((target, metadata, _digest),) = _collect_cpp_ir_constant_metadata_for_hash(gm)
+        self.assertEqual(target, "child.table")
+        self.assertEqual(metadata.storage_offset, 1)
+        self.assertEqual(metadata.stride, (1,))
+
+    def test_stock_does_not_gain_cpp_constant_metadata_field(self):
+        gm = self.graph(torch.tensor([0, 2]))
+        with config.patch(experimental_cpp_ir=False):
+            details = FxGraphHashDetails(gm, [], {}, [])
+        self.assertFalse(hasattr(details, "cpp_ir_constant_metadata"))
+
+    def test_absent_graph_has_no_constant_metadata(self):
+        self.assertEqual(_collect_cpp_ir_constant_metadata_for_hash(None), ())
+
+    def test_native_padding_reads_do_not_collide(self):
+        left = self.graph(torch.tensor([9.0, 0.0, 111.0, 2.0])[1::2], read_padding=True)
+        right = self.graph(
+            torch.tensor([9.0, 0.0, 222.0, 2.0])[1::2], read_padding=True
+        )
+        self.assertEqual(left.table, right.table)
+        self.assertFalse(torch.equal(left()[0], right()[0]))
+        self.assertEqual(
+            _collect_cpp_ir_constant_metadata_for_hash(left)[0][:2],
+            _collect_cpp_ir_constant_metadata_for_hash(right)[0][:2],
+        )
+        with config.patch(experimental_cpp_ir=True):
+            self.assertNotEqual(self.key(left), self.key(right))
+
+    def test_equal_storage_content_has_stable_key_without_identity(self):
+        left = self.graph(torch.tensor([9.0, 0.0, 111.0, 2.0])[1::2])
+        right = self.graph(torch.tensor([9.0, 0.0, 111.0, 2.0])[1::2])
+        with config.patch(experimental_cpp_ir=True):
+            self.assertEqual(self.key(left), self.key(right))
+
+    def test_storage_digest_preserves_nan_payload_bits(self):
+        left = self.graph(
+            torch.tensor([0x7FC00001], dtype=torch.int32).view(torch.float32)
+        )
+        right = self.graph(
+            torch.tensor([0x7FC00002], dtype=torch.int32).view(torch.float32)
+        )
+        self.assertTrue(torch.isnan(left.table).all())
+        self.assertTrue(torch.isnan(right.table).all())
+        self.assertNotEqual(
+            _collect_cpp_ir_constant_metadata_for_hash(left)[0][2],
+            _collect_cpp_ir_constant_metadata_for_hash(right)[0][2],
+        )
+
+    def test_real_storage_hash_is_safe_inside_fake_tensor_mode(self):
+        gm = self.graph(torch.tensor([0, 2]))
+        expected = _collect_cpp_ir_constant_metadata_for_hash(gm)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            actual = _collect_cpp_ir_constant_metadata_for_hash(gm)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

@@ -675,6 +675,38 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+def _collect_cpp_ir_constant_metadata_for_hash(
+    gm: torch.fx.GraphModule | None,
+) -> tuple[tuple[str, TensorMetadata, str | None], ...]:
+    """Keep exact geometry and storage bytes for readonly CPP constants.
+
+    Logical tolist() values omit padding read by native as_strided and can
+    lose floating NaN payload bits. CPP preserves the original storage.
+    """
+    from torch.fx.graph_module import _get_attr
+    from torch.utils._mode_utils import no_dispatch
+
+    if gm is None:
+        return ()
+    result = []
+    for node in gm.graph.nodes:
+        if node.op != "get_attr":
+            continue
+        target = str(node.target)
+        value = _get_attr(gm, target)
+        if not isinstance(value, torch.Tensor):
+            continue
+        digest = None
+        if not is_fake(value) and value.layout == torch.strided:
+            with no_dispatch():
+                storage = value.untyped_storage()
+                raw = torch.empty(0, dtype=torch.uint8, device=value.device)
+                raw.set_(storage, 0, (storage.nbytes(),), (1,))
+                digest = hashlib.sha256(raw.cpu().numpy().tobytes()).hexdigest()
+        result.append((target, extract_tensor_metadata(value), digest))
+    return tuple(result)
+
+
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
 # __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
 # reducer_override to avoid infinite recursion.
@@ -1563,6 +1595,12 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
+        if config.experimental_cpp_ir:
+            # Standard tensor hash metadata omits storage offsets/bytes.
+            # CPP constant guards and alias geometry retain those fields.
+            self.cpp_ir_constant_metadata = _collect_cpp_ir_constant_metadata_for_hash(
+                gm
+            )
         # Replace opaque references with hashable ordinals. What's important
         # is that if the same reference appears twice then it's the same hash
         # value for each.
