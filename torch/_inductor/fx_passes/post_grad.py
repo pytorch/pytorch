@@ -112,6 +112,11 @@ _QUACK_SYMMETRIC_MIN_M = 4096
 
 
 def _is_quack_symmetric_mm(match: Match) -> bool:
+    from .cpp_ir_strict import allow_quack_symmetric_mm
+
+    if not allow_quack_symmetric_mm():
+        # Strict C++ path: keep original MM for eager bit-fidelity.
+        return False
     x = match.kwargs["x"].meta["val"]
     if x.ndim not in (2, 3):
         return False
@@ -605,6 +610,11 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    from .cpp_ir_strict import allow_online_softmax_rewrite
+
+    if not allow_online_softmax_rewrite():
+        # Strict C++ path: online softmax reorders reductions; keep original.
+        return False
     device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
@@ -1129,6 +1139,11 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def pointless_cumsum_check(match: Match) -> bool:
+    from .cpp_ir_strict import allow_pointless_cumsum_rewrite
+
+    if not allow_pointless_cumsum_rewrite():
+        # Strict C++ path: keep original cumsum(full) for eager fidelity.
+        return False
     # Scalar cumsum is already handled directly by lowering.cumsum.
     if len(match.kwargs["shape"]) == 0:
         return False
@@ -1530,7 +1545,13 @@ def _collect_output_storage(
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
+
+    Strict C++ path (experimental_cpp_ir): skip pow(x, 1) elimination
+    (NaN handling differs from identity); other noops keep stock policy.
     """
+    from .cpp_ir_strict import keep_fp_neutral_op_elimination
+
+    strict_keep_pow_one = not keep_fp_neutral_op_elimination()
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
@@ -1567,6 +1588,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
     for node in graph.nodes:
         if node.target in noop_registry:
+            if strict_keep_pow_one and node.target is aten.pow.Tensor_Scalar:
+                # Strict: pow(x, 1) is not bitwise identical to x for NaN.
+                continue
             cond, src_index = noop_registry[node.target]
             if isinstance(src_index, int):
                 src = node.args[src_index]
@@ -2246,6 +2270,11 @@ for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
 )
 def reciprocal_sqrt_to_rsqrt(match: Match, x):
     """reciprocal(sqrt(x)) -> rsqrt(x)"""
+    from .cpp_ir_strict import allow_reciprocal_sqrt_to_rsqrt
+
+    if not allow_reciprocal_sqrt_to_rsqrt():
+        # Strict C++ path: two roundings vs one differ; keep original.
+        return
 
     def repl(x):
         return aten.rsqrt(x)
@@ -2298,6 +2327,11 @@ def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool
 
 
 def should_prefer_unfused_addmm(match):
+    from .cpp_ir_strict import allow_addmm_fusion_or_unfuse
+
+    if not allow_addmm_fusion_or_unfuse():
+        # Strict C++ path: keep fused addmm for eager accumulation order.
+        return False
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
@@ -2322,6 +2356,11 @@ def should_prefer_unfused_addmm(match):
 
 
 def should_prefer_unfused_baddbmm(match):
+    from .cpp_ir_strict import allow_addmm_fusion_or_unfuse
+
+    if not allow_addmm_fusion_or_unfuse():
+        # Strict C++ path: keep fused baddbmm for eager accumulation order.
+        return False
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
@@ -2481,6 +2520,11 @@ def addmm(match, mat1, mat2, *, inp):
 
 def _is_addcdiv_fma_eligible(match: Match) -> bool:
     """Guards for the addcdiv FMA re-fusion pass."""
+    from .cpp_ir_strict import allow_addcdiv_fma_fusion
+
+    if not allow_addcdiv_fma_fusion():
+        # Strict C++ path: FMA contraction changes rounding; keep decomposed.
+        return False
     # aten.addcdiv requires floating-point self; check inp, not output, because
     # aten.div promotes integers to float so the output is float even for int inp.
     inp_val = match.kwargs["inp"].meta.get("val")
@@ -2536,7 +2580,9 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
 
 
 def _is_var_std_reduction_dedup_enabled(match: Match) -> bool:
-    return config.var_std_reduction_dedup
+    from .cpp_ir_strict import allow_var_std_dedup
+
+    return allow_var_std_dedup()
 
 
 def register_var_std_reduction_dedup_pattern():
@@ -2676,6 +2722,11 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     argument. Restricting the match to a true scalar preserves the original
     multiply's output shape and wrapped-scalar type promotion.
     """
+    from .cpp_ir_strict import allow_scaled_mm_output_scale_fold
+
+    if not allow_scaled_mm_output_scale_fold():
+        # Strict C++ path: keep explicit multiply for eager rounding.
+        return False
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
     # This rewrite needs to retry ordinary scaled-mm lowering when every
