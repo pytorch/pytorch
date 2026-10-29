@@ -10203,15 +10203,17 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_a_cpp_extension_ops_cpp_kernels_are_not_reported(self):
         from torch._precompile import _custom_op_modules
 
-        # As a C++ extension's op naming its module with m.set_python_module, with a
-        # kernel from one of its C++ sources, or from a script run as __main__.
+        # As an op of a module, defined by a C++ extension or in Python, with a kernel
+        # from a C++ extension the module loads, or from a script run as __main__.
         ns = f"precompile_ext_{uuid.uuid4().hex}"
         lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.clone, "CPU")
         dump, op, at = torch._C._dispatch_dump, f"{ns}::op", "CPU: registered at "
-        pystub, schema = ("unittest", "context"), "/ext/op.cpp"
-        for path, untracked in (("/ext/k.cu", ()), ("/main.py", ((op, "CPU"),))):
+        pystub = ("unittest", "context")
+        cases = [(s, "/ext/k.cu", ()) for s in ("/ext/op.cpp", "/ext/ops.py")]
+        cases.append(("/ext/op.cpp", "/main.py", ((op, "CPU"),)))
+        for schema, path, untracked in cases:
             cpp = lambda q: re.sub(rf"(?m)^{at}\S+:", f"{at}{path}:", dump(q))  # noqa: E731
             with (
                 mock.patch.object(torch._C, "_dispatch_pystub", return_value=pystub),
