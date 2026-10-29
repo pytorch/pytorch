@@ -2071,7 +2071,10 @@ class FakeTensorMode(TorchDispatchMode):
     # - We change the torch.tensor ctor contract to never materialize
     #   tensors on device
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
-    @property
+    # Cached: it's read several times per uncached dispatch, checking costs a
+    # few us (torch.cuda.is_available() reads the environment), and the answer
+    # doesn't change while the mode is in use.
+    @functools.cached_property
     def avoid_device_init(self) -> bool:
         if torch.xpu._is_compiled():
             if torch.cuda._is_compiled():
