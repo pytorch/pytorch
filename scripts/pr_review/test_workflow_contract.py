@@ -2698,6 +2698,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "PREVIOUS_MERGE_BASE_SHA",
             "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
@@ -3026,7 +3027,10 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         )
         self.assertEqual(
             sorted(set(runs)),
-            ["trusted/scripts/pr_review/extract_verdict.py"],
+            [
+                "trusted/scripts/pr_review/extract_verdict.py",
+                "trusted/scripts/pr_review/interdiff.py",
+            ],
             f"the review job runs {sorted(set(runs))}; every program it "
             "executes must come from the trusted checkout.",
         )
