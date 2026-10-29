@@ -2141,8 +2141,8 @@ def _custom_op_modules(
     op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
     """The modules registering the ops in ``op_keys`` and their active kernels for
-    the op's keys, in the order their imports finished, so that importing them again
-    registers any overriding kernel last; and the custom ops among them that no
+    the op's keys, in the order their imports finished, which load replays with the
+    modules of overriding kernels last; and the custom ops among them that no
     known module registers, or with a kernel for ``keys`` no known module registers
     (a torch helper's, a C++ extension's or ``__main__``'s)."""
     file_modules = functools.cache(_file_modules)
@@ -2208,7 +2208,10 @@ def _graph_kernel_keys(
         for leaf in pytree.tree_leaves((vals, list(example_inputs)))
         if isinstance(leaf, torch.Tensor)
     }
-    return (*sorted(backends - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
+    # Many per-backend keys, e.g. QuantizedMeta, have names the dispatcher cannot
+    # parse back, so no kernel can be checked under them.
+    parseable = {k for k in backends if torch._C._parse_dispatch_key(k) is not None}
+    return (*sorted(parseable - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
 
 
 def _device_kernel_keys(device_types: Iterable[str]) -> tuple[str, ...]:
