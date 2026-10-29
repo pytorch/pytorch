@@ -1798,7 +1798,7 @@ def _dispatch_make_pyobj_dispatch_fns(
     handle: _DispatchOperatorHandle,
     dispatch_cpp: Callable,
     redispatch_cpp: Callable,
-) -> tuple[Callable, Callable]: ...
+) -> tuple[Callable, Callable, Callable]: ...
 def _dispatch_find_schema_or_throw(
     name: str,
     overload_name: str,
