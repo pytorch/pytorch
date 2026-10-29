@@ -10015,6 +10015,30 @@ class TestPrecompileCustomOpRecording(TestCase):
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
 
+        # Graph-break ops with no compiled graph naming a device check every kernel.
+        lib.define("nofake(Tensor x) -> Tensor")
+        for key in ("CPU", "CUDA"):
+            lib.impl("nofake", lambda x: x.clone(), key)
+        name = f"precompile_devices_nofake_{uuid.uuid4().hex}"
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(f"import torch\ndef fn(x):\n    return torch.ops.{ns}.nofake(x)\n")
+        self.addCleanup(sys.modules.pop, name, None)
+        with capture(
+            importlib.import_module(name).fn,
+            artifact_path=artifact,
+            cache_path=os.path.join(directory, "artifact.cache"),
+            tracer=DynamoTracer(),
+            backend="eager",
+        ) as cap:
+            cap(torch.randn(2))
+            # As a frame whose graphs name no device: its tensors come from elsewhere.
+            package = cap._session._package
+            package._device_types = frozenset()
+            package.device_types.clear()
+        expected = {f"{ns}::nofake": ("CPU", "CUDA")}
+        with open(artifact) as f:
+            self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
+
     def test_torch_cpp_op_without_a_source_root_uses_the_namespace(self):
         from torch._precompile import _torch_cpp_op, _torch_source_root
 
@@ -10349,14 +10373,24 @@ class TestPrecompileCustomOpRecording(TestCase):
         package.record_eager_fallback(_composite_op_fn.__code__)
         self.assertEqual(package.graph_break_op_names, {(fallback_name, "")})
 
-    def _render_with_ops(self, op_names):
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def _render_with_ops(self, op_names, mode="standalone"):
         # A Dynamo capture of a function in an importable module, whose graphs are
         # taken to call op_names. Returns the artifact's CUSTOM_OP_MODULES and the
         # entry's module name.
         directory = self.enterContext(tempfile.TemporaryDirectory())
         name = f"precompile_render_{uuid.uuid4().hex}"
         with open(os.path.join(directory, name + ".py"), "w") as f:
-            f.write("def fn(x):\n    return x.sin() + 1\n")
+            if mode == "installed":
+                # The helper's own frame is unreachable from the entry's.
+                f.write(
+                    "import torch\n"
+                    "def helper(y):\n    y = y.sin()\n"
+                    "    torch._dynamo.graph_break()\n    return y.cos()\n"
+                    "def fn(x):\n    return helper(x) + 1\n"
+                )
+            else:
+                f.write("def fn(x):\n    return x.sin() + 1\n")
         self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
         self.addCleanup(sys.modules.pop, name, None)
         artifact = os.path.join(directory, "artifact.py")
@@ -10370,7 +10404,11 @@ class TestPrecompileCustomOpRecording(TestCase):
             cap(torch.ones(4))
             cap._session._package.graph_break_op_names |= set(op_names)
         with open(artifact) as f:
-            (line,) = [l for l in f if l.startswith("CUSTOM_OP_MODULES = ")]
+            python_code = f.read()
+        self.assertIn(f'SERVING_MODE = "{mode}"', python_code)
+        (line,) = [
+            l for l in python_code.splitlines() if l.startswith("CUSTOM_OP_MODULES = ")
+        ]
         return line.strip(), name
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
@@ -10483,12 +10521,15 @@ class TestPrecompileCustomOpRecording(TestCase):
             with open(artifact) as f:
                 self.assertNotIn("CUSTOM_OPS = ", f.read())
 
-    def test_a_served_module_that_fails_to_import_fails_the_load(self):
+    @parametrize("mode", ["standalone", "installed"])
+    def test_a_served_module_that_fails_to_import_fails_the_load(self, mode):
         from torch.library import _scoped_library
 
         lib = self.enterContext(_scoped_library("precompile_served_fallback", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
-        line, name = self._render_with_ops([("precompile_served_fallback::op", "")])
+        line, name = self._render_with_ops(
+            [("precompile_served_fallback::op", "")], mode
+        )
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
         path = sys.modules.pop(name).__file__
         with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
@@ -10540,42 +10581,35 @@ class TestPrecompileCustomOpRecording(TestCase):
         expected = (served._init_fn.__module__,)
         self.assertIn(f"CUSTOM_OP_MODULES = {expected!r}", python_code)
 
-    def test_a_version_mismatch_refuses_before_the_custom_op_imports(self):
+    @parametrize("mode", ["standalone", "installed"])
+    def test_a_version_mismatch_refuses_before_the_custom_op_imports(self, mode):
         from torch.library import _scoped_library
 
-        directory = self.enterContext(tempfile.TemporaryDirectory())
-        artifact = os.path.join(directory, "artifact.py")
         ns = f"precompile_unregistered_{uuid.uuid4().hex}"
         # Registered only during the capture, so the artifact's op check fails.
         with _scoped_library(ns, "DEF") as lib:
             lib.define("op(Tensor x) -> Tensor")
-            with capture(
-                _no_compilation_single_graph,
-                artifact_path=artifact,
-                cache_path=os.path.join(directory, "artifact.cache"),
-                tracer=DynamoTracer(),
-                backend="eager",
-            ) as cap:
-                cap(torch.ones(4))
-                cap._session._package.graph_break_op_names.add((f"{ns}::op", ""))
-        with open(artifact) as f:
+            _, name = self._render_with_ops([(f"{ns}::op", "")], mode)
+        path = sys.modules[name].__file__
+        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
             python_code = f.read()
         (served,) = [
             line
             for line in python_code.splitlines()
             if line.startswith("SERVED_MODULES = ")
         ]
-        # A frame module defined in __main__ or one that does not import is refused
-        # before the op check too. This test's module may be __main__.
-        for module, error in (
-            ("unittest", "not registered here"),
-            ("__main__", "__main__ module"),
+        # A frame module defined in __main__, even a frame other than the entry's,
+        # or one that does not import is refused before the op check too.
+        for modules, error in (
+            (("unittest",), "not registered here"),
+            (("__main__",), "__main__ module"),
+            ((name, "__main__"), "__main__ module"),
             (
-                "precompile_no_such_module",
+                ("precompile_no_such_module",),
                 "'precompile_no_such_module'.*not importable",
             ),
         ):
-            code = python_code.replace(served, f"SERVED_MODULES = ({module!r},)")
+            code = python_code.replace(served, f"SERVED_MODULES = {modules!r}")
             with self.assertRaisesRegex(PrecompileError, error):
                 exec(code, {"__name__": "artifact"})
         version = f"TORCH_VERSION = {torch.__version__!r}"
