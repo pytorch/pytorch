@@ -5171,6 +5171,17 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                     mode=mode,
                     align_corners=align_corners,
                 )
+            if mode in ('linear', 'bilinear', 'trilinear') and align_corners is not None and dtype.is_floating_point:
+                # These sizes hit source coordinates just below a power of two (gh-201764)
+                out_size = 83 if align_corners else 29
+                for dim in range(rank):
+                    yield SampleInput(
+                        make_arg((1, 1) + (9,) * rank),
+                        tuple(out_size if d == dim else D for d in range(rank)),
+                        scale_factor=None,
+                        mode=mode,
+                        align_corners=align_corners,
+                    )
             for recompute_scale_factor in [False, True]:
                 for scale_factor in [1.7, 0.6]:
                     yield SampleInput(
@@ -19192,12 +19203,7 @@ op_db: list[OpInfo] = [
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
-                   supports_complex_to_float=True,
-                   skips=(
-                       # Ref: https://github.com/pytorch/pytorch/issues/78413
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
-                   )),
+                   supports_complex_to_float=True),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -23515,8 +23521,6 @@ python_ref_db = [
         decorators=(
             # dtypes that do not support check_uniform_bounds of rand_like
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
 
