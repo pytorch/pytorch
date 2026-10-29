@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include "RocLogger.h"
@@ -40,8 +41,6 @@ class RocprofLogger {
   RocprofLogger();
   RocprofLogger(const RocprofLogger&) = delete;
   RocprofLogger& operator=(const RocprofLogger&) = delete;
-
-  virtual ~RocprofLogger();
 
   static RocprofLogger& singleton();
 
@@ -69,9 +68,6 @@ class RocprofLogger {
       rocprofiler_tracing_operation_t op);
 
  private:
-  bool registered_{false};
-  void endTracing();
-
   static void insert_row_to_buffer(rocprofBase* row);
 
   static ThreadTraceBuffer* getThreadBuffer();
@@ -112,8 +108,7 @@ class RocprofLogger {
   std::atomic<uint64_t> generation_{0};
   std::atomic<uint64_t> totalRows_{0};
 
-  bool externalCorrelationEnabled_{true};
-  bool logging_{false};
+  std::atomic<bool> externalCorrelationEnabled_{true};
 
   friend class libkineto::RocprofActivityApi;
 };
