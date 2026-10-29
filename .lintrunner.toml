@@ -100,7 +100,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'aten/src/ATen/dlpack.h',
-    'torch/csrc/profiler/kineto/libkineto/third_party/**',
 ]
 init_command = [
     'python3',
@@ -227,7 +226,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/profiler/kineto/benchmarks/**',
     'torch/csrc/profiler/kineto/libkineto/test/**',
-    'torch/csrc/profiler/kineto/libkineto/third_party/**',
     # Need ROCm/XPU SDK headers, which the lint image doesn't have
     'torch/csrc/profiler/kineto/libkineto/src/Roc*',
     'torch/csrc/profiler/kineto/libkineto/src/plugin/xpupti/**',
@@ -610,7 +608,7 @@ exclude_patterns = [
     # Vendored: raw throws are upstream's call, not ours.
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
-    'torch/csrc/profiler/kineto/libkineto/third_party/**',
+    'third_party/dynolog_headers/**',
     'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
@@ -935,7 +933,6 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
-    'torch/csrc/profiler/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
@@ -1324,7 +1321,6 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'third_party/**',
-    'torch/csrc/profiler/kineto/libkineto/third_party/**',
     'test/cpython/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',

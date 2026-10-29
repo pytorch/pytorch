@@ -103,7 +103,7 @@ def vt_identity_compare(
     # A bound method is materialized afresh by every attribute access, so it
     # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
     # read off a tensor: `x.device is x.device` is False there too.
-    from .dicts import ConstDictVariable, MappingProxyVariable
+    from .dicts import ConstDictVariable, DictKeysVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
     from .functions import (
         _WrappedSkipFunctionMethodDescriptorCommonVariable,
@@ -132,6 +132,7 @@ def vt_identity_compare(
         SetVariable,
         FrozensetVariable,
         DictKeySetVariable,
+        DictKeysVariable,
         OrderedSetVariable,
         TracebackVariable,
         ExceptionVariable,

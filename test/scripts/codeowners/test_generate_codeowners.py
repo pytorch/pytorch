@@ -6,7 +6,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 SCRIPT = (
@@ -80,6 +84,8 @@ def replace_once(text: str, old: str, new: str) -> str:
 
 
 class TestGenerateCodeowners(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_render(self):
         text = render(OWNERSHIP)
         header, sections = text.split(SECTION_MARKER + "\n")
@@ -203,6 +209,8 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
 
 
 class TestGeneratorModes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_up_to_date(self):
         generated = render(OWNERSHIP)
         result, _ = run_generator(

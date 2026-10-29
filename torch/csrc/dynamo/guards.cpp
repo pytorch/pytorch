@@ -46,6 +46,7 @@
 #include <ATen/native/mtia/EmptyTensor.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -431,7 +432,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
     PyObject* pyList) {
   std::vector<std::optional<c10::SymInt>> vec;
   Py_ssize_t size = PyList_Size(pyList);
-  for (Py_ssize_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     PyObject* item = PyList_GetItem(pyList, i);
     auto handle = py::handle(item);
     if (Py_IsNone(item)) {
@@ -457,7 +458,7 @@ static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
   std::vector<std::vector<std::optional<c10::SymInt>>> per_tensor_dynamic_dims;
   if (!Py_IsNone(dynamic_dims_py)) {
     Py_ssize_t size = PyList_Size(dynamic_dims_py);
-    for (Py_ssize_t i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
       std::vector<std::optional<c10::SymInt>> vec = pyListToVecOptInt(py_list);
       per_tensor_dynamic_dims.push_back(std::move(vec));
@@ -674,7 +675,7 @@ struct AutocastState {
   c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
+    for (const auto i : c10::irange(DEVICES.size())) {
       enabled[i] = at::autocast::is_autocast_enabled(DEVICES[i]);
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
@@ -691,7 +692,7 @@ struct AutocastState {
       return false;
     }
 
-    for (size_t i{0}; i < DEVICES.size(); ++i) {
+    for (const auto i : c10::irange(DEVICES.size())) {
       if (enabled[i] &&
           dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
@@ -703,7 +704,7 @@ struct AutocastState {
 
   std::string reason(const AutocastState& o) const {
     std::ostringstream os;
-    for (size_t i = 0; i < DEVICES.size(); i++) {
+    for (const auto i : c10::irange(DEVICES.size())) {
       if (enabled[i] == false && o.enabled[i] == false) {
         continue;
       }
@@ -735,7 +736,7 @@ struct AutocastState {
 
     // Rebuild disabled_keys from enabled
     json_t.disabled_keys = c10::DispatchKeySet();
-    for (size_t i = 0; i < DEVICES.size(); i++) {
+    for (const auto i : c10::irange(DEVICES.size())) {
       if (!json_t.enabled[i]) {
         json_t.disabled_keys = json_t.disabled_keys.add(
             at::autocast::get_autocast_dispatch_key_from_device_type(
@@ -1332,7 +1333,7 @@ static PyObject* copy_if_misaligned(PyObject* /*self*/, PyObject* item) {
   if (tensor.numel() > 0) {
     auto sizes = tensor.sizes();
     auto strides = tensor.strides();
-    for (int64_t i = 0; i < tensor.dim(); ++i) {
+    for (const auto i : c10::irange(tensor.dim())) {
       needed_size += (sizes[i] - 1) * strides[i];
     }
     needed_size += 1;
@@ -1347,7 +1348,7 @@ static at::SmallVector<int64_t, 8> unwrap_size_tuple(PyObject* obj) {
   auto len{PyTuple_GET_SIZE(obj)};
   at::SmallVector<int64_t, 8> ret;
   ret.reserve(len);
-  for (Py_ssize_t i{0}; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     auto result{PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i))};
     TORCH_CHECK(result >= 0);
     ret.emplace_back(result);
@@ -1600,7 +1601,7 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   // Short-circuit: if last memory address of x is < start of y, then not
   // overlapping.
   auto x_last = Meta::storage_offset(x);
-  for (int64_t i = 0; i < x.dim(); i++) {
+  for (const auto i : c10::irange(x.dim())) {
     x_last += (Meta::size(x, i) - 1) * Meta::stride(x, i);
   }
   if (x_last < Meta::storage_offset(y)) {
@@ -1676,7 +1677,7 @@ std::unordered_set<int64_t> compute_overlapping_tensors(
   std::unordered_set<int64_t> aliased_tensor_indices;
   for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
     const auto& tensor_i = tensors[i];
-    for (int64_t j = 0; j < i; j++) {
+    for (const auto j : c10::irange(i)) {
       if (!tensors_definitely_do_not_overlap<Meta>(tensor_i, tensors[j])) {
         aliased_tensor_indices.insert(i);
         aliased_tensor_indices.insert(j);
@@ -2759,8 +2760,10 @@ class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
       return {};
     }
 
-    // This is safe since we're not accessing the contents of these pointers,
-    // only the contained address.
+    // Only the addresses are kept, without a reference. A freed hook's
+    // address can be reused by new hooks, so this comparison relies on
+    // AUTOGRAD_SAVED_TENSORS_HOOKS in torch/_dynamo/guards.py registering
+    // both hooks with id_ref, which invalidates the entry when one is freed.
     return std::array<PyObject*, 2>{pack, unpack};
   }
 };
@@ -5311,7 +5314,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
             std::move(verbose_code_parts),
             std::move(user_stack)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
-    for (Py_ssize_t idx = 0; idx < len; idx++) {
+    for (const auto idx : c10::irange(len)) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
       this->_ref_stack.push_back(type);
@@ -7662,12 +7665,12 @@ double profile_guard_manager(
   PyObject* locals = f_locals.ptr();
 
   // Warmup to setup fast paths (like dict_tags) for the actual profiling
-  for (int i = 0; i < 5; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(5)) {
     root->check_nopybind(locals);
   }
 
   std::chrono::duration<double> total_elapsed{0.0};
-  for (int i = 0; i < n_iters; i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(n_iters)) {
     // Flush the caches to accurately measure the overhead
     // store into a volatile to prevent optimization
     volatile char dummy = flush_cache_by_eviction();
