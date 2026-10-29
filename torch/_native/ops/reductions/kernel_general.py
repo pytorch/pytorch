@@ -264,17 +264,82 @@ def _flat_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
 # Fast-path classification shared by routing and condition gates, after TI coalescing.
 
 
-def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
-    """Select row or single-output column reduction by a dense 2D TI view's stride-one pair."""
+def fast_kind(red_pairs: Pairs, kept_pairs: Pairs) -> str | None:
+    """Classify a dense TI view as a full or contiguous-row reduction."""
     if len(kept_pairs) == 0:
         return "all"
     if len(red_pairs) != 1 or len(kept_pairs) != 1:
         return None
     if red_pairs[0][1] == 1:  # reduced run is innermost/contiguous -> row
         return "row"
-    if kept_pairs[0][1] == 1 and nouts == 1:  # kept innermost -> col
-        return "col"
     return None
+
+
+def _physical_col_view(
+    x: torch.Tensor,
+    red_axes: set[int],
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    count: int,
+    num_o: int,
+) -> torch.Tensor | None:
+    """Return a column-kernel view of a dense reduction, or None if it has none.
+
+    The view is 2D (R, C) for one dense column pair, or contiguous (B, R, C) for a
+    middle block of reduced axes.
+    """
+    if red_pairs == [(count, num_o)] and kept_pairs == [(num_o, 1)]:
+        return torch.as_strided(
+            x,
+            (count, num_o),
+            (num_o, 1),
+            storage_offset=x.storage_offset(),
+        )
+    dims = sorted(red_axes)
+    if (
+        not x.is_contiguous()
+        or not dims
+        or dims != list(range(dims[0], dims[-1] + 1))
+        or dims[0] == 0
+        or dims[-1] + 1 == x.dim()
+    ):
+        return None
+    B = math.prod(x.shape[: dims[0]])
+    R = math.prod(x.shape[dims[0] : dims[-1] + 1])
+    C = math.prod(x.shape[dims[-1] + 1 :])
+    # Stage one indexes batched rows as batch * R + row in Int32.
+    if B * R >= _INT32_LIMIT:
+        return None
+    return x.reshape(B, R, C)
+
+
+# B200 CUDA-graph timings of the batched column kernel against the general kernel, for
+# sum and var_mean at 16 and 512 MiB: R <= 64 wins at every C (4-33x). Longer R needs
+# C >= 16 (sum 1.3x or better), and two outputs also need B * C >= 8192 kept outputs;
+# below that, general is up to 4x faster. The other traits were measured on the stack's
+# later column tuning; the gate accepts their regressions on 8-16 MiB inputs at its
+# boundaries (0.82-0.86x one-output at R = 1024, C = 16, B * C = 4096; fp16 var_mean
+# 0.70x at B * C = 8192), which run 1.1-3.1x at 512 MiB.
+# Only B200 is measured, so other architectures keep the general kernel for these routes.
+_BATCHED_COL_CCS = ((10, 0),)
+_BATCHED_COL_SHORT_R = 64
+_BATCHED_COL_MIN_C = 16
+_BATCHED_COL_2OUT_MIN_OUTPUTS = 8192
+
+
+def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
+    """Whether the unordered column kernels beat the general kernel on this view."""
+    if view.dim() == 2 and nouts == 1:
+        # The single-output 2D route predates the measured batched and two-output routes.
+        return True
+    if cc not in _BATCHED_COL_CCS:
+        return False
+    B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
+    if R <= _BATCHED_COL_SHORT_R:
+        return True
+    return C >= _BATCHED_COL_MIN_C and (
+        nouts == 1 or B * C >= _BATCHED_COL_2OUT_MIN_OUTPUTS
+    )
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
@@ -635,7 +700,7 @@ def _reduce(
         else:
             reason = "inner-tree reduction cannot serve this geometry"
             red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
-            kind = fast_kind(red_pairs, kept_pairs, nouts)
+            kind = fast_kind(red_pairs, kept_pairs)
             if x.is_contiguous() and kind in ("row", "all"):
                 ordered = rt.reduce_row_tile(
                     trait,
@@ -675,33 +740,42 @@ def _reduce(
         return tuple(_as_shape(o, out_shape) for o in outs)
 
     red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+    cc = _hw.caps(x.device).cc
 
-    # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
-    # the fallback for direct calls and declines.
-    if (
-        len(out_shape) > 0
-        and x.is_contiguous()
-        and count < _INT32_LIMIT
-        and num_o < _INT32_LIMIT
-    ):
-        kind = fast_kind(red_pairs, kept_pairs, nouts)
+    # Reshape dense TensorIterator row/column views onto fast kernels; general remains
+    # the fallback for other layouts and declines.
+    if len(out_shape) > 0 and count < _INT32_LIMIT and num_o < _INT32_LIMIT:
+        kind = fast_kind(red_pairs, kept_pairs)
         red_n = x.numel() // max(1, math.prod(out_shape))
-        if kind == "row":
+        if kind == "row" and x.is_contiguous():
             x2 = x.reshape(math.prod(out_shape), red_n)
             fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
             if fast is not None:
                 return tuple(_as_shape(o, out_shape) for o in fast)
-        elif kind == "col":
-            # Splitting the reduced axis supplies parallelism for tall-narrow inputs:
-            # 7.24x, 2.53x, and 1.49x of ATen at (65536, 256), (16384, 1024), and (4096, 4096).
+        col_view = _physical_col_view(x, red_axes, red_pairs, kept_pairs, red_n, num_o)
+        if col_view is not None and _col_route_ok(col_view, nouts, cc):
             from . import kernel_coltile as ct
 
-            x2 = x.reshape(red_n, math.prod(out_shape))
-            out = ct.reduce_col_tile(trait, trait_key, x2, out_dtypes[0])
-            return (_as_shape(out, out_shape),)
+            if col_view.dim() == 2:
+                # Splitting the reduced axis supplies parallelism for tall-narrow
+                # inputs: 7.24x, 2.53x, and 1.49x of ATen at (65536, 256),
+                # (16384, 1024), and (4096, 4096).
+                if nouts == 1:
+                    fast = (
+                        ct.reduce_col_tile(trait, trait_key, col_view, out_dtypes[0]),
+                    )
+                else:
+                    fast = ct.reduce_col_tile_2out(
+                        trait, trait_key, col_view, out_dtypes
+                    )
+            else:
+                fast = ct.reduce_batched_col_tile(
+                    trait, trait_key, col_view, out_dtypes, nouts
+                )
+            return tuple(_as_shape(out, out_shape) for out in fast)
 
     config = select_general_config(
-        _hw.caps(x.device).cc,
+        cc,
         x.dtype,
         trait_key,
         count,
