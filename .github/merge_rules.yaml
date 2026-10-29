@@ -88,17 +88,6 @@
   - Lint
   - pull
 
-- name: OSS CI / pytorchbot / XLA
-  patterns:
-  - .github/ci_commit_pins/xla.txt
-  approved_by:
-  - pytorchbot
-  ignore_flaky_failures: false
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: Documentation
   patterns:
   - docs/**
@@ -433,7 +422,6 @@
   - torchgen/dest/lazy_ts_lowering.py
   - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
-  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
@@ -483,7 +471,6 @@
   patterns:
   - test/cpp/profiler/**
   - test/profiler/**
-  - third_party/kineto
   - torch/_C/_profiler.pyi
   - torch/autograd/profiler*
   - torch/csrc/autograd/profiler*
@@ -518,6 +505,7 @@
   - trichmo
   - hameerabbasi
   - riccardofelluga
+  - amjames
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -605,6 +593,17 @@
   - pull
   - inductor
 
+- name: c10 utilities
+  patterns:
+  - c10/util/**
+  - c10/test/util/**
+  approved_by:
+  - r-barnes
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -637,7 +636,6 @@
   - fegin
   - frgossen
   - georgehong
-  - han3101
   - htyu
   - huydhn
   - IvanKobzarev
@@ -672,6 +670,7 @@
   - soulitzer
   - tianyu-l
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
