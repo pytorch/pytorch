@@ -207,7 +207,13 @@ it.
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. The
+# python_code you JIT -- same results either way. One caveat: an artifact whose graph
+# calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a failed
+# import only warns), then refuses to load unless every op in CUSTOM_OPS and every
+# kernel key CUSTOM_OP_KERNELS lists for it is registered. The caller must import,
+# before load, what the artifact cannot record: C++ extension ops, ops from
+# torch.library.define or __main__, and kernels registered through
+# @torch.library.impl, register_kernel or another module's Library. The
 # eager backend has no kernels to accelerate, so the eager cache carries no compiled
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
@@ -2103,51 +2109,9 @@ def _write_custom_op_imports(
         if found := tuple(k for k in keys if has_kernel(qualname, k)):
             kernels[qualname] = found
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
-    buf.writeline("def _import_custom_op_modules():")
-    buf.writeline("    import importlib")
-    buf.writeline("    import warnings")
-    buf.writeline("    import torch")
-    buf.writeline("    import_errors = {}")
-    buf.writeline("    for module in CUSTOM_OP_MODULES:")
-    buf.writeline("        try:")
-    buf.writeline("            importlib.import_module(module)")
-    # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-    # torch.distributed.tensor raises ValueError.
-    buf.writeline("        except Exception as e:")
-    buf.writeline("            import_errors[module] = e")
-    buf.writeline("    missing = []")
-    buf.writeline("    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key")
-    buf.writeline("    for name, overload in CUSTOM_OPS:")
-    buf.writeline('        qualname = f"{name}.{overload}" if overload else name')
-    buf.writeline("        try:")
-    buf.writeline("            torch._C._dispatch_find_schema_or_throw(name, overload)")
-    buf.writeline("        except RuntimeError:")
-    buf.writeline("            missing.append(qualname)")
-    buf.writeline("            continue")
-    buf.writeline("        for key in CUSTOM_OP_KERNELS.get(qualname, ()):")
-    buf.writeline("            if not has_kernel(qualname, key):")
-    buf.writeline('                missing.append(f"{qualname} ({key} kernel)")')
-    buf.writeline("    if missing:")
-    buf.writeline("        raise torch.compiler.PrecompileError(")
-    buf.writeline(
-        '            f"this artifact calls custom ops or kernels not registered here: "'
-    )
-    buf.writeline('            f"{missing}. "')
-    buf.writeline(
-        '            "Import the modules registering them before loading it. Modules "'
-    )
-    buf.writeline(
-        "            f\"that failed to import: {sorted(import_errors) or 'none'}.\""
-    )
-    buf.writeline("        ) from next(iter(import_errors.values()), None)")
-    buf.writeline("    for module, e in import_errors.items():")
-    buf.writeline(
-        '        warnings.warn(f"importing custom op module {module!r} raised {e!r}; "'
-    )
-    buf.writeline(
-        '        "the ops this artifact calls and the kernels they had at capture are "'
-    )
-    buf.writeline('        "registered, so it loads anyway")')
+    from torch import _precompile_driver as driver
+
+    buf.writeline(inspect.getsource(driver._import_custom_op_modules).rstrip())
     buf.writeline("_import_custom_op_modules()")
     buf.writeline("del _import_custom_op_modules")
     buf.writeline("")
