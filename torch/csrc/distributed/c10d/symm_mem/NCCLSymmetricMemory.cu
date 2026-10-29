@@ -3,6 +3,7 @@
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
 #include <algorithm>
+#include <stdexcept>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
@@ -202,7 +203,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(NCCL_WIN_REQUIRED_ALIGNMENT)
     // RCCL advertises 4096-byte window alignment. The tested requirement is a
     // rounded backing allocation; registering an unrounded size also worked.
     // Use one rounded extent for both allocation and registration, while
@@ -501,6 +502,9 @@ void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
 #ifdef USE_ROCM
   pai_->check_peer_pointers();
 #endif
+  #ifndef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    TORCH_CHECK(false, "Device pointers are not available in NCCL < 2.28");
+  #endif
   return pai_->buffers_dev_;
 }
 
@@ -508,6 +512,9 @@ void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
 #ifdef USE_ROCM
   pai_->check_peer_pointers();
 #endif
+  #ifndef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    TORCH_CHECK(false, "Device pointers are not available in NCCL < 2.28");
+  #endif
   return pai_->signal_pads_dev_;
 }
 
@@ -748,7 +755,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && defined(NCCL_WIN_REQUIRED_ALIGNMENT)
     // Round the backing allocation to RCCL's advertised 4096-byte window
     // granularity; registration currently uses this same extent.
     const size_t total_size = at::round_up(
