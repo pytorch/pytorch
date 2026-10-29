@@ -2055,6 +2055,13 @@ _TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
         "or _ensure_cutlass_mm_registered()",
     }
 )
+# The setup of the lazy ops whose setup is narrower than their namespace's.
+_TORCH_LAZY_OPS = MappingProxyType(
+    {
+        "semi_structured::cusparselt_mm": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered()",
+        "semi_structured::cutlass_mm": "torch.sparse.semi_structured._ensure_cutlass_mm_registered()",
+    }
+)
 
 
 def _file_modules() -> dict[str, str]:
@@ -2114,7 +2121,7 @@ def _op_registration(
     ns = op_name.split("::")[0]
     # Checked first: a lazy custom_op's module imports without defining it.
     if ns in _TORCH_LAZY_OP_NAMESPACES:
-        return "lazy", _TORCH_LAZY_OP_NAMESPACES[ns]
+        return "lazy", _TORCH_LAZY_OPS.get(op_name, _TORCH_LAZY_OP_NAMESPACES[ns])
     module = _custom_op_module(op_name, overload) or _library_op_module(
         op_name, overload, file_modules
     )
