@@ -1146,7 +1146,9 @@ def break_graph_if_unsupported(
                         "expected speculation.reason is not None to be true"
                     )
                 return handle_graph_break(self, inst, speculation.reason)
-            stack: list[VariableTracker] = self.stack[:] if self.output.package else []
+            package = self.output.package
+            records = package is not None and package.records_graph_break_ops
+            stack: list[VariableTracker] = self.stack[:] if records else []
             try:
                 return inner_fn(self, inst)
             except (Unsupported, UserError) as excp:
