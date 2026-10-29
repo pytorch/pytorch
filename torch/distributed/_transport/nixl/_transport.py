@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import time
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
+from operator import itemgetter
 from threading import RLock
 from typing import Any, cast, TYPE_CHECKING
 
@@ -24,6 +27,8 @@ from ._work import _live_transports, _NIXLWork
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .._api import Memory
 
 
@@ -38,7 +43,7 @@ def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
 
 
-# Bounds loaded peer descriptors; past this, a peer is reset when it is idle.
+# Bounds loaded descriptors per peer; past this, a peer is reset when it is idle.
 _MAX_LOADED = 4096
 
 _LoadedKey = tuple[str, int, int, int]
@@ -129,16 +134,18 @@ class NIXLTransport(Transport):
             raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
         self._timeout = timeout
         self._default_timeout = timeout
-        self._peer_name: str | None = None
+        self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
-        # Peer registrations loaded into NIXL, keyed by (memory type, device,
-        # address, length).
-        self._loaded: dict[str, dict[_LoadedKey, bytes]] = {}
+        # Peer registrations loaded into NIXL as non-overlapping ((memory type,
+        # device, registration address, registration length), metadata) entries,
+        # sorted by key.
+        self._loaded: dict[str, list[tuple[_LoadedKey, bytes]]] = {}
         # Peers to reset once idle; transfers to them wait until then.
         self._resetting: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
+        self._pending_peers: Counter[str] = Counter()
         self._operation_lock = RLock()
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
         # is terminal; a failed or timed-out close retains unreleased resources
@@ -215,15 +222,18 @@ class NIXLTransport(Transport):
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        if self._peer_name is not None:
-            raise RuntimeError("transport is already connected")
-        name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
-        self._peer_name = name
+        agent = self._ensure_open()
+        try:
+            name = _agent_name(agent.add_remote_agent(peer_url))
+        except Exception:
+            self._close_if_dropped(agent, self._remote_agents)
+            raise
+        self._peers.add(name)
         self._remote_agents.add(name)
         return 0
 
     def connected(self) -> bool:
-        return self._peer_name is not None and not self._closed and not self._closing
+        return bool(self._peers) and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -306,6 +316,8 @@ class NIXLTransport(Transport):
             registration.device_id,
             registration.memory_type,
             metadata,
+            registration.address,
+            registration.length,
         )
 
     def _check_transfer(
@@ -318,8 +330,11 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
-        if self._peer_name != remote_buffer.agent_name:
-            raise ValueError("remote buffer does not belong to the connected peer")
+        remote_buffer._validate(
+            {name: getattr(remote_buffer, name) for name in remote_buffer._fields}
+        )
+        if remote_buffer.agent_name not in self._peers:
+            raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
@@ -379,6 +394,7 @@ class NIXLTransport(Transport):
         work._descriptors = (local_descs, remote_descs)
         self._transfers[id(work)] = work._handle
         self._pending[id(work)] = work
+        self._pending_peers[remote_buffer.agent_name] += 1
         _live_transports.add(self)
         try:
             work._state = agent.transfer(work._handle)
@@ -387,6 +403,13 @@ class NIXLTransport(Transport):
             # retain buffers until a native terminal state establishes safety.
             work._error = error
         return work
+
+    def _close_if_dropped(self, agent: Any, names: Iterable[str]) -> None:
+        # A load failing after it starts on a peer's descriptors drops them but
+        # keeps the peer's UCX connection, which then refuses reloads and
+        # in-flight status queries. The metadata may name any connected peer.
+        if not all(map(agent.check_remote_metadata, names)):
+            self._closing = True
 
     def _remove_remote_agent(self, agent: Any, name: str) -> None:
         agent.remove_remote_agent(name)
@@ -400,25 +423,29 @@ class NIXLTransport(Transport):
 
         NIXL resolves a remote address to any loaded descriptor containing it
         and cannot unload single descriptors, so one the peer has since
-        deregistered can break transfers to an overlapping registration. Resetting disconnects
-        the peer, so it waits for transfers to that peer; alternating between
-        overlapping registrations resets on every switch.
+        deregistered can break transfers to an overlapping registration.
+        Resetting disconnects the peer, so it waits for transfers to that peer;
+        alternating between overlapping registrations resets on every switch.
         """
         name = remote_buffer.agent_name
         key = (
             remote_buffer.memory_type,
             remote_buffer.device_id,
-            remote_buffer.address,
-            remote_buffer.length,
+            remote_buffer.region_address,
+            remote_buffer.region_length,
         )
-        loaded = self._loaded.get(name, {})
-        if name not in self._resetting and loaded.get(key) == remote_buffer.metadata:
+        loaded = self._loaded.get(name, [])
+        i = bisect.bisect_left(loaded, key, key=itemgetter(0))
+        if name not in self._resetting and loaded[i : i + 1] == [
+            (key, remote_buffer.metadata)
+        ]:
             return []
-        if (
-            name in self._resetting
-            or len(loaded) >= _MAX_LOADED
-            or any(_overlaps(key, other) for other in loaded)
-        ):
+        # Loaded keys never overlap each other, so only key's neighbors can.
+        stale = name in self._resetting or any(
+            _overlaps(key, other) for other, _ in loaded[max(i - 1, 0) : i + 1]
+        )
+        # Past the cap, reset only when idle so large batches do not drain.
+        if stale or (len(loaded) >= _MAX_LOADED and not self._pending_peers[name]):
             busy = [
                 work
                 for work in self._pending.values()
@@ -430,31 +457,33 @@ class NIXLTransport(Transport):
             if name in self._remote_agents:
                 self._remove_remote_agent(agent, name)
             self._resetting.discard(name)
-            loaded = {}
+            loaded, i = [], 0
         try:
             loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
-        except self._backend.nixlNotAllowedError:
-            # Changed connection info: the peer restarted and must be reset. NIXL
-            # also refuses an identical descriptor with new metadata, which only
-            # untracked descriptors from older peers can cause (unsupported).
-            self._resetting.add(name)
+        except Exception as error:
+            # Includes a peer just reset; NIXL cannot tell if it is wedged.
+            self._close_if_dropped(agent, self._remote_agents | {name})
+            refused = isinstance(error, self._backend.nixlNotAllowedError)
+            if refused and not self._closing:
+                # Changed connection info: the peer restarted and must be reset.
+                self._resetting.add(name)
             raise
-        except Exception:
-            # NIXL may drop the peer's descriptors but keep its UCX connection,
-            # which then refuses reloads and in-flight status queries.
-            self._closing = True
-            raise
-        self._remote_agents.add(loaded_name)
         if loaded_name != name:
-            try:
-                self._remove_remote_agent(agent, loaded_name)
-            except Exception:
-                # Preserve the agent for retryable close, including failed cleanup.
-                self._closing = True
-                _live_transports.add(self)
-                raise
+            if loaded_name in self._remote_agents:
+                # Another peer may have transfers in flight; reset it when idle.
+                self._resetting.add(loaded_name)
+            else:
+                self._remote_agents.add(loaded_name)
+                try:
+                    self._remove_remote_agent(agent, loaded_name)
+                except Exception:
+                    # Preserve the agent for retryable close, including failed cleanup.
+                    self._closing = True
+                    _live_transports.add(self)
+                    raise
             raise ValueError("remote buffer metadata names a different agent")
-        loaded[key] = remote_buffer.metadata
+        self._remote_agents.add(loaded_name)
+        loaded.insert(i, (key, remote_buffer.metadata))
         self._loaded[name] = loaded
         return []
 
@@ -646,7 +675,7 @@ class NIXLTransport(Transport):
             self._remote_agents.remove(name)
         self._loaded.clear()
         self._resetting.clear()
-        self._peer_name = None
+        self._peers.clear()
         self._agent = None
         self._closed = True
         _live_transports.discard(self)

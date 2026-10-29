@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, TYPE_CHECKING
+from typing_extensions import Self
 
 from .._serialization import _WireDescriptor
 
@@ -13,9 +15,34 @@ if TYPE_CHECKING:
     from ._transport import NIXLTransport
 
 
+def _subrange(
+    size: int, offset: int | None, length: int | None, name: str = "registered memory"
+) -> tuple[int, int]:
+    offset = 0 if offset is None else operator.index(offset)
+    if offset < 0 or offset > size:
+        raise ValueError(f"offset is outside the {name}")
+    length = size - offset if length is None else operator.index(length)
+    if length < 0 or length > size - offset:
+        raise ValueError(f"range exceeds the {name}")
+    return offset, length
+
+
+def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
+    if not isinstance(key, builtins.slice):
+        raise TypeError("expected a slice such as [a:b]")
+    start, stop, step = key.indices(size)
+    if step != 1:
+        raise ValueError("slice step must be 1")
+    return start, max(stop - start, 0)
+
+
 @dataclass(frozen=True)
 class NIXLRemoteBuffer(_WireDescriptor):
-    """A serializable descriptor for memory registered by a NIXL peer."""
+    """A serializable descriptor for memory registered by a NIXL peer.
+
+    ``address`` and ``length`` are the accessible range; ``region_address`` and
+    ``region_length`` are the containing registration.
+    """
 
     _backend = "nixl"
     _fields = {
@@ -25,6 +52,8 @@ class NIXLRemoteBuffer(_WireDescriptor):
         "device_id": int,
         "memory_type": str,
         "metadata": bytes,
+        "region_address": int,
+        "region_length": int,
     }
 
     agent_name: str
@@ -33,6 +62,24 @@ class NIXLRemoteBuffer(_WireDescriptor):
     device_id: int
     memory_type: str
     metadata: bytes
+    region_address: int
+    region_length: int
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        offset, length = _subrange(self.length, offset, length, "remote buffer")
+        return replace(self, address=self.address + offset, length=length)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        return self.slice(*_slice_range(self.length, key))
+
+    @classmethod
+    def _validate(cls, fields: dict[str, Any]) -> None:
+        super()._validate(fields)
+        if fields["address"] < fields["region_address"] or (
+            fields["address"] + fields["length"]
+            > fields["region_address"] + fields["region_length"]
+        ):
+            raise ValueError("descriptor range is outside its registration")
 
 
 @dataclass
@@ -62,6 +109,14 @@ class NIXLMemoryView:
     def size(self) -> int:
         return self._length
 
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        self._memory._registration.ensure_active()
+        offset, length = _subrange(self._length, offset, length, "view")
+        return type(self)(self._memory, self._offset + offset, length)
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        return self.slice(*_slice_range(self._length, key))
+
 
 class NIXLMutableMemoryView(NIXLMemoryView):
     """A writable byte range in NIXL-registered memory."""
@@ -78,17 +133,7 @@ class NIXLMemory:
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         self._registration.ensure_active()
-        offset = 0 if offset is None else operator.index(offset)
-        if offset < 0 or offset > self._registration.length:
-            raise ValueError("offset is outside the registered memory")
-        length = (
-            self._registration.length - offset
-            if length is None
-            else operator.index(length)
-        )
-        if length < 0 or length > self._registration.length - offset:
-            raise ValueError("view exceeds the registered memory")
-        return offset, length
+        return _subrange(self._registration.length, offset, length)
 
     def to_view(
         self, offset: int | None = None, length: int | None = None

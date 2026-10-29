@@ -160,6 +160,7 @@ class _NIXLWork(_PollingWork):
                 if self._error is None:
                     self._error = error
             transport._pending.pop(id(self))
+            transport._pending_peers[self._buffers[1].agent_name] -= 1
             # Lock-free readers use the recorded error and finalized bookkeeping.
             # Publish completion last; completed Works are never reset.
             self._done = True

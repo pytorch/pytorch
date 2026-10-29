@@ -7,6 +7,7 @@ import json
 import threading
 import time
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
+import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
@@ -117,6 +119,9 @@ class _Agent:
         self.remote_metadata.pop(name, None)
         self.peers.pop(name, None)
 
+    def check_remote_metadata(self, name):
+        return name in self.remote_metadata
+
     def register_memory(self, tensor, *, backends):
         if backends != list(self.backends):
             raise AssertionError("unexpected registration backend")
@@ -185,6 +190,9 @@ class _Agent:
         return "DONE"
 
     def check_xfer_state(self, handle):
+        # Like NIXL, a peer whose descriptors were dropped refuses status queries.
+        if handle.state == "PROC" and handle.remote_agent not in self.remote_metadata:
+            raise nixlNotFoundError("NIXL_ERR_NOT_FOUND")
         if handle.state == "PROC":
             handle.state = self.transfer_state
         # Like NIXL, raise for a failed transfer and keep that state final.
@@ -389,6 +397,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         wrong = replace(
             remote,
             address=remote.address + remote.length,
+            region_address=remote.address + remote.length,
             metadata=json.dumps(("unexpected", [])).encode(),
         )
         with patch.object(
@@ -473,6 +482,14 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                 first.write(source.to_view(), remote)
         self.assertEqual(first._agent.loads, loads + 1)
 
+    def test_remote_slices_reuse_loaded_metadata(self):
+        first, second, source, remote = self.registered_pair()
+        loads = first._agent.loads
+        first.write(source.to_view(0, 2), remote.slice(2, 2))
+        first.write(source.to_view(), remote)
+        first.write(source.to_view(0, 2), remote.slice(0, 2))
+        self.assertEqual(first._agent.loads, loads + 1)
+
     @parametrize("start", [0, 4])
     def test_reregistered_remote_memory_resets_peer(self, start):
         first, second = self.make_transport_pair()
@@ -496,8 +513,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertFalse(_nixl._overlaps(key, ("VRAM", 0, 100, 8)))
         self.assertFalse(_nixl._overlaps(key, ("DRAM", 1, 100, 8)))
 
+    @parametrize("capped", [False, True])
     @parametrize("use_async", [False, True])
-    def test_reset_waits_for_peer_transfers(self, use_async):
+    def test_reset_waits_for_peer_transfers(self, use_async, capped):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.arange(8, dtype=torch.uint8))
         target = torch.zeros(8, dtype=torch.uint8)
@@ -513,7 +531,13 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             else:
                 first.write(source.to_view(), whole.to_remote_buffer(), timeout=timeout)
 
-        with patch.object(_Agent, "transfer_state", "PROC"), no_sleep():
+        # Past the loaded limit, stale peers still wait.
+        limit = 1 if capped else _nixl._MAX_LOADED
+        with (
+            patch.object(_nixl, "_MAX_LOADED", limit),
+            patch.object(_Agent, "transfer_state", "PROC"),
+            no_sleep(),
+        ):
             work = first.write(
                 source.to_view(0, 4), half.to_remote_buffer(), async_op=True
             )
@@ -541,26 +565,37 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertNotIn("second", first._resetting)
         self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
 
-    def test_resets_idle_peer_at_loaded_limit(self):
+    def test_loaded_limit_resets_only_idle_peer(self):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.arange(8, dtype=torch.uint8))
-        tensors = [torch.zeros(8, dtype=torch.uint8) for _ in range(2)]
+        tensors = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
         targets = [second.register_memory(tensor) for tensor in tensors]
         with patch.object(_nixl, "_MAX_LOADED", 1):
+            # Past the cap, a busy peer loads without waiting for its transfers.
             with patch.object(first._agent, "transfer_state", "PROC"), no_sleep():
-                work = first.write(
-                    source.to_view(), targets[0].to_remote_buffer(), async_op=True
-                )
-                with self.assertRaisesRegex(
-                    TimeoutError, "peer transfers remain pending"
-                ):
+                works = [
+                    first.write(source.to_view(), t.to_remote_buffer(), async_op=True)
+                    for t in targets[:2]
+                ]
+            self.assertEqual(len(first._agent.remote_metadata["second"]), 2)
+            for work in works:
+                work.wait()
+            first.write(source.to_view(), targets[2].to_remote_buffer())
+            # Loaded registrations are reused at the limit, idle or busy.
+            loads = first._agent.loads
+            first.write(source.to_view(), targets[2].to_remote_buffer())
+            with patch.object(first._agent, "transfer_state", "PROC"), no_sleep():
+                works = [
                     first.write(
-                        source.to_view(), targets[1].to_remote_buffer(), timeout=0
+                        source.to_view(), targets[2].to_remote_buffer(), async_op=True
                     )
-            work.wait()
-            first.write(source.to_view(), targets[1].to_remote_buffer())
+                    for _ in range(2)
+                ]
+            self.assertEqual(first._agent.loads, loads)
+            for work in works:
+                work.wait()
         self.assertEqual(len(first._agent.remote_metadata["second"]), 1)
-        self.assertEqual(tensors[1], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(tensors[2], torch.arange(8, dtype=torch.uint8))
 
     @parametrize("use_async", [False, True])
     def test_reset_ignores_peer_transfer_errors(self, use_async):
@@ -613,21 +648,114 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertNotIn("second", first._resetting)
         self.assertEqual(target, torch.ones(8))
 
-    def test_failed_load_closes_transport(self):
+    def test_connect_restarted_peer_then_retry(self):
         first, second, source, remote = self.registered_pair()
-        other = second.register_memory(torch.zeros(8)).to_remote_buffer()
+        first.write(source.to_view(), remote)
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            restarted = new_transport("nixl", agent_name="second", plugin=self.plugin)
+        self.addCleanup(restarted.close)
+        with self.assertRaisesRegex(nixlNotAllowedError, "NOT_ALLOWED"):
+            first.connect(restarted.bind())
+        target = torch.zeros(8)
+        moved = restarted.register_memory(target).to_remote_buffer()
+        with self.assertRaisesRegex(nixlNotAllowedError, "NOT_ALLOWED"):
+            first.write(source.to_view(), moved)
+        first.write(source.to_view(), moved)
+        self.assertEqual(target, torch.ones(8))
+
+    @parametrize("error", [RuntimeError, nixlNotAllowedError])
+    @parametrize("dropped", ["second", "third"])
+    def test_load_dropping_peer_closes_transport(self, error, dropped):
+        first, source, _, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[1])
         with patch.object(_Agent, "transfer_state", "PROC"):
-            work = first.write(source.to_view(), remote, async_op=True)
-        with patch.object(
-            first._agent, "add_remote_agent", side_effect=RuntimeError("load failed")
-        ):
-            with self.assertRaisesRegex(RuntimeError, "load failed"):
-                first.write(source.to_view(), other)
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+        metadata = first._agent.remote_metadata
+        saved = metadata[dropped]
+
+        def drop_peer(_):
+            del metadata[dropped]
+            raise error("load failed")
+
+        with patch.object(first._agent, "add_remote_agent", side_effect=drop_peer):
+            with self.assertRaisesRegex(error, "load failed"):
+                first.write(source.to_view(), remotes[3])
         self.assertFalse(first.connected())
+        self.assertFalse(first._resetting)
         with self.assertRaisesRegex(RuntimeError, "closed"):
-            first.write(source.to_view(), remote)
+            first.write(source.to_view(), remotes[1])
+        if dropped == "second":
+            # The dropped peer's transfer can never be confirmed.
+            with self.assertRaises(TimeoutError):
+                first.close(timeout=0)
+            self.assertFalse(work.is_completed())
+            metadata[dropped] = saved
         work.wait()
+        first.close(timeout=0)
+
+    @parametrize("reset", [False, True])
+    def test_load_dropping_unloaded_peer_closes_transport(self, reset):
+        # A peer counts whether it was only connected or was just reset.
+        first, source, _, remotes = self.connect_peers()
+        if reset:
+            first.write(source.to_view(), remotes[0])
+            first._resetting.add("second")
+        metadata = first._agent.remote_metadata
+
+        def drop_peer(_):
+            metadata.pop("second", None)
+            raise RuntimeError("load failed")
+
+        with patch.object(first._agent, "add_remote_agent", side_effect=drop_peer):
+            with self.assertRaisesRegex(RuntimeError, "load failed"):
+                first.write(source.to_view(), remotes[0])
+        self.assertFalse(first.connected())
+
+    def test_connect_dropping_peer_closes_transport(self):
+        first, source, _, remotes = self.connect_peers()
+
+        def drop_peer(_):
+            del first._agent.remote_metadata["third"]
+            raise RuntimeError("load failed")
+
+        with patch.object(first._agent, "add_remote_agent", side_effect=drop_peer):
+            with self.assertRaisesRegex(RuntimeError, "load failed"):
+                first.connect(b"bad")
+        self.assertFalse(first.connected())
+
+    def test_async_reset_wait_does_not_block(self):
+        first, _, source, remote = self.registered_pair()
+        first._agent.transfer_state = "PROC"
+        work = first.write(source.to_view(), remote, async_op=True)
+        first._resetting.add("second")
+
+        async def finish():
+            await asyncio.sleep(0)
+            first._agent.transfer_state = "DONE"
+
+        async def main():
+            write = first.write_async(source.to_view(), remote)
+            await asyncio.wait_for(asyncio.gather(write, finish()), 5)
+
+        with no_sleep():
+            asyncio.run(main())
         self.assertTrue(work.is_success())
+        self.assertNotIn("second", first._resetting)
+
+    def test_rejected_load_keeps_transport(self):
+        first, second, source, remote = self.registered_pair()
+        first.write(source.to_view(), remote)
+        far = remote.region_address + 4096
+        with patch.object(
+            first._agent, "add_remote_agent", side_effect=RuntimeError("bad metadata")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bad metadata"):
+                first.write(
+                    source.to_view(), replace(remote, address=far, region_address=far)
+                )
+        self.assertTrue(first.connected())
+        self.assertFalse(first._resetting)
+        first.write(source.to_view(), remote)
 
     def test_failed_transfer_resets_peer(self):
         first, _, source, remote = self.registered_pair()
@@ -1166,10 +1294,165 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
 
+    def test_remote_slice_ranges(self):
+        _, _, _, remote = self.registered_pair()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual(
+            (part.address, part.length, part.region_address, part.region_length),
+            (remote.address + 3, 2, remote.address, remote.length),
+        )
+        self.assertEqual(part.metadata, remote.metadata)
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_rejects_descriptor_outside_registration(self):
+        first, _, source, remote = self.registered_pair()
+        for wrong in (
+            replace(remote, address=remote.address - 1),
+            replace(remote, length=remote.length + 1),
+        ):
+            with self.assertRaisesRegex(ValueError, "outside its registration"):
+                wrong.serialize()
+            with self.assertRaisesRegex(ValueError, "outside its registration"):
+                first.write(source.to_view(0, 1), wrong)
+        data = json.loads(remote.serialize())
+        data["fields"]["region_length"] = 0
+        with self.assertRaisesRegex(ValueError, "outside its registration"):
+            type(remote).deserialize(json.dumps(data).encode())
+
+    def test_slice_unregistered_view(self):
+        first, _, source, _ = self.registered_pair()
+        view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
+    def connect_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            third, fourth = (
+                new_transport("nixl", agent_name=name, plugin=self.plugin, timeout=5)
+                for name in ("third", "fourth")
+            )
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        # The last target is a second registration on the first peer.
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(4)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth, second), targets)
+        ]
+        return first, source, targets, remotes
+
+    def test_connects_multiple_peers(self):
+        first, source, targets, remotes = self.connect_peers()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            other = first.write(source.to_view(), remotes[1], async_op=True, timeout=0)
+            self.assertIn("second", first._agent.remote_metadata)
+        work.wait()
+        other.wait()
+        for remote in remotes[:2]:
+            first.write(source.to_view(), remote)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        self.assertEqual(first._peers, {"second", "third"})
+        self.assertTrue(first.connected())
+        loads = first._agent.loads
+        self.assertEqual(first.connect(json.dumps(["third", []]).encode()), 0)
+        first.write(source.to_view(), remotes[1])
+        self.assertEqual(first._agent.loads, loads + 1)
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+        agent = first._agent
+        first.close()
+        self.assertFalse(agent.remote_metadata)
+
+    def test_connect_rank_multiple_peers(self):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            transports = [
+                new_transport("nixl", agent_name=f"rank{rank}", plugin=self.plugin)
+                for rank in range(3)
+            ]
+        for transport in transports:
+            self.addCleanup(transport.close)
+        store = dist.HashStore()
+        calls = [(0, 1), (0, 2), (1, 0), (2, 0)]
+        with ThreadPoolExecutor(len(calls)) as pool:
+            futures = [
+                pool.submit(
+                    transports[rank].connect_rank,
+                    peer,
+                    store=store,
+                    rank=rank,
+                    timeout=5,
+                )
+                for rank, peer in calls
+            ]
+            for future in futures:
+                future.result(timeout=10)
+        self.assertEqual(transports[0]._peers, {"rank1", "rank2"})
+        source = transports[0].register_memory(torch.arange(8, dtype=torch.uint8))
+        for transport in transports[1:]:
+            target = torch.zeros(8, dtype=torch.uint8)
+            remote = transport.register_memory(target).to_remote_buffer()
+            transports[0].write(source.to_view(), remote)
+            self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
+            self.assertEqual(transport._peers, {"rank0"})
+
+    def test_mismatched_metadata_keeps_other_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[1])
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            wrong = replace(remotes[1], metadata=remotes[0].metadata)
+            with self.assertRaisesRegex(ValueError, "different agent"):
+                first.write(source.to_view(), wrong)
+            self.assertIn("second", first._agent.remote_metadata)
+        work.wait()
+        # The other peer is reset before its next new descriptor is loaded.
+        self.assertIn("second", first._resetting)
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertNotIn("second", first._resetting)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+
+    def test_reset_waits_only_for_its_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[1])
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+        first._resetting.add("third")
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[1], timeout=0)
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertFalse(work._done)
+        work.wait()
+
+    def test_reset_marks_only_its_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[0])
+        first.write(source.to_view(), remotes[1])
+        first._resetting.add("third")
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads)
+        first._resetting.add("second")
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertEqual(first._resetting, {"third"})
+        # A new registration of an idle peer loads without resetting it.
+        first.write(source.to_view(), remotes[3])
+        self.assertEqual(first._agent.loads, loads + 2)
+        self.assertEqual(len(first._loaded["second"]), 2)
+        self.assertEqual(targets[3], targets[0])
+
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
-        with self.assertRaisesRegex(RuntimeError, "already connected"):
-            first.connect(second.bind())
         with self.assertRaisesRegex(ValueError, "connected peer"):
             first.write(source.to_view(), replace(remote, agent_name="other"))
         with self.assertRaisesRegex(ValueError, "different agent"):

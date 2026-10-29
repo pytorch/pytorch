@@ -4,8 +4,7 @@ import logging
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
-import torch.distributed as dist
-
+from ._api import _exchange, _pair_store
 from ._registry import new_transport
 from ._work import _validate_timeout
 
@@ -15,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import torch
+    import torch.distributed as dist
 
     from ._api import Transport
 
@@ -62,32 +62,20 @@ def new_transport_rank(
         # peers before unregistering memory or closing the transport.
 
     Calls are matched in order per rank pair and backend: the Nth call on each
-    peer connects to the other's Nth call, including failed calls. One Store can
-    therefore connect a rank to every other rank. Bootstrap failures attempt to
-    close the partially created transport.
+    peer connects to the other's Nth call, including calls that failed after
+    validating ranks, such as backend construction errors. One Store can
+    therefore connect a rank to every other rank. To connect one transport to several ranks, use
+    ``Transport.connect_rank``. Bootstrap failures attempt to close the
+    partially created transport.
     """
     if not isinstance(bootstrap_timeout, timedelta):
         bootstrap_timeout = timedelta(seconds=bootstrap_timeout)
     timeout = bootstrap_timeout.total_seconds()
     _validate_timeout(timeout)
-    rank = dist.get_rank() if rank is None else rank
-    store = dist.distributed_c10d._get_default_store() if store is None else store
-    if type(rank) is not int or rank < 0:
-        raise ValueError("rank must be a nonnegative integer")
-    if type(peer_rank) is not int or peer_rank < 0:
-        raise ValueError("peer_rank must be a nonnegative integer")
-    if peer_rank == rank:
-        raise ValueError("peer_rank must differ from the local rank")
-    pair = f"transport/{backend.lower()}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
-    attempt = store.add(f"{pair}/attempts/{rank}", 1)
-    store = dist.PrefixStore(f"{pair}/{attempt}", store)
+    store, rank = _pair_store(f"transport/{backend.lower()}", store, rank, peer_rank)
     transport = new_transport(backend, device, **kwargs)
     try:
-        # Store.set accepts bytes; the stub only declares str.
-        # pyrefly: ignore [bad-argument-type]
-        store.set(str(rank), transport.bind(timeout=timeout))
-        store.wait([str(peer_rank)], bootstrap_timeout)
-        transport.connect(store.get(str(peer_rank)), timeout=timeout)
+        _exchange(transport, store, rank, peer_rank, bootstrap_timeout)
     except BaseException:
         try:
             transport.close(timeout=timeout)
