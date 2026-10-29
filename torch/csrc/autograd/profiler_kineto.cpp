@@ -96,15 +96,6 @@ inline bool isExternalTracerState(ProfilerState state) {
       state == ProfilerState::PRIVATEUSE1;
 }
 
-inline bool hasRequestedDeviceActivity(
-    const std::set<torch::profiler::impl::ActivityType>& activities) {
-  return activities.contains(ActivityType::CUDA) ||
-      activities.contains(ActivityType::XPU) ||
-      activities.contains(ActivityType::MTIA) ||
-      activities.contains(ActivityType::HPU) ||
-      activities.contains(ActivityType::PrivateUse1);
-}
-
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -659,7 +650,9 @@ void prepareProfiler(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!hasRequestedDeviceActivity(activities),
+      /*cpuOnly=*/!(
+          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
+          c10::get_privateuse1_backend() != "privateuseone"),
       activities,
       config.experimental_config,
       config.trace_id,

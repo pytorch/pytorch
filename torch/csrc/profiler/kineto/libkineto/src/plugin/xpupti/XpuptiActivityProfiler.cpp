@@ -101,6 +101,9 @@ std::unique_ptr<libkineto::IActivityProfilerSession> XPUActivityProfiler::
     configure(
         const std::set<ActivityType>& activity_types,
         const libkineto::Config& config) {
+  if (!config.gpuTracingEnabled()) {
+    return nullptr;
+  }
   return std::make_unique<XpuptiScopeProfilerSession>(
       XpuptiActivityApi::singleton(), name(), config, activity_types);
 }

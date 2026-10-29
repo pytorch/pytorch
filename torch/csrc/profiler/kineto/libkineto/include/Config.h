@@ -83,6 +83,12 @@ class Config : public AbstractConfig {
     return rocprofPerThreadBufferEnabled_;
   }
 
+  // Whether this trace may arm GPU tracing. A profiler registered without GPU
+  // support never arms it, whatever this says.
+  [[nodiscard]] bool gpuTracingEnabled() const {
+    return gpuTracingEnabled_;
+  }
+
   void setSelectedActivityTypes(const std::set<ActivityType>& types) {
     selectedActivityTypes_ = types;
   }
@@ -328,6 +334,10 @@ class Config : public AbstractConfig {
   // Kept separate from perThreadBufferEnabled_ because existing configs already
   // set that key true, and reusing it would flip every ROCm run onto the path.
   bool rocprofPerThreadBufferEnabled_{false};
+
+  // Lets a client keep a trace that requested no device activity away from
+  // the GPU tracer, which may be shared with other tools.
+  bool gpuTracingEnabled_{true};
   std::set<ActivityType> selectedActivityTypes_;
 
   // The activity profiler settings are all on-demand

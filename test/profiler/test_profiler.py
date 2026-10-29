@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -93,10 +92,6 @@ def get_profiler_activities(device_type):
         if device_activity and device_activity in supported_activities():
             activities.append(device_activity)
     return activities
-
-
-def setUpModule():
-    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -228,8 +223,11 @@ if out[0] != 1:
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
 
-with profile(activities=[ProfilerActivity.CUDA]):
+with profile(activities=[ProfilerActivity.CUDA]) as prof:
     add_one_graphed(zeros)
+    torch.cuda.synchronize()
+if not any(e.device_type == torch.autograd.DeviceType.CUDA for e in prof.events()):
+    raise AssertionError("Expected device events from the graphed callable")
 """,
             ],
             text=True,
@@ -237,6 +235,42 @@ with profile(activities=[ProfilerActivity.CUDA]):
         )
 
         # ^ this will throw an exception if the script fails.
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_device_tracing_decided_per_session(self):
+        # Kineto is registered once per process, by the first session. Each
+        # session must still decide for itself whether to trace the device.
+        # Runs in a fresh process because earlier tests may have registered Kineto.
+        script = """
+import json
+import torch
+from torch.autograd import DeviceType
+from torch.profiler import profile, ProfilerActivity
+
+x = torch.ones(64, 64, device="cuda")
+
+def run(activities):
+    with profile(activities=activities) as prof:
+        x @ x
+        torch.cuda.synchronize()
+    events = prof.events()
+    return {
+        "device": sum(e.device_type == DeviceType.CUDA for e in events),
+        "runtime": sum(e.name.startswith("cuda") for e in events),
+    }
+
+cpu, cuda = [ProfilerActivity.CPU], [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+print(json.dumps([run(cpu), run(cuda), run(cpu)]))
+"""
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], text=True, timeout=60
+        )
+        cpu_first, cuda, cpu_after = json.loads(out.splitlines()[-1])
+        none = {"device": 0, "runtime": 0}
+        self.assertEqual(cpu_first, none)
+        self.assertGreater(cuda["device"], 0)
+        self.assertGreater(cuda["runtime"], 0)
+        self.assertEqual(cpu_after, none)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
@@ -2320,7 +2354,7 @@ with open(sys.argv[1], "w") as f:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     # The child deadlocks once the parent has initialized Kineto's XPU profiler,
-    # which setUpModule does on any XPU build.
+    # which the first profiling session does on any XPU build.
     @unittest.skipIf(
         TEST_XPU,
         "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
