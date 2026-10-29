@@ -2,6 +2,7 @@
 import copy
 import os
 import random
+import unittest
 
 import torch
 from torch import nn
@@ -10,10 +11,21 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification, skipIfXpu
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_MTIA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
+
+_HAS_TRITON_BY_DEVICE = {
+    "cuda": HAS_CUDA_AND_TRITON,
+    "xpu": HAS_XPU_AND_TRITON,
+    "mtia": HAS_MTIA_AND_TRITON,
+}
 
 
 class Model2Conv(nn.Module):
@@ -34,6 +46,7 @@ class Model2Conv(nn.Module):
         return (torch.rand(2, 3, 16, 16),)
 
 
+@skipIfXpu(msg="ccl doesn't currently work on the XPU stack")
 class TestLayoutOptim(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -43,12 +56,26 @@ class TestLayoutOptim(TestCase):
 
         import torch.distributed as dist
 
+        has_triton = _HAS_TRITON_BY_DEVICE.get(cls.device_type)
+        if not has_triton:
+            raise unittest.SkipTest(
+                f"triton is not available for {cls.device_type} on this host"
+            )
+
+        if not dist.is_available():
+            raise unittest.SkipTest("torch.distributed is not available")
+        try:
+            backend = dist.get_default_backend_for_device(cls.device_type)
+        except ValueError:
+            raise unittest.SkipTest(
+                f"no default distributed backend registered for {cls.device_type}"
+            ) from None
+
         # not use a fixed port for stress test
         tot_retry = 5
         for retry_no in range(tot_retry):
             try:
                 port = random.randint(10000, 60000)
-                backend = dist.get_default_backend_for_device(cls.device_type)
                 dist.init_process_group(
                     backend=backend,
                     init_method=f"tcp://localhost:{port}",
@@ -298,7 +325,7 @@ class TestLayoutOptim(TestCase):
         """
         Repro for issue https://github.com/pytorch/pytorch/issues/120759
 
-        The accelerator implementation of aten.nll_loss2d_backward.default requires
+        The CUDA implementation of aten.nll_loss2d_backward.default requires
         the self tensor (whose layout will be used to create grad_input)
         to be contiguous. Layout optimization may change the self tensor's layout
         and cause failure. We fix that by adding layout constraints to the
@@ -341,11 +368,10 @@ class TestLayoutOptim(TestCase):
         self.assertTrue(torch.allclose(ref, loss))
 
 
-instantiate_device_type_tests(TestLayoutOptim, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestLayoutOptim, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
-    from torch.utils._triton import has_triton
-
-    if has_triton():
-        run_tests()
+    run_tests()
