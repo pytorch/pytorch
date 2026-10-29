@@ -31,6 +31,7 @@ from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
+from torch._subclasses.fake_impls import fast_constructor_impls
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     _check_for_subclass_arg,
@@ -4360,6 +4361,115 @@ class TestFakeTensorDispatchCache(TestCase):
             self.assertFalse(actual.requires_grad)
             self._assert_symbolic_cache_hit(before_hit, actual, expected)
 
+    def test_cache_bypass_custom_op_without_cache_key(self):
+        """
+        Test that a custom op, which can't be cached, is bypassed without
+        building a cache key for it.
+        """
+
+        @torch.library.custom_op("_torch_testing::fake_cache_bypass", mutates_args=())
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        outputs = []
+        f.register_fake(lambda x: outputs[0])
+
+        with FakeTensorMode():
+            x = torch.randn(3)
+            outputs.append(torch.empty(3))
+            FakeTensorMode.cache_clear()
+            built_key = AssertionError("built a cache key")
+            with patch.object(FakeTensorMode, "_cache_key", side_effect=built_key):
+                f(x)
+                f(x)
+            self.assertBypasses("non-builtin", 2)
+            self.assertEqual(FakeTensorMode.cache_info().size, 0)
+
+    def test_fast_constructors_match_general_path(self):
+        """
+        Test that the constructors FakeTensorMode builds directly (without the
+        cache) give the same result as the cache and the general path, and
+        that what they don't handle falls back.
+        """
+        aten = torch.ops.aten
+        with FakeTensorMode() as mode:
+            x = torch.empty(2, 3)
+            xi = torch.empty(2, 3, dtype=torch.int64)
+            nhwc = torch.empty(2, 3, 4, 5).to(memory_format=torch.channels_last)
+            const = torch.tensor(2.0)
+            xt = x.t()
+        sym_mode = FakeTensorMode(shape_env=ShapeEnv())
+        dynamic = StatelessSymbolicContext(dynamic_sizes=[DimDynamic.DYNAMIC] * 2)
+        sym = sym_mode.from_tensor(torch.empty(2, 3), symbolic_context=dynamic)
+        cpu = torch.device("cpu")
+        cases = [
+            # (mode, func, args, kwargs, handled by the fast path)
+            (mode, aten.empty_like.default, (x,), {}, True),
+            (mode, aten.empty_like.default, (xi,), {"dtype": torch.float64}, True),
+            (mode, aten.zeros_like.default, (x,), {"device": cpu}, True),
+            (
+                mode,
+                aten.ones_like.default,
+                (x,),
+                {"device": torch.device("meta")},
+                True,
+            ),
+            (
+                mode,
+                aten.ones_like.default,
+                (nhwc,),
+                {"memory_format": torch.contiguous_format},
+                True,
+            ),
+            (mode, aten.full_like.default, (xi, 2.5), {}, True),
+            (mode, aten.randn_like.default, (x,), {}, True),
+            (mode, aten.new_zeros.default, (x, [4, 5]), {"dtype": torch.int32}, True),
+            (mode, aten.new_full.default, (xi, [3], 7), {}, True),
+            (mode, aten.empty.memory_format, ([3, 4],), {"device": cpu}, True),
+            (mode, aten.zeros.default, ([0, 2],), {"dtype": torch.float16}, True),
+            (mode, aten.empty_strided.default, ([2, 3], [1, 2]), {}, True),
+            # preserve_format keeping strides that aren't contiguous
+            (mode, aten.empty_like.default, (nhwc,), {}, False),
+            (mode, aten.empty_like.default, (xt,), {}, False),
+            # constant propagation
+            (mode, aten.zeros_like.default, (const,), {}, False),
+            (sym_mode, aten.empty_like.default, (sym,), {}, False),
+            # the general path raises for these
+            (mode, aten.randn_like.default, (xi,), {}, False),
+            (mode, aten.new_empty.default, (x, [2, -1]), {}, False),
+            (
+                mode,
+                aten.empty.memory_format,
+                ([2, 3, 4, 5],),
+                {"memory_format": torch.channels_last},
+                False,
+            ),
+        ]
+        for fake_mode, func, args, kwargs, handled in cases:
+            with self.subTest(func=str(func), args=args, kwargs=kwargs):
+                fast = fast_constructor_impls[func](fake_mode, func, args, kwargs)
+                self.assertEqual(fast is not NotImplemented, handled)
+                if not handled:
+                    continue
+                with fake_mode, patch.dict(fast_constructor_impls, clear=True):
+                    expected = func(*args, **kwargs)
+                before = FakeTensorMode.cache_info()
+                with fake_mode:
+                    dispatched = func(*args, **kwargs)
+                after = FakeTensorMode.cache_info()
+                self.assertEqual(
+                    (after.hits, after.misses), (before.hits, before.misses)
+                )
+                for out in (fast, dispatched):
+                    self.assertIs(type(out), FakeTensor)
+                    self.assertEqual(
+                        extract_tensor_metadata(out), extract_tensor_metadata(expected)
+                    )
+                    self.assertEqual(
+                        torch._C._dispatch_key_set(out),
+                        torch._C._dispatch_key_set(expected),
+                    )
+
     def test_cache_bypass_prims_as_strided(self):
         x = torch.empty(0, 8)
         y = torch.empty(0, 8)
@@ -4735,11 +4845,13 @@ class TestFakeTensorDispatchCache(TestCase):
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
+            # index's fake impl makes its output with new_empty, which skips
+            # the cache (see fast_constructor_impls).
             ref = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
-            self.assertHitsMisses(0, 3)
+            self.assertHitsMisses(0, 2)
 
             res = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
-            self.assertHitsMisses(1, 3)
+            self.assertHitsMisses(1, 2)
             self.assertEqual(extract_tensor_metadata(ref), extract_tensor_metadata(res))
 
         with FakeTensorMode():

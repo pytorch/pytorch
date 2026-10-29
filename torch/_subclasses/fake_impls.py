@@ -58,6 +58,8 @@ from torch.utils._stats import count_label
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from types import NotImplementedType
+    from typing import TypeGuard
 
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.types import IntLikeType
@@ -309,6 +311,187 @@ def constructors(
             fake_mode, r, out_device
         )
     return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
+
+
+# Constructors whose result is just a fresh contiguous tensor of a known shape,
+# dtype and device. FakeTensorMode.dispatch builds that tensor directly, which
+# is several times cheaper than a dispatch cache hit (whose key reads every
+# property of the inputs) or the general path (which runs the decomposition or
+# meta kernel). Each returns NotImplemented to leave anything less plain, such
+# as preserving non-contiguous strides or constant propagation, to those paths.
+
+_PLAIN_CONSTRUCTOR_KWARGS = frozenset(
+    {"dtype", "layout", "device", "pin_memory", "memory_format"}
+)
+
+
+def _is_plain_fake(t: object, fake_mode: FakeTensorMode) -> TypeGuard[FakeTensor]:
+    return (
+        fake_mode.is_our_fake(t)
+        and t.constant is None
+        and not t._has_symbolic_sizes_strides
+        and t.layout is torch.strided
+    )
+
+
+def _is_plain_size(size: object) -> bool:
+    if not isinstance(size, (list, tuple)):
+        return False
+    for v in size:
+        if type(v) is not int or v < 0:
+            return False
+    return True
+
+
+def _are_plain_numbers(values: tuple[object, ...]) -> bool:
+    for v in values:
+        if type(v) not in (int, float, bool):
+            return False
+    return True
+
+
+def _has_plain_kwargs(kwargs: dict[str, Any]) -> bool:
+    return (
+        kwargs.keys() <= _PLAIN_CONSTRUCTOR_KWARGS
+        and kwargs.get("layout") in (None, torch.strided)
+        and not kwargs.get("pin_memory")
+    )
+
+
+def _make_plain_fake(
+    fake_mode: FakeTensorMode,
+    size: Sequence[int],
+    dtype: torch.dtype,
+    device: torch.device,
+    stride: Sequence[int] | None = None,
+) -> FakeTensor:
+    with in_kernel_invocation_manager(fake_mode):
+        if stride is None:
+            meta = torch.empty(size, dtype=dtype, device="meta")
+        else:
+            meta = torch.empty_strided(size, stride, dtype=dtype, device="meta")
+    return FakeTensor(fake_mode, meta, device)
+
+
+_FLOATING_ONLY_LIKE_CONSTRUCTORS = ordered_set(
+    aten.rand_like.default,
+    aten.randn_like.default,
+)
+
+
+def _fast_like_constructor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> FakeTensor | NotImplementedType:
+    x = args[0]
+    if not (
+        _is_plain_fake(x, fake_mode)
+        and _are_plain_numbers(args[1:])
+        and _has_plain_kwargs(kwargs)
+    ):
+        return NotImplemented
+    memory_format = kwargs.get("memory_format")
+    if memory_format is not torch.contiguous_format and not (
+        memory_format in (None, torch.preserve_format) and x.is_contiguous()
+    ):
+        return NotImplemented
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        dtype = x.dtype
+    if func in _FLOATING_ONLY_LIKE_CONSTRUCTORS and not (
+        dtype.is_floating_point or dtype.is_complex
+    ):
+        return NotImplemented
+    device = kwargs.get("device")
+    return _make_plain_fake(
+        fake_mode, x.shape, dtype, x.fake_device if device is None else device
+    )
+
+
+def _fast_new_constructor(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> FakeTensor | NotImplementedType:
+    x, size = args[0], args[1]
+    if not (
+        _is_plain_fake(x, fake_mode)
+        and _is_plain_size(size)
+        and _are_plain_numbers(args[2:])
+        and _has_plain_kwargs(kwargs)
+    ):
+        return NotImplemented
+    dtype = kwargs.get("dtype")
+    device = kwargs.get("device")
+    return _make_plain_fake(
+        fake_mode,
+        size,
+        x.dtype if dtype is None else dtype,
+        x.fake_device if device is None else device,
+    )
+
+
+def _fast_factory(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> FakeTensor | NotImplementedType:
+    size = args[0]
+    stride = args[1] if func is aten.empty_strided.default else None
+    if not (
+        _is_plain_size(size)
+        and (stride is None or _is_plain_size(stride))
+        and len(args) == (1 if stride is None else 2)
+        and _has_plain_kwargs(kwargs)
+        and kwargs.get("memory_format") in (None, torch.contiguous_format)
+    ):
+        return NotImplemented
+    dtype = kwargs.get("dtype")
+    device = kwargs.get("device")
+    return _make_plain_fake(
+        fake_mode,
+        size,
+        torch.get_default_dtype() if dtype is None else dtype,
+        # constructors() defaults to CPU too.
+        torch.device("cpu") if device is None else device,
+        stride,
+    )
+
+
+fast_constructor_impls: dict[OpOverload, Callable[..., Any]] = {
+    **dict.fromkeys(
+        [
+            aten.empty_like.default,
+            aten.zeros_like.default,
+            aten.ones_like.default,
+            aten.full_like.default,
+            *_FLOATING_ONLY_LIKE_CONSTRUCTORS,
+        ],
+        _fast_like_constructor,
+    ),
+    **dict.fromkeys(
+        [
+            aten.new_empty.default,
+            aten.new_zeros.default,
+            aten.new_ones.default,
+            aten.new_full.default,
+        ],
+        _fast_new_constructor,
+    ),
+    **dict.fromkeys(
+        [
+            aten.empty.memory_format,
+            aten.empty_strided.default,
+            aten.zeros.default,
+            aten.ones.default,
+        ],
+        _fast_factory,
+    ),
+}
 
 
 @register_op_impl(aten.is_pinned.default)
