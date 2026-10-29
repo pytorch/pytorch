@@ -9224,6 +9224,7 @@ lib.impl("triple", lambda x: x * 3, "CompositeExplicitAutograd")
 
 
 _CUSTOM_OP_LIBRARY_DRIVER = """
+import os
 import sys
 
 import torch
@@ -9243,11 +9244,25 @@ if phase == "capture":
         backend="eager",
     ) as cap:
         torch.save(cap(x), artifact + ".pt")
-else:
+elif phase == "load":
     assert module not in sys.modules, module
     loaded = load(artifact, cache)
     torch.testing.assert_close(loaded(x), torch.load(artifact + ".pt"))
     assert module in sys.modules, "the artifact did not import its op's module"
+else:
+    # Loaded under another name, so importing the recorded one runs its
+    # Library(ns, "DEF") again, which raises.
+    import importlib.util
+    import warnings
+
+    path = os.path.join(directory, module + ".py")
+    spec = importlib.util.spec_from_file_location("preregistered_ops", path)
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loaded = load(artifact, cache)
+    assert any(repr(module) in str(w.message) for w in caught), caught
+    torch.testing.assert_close(loaded(x), torch.load(artifact + ".pt"))
 print("library op phase ok:", phase)
 """
 
@@ -9473,13 +9488,16 @@ class TestPrecompileCustomOpModules(TestCase):
             f.write(_CUSTOM_OP_LIBRARY_MODULE.replace("{ns}", ns))
         artifact = os.path.join(directory, "artifact.py")
         args = [directory, module, ns, artifact, os.path.join(directory, "c")]
-        for phase in ("capture", "load"):
+        for phase in ("capture", "load", "preregistered"):
             cmd = [sys.executable, "-c", _CUSTOM_OP_LIBRARY_DRIVER, phase, *args]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertIn(f"library op phase ok: {phase}", out.stdout)
         with open(artifact) as f:
-            self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
+            source = f.read()
+        self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", source)
+        # Its kernel replaced no other, so its failed import only warns.
+        self.assertIn("CUSTOM_OP_KERNEL_MODULES = ()", source)
 
     @skipIfCrossRef
     @parametrize("shared", (False, True))
@@ -9653,6 +9671,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         from torch._precompile import (
             _custom_op_modules,
             _custom_ops,
+            _KERNEL_KEYS,
             _parse_artifact_metadata,
             _write_custom_op_imports,
         )
@@ -9677,7 +9696,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         def run(ops):
             buf = PySourceBuilder()
-            _write_custom_op_imports(buf, modules, ops)
+            _write_custom_op_imports(buf, modules, ops, _KERNEL_KEYS)
             namespace = {}
             exec(buf.getvalue(), namespace)
             return buf.getvalue(), namespace
