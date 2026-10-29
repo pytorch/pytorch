@@ -1001,7 +1001,6 @@ Tensor& _scaled_mnk4(
     bool use_fast_accum,
     Tensor& out,
     const ScaledGemmEpilogue& epilogue = {}) {
-#ifndef USE_ROCM
   at::cuda::blas::detail::check_mnk4_support();
   TORCH_CHECK_VALUE(
       out.scalar_type() == kBFloat16 || out.scalar_type() == kHalf || out.scalar_type() == kFloat,
@@ -1030,9 +1029,6 @@ Tensor& _scaled_mnk4(
       "For packed MNxK4 scaling scale_b must have a 16-byte aligned data pointer");
   return _scaled_gemm(
       mat_a, mat_b, scale_a, scale_b, scaling_type, scaling_type, SwizzleType::SWIZZLE_MNxK4, SwizzleType::SWIZZLE_MNxK4, bias, use_fast_accum, out, epilogue);
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling is not supported on ROCm");
-#endif
 }
 
 Tensor&
@@ -1741,9 +1737,7 @@ void scaled_mm_cuda_v2_impl(
     }
     if (gemm_impl == ScaledGemmImplementation::MNK4_1x32 ||
         gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
-#ifndef USE_ROCM
       at::cuda::blas::detail::check_mnk4_support();
-#endif
     }
     epilogue.beta = beta.to<float>();
     epilogue.alpha = alpha.to<float>();

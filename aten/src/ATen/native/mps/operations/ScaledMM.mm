@@ -71,8 +71,15 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
     TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
                       "MPS does not support swizzle.");
   }
-  const auto gemm_impl = scaled::find_scaled_gemm_impl(
-      scale_kernel_dispatch, mat_a.scalar_type(), recipe_a, scale_a_ref, mat_b.scalar_type(), recipe_b, scale_b_ref);
+  const auto gemm_impl = scaled::find_scaled_gemm_impl(scale_kernel_dispatch,
+                                                       mat_a.scalar_type(),
+                                                       recipe_a,
+                                                       scale_a_ref,
+                                                       swizzle_a_enum,
+                                                       mat_b.scalar_type(),
+                                                       recipe_b,
+                                                       scale_b_ref,
+                                                       swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != scaled::ScaledGemmImplementation::NONE,
       "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
