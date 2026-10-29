@@ -229,6 +229,13 @@ Follow these rules for all code changes in this repository:
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
   comments you are adding or rewriting.
+- Don't put long explanations of how or why an implementation works (e.g. a
+  `Note [...]`) in C++/CUDA headers (`.h`, `.cuh`, `.hpp`): editing a header,
+  even just a comment, rebuilds every file that includes it. Put them in the
+  `.cpp`/`.cu` file that implements the logic and leave a short
+  `// See Note [...]` pointer in the header. Documentation callers need (API
+  docs, interface contracts) stays in the header. This applies to comments you
+  add or substantially rewrite; existing comments can stay.
 
 If uncertain, choose the simpler, more concise implementation.
 
