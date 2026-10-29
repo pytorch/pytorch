@@ -63,13 +63,9 @@ void initFFTFunctions(PyObject* module) {
   };
   PyObject* fft = PyModule_Create(&def);
   THPFFTVariableFunctionsModule = fft;
-  if (!fft) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(fft);
   // steals a reference to fft
-  if (PyModule_AddObject(module, "_fft", fft) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_fft", fft) == 0);
 }
 
 // generated methods start here

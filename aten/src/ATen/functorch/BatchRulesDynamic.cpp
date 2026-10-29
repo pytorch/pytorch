@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/ATen.h>
-#include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/Metaprogramming.h>

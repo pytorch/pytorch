@@ -36,6 +36,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -397,7 +398,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 fully_shard_fn(module)
         fully_shard_fn(model)
         if unshard_async_op:
-            model._set_unshard_async_op(unshard_async_op)
+            model.set_unshard_in_current_stream(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -833,7 +834,7 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestReplicateGradientAccumulation(FSDPTest):
+class TestReplicateGradientAccumulation(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())

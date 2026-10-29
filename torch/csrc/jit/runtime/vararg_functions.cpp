@@ -113,7 +113,7 @@ void format(Stack& stack, size_t num_inputs) {
 
   // static const std::regex unsupported_options("\\{(.*?)\\}");
   auto format = peek(stack, 0, num_inputs).toStringRef();
-  // // Temporally comment out the warning message because of
+  // // Temporarily comment out the warning message because of
   // // "StdRegexIsAwful" internal Lint error, to prevent sev
   // // of std::regex from PT mobile.
   // if (std::regex_search(format, unsupported_options)) {
