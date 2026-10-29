@@ -190,7 +190,9 @@ jobs:
               exit 0
             fi
             echo "${err}" >&2
-            sleep $((attempt * 15))
+            if (( attempt < 3 )); then
+              sleep $((attempt * 15))
+            fi
           done
           echo "::error::Could not tell whether ${DOCKER_IMAGE} exists, so not rebuilding it in place"
           exit 1
