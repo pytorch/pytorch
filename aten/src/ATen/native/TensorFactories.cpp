@@ -1457,7 +1457,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
           }
         });
 
-    for (int64_t i = 0; i < n - 1; i++) {
+    for (const auto i : c10::irange(n - 1)) {
       // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
       int64_t z = generator->random() % (n - i);
       scalar_t save = r__data[i * r__stride_0];
@@ -1474,7 +1474,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   // start seeing the skew
   // use no-initialization Fischer-Yates variant
   // https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_.22inside-out.22_algorithm
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     int64_t z = static_cast<int64_t>(generator->random64() % (i + 1));
     r__data[i * r__stride_0] = i;
     r__data[i * r__stride_0] = r__data[z * r__stride_0];
