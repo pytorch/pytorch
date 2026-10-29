@@ -861,7 +861,15 @@ class CustomOpDef:
 
     def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
-        self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
+        # When no input needs grad, autograd_impl only redispatches below
+        # Autograd (redispatch_no_grad), which the dispatcher can do itself.
+        self._lib.impl(
+            self._name,
+            autograd_impl,
+            "Autograd",
+            with_keyset=True,
+            _skip_if_no_grad=True,
+        )
 
     def _register_adinplaceorview_dispatcher_impl(self) -> None:
         schema = self._opoverload._schema
