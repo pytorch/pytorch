@@ -214,10 +214,11 @@ it.
 # overrode another for the same key), then refuses to load unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same module's
-# file. A Dynamo artifact also imports its
-# served frames' modules for ops with no recorded module, so the caller must import,
-# before load, only what the artifact cannot record: for a make_fx artifact (or a
-# Dynamo one whose op is registered outside every served frame's module), C++
+# file. A Dynamo artifact also imports its served frames' modules, in the order
+# their imports finished, when an op or one of its kernels has no recorded module,
+# so the caller must import, before load, only what the artifact cannot record: for
+# a make_fx artifact (or a Dynamo one whose op or kernel is registered outside every
+# served frame's module), C++
 # extension ops, ops from torch.library.define or __main__, and kernels registered
 # through @torch.library.impl, register_kernel or another module's Library. The eager
 # backend has no kernels to accelerate, so the eager cache carries no compiled artifact
@@ -2132,18 +2133,29 @@ def _custom_op_modules(
     """The modules registering the ops among ``op_names`` and their active kernels
     for ``keys``, in the order their imports finished, so that importing them again
     registers any overriding kernel last; and the custom ops among them that no
-    known module registers."""
+    known module registers, or with a kernel for ``keys`` no known module registers
+    (a torch helper's, a C++ extension's or ``__main__``'s)."""
     file_modules = functools.cache(_file_modules)
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
     unmapped: set[tuple[str, str]] = set()
     for op_name, overload in op_names:
         module = _custom_op_module(op_name, overload)
         if module is None:
             module = _library_op_module(op_name, overload, file_modules)
-        modules.update(_kernel_modules(op_name, overload, keys, file_modules).values())
+        kernels = _kernel_modules(op_name, overload, keys, file_modules)
+        modules.update(kernels.values())
+        # torch registers the kernels of its own ops.
         if module is not None:
             modules.add(module)
-        elif not _torch_cpp_op(op_name, overload):
+            if module.partition(".")[0] == "torch":
+                continue
+        elif _torch_cpp_op(op_name, overload):
+            continue
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        if module is None or any(
+            k not in kernels and has_kernel(qualname, k) for k in keys
+        ):
             unmapped.add((op_name, overload))
     return tuple(m for m in sys.modules if m in modules), tuple(sorted(unmapped))
 

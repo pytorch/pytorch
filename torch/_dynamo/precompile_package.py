@@ -1612,6 +1612,9 @@ class _CapturePackage(CompilePackage):
         # code or falls back to eager, so a bypassed compile's ops are dropped like
         # its backend graphs.
         self._compile_graph_break_op_names: set[tuple[str, str]] = set()
+        # The device types of the graph-break ops' inputs, kept like their names.
+        self.graph_break_device_types: set[str] = set()
+        self._compile_graph_break_device_types: set[str] = set()
         self._compile_graph_break_code: types.CodeType | None = None
 
     def note_compute(self) -> None:
@@ -1640,6 +1643,7 @@ class _CapturePackage(CompilePackage):
 
         names = _overload_names(op)
         self._compile_graph_break_op_names |= names
+        self._compile_graph_break_device_types |= device_types
         has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
         backend_keys = [torch._C._dispatch_key_for_device(t) for t in device_types]
 
@@ -1661,6 +1665,7 @@ class _CapturePackage(CompilePackage):
         self, code: types.CodeType, global_scope: dict[str, object] | None = None
     ) -> Iterator[None]:
         self._compile_graph_break_op_names = set()
+        self._compile_graph_break_device_types = set()
         self._compile_graph_break_code = code
         with super().code_context(code, global_scope):
             yield
@@ -1670,6 +1675,7 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         super().add_guarded_code(guards_state, dynamo_code)
         self.graph_break_op_names |= self._compile_graph_break_op_names
+        self.graph_break_device_types |= self._compile_graph_break_device_types
 
     def record_eager_fallback(self, code: types.CodeType) -> None:
         super().record_eager_fallback(code)
@@ -1677,7 +1683,9 @@ class _CapturePackage(CompilePackage):
         # bypassed compile of another frame left behind.
         if code is self._compile_graph_break_code:
             self.graph_break_op_names |= self._compile_graph_break_op_names
+            self.graph_break_device_types |= self._compile_graph_break_device_types
         self._compile_graph_break_op_names = set()
+        self._compile_graph_break_device_types = set()
         self._compile_graph_break_code = None
 
     def add_resume_function(
@@ -2208,8 +2216,10 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         op_names = set(self._package.graph_break_op_names)
-        # Graph-break ops run eagerly on the devices of any compiled frame.
+        # Graph-break ops run eagerly on their inputs' devices, or on those of any
+        # compiled frame.
         device_types = set(self._package._device_types if op_names else ())
+        device_types |= self._package.graph_break_device_types
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
@@ -2228,11 +2238,13 @@ class PrecompileSession(Generic[_P, _R]):
         keys = _device_kernel_keys(device_types) if device_types else _KERNEL_KEYS
         modules, unmapped = _custom_op_modules(ops, keys)
         if unmapped:
-            # An op with no known module (torch.library.define, a C++ extension's
-            # load_library) is likely registered by a module the frames run in,
-            # which the driver imports only after the ops are checked.
+            # An op or kernel with no known module (torch.library.define,
+            # register_kernel, a C++ extension's load_library) is likely registered
+            # by a module the frames run in, which the driver imports only after
+            # the ops are checked.
             served = _served_modules(_multigraph_frames(entry))
-            modules += tuple(sorted(served - {"__main__", *modules}))
+            wanted = {*modules, *served} - {"__main__"}
+            modules = tuple(m for m in sys.modules if m in wanted)
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, modules, ops, keys
         )
