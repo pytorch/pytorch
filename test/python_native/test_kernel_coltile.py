@@ -219,6 +219,20 @@ class TestKernelColTile(TestCase):
                 for g, e in zip(got, expected):
                     torch.testing.assert_close(g, e, atol=1e-3, rtol=1e-4)
 
+    def test_batched_view_collapses_adjacent_axes(self):
+        # Leading, reduced and trailing runs each fold into one (B, R, C) axis and back.
+        x = torch.randn(2, 3, 32, 5, 16, device="cuda")
+        real = ct.reduce_batched_col_tile
+        with mock.patch.object(ct, "reduce_batched_col_tile", wraps=real) as served:
+            got = kg.reduce_dim(
+                T.SumOps(acc=cutlass.Float32), "collapse", x, [2, 3], torch.float32
+            )
+        served.assert_called_once()
+        self.assertEqual(served.call_args.args[2].shape, (6, 160, 16))
+        torch.testing.assert_close(
+            got, x.double().sum(dim=(2, 3)).float(), atol=1e-4, rtol=1e-4
+        )
+
     def test_two_output_columns_route_to_coltile(self):
         # Dense dim-0 and transposed two-output reductions reach the column kernel when
         # they pass the batched gate as B == 1; narrow columns stay on the general kernel.
