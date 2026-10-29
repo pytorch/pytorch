@@ -16,7 +16,7 @@ on:
       hardware:
         type: choice
         default: mi350
-        options: [mi350, l4, both, mi350-boundary]
+        options: [mi350, l4, both, mi350-boundary, mi350-amd-boundary]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -58,7 +58,7 @@ jobs:
       rocm-arch-list: gfx950
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.hardware == 'mi350-boundary' && 'triton_pin_mi350_boundary' || 'triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "${{ github.event.inputs.hardware == 'mi350-amd-boundary' && 'triton_pin_mi350_amd_boundary' || github.event.inputs.hardware == 'mi350-boundary' && 'triton_pin_mi350_boundary' || 'triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
