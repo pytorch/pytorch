@@ -4,9 +4,10 @@ Nothing here is imported or run by torch at runtime, and the generated artifacts
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
-graph. Authoring the driver as real code -- instead of a hand-written string literal --
-lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
-would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
+graph (``_import_custom_op_modules`` goes before them, as section 0). Authoring the
+driver as real code -- instead of a hand-written string literal -- lets pyrefly / ruff
+/ IDEs type-check and navigate the load-bearing driver logic that would otherwise be
+invisible inside a string (and drops the wall of ``# noqa: F821``).
 
 Keeping python_code self-contained and version-frozen (its behavior is hashed via
 code_hash, invariant 7) still holds: the artifact carries the driver TEXT, it does not
@@ -54,6 +55,11 @@ if TYPE_CHECKING:
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
+    # Section 0 of an artifact that calls custom ops.
+    CUSTOM_OP_MODULES: tuple[str, ...] = ()
+    CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
+    CUSTOM_OP_KERNELS: dict[str, tuple[str, ...]] = {}
+    CUSTOM_OP_OVERRIDE_MODULES: dict[str, dict[str, str]] = {}
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -73,6 +79,81 @@ if TYPE_CHECKING:
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
+
+
+def _import_custom_op_modules():
+    """Import the modules registering the custom ops the graphs call, then check
+    that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
+    registered, and that every module in CUSTOM_OP_OVERRIDE_MODULES imported and
+    still registers the active kernel it did at capture. Emitted as section 0 and
+    called at exec time."""
+    import importlib
+    import os
+    import re
+    import sys
+    import warnings
+
+    import torch
+
+    import_errors = {}
+    # A module imported from inside another finished first, so the order alone
+    # would import an override nested in the module it overrides before that one.
+    owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
+    for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
+        try:
+            importlib.import_module(module)
+        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
+        # torch.distributed.tensor raises ValueError.
+        except Exception as e:
+            import_errors[module] = e
+    missing = []
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    for name, overload in CUSTOM_OPS:
+        qualname = f"{name}.{overload}" if overload else name
+        try:
+            torch._C._dispatch_find_schema_or_throw(name, overload)
+        except RuntimeError:
+            missing.append(qualname)
+            continue
+        for key in CUSTOM_OP_KERNELS.get(qualname, ()):
+            if not has_kernel(qualname, key):
+                missing.append(f"{qualname} ({key} kernel)")
+    # Another module's kernel under the same key would pass the check above, so
+    # the active kernel must be registered from the overriding module's file.
+    overridden = []
+    real = os.path.realpath
+    override_errors = set()
+    for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
+        dump = torch._C._dispatch_dump(qualname)
+        for key, module in owners.items():
+            pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
+            active = re.search(pattern, dump, re.MULTILINE)
+            path = getattr(sys.modules.get(module), "__file__", None)
+            if module in import_errors:
+                override_errors.add(module)
+            elif not (active and path and real(active[1]) == real(path)):
+                overridden.append(f"{qualname} ({key} kernel of {module})")
+    if missing or override_errors or overridden:
+        # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        errors = [import_errors[m] for m in sorted(override_errors)]
+        raise _PrecompileError(
+            f"this artifact calls custom ops or kernels not registered here: "
+            f"{missing or 'none'}. Modules whose kernels overrode another kernel "
+            f"for the same key at capture that failed to import: "
+            f"{sorted(override_errors) or 'none'}. Overriding kernels it ran at "
+            f"capture that another kernel replaced: {overridden or 'none'}. "
+            "Import the modules registering them, and register no other kernel "
+            "over theirs, before loading it. Modules that failed to import: "
+            f"{sorted(import_errors) or 'none'}."
+        ) from next(iter(errors or import_errors.values()), None)
+    for module, e in import_errors.items():
+        warnings.warn(
+            f"importing custom op module {module!r} raised {e!r}; none of its "
+            "kernels overrode another for the same key, and the ops this artifact "
+            "calls and their kernel keys are registered anyway, so it loads"
+        )
 
 
 def _extract_param_buffers(mods):
