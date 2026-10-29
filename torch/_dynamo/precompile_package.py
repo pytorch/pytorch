@@ -2214,6 +2214,7 @@ class PrecompileSession(Generic[_P, _R]):
             _KERNEL_KEYS,
             _multigraph_frames,
             _served_modules,
+            _warn_unregistered_ops,
         )
 
         summary = self._gated_summary(
@@ -2251,15 +2252,18 @@ class PrecompileSession(Generic[_P, _R]):
             n: _device_kernel_keys(op_devices[n]) if op_devices[n] else _KERNEL_KEYS
             for n in ops
         }
-        modules, unmapped = _custom_op_modules(keys)
-        if unmapped or any(m.partition(".")[0] != "torch" for m in modules):
+        found = _custom_op_modules(keys)
+        served: set[str] = set()
+        mapped = any(m.partition(".")[0] != "torch" for m in found.modules)
+        if found.unrecorded or found.unrecorded_kernels or mapped:
             # A module the frames run in, which the driver imports only after the ops
             # are checked, may register a kernel over an override's, or an op or kernel
-            # with no known module (torch.library.define, any custom_op's kernels,
-            # which torch's helpers register, a C++ extension). Torch's ops skip this.
-            served = _served_modules(_multigraph_frames(entry))
-            wanted = {*modules, *served} - {"__main__"}
-            modules = tuple(m for m in sys.modules if m in wanted)
+            # with no known module (one registered from __main__, a C++ extension).
+            # Torch's own ops skip this.
+            served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
+        wanted = {*found.modules, *served}
+        modules = tuple(m for m in sys.modules if m in wanted)
+        _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, **sections

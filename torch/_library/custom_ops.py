@@ -296,6 +296,9 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        # The utils.caller_module() of each register_kernel call, by dispatch key,
+        # as the dispatcher records only this file.
+        self._backend_fn_callers: dict[str, str] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -436,6 +439,9 @@ class CustomOpDef:
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
                 if device_type not in self._backend_fns:
 
                     def backend_impl(*args, **kwargs):
@@ -482,16 +488,7 @@ class CustomOpDef:
                             )
                         return result
 
-                    if device_type is None:
-                        self._lib.impl(
-                            self._name, backend_impl, "CompositeExplicitAutograd"
-                        )
-                    else:
-                        self._lib.impl(
-                            self._name,
-                            backend_impl,
-                            _C._dispatch_key_for_device(device_type),
-                        )
+                    self._lib.impl(self._name, backend_impl, key)
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
@@ -503,6 +500,7 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
+                self._backend_fn_callers[key] = utils.caller_module()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
