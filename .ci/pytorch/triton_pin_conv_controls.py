@@ -334,15 +334,79 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
     }
 
 
+def replay_capture(label, full_accumulation):
+    import torch
+    from torch.testing._internal.common_utils import DeterministicGuard, TestCase
+
+    data = torch.load(DEBUG / "ci-prefix-operands.pt", weights_only=True)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+        not full_accumulation
+    )
+    with DeterministicGuard(True, warn_only=True), torch.no_grad():
+        convolution = torch.nn.functional.conv2d(
+            data["input_fp16"].cuda(), data["weight_fp16"].cuda()
+        )
+        padded = torch.nn.functional.pad(convolution, (2, 2, 2, 2))
+        view = torch.as_strided(padded, (8, 384, 2, 20, 12), (153600, 400, 160, 1, 20))
+        actual = (
+            torch.as_strided(view, (8, 384, 2, 2, 12, 12), (153600, 400, 160, 8, 20, 1))
+            .clone(memory_format=torch.contiguous_format)
+            .cpu()
+        )
+    result = {
+        "solver": os.environ["MIOPEN_DEBUG_FIND_ONLY_SOLVER"],
+        "allow_fp16_reduction": torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+        "actual_vs_original_reference": statistics(
+            actual, data["original_fp32_reference"]
+        ),
+        "actual_vs_fp64": statistics(actual, data["fp64_reference"]),
+        "actual_vs_failed_capture": statistics(actual, data["actual"]),
+    }
+    torch.save(actual, DEBUG / f"{label}-actual.pt")
+    (REPORT / f"{label}-numerics.json").write_text(json.dumps(result, indent=2))
+    print("CONV_CAPTURE_REPLAY", label, json.dumps(result), flush=True)
+    TestCase().assertEqual(
+        actual, data["original_fp32_reference"], atol=2e-3, rtol=2e-3
+    )
+
+
+def solver_control(label, solver, full_accumulation=False):
+    env = os.environ.copy()
+    env["MIOPEN_DEBUG_FIND_ONLY_SOLVER"] = solver
+    env["MIOPEN_FIND_MODE"] = "normal"
+    env["MIOPEN_FIND_ENFORCE"] = "4"
+    env["MIOPEN_USER_DB_PATH"] = str(WORK / f"solver-db-{label}")
+    env["MIOPEN_ENABLE_LOGGING"] = "1"
+    env["MIOPEN_LOG_LEVEL"] = "6"
+    Path(env["MIOPEN_USER_DB_PATH"]).mkdir(parents=True)
+    command = [sys.executable, str(Path(__file__).resolve()), "--replay-capture", label]
+    if full_accumulation:
+        command.append("--full-accumulation")
+    code = controls.run(command, env=env, name=label, check=False, timeout=300)
+    log = (REPORT / f"{label}.log").read_text(errors="replace")
+    if code not in (0, 1) or "CONV_CAPTURE_REPLAY" not in log:
+        raise AssertionError(f"Captured-operand replay did not complete: {label}")
+    return {
+        "exit_code": code,
+        "numerics": json.loads((REPORT / f"{label}-numerics.json").read_text()),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--child")
     parser.add_argument("--aten", action="store_true")
     parser.add_argument("--ci-prefix", action="store_true")
+    parser.add_argument("--full-accumulation", action="store_true")
+    parser.add_argument("--replay-capture")
     args = parser.parse_args()
     REPORT.mkdir(parents=True, exist_ok=True)
     DEBUG.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
+    if args.replay_capture:
+        replay_capture(args.replay_capture, args.full_accumulation)
+        return
     if args.child:
         child(args.child, args.aten, args.ci_prefix)
         return
@@ -361,7 +425,19 @@ def main():
     if args.ci_prefix:
         result = {
             "mode": "original-ci-prefix",
-            "controls": {"ci-prefix": phase("ci-prefix", prefix=True)},
+            "controls": {
+                "ci-prefix": phase("ci-prefix", prefix=True),
+                "ci-prefix-aten": phase("ci-prefix-aten", prefix=True, aten=True),
+                "capture-gemm": solver_control("capture-gemm", "GemmFwd1x1_0_1"),
+                "capture-winograd": solver_control(
+                    "capture-winograd", "ConvWinoRageRxS<2-3>"
+                ),
+                "capture-winograd-full-accumulation": solver_control(
+                    "capture-winograd-full-accumulation",
+                    "ConvWinoRageRxS<2-3>",
+                    full_accumulation=True,
+                ),
+            },
         }
         (REPORT / "results.json").write_text(json.dumps(result, indent=2))
         print("CONV_CI_PREFIX_RESULTS", json.dumps(result), flush=True)

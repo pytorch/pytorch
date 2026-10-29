@@ -383,6 +383,18 @@ jobs:
           if-no-files-found: warn
           path: test/debug/triton-pin-conv/**/*
 
+      - name: Upload native Triton property compiler provenance and complete wheels
+        if: always() && (matrix.config == 'triton_pin_mi350_verify' || matrix.config == 'triton_pin_mi350_bisect') && steps.test.conclusion
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: triton-pin-native-property-evidence-${{ github.run_id }}-${{ steps.get-job-id.outputs.job-id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            test/debug/triton-pin-native-property-trace/**/*
+            test/debug/triton-pin-native-wheels/**/*
+            test/debug/triton-pin-mi350-bisect/**/*
+
       - name: Collect backtraces from coredumps (if any)
         if: always()
         run: |
