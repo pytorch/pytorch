@@ -208,7 +208,10 @@ class Adagrad(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._accelerator_graph_capture_health_check()
+        if not all(
+            group["capturable"] or group["fused"] for group in self.param_groups
+        ) or all(group["capturable"] for group in self.param_groups):
+            self._accelerator_graph_capture_health_check()
 
         loss = None
 
