@@ -27,6 +27,7 @@ import types
 import typing
 import unittest
 import uuid
+import warnings
 import weakref
 from unittest import mock
 
@@ -9707,6 +9708,16 @@ def _composite_op_fn(x):
     return torch.ops.precompile_no_fake.composite.default(x.sin()) + 1
 
 
+def _caught_fake_failure_fn(x):
+    # The fake impl raises, which this try handles inside the trace: the compiled
+    # code never calls the op.
+    try:
+        y = torch.ops.precompile_fake_raises.op.default(x)
+    except RuntimeError:
+        y = x.cos()
+    return y + 1
+
+
 class _UserContext:
     def __enter__(self):
         return self
@@ -10215,7 +10226,6 @@ class TestPrecompileCustomOpRecording(TestCase):
             (line,) = [l for l in f if l.startswith("CUSTOM_OP_MODULES = ")]
         return line.strip(), name
 
-    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_a_torch_cpp_op_does_not_import_the_frame_modules(self):
         importlib.import_module("torch.distributed._ops.device_mesh")
@@ -10247,7 +10257,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(f"imports {name}, the modules its frames run in", warning)
         self.assertIn("as a best-effort fallback", warning)
 
-    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_dynamo_graph_breaks_on_is_checked(self):
         from torch.library import _scoped_library
 
@@ -10284,7 +10293,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
-    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_in_a_frame_dynamo_falls_back_on_is_checked(self):
         from torch.library import _scoped_library
 
@@ -10306,7 +10314,57 @@ class TestPrecompileCustomOpRecording(TestCase):
         expected = (("precompile_no_fake::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
-    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+    def test_an_op_whose_fake_failure_the_trace_handles_is_not_checked(self):
+        from torch.library import _scoped_library
+
+        def fake(x):
+            raise RuntimeError("precompile: no fake result for this input")
+
+        lib = self.enterContext(_scoped_library("precompile_fake_raises", "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        lib.impl("op", torch.Tensor.clone, "CPU")
+        torch.library.register_fake("precompile_fake_raises::op", fake, lib=lib)
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = os.path.join(directory, "artifact.py")
+            with capture(
+                _caught_fake_failure_fn,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+                self.assertEqual(cap._session._package.graph_break_op_names, set())
+            with open(artifact) as f:
+                self.assertNotIn("CUSTOM_OPS = ", f.read())
+
+    def test_a_served_module_that_fails_to_import_fails_the_load(self):
+        from torch.library import _scoped_library
+
+        lib = self.enterContext(_scoped_library("precompile_served_fallback", "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        line, name = self._render_with_ops([("precompile_served_fallback::op", "")])
+        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
+        path = sys.modules.pop(name).__file__
+        with open(os.path.join(os.path.dirname(path), "artifact.py")) as f:
+            python_code = f.read()
+        hits = types.ModuleType(f"precompile_hits_{uuid.uuid4().hex}")
+        hits.count = 0
+        sys.modules[hits.__name__] = hits
+        self.addCleanup(sys.modules.pop, hits.__name__)
+        with open(path, "w") as f:
+            f.write(
+                f"import {hits.__name__} as h\nh.count += 1\nraise ImportError('boom')\n"
+            )
+        importlib.invalidate_caches()
+        # Failed through the driver's import: not warned about as a custom op
+        # module's (its op is registered) and then imported again.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with self.assertRaisesRegex(PrecompileError, f"{name}.*not importable"):
+                exec(python_code, {"__name__": "artifact"})
+        self.assertEqual(hits.count, 1)
+
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
         served, served_name = self._op("served")
         unserved, unserved_name = self._op("unserved")
@@ -10337,7 +10395,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         expected = (served._init_fn.__module__,)
         self.assertIn(f"CUSTOM_OP_MODULES = {expected!r}", python_code)
 
-    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_a_version_mismatch_refuses_before_the_custom_op_imports(self):
         from torch.library import _scoped_library
 
@@ -10381,6 +10438,21 @@ class TestPrecompileCustomOpRecording(TestCase):
         python_code = python_code.replace(version, "TORCH_VERSION = '0.0'")
         with self.assertRaisesRegex(PrecompileError, "produced by torch 0.0"):
             exec(python_code, {"__name__": "artifact"})
+        # A serving torch older than the driver lacks its helpers, and still
+        # refuses cleanly.
+        from torch import _precompile_driver
+
+        for helper in ("_opens_scope", "_unimportable_module"):
+            self.addCleanup(
+                setattr, torch._precompile, helper, getattr(torch._precompile, helper)
+            )
+            delattr(torch._precompile, helper)
+        with self.assertRaisesRegex(PrecompileError, "produced by torch 0.0"):
+            exec(python_code, {"__name__": "artifact"})
+        scope = {"_DYNAMO_PYTHON_VERSION": sys.version_info[:2], "TORCH_VERSION": "0.0"}
+        exec(inspect.getsource(_precompile_driver._build_installed_forward), scope)
+        with self.assertRaisesRegex(PrecompileError, "produced by torch 0.0"):
+            scope["_build_installed_forward"]()
 
 
 if __name__ == "__main__":
