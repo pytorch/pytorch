@@ -240,6 +240,59 @@ class ManifestTest(TestCase):
         self.assertNotIn("benchcommon", src)
 
 
+class NativeLossPreparationTest(TestCase):
+    def test_public_cache_keeps_exact_native_loss_callable(self):
+        def native_loss(x):
+            return x.square().sum()
+
+        class Module(FakeModule):
+            resolutions = 0
+
+            @property
+            def loss_function(self):
+                if hasattr(self, "_loss_function"):
+                    return self._loss_function
+                self.resolutions += 1
+                return native_loss
+
+            @loss_function.setter
+            def loss_function(self, value):
+                self._loss_function = value
+
+        bm = FakeBenchmark(test="train")
+        bm.model = Module()
+        before_settings = suite.numerical_settings()
+        suite._cache_native_loss_function(bm)
+        self.assertIs(bm.model.loss_function, native_loss)
+        self.assertEqual(bm.model.resolutions, 1)
+        x = torch.tensor([0.0, -0.0, 2.0])
+        self.assertEqual(bm.model.loss_function(x), native_loss(x))
+        self.assertEqual(suite.numerical_settings(), before_settings)
+        inv = suite.inventory_benchmark(bm, "hf_GPT2", "train", 4)
+        self.assertEqual(inv["preparation"], list(bm._loops_ir_preparation))
+
+    def test_library_without_public_setter_is_not_modified(self):
+        bm = FakeBenchmark(test="train")
+        suite._cache_native_loss_function(bm)
+        self.assertFalse(hasattr(bm, "_loops_ir_preparation"))
+        self.assertFalse(hasattr(bm.model, "_loss_function"))
+
+    def test_noncallable_native_loss_rejected(self):
+        class Module(FakeModule):
+            @property
+            def loss_function(self):
+                return None
+
+            @loss_function.setter
+            def loss_function(self, value):
+                raise AssertionError("invalid loss must not be installed")
+
+        bm = FakeBenchmark(test="train")
+        bm.model = Module()
+        with self.assertRaisesRegex(TypeError, "not callable"):
+            suite._cache_native_loss_function(bm)
+
+
 class ParserTest(TestCase):
     def test_defaults(self):
         args = suite.parse_args([])

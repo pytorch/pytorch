@@ -286,7 +286,31 @@ def construct_benchmark(model_name: str, test: str, batch_size: int) -> Any:
     benchmark = module.Model(
         test=test, device=DEVICE, batch_size=batch_size, extra_args=list(EXTRA_ARGS)
     )
+    if model_name == "hf_GPT2" and test == "train":
+        _cache_native_loss_function(benchmark)
     return benchmark
+
+
+def _cache_native_loss_function(benchmark: Any) -> None:
+    """Cache the library-selected loss through its public property setter.
+
+    Recent Transformers chooses the default loss inside a logging property,
+    which breaks fullgraph compilation for both stock and CPP. Resolve that
+    choice before compilation; never substitute a different loss callable.
+    """
+    module, _ = benchmark.get_module()
+    prop = inspect.getattr_static(module, "loss_function", None)
+    if not isinstance(prop, property) or prop.fset is None:
+        return
+    resolved = module.loss_function
+    if not callable(resolved):
+        raise TypeError("native Transformers loss function is not callable")
+    module.loss_function = resolved
+    if module.loss_function is not resolved:
+        raise RuntimeError("native loss cache changed the selected callable")
+    benchmark._loops_ir_preparation = (
+        "cache identical native loss_function through its public setter",
+    )
 
 
 def inventory_benchmark(
@@ -341,6 +365,7 @@ def inventory_benchmark(
         "test": test,
         "batch_size": batch_size,
         "batch_source": "suite-manifest-exact-source-default",
+        "preparation": list(getattr(benchmark, "_loops_ir_preparation", ())),
         "extra_args": list(EXTRA_ARGS),
         "module_path": module_path,
         "module_class": module_cls_path,
