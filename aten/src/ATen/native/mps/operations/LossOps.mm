@@ -1,11 +1,13 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/OpMathType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <ATen/native/mps/kernels/ReduceOps.h>
 #include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,6 +21,7 @@
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/mean.h>
 #include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
@@ -75,53 +78,8 @@ namespace BCELoss {
 struct CachedGraph : public MPSCachedGraph {
   CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
   MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
-  // gradOutput only used on backward pass
-  MPSGraphTensor *weightTensor = nil, *gradOutputTensor = nil;
-  // lossTensor used for forward, and gradInputTensor for backward pass
-  union {
-    MPSGraphTensor* lossTensor = nil;
-    MPSGraphTensor* gradInputTensor;
-  };
+  MPSGraphTensor *weightTensor = nil, *gradOutputTensor = nil, *gradInputTensor = nil;
 };
-
-static MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
-  MPSGraph* mpsGraph = bceGraph->graph();
-  const auto inputType = [bceGraph->inputTensor dataType];
-
-  // Forward BCE: L = -w (y ln(x) + (1-y) ln(1-x))
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
-  // -100 is the hard limit value defined in BCELoss Spec. to clamp the log
-  MPSGraphTensor* neg100 = [mpsGraph constantWithScalar:-100.0 dataType:inputType];
-  // 1 - x
-  MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
-                                                     secondaryTensor:bceGraph->inputTensor
-                                                                name:nil];
-  // log(x)
-  MPSGraphTensor* logInput = [mpsGraph logarithmWithTensor:bceGraph->inputTensor name:nil];
-  // max(log(x), -100)
-  MPSGraphTensor* clampedLogInput = [mpsGraph maximumWithPrimaryTensor:logInput secondaryTensor:neg100 name:nil];
-  // log(1 - x)
-  MPSGraphTensor* log1_Input = [mpsGraph logarithmWithTensor:one_Input name:nil];
-  // max(log(1 - x), -100)
-  MPSGraphTensor* clampedLog1_Input = [mpsGraph maximumWithPrimaryTensor:log1_Input secondaryTensor:neg100 name:nil];
-  // (y - 1) resulted from -(1 - y)
-  MPSGraphTensor* target_1 = [mpsGraph subtractionWithPrimaryTensor:bceGraph->targetTensor
-                                                    secondaryTensor:one
-                                                               name:nil];
-  // (y - 1) * max(log(1 - x), -100)
-  MPSGraphTensor* target_1TimesLog1_Input = [mpsGraph multiplicationWithPrimaryTensor:target_1
-                                                                      secondaryTensor:clampedLog1_Input
-                                                                                 name:nil];
-  // y * max(log(x), -100)
-  MPSGraphTensor* targetTimesLogInput = [mpsGraph multiplicationWithPrimaryTensor:bceGraph->targetTensor
-                                                                  secondaryTensor:clampedLogInput
-                                                                             name:nil];
-  // ((y - 1) * max(log(1 - x), -100)) - (y * max(log(x), -100))
-  MPSGraphTensor* bceLoss = [mpsGraph subtractionWithPrimaryTensor:target_1TimesLog1_Input
-                                                   secondaryTensor:targetTimesLogInput
-                                                              name:nil];
-  return bceLoss;
-}
 
 static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
   MPSGraph* mpsGraph = bceGraph->graph();
@@ -158,6 +116,77 @@ static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
   return gradInput;
 }
 
+static void bce_loss_forward_impl(const Tensor& input_arg,
+                                  const Tensor& target_arg,
+                                  const Tensor& weight,
+                                  int64_t reduction,
+                                  Tensor& loss) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
+                              "binary_cross_entropy is not implemented for ",
+                              input_arg.scalar_type(),
+                              " on MPS");
+
+  const Tensor input = input_arg.contiguous();
+  const Tensor target = target_arg.to(input.scalar_type()).contiguous();
+  const int64_t numel = input.numel();
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Mean and sum are fused into the loss kernel, which writes one partial per
+  // threadgroup (pass 1 of ReduceOps' flat reduction); sum_out folds them
+  if (reduction != Reduction::None && canUse32BitIndexMath(input)) {
+    const auto n = static_cast<uint32_t>(numel);
+    const auto max_groups = std::min(512u, at::ceil_div(n, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
+    const auto slice_len = at::ceil_div(n, max_groups);
+    const auto num_groups = at::ceil_div(n, slice_len);
+    const BCELossReduceParams params{.numel = n,
+                                     .slice_len = slice_len,
+                                     .scale = reduction == Reduction::Mean ? 1.0f / n : 1.0f,
+                                     .has_weight = weight.defined()};
+    const Tensor weight_ = weight.defined() ? weight.to(input.scalar_type()).expand_as(input).contiguous() : input;
+    Tensor partials = at::empty({num_groups}, input.options().dtype(kFloat));
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto pso = lib.getPipelineStateForFunc("bce_loss_forward_reduce_" + scalarToMetalTypeString(input));
+        const auto threads = std::min<uint32_t>(MAX_THREADGROUP_SIZE, [pso maxTotalThreadsPerThreadgroup]);
+        auto encoder = stream->commandEncoder();
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, input, target, weight_, partials, params, stream->getErrorBuffer());
+        [encoder dispatchThreads:MTLSizeMake(num_groups * threads, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+      }
+    });
+    at::sum_out(loss, partials, IntArrayRef{}, false, loss.scalar_type());
+    return;
+  }
+
+  const bool write_to_loss = reduction == Reduction::None && loss.is_contiguous();
+  Tensor unreduced = write_to_loss ? loss : at::empty(input.sizes(), input.options());
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("bce_loss_forward_" + scalarToMetalTypeString(input));
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, target, unreduced);
+
+      constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
+      for (auto offset = int64_t{0}; offset < numel; offset += max_threads) {
+        mtl_setArgs<3>(encoder, offset, stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, numel - offset));
+      }
+    }
+  });
+  if (weight.defined()) {
+    unreduced.mul_(weight);
+  }
+  if (reduction == Reduction::Mean) {
+    loss.copy_(at::mean(unreduced));
+  } else if (reduction == Reduction::Sum) {
+    loss.copy_(at::sum(unreduced));
+  } else if (!write_to_loss) {
+    loss.copy_(unreduced);
+  }
+}
+
 // Binary Cross Enropy (Forward/Backward BCELoss)
 // NOTE: "loss" tensor would be "grad_input" if it's a backward pass
 static Tensor& bce_loss_out_impl(const Tensor& input,
@@ -167,7 +196,6 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  Tensor& loss,
                                  const std::optional<Tensor>& grad_output_opt,
                                  const std::string& op_name) {
-  // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -188,6 +216,11 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
     return loss;
   }
 
+  if (!grad_output.defined()) {
+    bce_loss_forward_impl(input, target, weight, reduction, loss);
+    return loss;
+  }
+
   @autoreleasepool {
     std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
@@ -195,14 +228,8 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
 
-      MPSGraphTensor* bceLossUnweighted = nil;
-      // if grad_output is defined, then it's a backward pass
-      if (grad_output.defined()) {
-        newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
-        bceLossUnweighted = bce_backward_mps(newCachedGraph);
-      } else {
-        bceLossUnweighted = bce_forward_mps(newCachedGraph);
-      }
+      newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      MPSGraphTensor* bceLossUnweighted = bce_backward_mps(newCachedGraph);
 
       MPSGraphTensor* bceLoss = bceLossUnweighted;
       if (weight.defined()) {
@@ -212,23 +239,19 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                                        name:nil];
       }
 
-      if (grad_output.defined()) {
-        if (reduction == at::Reduction::Mean) {
-          MPSGraphTensor* inputNumel = [mpsGraph constantWithScalar:static_cast<double>(input.numel())
-                                                           dataType:[bceLoss dataType]];
-          newCachedGraph->gradInputTensor = [mpsGraph divisionWithPrimaryTensor:bceLoss
-                                                                secondaryTensor:inputNumel
-                                                                           name:nil];
-        } else {
-          newCachedGraph->gradInputTensor = bceLoss;
-        }
+      if (reduction == at::Reduction::Mean) {
+        MPSGraphTensor* inputNumel = [mpsGraph constantWithScalar:static_cast<double>(input.numel())
+                                                         dataType:[bceLoss dataType]];
+        newCachedGraph->gradInputTensor = [mpsGraph divisionWithPrimaryTensor:bceLoss
+                                                              secondaryTensor:inputNumel
+                                                                         name:nil];
       } else {
-        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
+        newCachedGraph->gradInputTensor = bceLoss;
       }
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss);
+    Placeholder lossPlaceholder = Placeholder(cachedGraph->gradInputTensor, loss);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
 
@@ -238,10 +261,8 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
       Placeholder weightPlaceholder = Placeholder(cachedGraph->weightTensor, weight);
       feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
     }
-    if (grad_output.defined()) {
-      Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
-      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-    }
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor, grad_output);
+    feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, lossPlaceholder);
   }
