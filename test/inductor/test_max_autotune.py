@@ -418,8 +418,9 @@ class TestMaxAutotune(TestCase):
                 }
             ),
         ):
-            c_actual = torch.compile(torch.mm)(a, b)
+            c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
 
+        FileCheck().check("tl.debug_barrier").run(code[0])
         torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
@@ -431,17 +432,18 @@ class TestMaxAutotune(TestCase):
         a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
         b = torch.randn((K, N), dtype=torch.bfloat16, device=GPU_TYPE)
         all_triton_mm_choices: dict[bool, list[str]] = {}
+        all_triton_mm_choice_names: dict[bool, list[str]] = {}
         actual = None
 
         for enable_xpu_templates in (True, False):
             triton_mm_choices: list[str] = []
+            triton_mm_choice_names: list[str] = []
 
             def record_choices(choices):
-                triton_mm_choices.extend(
-                    choice.description
-                    for choice in choices
-                    if choice.name.startswith("triton_mm")
-                )
+                for choice in choices:
+                    if choice.name.startswith("triton_mm"):
+                        triton_mm_choice_names.append(choice.name)
+                        triton_mm_choices.append(choice.description)
                 return choices
 
             add_preprocessing_fn(record_choices)
@@ -466,6 +468,7 @@ class TestMaxAutotune(TestCase):
                 clear_preprocessing_fns(clear_defaults=False)
 
             all_triton_mm_choices[enable_xpu_templates] = triton_mm_choices
+            all_triton_mm_choice_names[enable_xpu_templates] = triton_mm_choice_names
             if enable_xpu_templates:
                 actual = result
 
@@ -473,10 +476,8 @@ class TestMaxAutotune(TestCase):
             all_triton_mm_choices[True],
         )
         self.assertFalse(
-            any(
-                "mm_xpu_" in description for description in all_triton_mm_choices[True]
-            ),
-            all_triton_mm_choices[True],
+            any("mm_xpu_" in name for name in all_triton_mm_choice_names[True]),
+            all_triton_mm_choice_names[True],
         )
         self.assertEqual(
             sorted(all_triton_mm_choices[True]),
