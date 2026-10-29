@@ -1131,7 +1131,8 @@ static Tensor& adaptive_avg_pool_out_mps_impl(const Tensor& input,
               output.dtype());
   auto output_shape = input.sizes().vec();
   std::copy(output_size.begin(), output_size.end(), output_shape.end() - pooling_dims);
-  output.resize_(output_shape, input.suggest_memory_format());
+  // Match CPU/CUDA and meta kernels: only 2D preserves channels last
+  output.resize_(output_shape, pooling_dims == 2 ? input.suggest_memory_format() : MemoryFormat::Contiguous);
   if (output.numel() == 0) {
     return output;
   }
@@ -1147,10 +1148,19 @@ static Tensor& adaptive_avg_pool_backward_out_mps_impl(const Tensor& grad_output
                                                        const int32_t pooling_dims,
                                                        const std::string& op_name) {
   adaptive_pool_empty_output_check(grad_output, op_name.c_str());
-  TORCH_CHECK(input.dim() == grad_output.dim(),
+  const auto ndim = input.dim();
+  TORCH_CHECK(ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
+              op_name,
+              "(): Expected ",
+              pooling_dims + 1,
+              "D or ",
+              pooling_dims + 2,
+              "D tensor, but got ",
+              input.sizes());
+  TORCH_CHECK(ndim == grad_output.dim(),
               op_name,
               ": Expected dimensions ",
-              input.dim(),
+              ndim,
               " for `grad_output` but got dimensions ",
               grad_output.dim());
   TORCH_CHECK(input.dtype() == grad_output.dtype(),
@@ -1159,9 +1169,15 @@ static Tensor& adaptive_avg_pool_backward_out_mps_impl(const Tensor& grad_output
               input.dtype(),
               " for `grad_output` but got dtype ",
               grad_output.dtype());
+  TORCH_CHECK(input.dtype() == grad_input.dtype(),
+              op_name,
+              ": Expected dtype ",
+              input.dtype(),
+              " for `grad_input` but got dtype ",
+              grad_input.dtype());
   TORCH_CHECK_NOT_IMPLEMENTED(
       isFloatingType(input.scalar_type()), "\"", op_name, "\" not implemented for '", input.scalar_type(), "'");
-  grad_input.resize_(input.sizes(), input.suggest_memory_format());
+  grad_input.resize_(input.sizes(), pooling_dims == 2 ? input.suggest_memory_format() : MemoryFormat::Contiguous);
   adaptive_avg_pool_backward_out_mps_template(grad_input, grad_output, input, pooling_dims, op_name);
   return grad_input;
 }

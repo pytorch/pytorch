@@ -120,7 +120,7 @@ void max_pool_3d_input_iter(
        stride2 * bounds2.start];
   const idx_t size12 = idx_t(geom.input_sizes[1]) * geom.input_sizes[2];
   idx_t max_index = bounds0.start * size12 +
-      bounds1.start * geom.input_sizes[2] + bounds2.start;
+      idx_t(bounds1.start) * geom.input_sizes[2] + bounds2.start;
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0 += d0) {
     auto offset0 = stride0 * i0;
@@ -133,7 +133,7 @@ void max_pool_3d_input_iter(
         const bool is_greater =
             update_max(max_value, input[offset0 + offset1 + offset2]);
         if (return_indices) {
-          auto input_index = i0 * size12 + i1 * geom.input_sizes[2] + i2;
+          auto input_index = i0 * size12 + idx_t(i1) * geom.input_sizes[2] + i2;
           max_index = is_greater ? input_index : max_index;
         }
       }
