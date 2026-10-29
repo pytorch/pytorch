@@ -228,6 +228,8 @@ def plan_effects(
         effects.notes.append(f"dropped redundant labels {redundant}")
     if forbidden or (not labels and (unknown or decision in LABELING_DECISIONS)):
         labels.append(TRIAGE_REVIEW)
+    if decision == "triage_review":
+        labels.append(TRIAGE_REVIEW)
     if "triaged" in labels and TRIAGE_REVIEW in existing_labels | set(labels):
         effects.notes.append("dropped 'triaged': the issue needs human review")
         labels = [label for label in labels if label != "triaged"]
