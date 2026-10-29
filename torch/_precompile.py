@@ -217,7 +217,8 @@ it.
 # Custom ops: an artifact whose graph calls them first imports the modules recorded in
 # CUSTOM_OP_MODULES (a Dynamo artifact after its version checks). A failed import only
 # warns, unless the module is in CUSTOM_OP_OVERRIDE_MODULES (its kernel overrode another
-# for the same key at capture) or, for a Dynamo artifact, in SERVED_MODULES (it serves
+# for the same key at capture, or it called register_kernel on another module's
+# custom_op) or, for a Dynamo artifact, in SERVED_MODULES (it serves
 # the artifact's frames); then the load fails. The load then refuses unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same file.
@@ -2094,6 +2095,8 @@ _TORCH_DIR = os.path.dirname(torch.__file__)
 _TORCH_OP_HELPERS = tuple(
     os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
 )
+# torch.library.define, unlike torch.library.impl, registers an op at torch/library.py
+# rather than its caller's file, so torch's own torch.library.define ops are listed.
 _TORCH_HELPER_OP_MODULES = MappingProxyType(
     {
         "coor::current_device": "torch.fx.experimental.proxy_tensor",
@@ -2426,6 +2429,9 @@ def _write_custom_op_imports(
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     kernels = {}
     file_modules = functools.cache(_file_modules)
+    from torch._library import custom_ops
+
+    custom_ops_file = os.path.realpath(custom_ops.__file__)
     overrides = {}
     for name, overload in ops:
         qualname = f"{name}.{overload}" if overload else name
@@ -2438,13 +2444,29 @@ def _write_custom_op_imports(
         ):
             kernels[qualname] = found
             paths = _kernel_paths(qualname)
-            if owners := _kernel_modules(qualname, paths, op_keys, file_modules, True):
+            # register_kernel from another module replaces only the kernel the
+            # custom_op's own dispatcher kernel calls, so its caller is recorded.
+            opdef = custom_ops.OPDEFS.get(qualname)
+            callers = opdef._backend_fn_callers if opdef is not None else {}
+            own = _custom_op_module(name, overload)
+            owners = {
+                k: c
+                for k in found
+                if (c := callers.get(k)) is not None
+                and c != own
+                and c.partition(".")[0] != "torch"
+                and _importable_module(c)
+                and os.path.realpath(paths.get(k, "")) == custom_ops_file
+            }
+            owners |= _kernel_modules(qualname, paths, op_keys, file_modules, True)
+            if owners:
                 overrides[qualname] = owners
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
     # By op and key, the module registering a kernel the graph ran over another one
-    # for the same key. The replaced kernel passes the check above, and would run in
-    # its place if the module failed to import, registered it only when called, or
-    # was imported before the replaced kernel's module.
+    # for the same key, or a custom_op's kernel through register_kernel from a module
+    # other than the op's. The replaced kernel passes the check above, and would run
+    # in its place if the module failed to import, registered it only when called,
+    # or was imported before the replaced kernel's module.
     buf.writeline(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}")
     from torch import _precompile_driver as driver
 
@@ -4188,7 +4210,9 @@ def load(
     capture). A module in ``CUSTOM_OP_OVERRIDE_MODULES``, one whose kernel the
     graph ran at capture overrode another kernel for the same dispatch key, must
     import, and that kernel must still be the active one, registered from the same
-    module's file: otherwise the replaced kernel would run in its place. Any other
+    module's file: otherwise the replaced kernel would run in its place. The same
+    holds for a module that called ``register_kernel`` on another module's custom
+    op, whose kernel must still be the one that call registered. Any other
     module only warns when it fails to import and the ops and kernels are
     registered anyway, e.g. by a module the server imported under another name.
 
