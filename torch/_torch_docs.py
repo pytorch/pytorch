@@ -14581,15 +14581,16 @@ Example::
 add_docstr(
     torch._assert_async,
     r"""
-assert_async(tensor, assert_msg=None) -> None
+assert_async(tensor) -> None
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for
-CUDA tensors, we DO NOT synchronize and you may only find out the assertion
-failed at a later CUDA kernel launch.  Asynchronous assertion can be helpful for
-testing invariants in CUDA tensors without giving up performance.  This function
-is NOT intended to be used for regular error checking, as it will trash your CUDA
-context if the assert fails (forcing you to restart your PyTorch process.)
+CUDA, MPS and XPU tensors, we DO NOT synchronize and you may only find out the
+assertion failed later (for CUDA, at a later kernel launch; for MPS, at the next
+synchronization).  Asynchronous assertion can be helpful for testing invariants
+in accelerator tensors without giving up performance.  This function is NOT
+intended to be used for regular error checking, as on CUDA it will trash your
+CUDA context if the assert fails (forcing you to restart your PyTorch process.)
 
 ``torch._assert_async`` is an alias of this function kept for backward
 compatibility.
@@ -14597,13 +14598,29 @@ compatibility.
 Args:
     tensor (Tensor): a one element tensor to test to see if it is nonzero.  Zero
         elements (including False for boolean tensors) cause an assertion failure
-        to be raised.
-    assert_msg (str, optional): message to include in the error raised when the
-        assertion fails.
+        to be raised.  (On MPS, ``-0.0`` counts as nonzero.)
 
 Example::
 
     >>> torch.assert_async(torch.tensor(1))
+
+.. function:: assert_async(tensor, assert_msg) -> None
+   :noindex:
+
+Like :func:`assert_async`, but with a message that says what failed.
+
+Args:
+    tensor (Tensor): a one element tensor to test to see if it is nonzero.
+    assert_msg (str): message for a failed assertion.  On CPU it is the message
+        of the ``RuntimeError`` raised.  On CUDA the kernel prints it with the
+        device-side assertion (ROCm builds abort without printing it by
+        default), and Python sees the generic device-side assert error.  On
+        MPS it is in the ``torch.AcceleratorError`` raised at the next
+        synchronization.  XPU does not show it yet.  It must be shorter than
+        255 characters on CUDA and XPU and 250 on MPS, or the call raises.
+
+Example::
+
     >>> torch.assert_async(torch.tensor(1), "value must be nonzero")
 """,
 )
