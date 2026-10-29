@@ -3814,17 +3814,28 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=lambda value, order: _ordered_dict_order(value) == order,
     )
     def ORDERED_DICT_ORDER_MATCH(self, guard: Guard) -> None:
+        # Keep the container in the serialized guard state, even with a root leaf.
         self.get_guard_manager(guard)
         order = _ordered_dict_order(self.get(guard))
+        storage_order = order == tuple(range(len(order)))
 
-        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            return _ordered_dict_order(value) == order
+        def guard_fn(
+            value: collections.OrderedDict[Any, Any], expected: tuple[int, ...]
+        ) -> bool:
+            if storage_order:
+                return dict.__len__(value) == len(expected) and all(
+                    stored is linked
+                    for stored, linked in zip(
+                        dict.keys(value), collections.OrderedDict.keys(value)
+                    )
+                )
+            return _ordered_dict_order(value) == expected
 
-        code = [f"___check_order({self.arg_ref(guard)})"]
+        code = [f"___ordered_dict_order_matches({self.arg_ref(guard)}, {order!r})"]
         self.add_python_lambda_leaf_guard_to_root(
             code,
             get_verbose_code_parts(code, guard),
-            _get_closure_vars() | {"___check_order": guard_fn},
+            _get_closure_vars() | {"___ordered_dict_order_matches": guard_fn},
         )
         self._set_guard_export_info(guard, code)
 
@@ -5008,9 +5019,9 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _restore_ordered_dict_state(
         cls,
         value: collections.OrderedDict[Any, Any],
-        state: tuple[Any, tuple[Any, ...]],
+        state: tuple[Any, tuple[int, ...]],
     ) -> None:
-        attrs, keys = state
+        attrs, order = state
         if hasattr(value, "__setstate__"):
             value.__setstate__(attrs)
         else:
@@ -5018,12 +5029,16 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(attrs, tuple):
                 attrs, slots = attrs
             if attrs is not None:
+                # Preserve constructor attributes and aliases to the saved state.
+                for name, item in value.__dict__.items():
+                    attrs.setdefault(name, item)
                 value.__dict__ = attrs
             if slots:
                 for name, item in slots.items():
                     setattr(value, name, item)
-        for key in keys:
-            collections.OrderedDict.move_to_end(value, key)
+        keys = list(dict.keys(value))
+        for index in order:
+            collections.OrderedDict.move_to_end(value, keys[index])
 
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
@@ -5356,7 +5371,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             return (
                 type(obj),
                 (),
-                (state, tuple(collections.OrderedDict.keys(obj))),
+                (state, _ordered_dict_order(obj)),
                 None,
                 iter(dict.items(obj)),
                 type(self)._restore_ordered_dict_state,
