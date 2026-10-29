@@ -7,7 +7,12 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfNoCuteDSL,
+    TestCase,
+)
 
 
 def _disabled():
@@ -17,6 +22,8 @@ def _disabled():
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestCuTeDSLReductionWiring(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _fired_count(self, fn):
         from torch._native.ops.reductions import kernel_general as kg
 

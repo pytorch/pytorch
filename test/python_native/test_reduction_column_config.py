@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -30,6 +31,8 @@ from torch._native.ops.reductions import kernel_coltile as ct, traits as T
 
 
 class TestColumnConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
         itemsize = 2 if dtype == torch.bfloat16 else 4
         args = dict(
@@ -215,6 +218,8 @@ class TestColumnConfig(TestCase):
 
 
 class TestColumnCombine(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @onlyCUDA
     @parametrize(
         "dtype,op,pattern,tile_columns",
