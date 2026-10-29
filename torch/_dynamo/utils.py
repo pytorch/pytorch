@@ -4215,6 +4215,12 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def _tensor_device_types(tree: Any) -> frozenset[str]:
+    return frozenset(
+        t.device.type for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)
+    )
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4320,7 +4326,9 @@ def _get_fake_value_impl(
         fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
         package = tx.output.package
         if package is not None and isinstance(e.__cause__, fake_failures):
-            package.add_graph_break_op(node.target)
+            package.add_graph_break_op(
+                node.target, device_types=_tensor_device_types((args, kwargs))
+            )
         raise
     except RuntimeError as e:
         cause: BaseException = e
@@ -4333,14 +4341,10 @@ def _get_fake_value_impl(
             torch._subclasses.fake_tensor.UnsupportedOperatorException,
         )
         package = tx.output.package
+        device_types = _tensor_device_types((args, kwargs))
         if package is not None and isinstance(cause, graph_break_causes):
-            # These graph-break below, and the op then runs eagerly; so do the
-            # TypeError and pending fake impl branches.
-            device_types = frozenset(
-                t.device.type
-                for t in pytree.tree_leaves((args, kwargs))
-                if isinstance(t, torch.Tensor)
-            )
+            # These graph-break below, and the op then runs eagerly on its inputs'
+            # devices; so do the TypeError and pending fake impl branches.
             package.add_graph_break_op(node.target, cause.func, device_types)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
@@ -4445,7 +4449,7 @@ def _get_fake_value_impl(
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
             if package is not None:
-                package.add_graph_break_op(node.target)
+                package.add_graph_break_op(node.target, device_types=device_types)
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
@@ -4471,7 +4475,7 @@ def _get_fake_value_impl(
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
             if package is not None:
-                package.add_graph_break_op(node.target)
+                package.add_graph_break_op(node.target, device_types=device_types)
             unimplemented(
                 gb_type="Custom op missing fake impl during tracing",
                 context=f"{node.target}",
