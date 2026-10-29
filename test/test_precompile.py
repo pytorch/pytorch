@@ -5587,6 +5587,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_can_opt_into_serve_time_compiles(
         self, caching_precompile
     ):
@@ -5642,6 +5643,10 @@ class TestPrecompileDynamoCapture(TestCase):
             "        raise AssertionError('compiled under fail_on_recompile')\n"
             "print('compiled at serve time')\n"
         )
+        script = (
+            "import torch\n"
+            "with torch._dynamo.config.patch(nested_graph_breaks=False):\n"
+        ) + textwrap.indent(script, "    ")
         argv = [self.dir, self.artifact, self.cache, self.module_name, state]
         cmd = [sys.executable, "-c", script, *argv]
         env = {**os.environ, "TORCH_CACHING_PRECOMPILE": str(int(caching_precompile))}
@@ -5655,6 +5660,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "only to an installed artifact"):
             load(self.artifact, self.cache, allow_serve_time_compiles=True)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_without_the_flag_default_refuses_it(self):
         with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
             cap(self.model, self.x2)
@@ -5678,6 +5684,7 @@ class TestPrecompileDynamoCapture(TestCase):
             ("_ALLOW_SERVE_TIME_COMPILES = False  # edited", True, "not in the form"),
         ],
     )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_an_installed_artifact_with_an_edited_flag_line_refuses_to_load(
         self, line, allow, msg
     ):
