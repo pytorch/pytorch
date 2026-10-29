@@ -18,6 +18,10 @@ on:
         type: boolean
         default: false
         description: Test candidate implicit-fusion opt-in against its default.
+      reuse-candidate-wheel:
+        type: boolean
+        default: false
+        description: Reuse the verified full native candidate wheel for kernel capture.
       boundary-controls:
         type: boolean
         default: false
@@ -88,7 +92,7 @@ jobs:
       # torchtitan_h100_integration disabled pending runner availability
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
+          { config: "${{ github.event.inputs.reuse-candidate-wheel == 'true' && 'torchtitan_triton_pin_fusion_reuse_controls' || github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -123,7 +127,7 @@ jobs:
       timeout-minutes: 180
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ github.event.inputs.control-runner == 'a10g-4-lf' && 'lf-l-x86aavx2-45-167-a10g-4' || github.event.inputs.control-runner == 'a10g-4' && format('{0}l-x86aavx2-45-167-a10g-4', needs.get-label-type.outputs.label-type) || 'mt-l-x86aavx2-189-704-a10g-8' }}" }
+          { config: "${{ github.event.inputs.reuse-candidate-wheel == 'true' && 'torchtitan_triton_pin_fusion_reuse_controls' || github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ github.event.inputs.control-runner == 'a10g-4-lf' && 'lf-l-x86aavx2-45-167-a10g-4' || github.event.inputs.control-runner == 'a10g-4' && format('{0}l-x86aavx2-45-167-a10g-4', needs.get-label-type.outputs.label-type) || 'mt-l-x86aavx2-189-704-a10g-8' }}" }
         ]}
       python-version: '3.12'
       compiler: gcc11
