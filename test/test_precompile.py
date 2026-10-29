@@ -9683,6 +9683,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         from torch._precompile import (
             _custom_op_modules,
             _custom_ops,
+            _parse_artifact_metadata,
             _write_custom_op_imports,
         )
         from torch.library import _scoped_library
@@ -9707,10 +9708,18 @@ class TestPrecompileCustomOpRecording(TestCase):
         def run(ops):
             buf = PySourceBuilder()
             _write_custom_op_imports(buf, modules, ops)
-            exec(buf.getvalue(), {})
+            namespace = {}
+            exec(buf.getvalue(), namespace)
+            return buf.getvalue(), namespace
 
         with self.assertWarnsRegex(UserWarning, rf"'{broken}' raised RuntimeError"):
-            run(((f"{ns}::op", ""),))
+            source, namespace = run(((f"{ns}::op", ""),))
+        # Only the two metadata names stay in the artifact's namespace.
+        names = {name for name in namespace if not name.startswith("__")}
+        self.assertEqual(names, {"CUSTOM_OP_MODULES", "CUSTOM_OPS"})
+        with self.assertNoLogs("torch._precompile", "DEBUG"):
+            with self.assertRaisesRegex(PrecompileError, "missing calling-convention"):
+                _parse_artifact_metadata(source)
         with self.assertRaisesRegex(
             torch.compiler.PrecompileError,
             rf"{ns}::missing\.out'\]\..*'precompile_no_such_module'",
