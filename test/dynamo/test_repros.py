@@ -9311,6 +9311,190 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_mro_source_cache_includes_attr_name(self):
+        # Base -> Mid -> A hierarchy: two class attributes with the same
+        # interned integer value share the same id().  The mro_source_cache
+        # must include the attribute name in its key; otherwise the second
+        # lookup returns the first attribute's source, installing a guard
+        # on the wrong key and missing mutations to the second attribute.
+        class Base:
+            x = 1
+            y = 1
+
+        class Mid(Base):
+            pass
+
+        class A(Mid):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(obj, t):
+            return t * obj.x + t * obj.y
+
+        obj = A()
+        t = torch.tensor([1.0])
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([2.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Changing y on Base must trigger recompilation.
+        Base.y = 42
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([43.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_mro_source_cache_shared_across_instances(self):
+        # Two instances reaching the same class attribute share one source for
+        # it, rather than aliasing two sources with an OBJECT_ALIASING guard.
+        class Cfg:
+            scale = 2
+
+        class Layer:
+            cfg = Cfg()
+
+        a, b = Layer(), Layer()
+
+        def fn(x):
+            return x * a.cfg.scale + x * b.cfg.scale
+
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+        entries = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("OBJECT_ALIASING", str(entries[0].guard_manager))
+
+    def test_mro_source_cache_descriptor_shared_by_classes(self):
+        # One descriptor object in two unrelated classes: the source through A
+        # does not see B's attribute being reassigned, so B needs its own.
+        p = property(lambda self: 1.0)
+
+        class A:
+            val = p
+
+        class B:
+            val = p
+
+        a, b = A(), B()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x + a.val + b.val
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(x), torch.tensor([2.0]))
+        B.val = property(lambda self: 100.0)
+        self.assertEqual(fn(x), torch.tensor([101.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False  # noqa: S101
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True  # noqa: S101
+
+            return a + b
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_data_attr_mutation_with_noop_add(self):
+        # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
+        # when x was subsequently mutated by set_, causing the return value to
+        # alias the mutated input instead of being an independent copy.
+        def fn(a, b):
+            a.data = b
+            b.data = torch.zeros_like(b)
+            return a + b
+
+        a = torch.tensor([True, False, True, False])
+        b = torch.tensor([False, False, True, True])
+        a_ = a.clone()
+        b_ = b.clone()
+        cfunc = torch.compile(fn, backend="inductor")
+        res1 = fn(a, b)
+        res2 = cfunc(a_, b_)
+        self.assertEqual(res1, res2)
+
+    def test_custom_op_mutation_with_noop_add(self):
+        @torch.library.custom_op("test_repros::mutate_tensor", mutates_args={"x"})
+        def mutate_tensor(x: torch.Tensor, src: torch.Tensor) -> None:
+            x.copy_(src)
+
+        def fn(b):
+            zeros = torch.zeros_like(b)
+            result = b + zeros
+            mutate_tensor(b, zeros)
+            return result
+
+        b = torch.tensor([4.0, 5.0, 6.0])
+        b_ = b.clone()
+        cfunc = torch.compile(fn, backend="inductor")
+        res1 = fn(b)
+        res2 = cfunc(b_)
+        self.assertEqual(res1, res2)
+
+    def test_getset_descriptor_objclass_identity(self):
+        # GetSetDescriptor.__objclass__ should preserve identity with the class
+        # under torch.compile. This is needed for inspect.getattr_static (and
+        # therefore inspect.signature) to work on callable class instances.
+        class Foo:
+            pass
+
+        desc = Foo.__dict__["__dict__"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if desc.__objclass__ is Foo:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_inspect_signature_callable_class(self):
+        # inspect.signature should work on callable class instances under
+        # torch.compile, needed by flex_attention's _get_mod_type.
+        class MyCallable:
+            def __call__(self, b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+        obj = MyCallable()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            sig = inspect.signature(obj)
+            num_params = sum(
+                1
+                for p in sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+            )
+            return x + num_params
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 4.0)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -10515,190 +10699,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                     functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
                 ),
             )
-
-    def test_mro_source_cache_includes_attr_name(self):
-        # Base -> Mid -> A hierarchy: two class attributes with the same
-        # interned integer value share the same id().  The mro_source_cache
-        # must include the attribute name in its key; otherwise the second
-        # lookup returns the first attribute's source, installing a guard
-        # on the wrong key and missing mutations to the second attribute.
-        class Base:
-            x = 1
-            y = 1
-
-        class Mid(Base):
-            pass
-
-        class A(Mid):
-            pass
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(obj, t):
-            return t * obj.x + t * obj.y
-
-        obj = A()
-        t = torch.tensor([1.0])
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([2.0]))
-        self.assertEqual(cnt.frame_count, 1)
-
-        # Changing y on Base must trigger recompilation.
-        Base.y = 42
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([43.0]))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_mro_source_cache_shared_across_instances(self):
-        # Two instances reaching the same class attribute share one source for
-        # it, rather than aliasing two sources with an OBJECT_ALIASING guard.
-        class Cfg:
-            scale = 2
-
-        class Layer:
-            cfg = Cfg()
-
-        a, b = Layer(), Layer()
-
-        def fn(x):
-            return x * a.cfg.scale + x * b.cfg.scale
-
-        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
-        entries = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(fn.__code__)
-        self.assertNotIn("OBJECT_ALIASING", str(entries[0].guard_manager))
-
-    def test_mro_source_cache_descriptor_shared_by_classes(self):
-        # One descriptor object in two unrelated classes: the source through A
-        # does not see B's attribute being reassigned, so B needs its own.
-        p = property(lambda self: 1.0)
-
-        class A:
-            val = p
-
-        class B:
-            val = p
-
-        a, b = A(), B()
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(x):
-            return x + a.val + b.val
-
-        x = torch.zeros(1)
-        self.assertEqual(fn(x), torch.tensor([2.0]))
-        B.val = property(lambda self: 100.0)
-        self.assertEqual(fn(x), torch.tensor([101.0]))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_pytree_tree_is_leaf_with_namedtuple(self):
-        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
-        from collections import namedtuple
-
-        from torch.utils._pytree import tree_is_leaf
-
-        Point = namedtuple("Point", ["x", "y"])
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt, fullgraph=True)
-        def fn(a, b):
-            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
-            point = Point(a, b)
-            is_leaf_namedtuple = tree_is_leaf(point)
-            assert is_leaf_namedtuple is False  # noqa: S101
-
-            # But individual tensors are leaves
-            is_leaf_tensor = tree_is_leaf(a)
-            assert is_leaf_tensor is True  # noqa: S101
-
-            return a + b
-
-        x = torch.randn(3, 4)
-        y = torch.randn(3, 4)
-        result = fn(x, y)
-        expected = x + y
-
-        self.assertTrue(torch.allclose(result, expected))
-        # Should compile successfully with fullgraph=True
-        self.assertEqual(cnt.frame_count, 1)
-
-    def test_data_attr_mutation_with_noop_add(self):
-        # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
-        # when x was subsequently mutated by set_, causing the return value to
-        # alias the mutated input instead of being an independent copy.
-        def fn(a, b):
-            a.data = b
-            b.data = torch.zeros_like(b)
-            return a + b
-
-        a = torch.tensor([True, False, True, False])
-        b = torch.tensor([False, False, True, True])
-        a_ = a.clone()
-        b_ = b.clone()
-        cfunc = torch.compile(fn, backend="inductor")
-        res1 = fn(a, b)
-        res2 = cfunc(a_, b_)
-        self.assertEqual(res1, res2)
-
-    def test_custom_op_mutation_with_noop_add(self):
-        @torch.library.custom_op("test_repros::mutate_tensor", mutates_args={"x"})
-        def mutate_tensor(x: torch.Tensor, src: torch.Tensor) -> None:
-            x.copy_(src)
-
-        def fn(b):
-            zeros = torch.zeros_like(b)
-            result = b + zeros
-            mutate_tensor(b, zeros)
-            return result
-
-        b = torch.tensor([4.0, 5.0, 6.0])
-        b_ = b.clone()
-        cfunc = torch.compile(fn, backend="inductor")
-        res1 = fn(b)
-        res2 = cfunc(b_)
-        self.assertEqual(res1, res2)
-
-    def test_getset_descriptor_objclass_identity(self):
-        # GetSetDescriptor.__objclass__ should preserve identity with the class
-        # under torch.compile. This is needed for inspect.getattr_static (and
-        # therefore inspect.signature) to work on callable class instances.
-        class Foo:
-            pass
-
-        desc = Foo.__dict__["__dict__"]
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            if desc.__objclass__ is Foo:
-                return x + 1.0
-            return x + 2.0
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 1.0)
-
-    def test_inspect_signature_callable_class(self):
-        # inspect.signature should work on callable class instances under
-        # torch.compile, needed by flex_attention's _get_mod_type.
-        class MyCallable:
-            def __call__(self, b, h, q_idx, kv_idx):
-                return q_idx >= kv_idx
-
-        obj = MyCallable()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f(x):
-            sig = inspect.signature(obj)
-            num_params = sum(
-                1
-                for p in sig.parameters.values()
-                if p.default is inspect.Parameter.empty
-            )
-            return x + num_params
-
-        result = f(torch.tensor(0.0))
-        self.assertEqual(result.item(), 4.0)
 
     def test_enum_with_class_values(self):
         from enum import Enum
