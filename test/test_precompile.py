@@ -9379,6 +9379,17 @@ artifact = os.path.join(directory, "artifact.py")
 cache = os.path.join(directory, "artifact.cache")
 expected_path = os.path.join(directory, "expected.pt")
 x = torch.arange(6, dtype=torch.float32)
+
+
+def exec_module(name, alias):
+    import importlib.util
+
+    path = os.path.join(directory, name + ".py")
+    spec = importlib.util.spec_from_file_location(alias, path)
+    sys.modules[alias] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sys.modules[alias])
+
+
 if phase == "capture":
     __import__(module)
     __import__(unused)
@@ -9402,17 +9413,23 @@ elif phase == "preregistered":
     # The ops are registered by modules the server loaded under other names, so the
     # recorded module does not import and the artifact still loads. A Dynamo
     # artifact imports the entry's module, which is loaded under its own name.
-    import importlib.util
-
     loads = ((bwmod, bwmod), (module, "preregistered_ops"), (entries, entries))
     for name, alias in loads:
-        path = os.path.join(directory, name + ".py")
-        spec = importlib.util.spec_from_file_location(alias, path)
-        sys.modules[alias] = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(sys.modules[alias])
-    loaded = pc.load(artifact, cache)
-    torch.testing.assert_close(loaded(x), torch.load(expected_path))
+        exec_module(name, alias)
+    if (tracer, backend, entry) == ("dynamo", "eager", "train_fn"):
+        # The op's Python backward is a frame of the op's module, which it serves.
+        try:
+            pc.load(artifact, cache)
+        except torch.compiler.PrecompileError as e:
+            assert repr(module) in str(e), e
+        else:
+            raise AssertionError("load served a frame of a module it cannot import")
+    else:
+        loaded = pc.load(artifact, cache)
+        torch.testing.assert_close(loaded(x), torch.load(expected_path))
 else:
+    # Only the op modules are missing: a server loads the entry's module first.
+    exec_module(entries, entries)
     try:
         pc.load(artifact, cache)
     except torch.compiler.PrecompileError as e:
@@ -9468,12 +9485,7 @@ class TestPrecompileCustomOpModules(TestCase):
                         .replace("{bwns}", bwns)
                         .replace("{bwmod}", bwmod)
                     )
-            # Dynamo with the eager backend compiles the op's Python backward as a
-            # frame of the op's module, so the artifact needs that module by name.
-            compiles_bw = (tracer, backend, entry) == ("dynamo", "eager", "train_fn")
             for phase in ("capture", "replay", "preregistered", "missing"):
-                if compiles_bw and phase == "preregistered":
-                    continue
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
                     + [module, entries, unused, tracer, backend, entry, bwmod],
@@ -9806,14 +9818,34 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
     def test_extension_cpp_op_in_torch_namespace_is_custom_op(self):
-        from torch._precompile import _custom_op_modules, _torch_source_root
+        from torch._precompile import _custom_op_modules
 
         op = ("inductor::accumulate_grad_", "")
         self.assertEqual(_custom_op_modules([op]), ((), ()))
         # As an extension built elsewhere would record its TORCH_LIBRARY_FRAGMENT.
-        root = os.path.join(os.path.dirname(_torch_source_root()), "extension")
-        with mock.patch("torch._precompile._torch_source_root", return_value=root):
+        with (
+            mock.patch("torch._precompile._torch_source_root", return_value="/src/pt"),
+            mock.patch(
+                "torch._precompile._registration_path",
+                return_value="/src/extension/ext.cpp",
+            ),
+        ):
             self.assertEqual(_custom_op_modules([op]), ((), (op,)))
+
+    def test_extension_cpp_op_under_the_source_root_is_custom_op(self):
+        from torch._precompile import _torch_cpp_op
+
+        # An in-tree build's test/cpp_extensions, and ~/.cache/torch_extensions
+        # under a root that is the home directory.
+        for root, path in (
+            ("/src/pytorch", "/src/pytorch/test/cpp_extensions/ext.cpp"),
+            ("/home/u", "/home/u/.cache/torch_extensions/ext/ext.cpp"),
+        ):
+            with (
+                mock.patch("torch._precompile._torch_source_root", return_value=root),
+                mock.patch("torch._precompile._registration_path", return_value=path),
+            ):
+                self.assertFalse(_torch_cpp_op("precompile_ext::op", ""))
 
     def test_kernels_recorded_only_for_the_graph_devices(self):
         from torch._functorch._aot_autograd.codegen import PySourceBuilder
@@ -10053,8 +10085,24 @@ class TestPrecompileCustomOpRecording(TestCase):
                 cap._session._package.graph_break_op_names.add((f"{ns}::op", ""))
         with open(artifact) as f:
             python_code = f.read()
-        with self.assertRaisesRegex(PrecompileError, "not registered here"):
-            exec(python_code, {"__name__": "artifact"})
+        (served,) = [
+            line
+            for line in python_code.splitlines()
+            if line.startswith("SERVED_MODULES = ")
+        ]
+        # A frame module defined in __main__ or one that does not import is refused
+        # before the op check too. This test's module may be __main__.
+        for module, error in (
+            ("unittest", "not registered here"),
+            ("__main__", "__main__ module"),
+            (
+                "precompile_no_such_module",
+                "'precompile_no_such_module'.*not importable",
+            ),
+        ):
+            code = python_code.replace(served, f"SERVED_MODULES = ({module!r},)")
+            with self.assertRaisesRegex(PrecompileError, error):
+                exec(code, {"__name__": "artifact"})
         version = f"TORCH_VERSION = {torch.__version__!r}"
         self.assertIn(version, python_code)
         python_code = python_code.replace(version, "TORCH_VERSION = '0.0'")
