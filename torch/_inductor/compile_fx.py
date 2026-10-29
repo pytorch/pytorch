@@ -1810,6 +1810,44 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                if config.experimental_cpp_loops_ir_dump:
+                    from .loops_ir import print_cpp_loops_ir
+
+                    print_cpp_loops_ir(gm, example_inputs)
+
+                # Optional strict C++ LoopsIR path. The normal AOT /
+                # post-grad pipeline above still runs (post-grad passes
+                # called, stock optimization policy unchanged when the
+                # flag is off). When enabled, delegate lowering/codegen
+                # to the helper instead of GraphLowering. The helper
+                # owns C++ optimization/emission, CompiledFxGraph
+                # construction, and metrics; it receives the full
+                # graph_kwargs flags plus the pre/post-grad graph strs.
+                # NOTE: compile_fx_loops_ir_output is orchestrator-owned
+                # (loops_ir_backend.py). If it is not implemented yet,
+                # fail loudly rather than silently falling back to
+                # GraphLowering, which would hide the missing seam.
+                if config.experimental_cpp_ir:
+                    try:
+                        from .loops_ir_backend import compile_fx_loops_ir_output
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "experimental_cpp_ir=True requires "
+                            "torch._inductor.loops_ir_backend."
+                            "compile_fx_loops_ir_output, which is not "
+                            "implemented yet (orchestrator-owned). "
+                            "No fallback to GraphLowering."
+                        ) from e
+
+                    return compile_fx_loops_ir_output(
+                        gm,
+                        example_inputs,
+                        graph_kwargs=graph_kwargs,
+                        inputs_to_check=inputs_to_check,
+                        runnable_graph_str=runnable_graph_str,
+                        inductor_post_grad_graph_str=inductor_post_grad_graph_str,
+                    )
+
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
