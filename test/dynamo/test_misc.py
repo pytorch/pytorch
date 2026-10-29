@@ -61,6 +61,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
+from torch._export.utils import _compiling_state_context
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
@@ -10063,9 +10064,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_f(), torch.zeros(2, 2))
 
     def test_is_compiling_in_wrapper_subclass_torch_dispatch(self):
-        # #184547: __torch_dispatch__ of a wrapper subclass runs eagerly inside
-        # the compile session (AOTAutograd invokes it) and must see the session
-        # flags even though Dynamo never traces it.
         flags = []
 
         class WrapperTensor(torch.Tensor):
@@ -10100,6 +10098,226 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(all(flags))
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
+
+    def _start_flags_thread(self, target, name, errors: list[Exception]):
+        def job():
+            try:
+                target()
+            except Exception as e:
+                errors.append(e)
+
+        thread = threading.Thread(target=job, name=name)
+        thread.start()
+        return thread
+
+    def _join_flags_thread(self, thread: threading.Thread, errors: list[Exception]):
+        thread.join(60)
+        self.assertFalse(
+            thread.is_alive(), f"thread {thread.name} did not finish in time"
+        )
+        if errors:
+            raise errors[0]
+
+    def test_tracing_flags_are_per_thread(self):
+        errors: list[Exception] = []
+        read = {}
+
+        def session_job():
+            with torch.compiler._compile_session_context():
+                read["compile_in_session"] = torch.compiler.is_compiling()
+            with torch.compiler._non_strict_tracing_context():
+                read["non_strict_in_session"] = torch.compiler._is_non_strict_tracing()
+
+        session_thread = self._start_flags_thread(session_job, "tracing-thread", errors)
+        self._join_flags_thread(session_thread, errors)
+        self.assertTrue(read["compile_in_session"])
+        self.assertTrue(read["non_strict_in_session"])
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler._is_non_strict_tracing())
+
+        flags_from_export_thread = {}
+        b_entered, release_b, a_entered, release_a = (
+            threading.Event() for _ in range(4)
+        )
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a_entered.set()
+                flags_from_export_thread["is_exporting"] = torch.compiler.is_exporting()
+                flags_from_export_thread["is_compiling"] = torch.compiler.is_compiling()
+                release_a.wait(60)
+                return x + 1
+
+        def compile_side():
+            with torch.compiler._compile_session_context():
+                b_entered.set()
+                release_b.wait(60)
+
+        def export_side():
+            torch.export.export(M(), (torch.ones(3),), strict=False)
+
+        compile_thread = self._start_flags_thread(
+            compile_side, "compiling-thread", errors
+        )
+        self.assertTrue(b_entered.wait(60))
+        export_thread = self._start_flags_thread(
+            export_side, "exporting-thread", errors
+        )
+        self.assertTrue(a_entered.wait(60))
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+        release_b.set()
+        self._join_flags_thread(compile_thread, errors)
+        self.assertTrue(flags_from_export_thread["is_exporting"])
+        self.assertTrue(flags_from_export_thread["is_compiling"])
+        release_a.set()
+        self._join_flags_thread(export_thread, errors)
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+
+        worker_read = {}
+        entered, release = (threading.Event() for _ in range(2))
+        key = torch.compiler._SESSION_FLAGS_TLS_KEY
+        with torch.compiler._compile_session_context():
+            parent_object = torch.compiler._current_flags()
+            self.assertFalse(torch.compiler.is_exporting())
+
+            def worker_job():
+                torch._C._stash_obj_in_tls(key, parent_object)
+                try:
+                    with _compiling_state_context():
+                        worker_read["is_exporting"] = torch.compiler.is_exporting()
+                        entered.set()
+                        if not release.wait(60):
+                            raise AssertionError("release event not set in time")
+                finally:
+                    torch._C._remove_obj_from_tls(key)
+
+            worker_thread = self._start_flags_thread(
+                worker_job, "worker-thread", errors
+            )
+            self.assertTrue(entered.wait(60))
+            self.assertFalse(torch.compiler.is_exporting())
+            self.assertIs(torch.compiler._current_flags(), parent_object)
+            self.assertFalse(parent_object.is_exporting)
+            release.set()
+            self._join_flags_thread(worker_thread, errors)
+            self.assertTrue(worker_read["is_exporting"])
+
+        with torch.compiler._compile_session_context():
+            captured = torch.compiler._current_flags()
+            self.assertTrue(captured.is_compiling)
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertTrue(captured.is_compiling)
+
+    def test_tracing_flags_in_session_reads_and_shim(self):
+        torch._dynamo.reset()
+        backend_started, release_backend = (threading.Event() for _ in range(2))
+        errors: list[Exception] = []
+        backend_flags = {}
+
+        def blocking_backend(gm, example_inputs):
+            backend_started.set()
+            backend_flags["vals"] = (
+                torch.compiler.is_compiling(),
+                torch.compiler.is_exporting(),
+                torch.compiler.is_dynamo_compiling(),
+            )
+            if not release_backend.wait(60):
+                raise AssertionError("release_backend event not set in time")
+            return gm.forward
+
+        def compile_job():
+            torch.compile(lambda x: x * 2, backend=blocking_backend)(torch.ones(3))
+
+        compile_thread = self._start_flags_thread(
+            compile_job, "compiling-thread", errors
+        )
+        self.assertTrue(backend_started.wait(60))
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_dynamo_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+        release_backend.set()
+        self._join_flags_thread(compile_thread, errors)
+        self.assertEqual(backend_flags["vals"], (True, False, False))
+        self.assertFalse(torch.compiler.is_compiling())
+
+        self.assertFalse(torch.compiler._is_compiling_flag)
+        self.assertFalse(torch.compiler._is_exporting_flag)
+        self.assertFalse(torch.compiler._is_non_strict_tracing_flag)
+        with torch.compiler._compile_session_context():
+            self.assertTrue(torch.compiler._is_compiling_flag)
+            self.assertFalse(torch.compiler._is_exporting_flag)
+        self.assertFalse(torch.compiler._is_compiling_flag)
+        with _compiling_state_context():
+            self.assertTrue(torch.compiler._is_exporting_flag)
+            self.assertTrue(torch.compiler._is_compiling_flag)
+        self.assertFalse(torch.compiler._is_exporting_flag)
+        with self.assertRaisesRegex(AttributeError, "_compile_session_context"):
+            torch.compiler._is_exporting_flag = True
+        self.assertNotIn("_is_exporting_flag", torch.compiler.__dict__)
+        self.assertFalse(torch.compiler._is_exporting_flag)
+
+        # Nested sessions restore correctly within one thread.
+        with torch.compiler._compile_session_context():
+            self.assertTrue(torch.compiler.is_compiling())
+            with torch.compiler._compile_session_context():
+                self.assertTrue(torch.compiler.is_compiling())
+            self.assertTrue(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_compiling())
+        with _compiling_state_context():
+            self.assertTrue(torch.compiler.is_exporting())
+            self.assertTrue(torch.compiler.is_compiling())
+            with torch.compiler._compile_session_context():
+                self.assertTrue(torch.compiler.is_compiling())
+            self.assertTrue(torch.compiler.is_exporting())
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertFalse(torch.compiler.is_compiling())
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_tracing_flags_autograd_worker_thread(self):
+        def run_backward(session_ctx):
+            recorded = []
+
+            class ProbeFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, g):
+                    recorded.append(
+                        (
+                            threading.current_thread() is threading.main_thread(),
+                            torch.compiler.is_compiling(),
+                            torch.compiler.is_exporting(),
+                            torch.compiler._is_non_strict_tracing(),
+                        )
+                    )
+                    return g
+
+            with session_ctx():
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                y = ProbeFn.apply(x.sin())
+                torch.autograd.grad(y.sum(), (x,))
+            return recorded
+
+        records = run_backward(torch.compiler._compile_session_context)
+        self.assertTrue(records)
+        self.assertTrue(any(not is_main for is_main, _, _, _ in records))
+        self.assertTrue(all(compiling for _, compiling, _, _ in records))
+        self.assertTrue(all(not exporting for _, _, exporting, _ in records))
+        records = run_backward(_compiling_state_context)
+        self.assertTrue(records)
+        self.assertTrue(
+            all(compiling and exporting for _, compiling, exporting, _ in records)
+        )
+        records = run_backward(torch.compiler._non_strict_tracing_context)
+        self.assertTrue(records)
+        self.assertTrue(all(non_strict for _, _, _, non_strict in records))
+        self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertFalse(torch.compiler._is_non_strict_tracing())
 
     def test_torch_generator_set_state(self):
         def fn():

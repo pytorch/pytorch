@@ -3,7 +3,6 @@ import contextlib
 import io
 import sys
 import types
-import warnings
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -603,8 +602,7 @@ _SESSION_FLAGS_TLS_KEY = "torch_compiler_tracing_flags"
 
 def _current_flags() -> _TracingFlags:
     if torch._C._is_key_in_tls(_SESSION_FLAGS_TLS_KEY):
-        if (stashed := torch._C._get_obj_in_tls(_SESSION_FLAGS_TLS_KEY)) is not None:
-            return stashed
+        return torch._C._get_obj_in_tls(_SESSION_FLAGS_TLS_KEY)
     return _flags
 
 
@@ -621,7 +619,7 @@ def _session_flag(*attrs: str):
     current = _current_flags()
     fresh = current is _flags
     flags = _TracingFlags()
-    for attr in ("is_compiling", "is_exporting", "is_non_strict_tracing"):
+    for attr in _TracingFlags.__slots__:
         setattr(flags, attr, getattr(current, attr))
     for attr in attrs:
         setattr(flags, attr, True)
@@ -792,9 +790,9 @@ def is_exporting() -> bool:
 
 
 # BC for reads: these were module globals for several releases and code
-# outside this codebase reads them directly. Writes are deprecated too: they
-# are warned about and ignored, since per-session flags have no process-wide
-# value to write (see _LegacyCompilerModule).
+# outside this codebase reads them directly. Writes raise instead: the
+# session flags are per-session now and there is no process-wide value to
+# write (see _LegacyCompilerModule).
 _LEGACY_FLAG_NAMES = {
     "_is_compiling_flag": "is_compiling",
     "_is_exporting_flag": "is_exporting",
@@ -811,16 +809,18 @@ def __getattr__(name: str) -> Any:
 class _LegacyCompilerModule(types.ModuleType):
     def __setattr__(self, name: str, value: Any) -> None:
         if name in _LEGACY_FLAG_NAMES:
-            warnings.warn(
-                f"Setting torch.compiler.{name} is deprecated and ignored: "
-                "tracing flags are per-session now; enter a session with "
+            raise AttributeError(
+                f"Setting torch.compiler.{name} no longer works: the "
+                "tracing flags are per-session now. Enter a session with "
                 "torch.compiler._compile_session_context() or "
-                "torch.compiler._non_strict_tracing_context() instead",
-                FutureWarning,
-                stacklevel=2,
+                "torch.compiler._non_strict_tracing_context() instead"
             )
-            return
         super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in _LEGACY_FLAG_NAMES:
+            return
+        super().__delattr__(name)
 
 
 sys.modules[__name__].__class__ = _LegacyCompilerModule
