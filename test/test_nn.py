@@ -2529,6 +2529,140 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
+    def test_CTCLoss_target_value_checks_cpu(self):
+        # Out-of-range target values used to index log_probs and its gradient
+        # without bound-checking, corrupting memory (gh-193794). The public
+        # error cases live in error_inputs_ctc_loss; these cover what must
+        # still be accepted and the int32 instantiation.
+        for dtype in (torch.int64, torch.int32):
+            log_probs = torch.randn(5, 6, requires_grad=True)
+            input_lengths = torch.tensor([5])
+            target_lengths = torch.tensor([4])
+
+            # padded entries beyond target_lengths are never used and must not raise
+            targets = torch.tensor([[3, 5, 4, 2, 99]], dtype=dtype)
+            loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            self.assertTrue(torch.isfinite(loss).item())
+            loss.backward()
+
+            # valid concatenated targets of exactly sum(target_lengths) must not raise
+            targets = torch.tensor([3, 5, 4, 2], dtype=dtype)
+            loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            self.assertTrue(torch.isfinite(loss).item())
+            loss.backward()
+
+        # target_lengths[b] == 0: all entries are padding and must not be validated
+        log_probs = torch.randn(3, 1, 6)
+        targets = torch.tensor([[99, 98, 97]])
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([3]), torch.tensor([0]))
+        self.assertTrue(torch.isfinite(loss).item())
+
+        # the public API upcasts targets to int64, so call the op directly to
+        # exercise the int32 (kInt) instantiation of the check
+        log_probs = torch.randn(5, 1, 6, requires_grad=True)
+        targets = torch.tensor([[3, 5, 6, 7]], dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "target values to be in the range"):
+            torch._ctc_loss(log_probs, targets, [5], [4], 0, False)
+
+    def test_CTCLoss_target_value_checks_backward_cpu(self):
+        # The backward revalidates target values: autograd can reach it with a
+        # saved targets tensor mutated after the forward (e.g. through .data,
+        # which does not bump the version counter).
+        log_probs = torch.randn(5, 6, requires_grad=True)
+        targets = torch.tensor([[3, 5, 4, 2]])
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([5]), torch.tensor([4]))
+        targets.data[0, 0] = 99
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 99 for batch 0"):
+            loss.backward()
+
+        # 1D concatenated targets: nonzero per-batch offset in the backward
+        log_probs = torch.randn(5, 2, 6, requires_grad=True)
+        targets = torch.tensor([1, 2, 3, 4, 5])
+        loss = torch.nn.functional.ctc_loss(
+            log_probs, targets, torch.tensor([5, 5]), torch.tensor([3, 2]), reduction="sum")
+        targets.data[4] = 9
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 9 for batch 1"):
+            loss.backward()
+
+        # malformed length lists must be rejected like the forward does, so the
+        # target-value check cannot index past the per-batch offsets
+        log_probs = torch.randn(5, 1, 6)
+        targets = torch.tensor([[1, 2]])
+        neg_log_likelihood, log_alpha = torch._ctc_loss(log_probs, targets, [5], [2], 0, False)
+        with self.assertRaisesRegex(RuntimeError, "target_lengths must be of size batch_size"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets, [5], [2, 2], neg_log_likelihood, log_alpha, 0, False)
+
+    def test_CTCLoss_backward_metadata_guards_cpu(self):
+        # The backward validator reads target storage, so its own indexing
+        # metadata must be checked first: a direct _ctc_loss_backward call
+        # bypasses the forward's checks, and oversized or negative
+        # target_lengths used to OOB inside the validator itself.
+        log_probs = torch.randn(5, 1, 6)
+        targets = torch.tensor([[1, 2, 3]])
+        neg_log_likelihood, log_alpha = torch._ctc_loss(log_probs, targets, [5], [3], 0, False)
+
+        # oversized 2D target_length does not fit the row
+        with self.assertRaisesRegex(RuntimeError, r"size at least 1000 at dimension 1, but got size 3"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets, [5], [1000], neg_log_likelihood, log_alpha, 0, False)
+
+        # the guard must fire before any value read even with nll=inf and
+        # zero_infinity (the OOB-in-validator scenario)
+        inf_nll = torch.full_like(neg_log_likelihood, float('inf'))
+        with self.assertRaisesRegex(RuntimeError, r"size at least 1000 at dimension 1, but got size 3"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets, [5], [1000], inf_nll, log_alpha, 0, True)
+
+        # negative target_lengths would shrink offsets below zero
+        with self.assertRaisesRegex(RuntimeError, "target_lengths to have value at least 0, but got value -1"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets, [5], [-1], neg_log_likelihood, log_alpha, 0, False)
+
+        # 1D concatenated: sum of target_lengths must equal targets.size(0)
+        targets_1d = torch.tensor([1, 2, 3])
+        nll_1d, la_1d = torch._ctc_loss(log_probs, targets_1d, [5], [3], 0, False)
+        with self.assertRaisesRegex(RuntimeError, r"target_lengths\[0\] = 1000 exceeds the 3 remaining entries"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets_1d, [5], [1000], nll_1d, la_1d, 0, False)
+        with self.assertRaisesRegex(RuntimeError, r"size 2 at dimension 0, but got size 3"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, targets_1d, [5], [2], nll_1d, la_1d, 0, False)
+
+        # 1D lengths whose sum overflows int64 and wraps back to targets.size(0)
+        # must be rejected before accumulation, in the backward (also with
+        # nll=inf and zero_infinity) and in the forward
+        log_probs_3 = torch.randn(5, 3, 6)
+        nll_3, la_3 = torch._ctc_loss(log_probs_3, torch.tensor([1, 2, 3]), [5, 5, 5], [1, 1, 1], 0, False)
+        int64_max = torch.iinfo(torch.int64).max
+        overflow_lengths = [int64_max, int64_max, 3]
+        msg = r"target_lengths\[0\] = 9223372036854775807 exceeds the 1 remaining entries"
+        for nll, zero_infinity in ((nll_3, False), (torch.full_like(nll_3, float('inf')), True)):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.ops.aten._ctc_loss_backward(
+                    torch.ones(3), log_probs_3, torch.tensor([1]), [5, 5, 5], overflow_lengths,
+                    nll, la_3, 0, zero_infinity)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch._ctc_loss(log_probs_3, torch.tensor([1]), [5, 5, 5], overflow_lengths, 0, False)
+
+        # the offset math only handles 1D and 2D targets
+        with self.assertRaisesRegex(RuntimeError, "targets must be 1 or 2 dimensional"):
+            torch.ops.aten._ctc_loss_backward(
+                torch.ones(1), log_probs, torch.zeros(1, 1, 3, dtype=torch.long), [5], [3],
+                neg_log_likelihood, log_alpha, 0, False)
+
+    def test_CTCLoss_meta_ignores_target_values(self):
+        # ctc_loss_meta shares the output allocator with the CPU implementation;
+        # the allocator must stay metadata-only so meta results never depend on
+        # CPU target contents (gh-193794 follow-up). Mixed meta log_probs with
+        # CPU targets dispatches to the Meta kernel; the public F.ctc_loss path
+        # cannot be used because the .Tensor lengths overload has no Meta kernel.
+        log_probs = torch.zeros(5, 1, 6, device='meta')
+        targets = torch.tensor([[3, 5, 6, 7]])  # 6 and 7 are out of range for C=6
+        nll, log_alpha = torch._ctc_loss(log_probs, targets, [5], [4], 0, False)
+        self.assertEqual(nll.device.type, 'meta')
+        self.assertEqual(log_alpha.device.type, 'meta')
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)

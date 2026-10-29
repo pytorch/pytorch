@@ -9343,6 +9343,50 @@ def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,),
                           kwargs=dict(reduction=r, zero_infinity=z))
 
+    # concatenated 1D targets over several batches, so noncontiguous variants
+    # exercise the per-batch offsets. CPU only: the CUDA kernel does not yet
+    # scale 1D batch offsets by the targets stride.
+    if torch.device(device).type == 'cpu':
+        for r in reductions:
+            log_probs = make_log_probs((10, 3, 6))
+            input_lengths = torch.full((3, ), 10, dtype=torch.long, device=device)
+            target_lengths = torch.tensor([2, 3, 1], dtype=torch.long, device=device)
+            targets = torch.randint(1, 6, (int(target_lengths.sum()), ), dtype=torch.long, device=device)
+            if r in ["none", "sum"]:
+                input_lengths = input_lengths.tolist()
+                target_lengths = target_lengths.tolist()
+            yield SampleInput(log_probs, args=(targets, input_lengths, target_lengths,),
+                              kwargs=dict(reduction=r))
+
+
+def error_inputs_ctc_loss(op_info, device, **kwargs):
+    # out-of-range target values are only validated on CPU; on CUDA they
+    # trip a device-side assert instead of raising
+    if torch.device(device).type != 'cpu':
+        return
+    make = partial(make_tensor, device=device, dtype=torch.float32)
+    lengths = partial(torch.tensor, dtype=torch.long, device=device)
+    labels = partial(torch.tensor, dtype=torch.long, device=device)
+
+    # target value beyond num_labels (gh-193794)
+    yield ErrorInput(SampleInput(make((5, 1, 6)), args=(labels([[3, 5, 6, 7]]), lengths([5]), lengths([4]))),
+                     error_regex=r"range \[0, 6\), but got value 6 for batch 0")
+    # negative value in concatenated targets
+    yield ErrorInput(SampleInput(make((5, 1, 6)), args=(labels([3, 5, -1, 2]), lengths([5]), lengths([4]))),
+                     error_regex=r"range \[0, 6\), but got value -1 for batch 0")
+    # 2D batch: junk padding in row 0 is skipped, the used value in row 1 is reported
+    yield ErrorInput(SampleInput(make((5, 2, 6)), args=(labels([[1, 2, 3, 4, 99], [1, 2, 3, 7, 0]]),
+                                                        lengths([5, 5]), lengths([4, 4]))),
+                     error_regex=r"range \[0, 6\), but got value 7 for batch 1")
+    # transposed 2D targets: validation follows the kernel's stride math
+    yield ErrorInput(SampleInput(make((5, 2, 6)), args=(labels([[1, 2], [3, 7], [4, 5]]).t(),
+                                                        lengths([5, 5]), lengths([3, 2]))),
+                     error_regex=r"range \[0, 6\), but got value 7 for batch 1")
+    # concatenated targets: nonzero per-batch offset
+    yield ErrorInput(SampleInput(make((5, 2, 6)), args=(labels([1, 2, 3, 4, 9]), lengths([5, 5]), lengths([3, 2])),
+                                 kwargs=dict(reduction="sum")),
+                     error_regex=r"range \[0, 6\), but got value 9 for batch 1")
+
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
@@ -22595,6 +22639,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=floating_types(),
         supports_out=False,
         sample_inputs_func=sample_inputs_ctc_loss,
+        error_inputs_func=error_inputs_ctc_loss,
         # gradcheck_wrapper, see https://github.com/pytorch/pytorch/issues/52241
         gradcheck_wrapper=gradcheck_wrapper_ctc_loss,
         skips=(
