@@ -9364,7 +9364,7 @@ class TestPrecompileCustomOpModules(TestCase):
             # A make_fx training capture traces the backward, so its op's module is
             # recorded.
             traced_bw = tracer == "make_fx" and entry == "train_fn"
-            modules = tuple(sorted((module, bwmod))) if traced_bw else (module,)
+            modules = (bwmod, module) if traced_bw else (module,)
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)
@@ -9537,9 +9537,54 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"['{ns}::triple (CPU kernel)']", out.stdout)
         with open(paths[0]) as f:
             source = f.read()
-        modules = (defmod,) if shared else tuple(sorted((defmod, implmod)))
+        modules = (defmod,) if shared else (defmod, implmod)
         self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", source)
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
+
+    @skipIfCrossRef
+    def test_load_imports_the_overriding_kernel_module_last(self):
+        tag = uuid.uuid4().hex
+        # Alphabetical order would import the overriding module first.
+        override, vendor = f"precompile_a_override_{tag}", f"precompile_z_vendor_{tag}"
+        cuda_only, ns = f"precompile_cuda_{tag}", f"precompile_override_test_{tag}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        lib = f'import torch\nlib = torch.library.Library("{ns}", "IMPL")\n'
+        sources = {
+            vendor: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("op(Tensor x) -> Tensor")\nlib.impl("op", lambda x: x * 3, "CPU")\n',
+            override: lib + 'lib.impl("op", lambda x: x * 5, "CPU")\n',
+            cuda_only: lib + 'lib.impl("op", lambda x: x * 7, "CUDA")\n',
+        }
+        for name, source in sources.items():
+            with open(os.path.join(directory, name + ".py"), "w") as f:
+                f.write(source)
+        script = textwrap.dedent(
+            f"""
+            import sys, warnings
+            import torch
+            from torch.compiler.precompile import capture, load, MakeFxTracer
+            phase, artifact, cache = sys.argv[1:]
+            sys.path.insert(0, {directory!r})
+            x = torch.arange(6, dtype=torch.float32)
+            if phase == "capture":
+                warnings.simplefilter("ignore")
+                import {vendor}, {override}, {cuda_only}
+                op = torch.ops.{ns}.op.default
+                with capture(lambda x: op(x), artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
+                    torch.testing.assert_close(cap(x), x * 5)
+            else:
+                torch.testing.assert_close(load(artifact, cache)(x), x * 5)
+                assert "{cuda_only}" not in sys.modules
+            print("ok", phase)
+            """
+        )
+        paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
+        for phase in ("capture", "load"):
+            cmd = [sys.executable, "-c", script, phase, *paths]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn(f"ok {phase}", out.stdout)
+        with open(paths[0]) as f:
+            self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", f.read())
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -9599,7 +9644,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.impl("op", lambda x: x.clone(), "CompositeExplicitAutograd")
         names = {(f"{ns}::op", ""), ("aten::add", "Tensor")}
         # A Library a torch helper created records no module, but is still checked.
-        self.assertEqual(_custom_op_modules(names), ())
+        self.assertEqual(_custom_op_modules(names, ("CPU",)), ())
         self.assertEqual(_custom_ops(names), ((f"{ns}::op", ""),))
 
         # A module that imports but raises is collected like a missing one.
