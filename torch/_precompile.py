@@ -2016,21 +2016,30 @@ def _library_op_module(
 
 
 def _kernel_modules(
-    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+    op_name: str,
+    overload: str,
+    keys: tuple[str, ...],
+    file_modules: Callable[[], dict[str, str]],
 ) -> set[str]:
     """The modules outside torch that constructed a ``torch.library.Library``
-    registering a kernel of ``op_name``, often not the module defining the op. A
-    kernel registered through another module's Library records that module, not
-    the one calling ``impl``."""
+    registering the active kernel of ``op_name`` for one of ``keys``, often not the
+    module defining the op. A kernel registered through another module's Library
+    records that module, not the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
     dump = torch._C._dispatch_dump(qualname)
-    paths = re.findall(r"^[^:\n]+: registered at (.+\.py):\d+ ::", dump, re.MULTILINE)
-    modules = {file_modules().get(os.path.realpath(path)) for path in paths}
+    # An overridden kernel's line reads "CPU (inactive): registered at ...".
+    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+\.py):\d+ ::"
+    found = re.findall(pattern, dump, re.MULTILINE)
+    modules = {file_modules().get(os.path.realpath(p)) for k, p in found if k in keys}
     return {m for m in modules if m and m.partition(".")[0] != "torch"}
 
 
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
-    """The modules registering the ops among ``op_names``."""
+def _custom_op_modules(
+    op_names: Iterable[tuple[str, str]], keys: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The modules registering the ops among ``op_names`` and their active kernels
+    for ``keys``, in the order their imports finished, so that importing them again
+    registers any overriding kernel last."""
     file_modules = functools.cache(_file_modules)
     modules: set[str | None] = set()
     for op_name, overload in op_names:
@@ -2038,8 +2047,8 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
             _custom_op_module(op_name, overload)
             or _library_op_module(op_name, overload, file_modules)
         )
-        modules |= _kernel_modules(op_name, overload, file_modules)
-    return tuple(sorted(m for m in modules if m is not None))
+        modules |= _kernel_modules(op_name, overload, keys, file_modules)
+    return tuple(m for m in sys.modules if m in modules)
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -2129,7 +2138,7 @@ def _build_python_source(
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(compiled._gm)
-        _write_custom_op_imports(buf, _custom_op_modules(ops), ops, keys)
+        _write_custom_op_imports(buf, _custom_op_modules(ops, keys), ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2186,7 +2195,7 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(gm)
-        _write_custom_op_imports(buf, _custom_op_modules(ops), ops, keys)
+        _write_custom_op_imports(buf, _custom_op_modules(ops, keys), ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
