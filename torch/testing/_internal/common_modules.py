@@ -4156,16 +4156,11 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
-               skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
                skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),
                    # Fails on backward check if output size is 1x1
                    DecorateInfo(
                        unittest.expectedFailure,
@@ -4954,10 +4949,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
