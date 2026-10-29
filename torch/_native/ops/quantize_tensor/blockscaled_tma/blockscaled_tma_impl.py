@@ -708,28 +708,24 @@ def _blockscaled_tma_impl(
 
 def _blockscaled_tma_impl_dual(
     input: torch.Tensor,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
     *,
     dim: _SingleQuantDim = (-2, -1),
-    **kwargs: object,
 ) -> _FourTensorOutput:
-    r"""_blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled, *, dim=(-2, -1), **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""_blockscaled_tma_impl_dual(input, *, dim=(-2, -1)) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize both matrix axes of an N-D tensor in one kernel launch.
+
+    Uses 1x32 scaling blocks and swizzled scales.
 
     Args:
         input (Tensor): CUDA tensor with the layout and dtypes described by
             :func:`_blockscaled_tma_impl`. Both selected axes must have sizes
             divisible by 32. Inputs not admitting a 2D or 4D TMA view are
             materialized as described above.
-        is_square_scaling (bool): Must be ``False``.
-        is_scale_swizzled (bool): Must be ``True``.
         dim (tuple[int, int], optional): Ordered matrix-axis pair. Both this
             pair and its reverse are quantized. The pair must be in ascending
             order after normalizing negative axes; all other axes are batch
             axes. Default: ``(-2, -1)``.
-        **kwargs: No unlisted keyword arguments are accepted.
 
     Returns:
         tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,
@@ -741,16 +737,15 @@ def _blockscaled_tma_impl_dual(
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
-        >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
+        >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x)
     """
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(
             input,
             dim,
-            is_square_scaling,
-            is_scale_swizzled,
+            False,
+            True,
             dual=True,
-            **kwargs,
         ),
     )
