@@ -30,7 +30,7 @@
           "function {} failed with error {} ({})",         \
           #call,                                           \
           _errstr_,                                        \
-          (int)_status_);                                  \
+          static_cast<int>(_status_));                     \
     }                                                      \
     return _status_;                                       \
   }()
@@ -45,7 +45,7 @@
           "function {} failed with error {} ({})", \
           #call,                                   \
           _errstr_,                                \
-          (int)_status_);                          \
+          static_cast<int>(_status_));             \
     }                                              \
     return _status_;                               \
   }()
@@ -70,8 +70,13 @@
 // clang-format on
 
 #elif defined(HAS_ROCTRACER)
+#include <stdexcept>
+
 #include <hip/hip_runtime.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+
+#include "ThrowUtil.h"
 
 #define CUDA_CALL(call)                                   \
   {                                                       \
@@ -82,9 +87,48 @@
           "function {} failed with error {} ({})",        \
           #call,                                          \
           _errstr_,                                       \
-          (int)_status_);                                 \
+          static_cast<int>(_status_));                    \
     }                                                     \
   }
+
+// rocprofiler-sdk returns a status from every call and reports nothing else
+// on failure, so the status string is the only diagnostic. ROCPROF_CALL logs
+// and hands the status back to the caller for cases where some failures are
+// expected (e.g. stopping an already-stopped context); ROCPROF_CALL_THROW is
+// for paths where any failure must abort, such as tool initialization.
+inline const char* rocprofStatusString(rocprofiler_status_t status) {
+  const char* str = rocprofiler_get_status_string(status);
+  return str != nullptr ? str : "unknown rocprofiler-sdk error";
+}
+
+#define ROCPROF_CALL(call)                         \
+  [&]() -> rocprofiler_status_t {                  \
+    rocprofiler_status_t _status_ = call;          \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {  \
+      LOG(WARNING) << fmt::format(                 \
+          "function {} failed with error {} ({})", \
+          #call,                                   \
+          rocprofStatusString(_status_),           \
+          static_cast<int>(_status_));             \
+    }                                              \
+    return _status_;                               \
+  }()
+
+// clang-format off
+#define ROCPROF_CALL_THROW(call)                     \
+  do {                                               \
+    rocprofiler_status_t _status_ = (call);          \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {    \
+      KINETO_THROW(                                  \
+          std::runtime_error,                        \
+          fmt::format(                               \
+              "{} failed: {} ({})",                  \
+              #call,                                 \
+              rocprofStatusString(_status_),         \
+              static_cast<int>(_status_)));          \
+    }                                                \
+  } while (false)
+// clang-format on
 
 #define CUPTI_CALL(call) call
 

@@ -162,6 +162,21 @@ struct _cuda_scatter_gather_internal_kernel {
       }
     }
 
+    if constexpr (is_scatter_like && std::is_same_v<func_t, TensorAssign>) {
+      constexpr size_t element_size = sizeof(scalar_t);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_kernel_eligible<alignment>(
+              iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        if (iter.numel() == 0) return;
+        at::native::vectorized_scatter_kernel_launch<
+            at::native::ScatterCopyOp, alignment, char, index_t>(
+            self_ptr, src_ptr, reinterpret_cast<index_t*>(index_ptr),
+            iter.shape()[1], iter.shape()[0] * element_size, index_size,
+            index_stride * element_size, iter.strides(1)[1]);
+        return;
+      }
+    }
+
 #if !defined(USE_ROCM)
     if constexpr (is_scatter_like && std::is_same_v<func_t, ReduceAdd> &&
         (std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double> ||
