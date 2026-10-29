@@ -1116,10 +1116,15 @@ def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None
             devices |= {v.device.type}
     for vt in vts:
         if isinstance(vt, LazyVariableTracker):
-            for op in tree_leaves(vt.peek_value()):
-                package.add_graph_break_op(op, device_types=devices)
-        elif isinstance(vt, BaseTorchVariable):
-            package.add_graph_break_op(vt.value, device_types=devices)
+            ops: list[Any] = tree_leaves(vt.peek_value())
+        else:
+            ops = [vt.value] if isinstance(vt, BaseTorchVariable) else []
+        for op in ops:
+            if isinstance(op, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+                try:
+                    package.add_graph_break_op(op, device_types=devices)
+                except Exception:
+                    log.debug("precompile: dropped a graph-break op", exc_info=True)
 
 
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
