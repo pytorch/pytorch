@@ -34,6 +34,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     munge_exc,
     parametrize,
@@ -143,6 +144,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
+@instantiate_parametrized_tests
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -2333,7 +2335,74 @@ def forward(self):
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
-    def test_cond_dunder_dict_read_then_outer_mutation(self):
+    @parametrize("kind", ["function", "wrapped", "staticmethod", "exception"])
+    @parametrize("hop", ["cond", "checkpoint"])
+    @parametrize("via_dict", [False, True])
+    @parametrize("local", [False, True])
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=False)
+    def test_hop_instance_dict_side_effect(self, kind, hop, via_dict, local):
+        def make_target():
+            def inner(y):
+                return y.cos()
+
+            if kind == "wrapped":
+                return torch.no_grad()(inner)
+            if kind == "staticmethod":
+                return staticmethod(inner)
+            if kind == "exception":
+                return ValueError("test")
+            return inner
+
+        def fn(pred, x):
+            outer = make_target()
+
+            def body(y):
+                target = make_target() if local else outer
+                if via_dict:
+                    target.__dict__["tag"] = 7
+                else:
+                    target.tag = 7
+                return y.sin() + target.tag
+
+            if hop == "cond":
+                return torch.cond(pred, body, body, (x,))
+            return torch.utils.checkpoint.checkpoint(body, x, use_reentrant=False)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if local:
+            self.assertEqual(compiled(torch.tensor(True), x), x.sin() + 7)
+        else:
+            error = (
+                torch._dynamo.exc.UncapturedHigherOrderOpError
+                if hop == "cond"
+                else torch._dynamo.exc.Unsupported
+            )
+            with self.assertRaisesRegex(error, "Unsafe side effect"):
+                compiled(torch.tensor(True), x)
+
+    def test_cond_observed_exception_side_effect(self):
+        def fn(pred, x):
+            try:
+                {}["missing"]
+            except KeyError as exc:
+                caught = exc
+
+                def body(y):
+                    caught.__dict__["tag"] = 7
+                    return y.sin()
+
+                return torch.cond(pred, body, body, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError, "Unsafe side effect"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.tensor(True), torch.randn(4)
+            )
+
+    @parametrize("kind", ["function", "wrapped", "staticmethod", "exception"])
+    def test_cond_dunder_dict_read_then_outer_mutation(self, kind):
         # The first __dict__ access on `inner` happens inside the cond body,
         # whose side effects table is discarded after tracing. The later
         # mutation outside the cond must still be recorded and replayed.
@@ -2341,19 +2410,103 @@ def forward(self):
             def inner():
                 return x + 1
 
+            if kind == "wrapped":
+                inner = torch.no_grad()(inner)
+            elif kind == "staticmethod":
+                inner = staticmethod(inner)
+            elif kind == "exception":
+                inner = ValueError("test")
+
             def branch():
-                return x + len(inner.__dict__)
+                return x + len(inner.__dict__) * 0
 
             out = control_flow.cond(pred, branch, branch)
             inner.tag = 42
-            return out, inner
+            return out, inner, inner.__dict__
 
         x = torch.randn(4)
-        out, inner = torch.compile(fn, backend="eager", fullgraph=True)(
+        out, inner, attrs = torch.compile(fn, backend="eager", fullgraph=True)(
             torch.tensor(True), x
         )
         self.assertEqual(out, x)
         self.assertEqual(inner.tag, 42)
+        self.assertIs(attrs, inner.__dict__)
+
+    @parametrize("hop", ["cond", "checkpoint"])
+    @parametrize("read", ["dict", "staticmethod"])
+    @parametrize("name", ["__doc__", "tag"])
+    @parametrize("operation", ["store", "setattr", "set_method", "delete"])
+    def test_existing_function_read_then_outer_mutation(
+        self, hop, read, name, operation
+    ):
+        def existing():
+            "original"
+
+        existing.tag = "original"
+
+        def fn(pred, x, f):
+            def branch(y):
+                obj = staticmethod(f) if read == "staticmethod" else f
+                return y.sin() + len(obj.__dict__) * 0
+
+            if hop == "cond":
+                out = torch.cond(pred, branch, branch, (x,))
+            else:
+                out = torch.utils.checkpoint.checkpoint(branch, x, use_reentrant=False)
+            if operation == "store":
+                if name == "__doc__":
+                    f.__doc__ = "changed"
+                else:
+                    f.tag = "changed"
+            elif operation == "setattr":
+                setattr(f, name, "changed")
+            elif operation == "set_method":
+                f.__setattr__(name, "changed")
+            elif name == "__doc__":
+                del f.__doc__
+            else:
+                del f.tag
+            return out, f, getattr(f, name, None), hasattr(f, name)
+
+        x = torch.randn(4)
+        counter = CompileCounterWithBackend("eager")
+        result = torch.compile(fn, backend=counter, fullgraph=True)(
+            torch.tensor(True), x, existing
+        )
+        self.assertEqual(result[0], x.sin())
+        self.assertIs(result[1], existing)
+        expected = None if operation == "delete" else "changed"
+        present = name == "__doc__" or operation != "delete"
+        self.assertEqual(result[2:], (expected, present))
+        self.assertEqual(getattr(existing, name, None), expected)
+        self.assertEqual(hasattr(existing, name), present)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("read", ["dict", "staticmethod"])
+    @parametrize("name", ["__doc__", "tag"])
+    def test_cond_existing_function_side_effect_after_read(self, read, name):
+        def existing():
+            "original"
+
+        existing.tag = "original"
+
+        def fn(pred, x, f):
+            def branch(y):
+                obj = staticmethod(f) if read == "staticmethod" else f
+                size = len(obj.__dict__)
+                setattr(f, name, "changed")
+                return y.sin() + size * 0
+
+            return torch.cond(pred, branch, branch, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Unsafe side effect|Non-nullified side effect",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.tensor(True), torch.randn(4), existing
+            )
+        self.assertEqual(getattr(existing, name), "original")
 
     def test_cond_with_constant_pred(self):
         def test(pred, x):

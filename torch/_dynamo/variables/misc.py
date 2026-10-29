@@ -393,6 +393,10 @@ class SuperVariable(VariableTracker):
             # type: ignore[arg-type]
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
         elif inner_fn is object.__delattr__:
+            if isinstance(self.objvar, UserDefinedObjectVariable):
+                return self.objvar.method_setattr_standard(
+                    tx, args[0], variables.DeletedVariable()
+                )
             attr = args[0]
             try:
                 attr = attr.as_python_constant()

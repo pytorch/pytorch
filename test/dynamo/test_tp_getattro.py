@@ -2,8 +2,10 @@
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
 import collections
+import functools
 import inspect
 import sys
+import time
 import traceback
 import types
 import unittest
@@ -13,13 +15,364 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 from torch.utils._triton import has_triton_package
 
 
+def _staticmethod_identity(value):
+    return value
+
+
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("source_kind", ["input", "closure", "global", "new"])
+    @parametrize("name", ["__doc__", "__module__"])
+    @parametrize("explicit_method", [False, True])
+    @parametrize("delete_first", [False, True])
+    def test_function_metadata_set_delete(
+        self, source_kind, name, explicit_method, delete_first
+    ):
+        def existing():
+            "original doc"
+
+        def fn(x, f):
+            if source_kind == "closure":
+                f = existing
+            elif source_kind == "global":
+                f = _staticmethod_identity
+            elif source_kind == "new":
+
+                def f():
+                    "original doc"
+
+            if not delete_first:
+                if explicit_method:
+                    f.__setattr__(name, "initial")
+                else:
+                    setattr(f, name, "initial")
+            if explicit_method:
+                f.__delattr__(name)
+            else:
+                delattr(f, name)
+            deleted = getattr(f, name), hasattr(f, name)
+            delattr(f, name)
+            if explicit_method:
+                f.__setattr__(name, "changed")
+            else:
+                setattr(f, name, "changed")
+            assigned = getattr(f, name)
+            delattr(f, name)
+            return x + 1, f, deleted, assigned, getattr(f, name), hasattr(f, name)
+
+        target = _staticmethod_identity if source_kind == "global" else existing
+        original = getattr(target, name)
+        self.addCleanup(setattr, target, name, original)
+        x = torch.randn(3)
+        expected = fn(x, target)
+        setattr(target, name, original)
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=counter, fullgraph=True)(x, target)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[2:], expected[2:])
+        self.assertIsNone(getattr(result[1], name))
+        self.assertTrue(hasattr(result[1], name))
+        if source_kind != "new":
+            self.assertIs(result[1], target)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("name", ["__name__", "__qualname__", "__doc__", "__module__"])
+    def test_function_metadata_method_alias(self, name):
+        class Obj:
+            def method(self):
+                "original doc"
+
+        def fn(x, obj):
+            method = obj.method
+            setattr(method.__func__, name, "changed")
+            return x + 1, getattr(obj.method, name), getattr(method.__func__, name)
+
+        obj = Obj()
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(result, (x + 1, "changed", "changed"))
+        self.assertEqual(getattr(Obj.method, name), "changed")
+
+    @parametrize("name", ["__doc__", "__module__"])
+    @parametrize("delete", [False, True])
+    def test_bound_method_metadata_is_readonly(self, name, delete):
+        class Obj:
+            def method(self):
+                "original doc"
+
+        def fn(x, obj):
+            try:
+                if delete:
+                    delattr(obj.method, name)
+                else:
+                    obj.method.__setattr__(name, "changed")
+            except AttributeError:
+                return x + 1
+            return x - 1
+
+        obj = Obj()
+        original = getattr(Obj.method, name)
+        x = torch.randn(3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
+        )
+        self.assertEqual(getattr(Obj.method, name), original)
+
+    @parametrize("binding", ["method", "classmethod", "decorated"])
+    @parametrize("operation", ["set_method", "del_method", "delattr", "delete"])
+    def test_bound_method_instance_attributes_are_readonly(self, binding, operation):
+        class Obj:
+            def method(self):
+                pass
+
+            @classmethod
+            def classmethod(cls):
+                pass
+
+            @torch.no_grad()
+            def decorated(self):
+                pass
+
+        obj = Obj()
+        method = getattr(obj, binding)
+        method.__dict__["tag"] = "original"
+        expected_attrs = method.__dict__.copy()
+
+        def fn(x, obj):
+            method = getattr(obj, binding)
+            try:
+                if operation == "set_method":
+                    method.__setattr__("new", 1)
+                elif operation == "del_method":
+                    method.__delattr__("tag")
+                elif operation == "delattr":
+                    delattr(method, "tag")
+                else:
+                    del method.tag
+            except AttributeError:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+        expected = fn(x, obj)
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(
+            torch.compile(fn, backend=counter, fullgraph=True)(x, obj), expected
+        )
+        self.assertEqual(method.__dict__, expected_attrs)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("binding", ["method", "classmethod", "decorated"])
+    @parametrize("delete", [False, True])
+    def test_bound_method_instance_dict_remains_writable(self, binding, delete):
+        class Obj:
+            def method(self):
+                pass
+
+            @classmethod
+            def classmethod(cls):
+                pass
+
+            @torch.no_grad()
+            def decorated(self):
+                pass
+
+        obj = Obj()
+        method = getattr(obj, binding)
+
+        def fn(x, obj):
+            attrs = getattr(obj, binding).__dict__
+            attrs["tag"] = "original"
+            if delete:
+                del attrs["tag"]
+            return x + 1, attrs
+
+        x = torch.randn(3)
+        out, attrs = torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(out, x + 1)
+        self.assertIs(attrs, method.__dict__)
+        self.assertEqual("tag" in attrs, not delete)
+
+    @parametrize("wrapped", [False, True])
+    @parametrize("delete", [False, True])
+    @parametrize("name", ["tag", 1])
+    def test_bound_method_explicit_mutation_errors(self, wrapped, delete, name):
+        class Obj:
+            def method(self):
+                pass
+
+        if wrapped:
+            Obj.method = functools.lru_cache()(Obj.method)
+        Obj.method.tag = "original"
+
+        def fn(x, obj):
+            try:
+                if delete:
+                    obj.method.__delattr__(name)
+                else:
+                    obj.method.__setattr__(name, 1)
+            except TypeError:
+                return x + 1
+            except AttributeError:
+                return x + 2
+            return x - 1
+
+        obj = Obj()
+        x = torch.randn(3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
+        )
+        self.assertEqual(Obj.method.tag, "original")
+
+    @parametrize("write_global", [False, True])
+    def test_function_metadata_global_input_alias_guard(self, write_global):
+        target = _staticmethod_identity
+        original_doc = target.__doc__
+        self.addCleanup(setattr, target, "__doc__", original_doc)
+        other = types.FunctionType(target.__code__, target.__globals__)
+        target.__doc__ = other.__doc__ = "original"
+
+        def fn(x, f):
+            if write_global:
+                _staticmethod_identity.__doc__ = "changed"
+                return x + 1, f.__doc__
+            f.__doc__ = "changed"
+            return x + 1, _staticmethod_identity.__doc__
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, target), (x + 1, "changed"))
+        target.__doc__ = "original"
+        self.assertEqual(compiled(x, other), (x + 1, "original"))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(target.__doc__, "changed" if write_global else "original")
+        self.assertEqual(other.__doc__, "original" if write_global else "changed")
+
+    @parametrize("via_dict", [False, True])
+    def test_function_deleted_instance_attr_hasattr(self, via_dict):
+        def existing():
+            pass
+
+        existing.tag = "old"
+
+        def fn(x, f):
+            if via_dict:
+                del f.__dict__["tag"]
+            else:
+                del f.tag
+            return x + 1, hasattr(f, "tag"), getattr(f, "tag", "missing")
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, existing)
+        self.assertEqual(result, (x + 1, False, "missing"))
+        self.assertFalse(hasattr(existing, "tag"))
+
+    @parametrize("name", ["__name__", "__qualname__", "__doc__", "__module__"])
+    @parametrize("bound", [False, True])
+    def test_wrapper_metadata_guards(self, name, bound):
+        def target(*args):
+            "inline doc"
+
+        first = functools.lru_cache()(target)
+        second = functools.lru_cache()(target)
+        setattr(first, name, "a")
+        setattr(second, name, "b")
+        if bound:
+            owner = object()
+            first_arg = types.MethodType(first, owner)
+            second_arg = types.MethodType(second, owner)
+        else:
+            first_arg, second_arg = first, second
+
+        def fn(x, f):
+            return x + 1 if getattr(f, name) == "a" else x - 1
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, first_arg), fn(x, first_arg))
+        self.assertEqual(compiled(x, second_arg), fn(x, second_arg))
+        setattr(first, name, "b")
+        self.assertEqual(compiled(x, first_arg), fn(x, first_arg))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("new_function", [False, True])
+    @parametrize(
+        "name",
+        ["__name__", "__qualname__"]
+        + (["__type_params__"] if sys.version_info >= (3, 12) else []),
+    )
+    def test_function_slot_deletion_raises_during_tracing(self, new_function, name):
+        def existing():
+            pass
+
+        def fn(x, f):
+            if new_function:
+
+                def f():
+                    pass
+
+            try:
+                delattr(f, name)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.randn(3)
+        expected = fn(x, existing)
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=counter, fullgraph=True)(x, existing)
+        self.assertEqual(result, expected)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_function_slot_deletion_ignores_instance_dict(self):
+        def existing():
+            pass
+
+        existing.__dict__[object()] = "unrelated"
+
+        def fn(x):
+            try:
+                del existing.__name__
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @unittest.skipIf(sys.version_info >= (3, 12), "__type_params__ is a function slot")
+    @parametrize("new_function", [False, True])
+    def test_function_type_params_instance_dict(self, new_function):
+        def existing():
+            pass
+
+        def fn(x, f):
+            if new_function:
+
+                def f():
+                    pass
+
+            f.__type_params__ = ()
+            before = f.__dict__["__type_params__"]
+            del f.__type_params__
+            return before, hasattr(f, "__type_params__"), x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, existing),
+            fn(x, existing),
+        )
 
     # --- getattr() builtin ---
 
@@ -752,6 +1105,592 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsInstance(result, staticmethod)
         self.assertEqual(result.__func__(), 1)
+
+    @parametrize("use_dict", [False, True])
+    @parametrize("wrapped", [None, len])
+    def test_staticmethod_instance_attributes(self, use_dict, wrapped):
+        def fn():
+            sm = staticmethod(wrapped)
+            attrs = sm.__dict__
+            if use_dict:
+                attrs["x"] = 42
+            else:
+                sm.x = 42
+            before = sm.x, attrs.copy()
+            if use_dict:
+                del attrs["x"]
+            else:
+                del sm.x
+            return before, attrs.copy(), hasattr(sm, "x")
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_copied_attributes_are_snapshots(self):
+        def fn():
+            def f():
+                "original doc"
+
+            sm = staticmethod(f)
+            f.__doc__ = "changed doc"
+            sm.__name__ = "renamed"
+            return sm.__doc__, sm.__name__, f.__name__, sm.__dict__["__doc__"]
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_abstract_flag_tracks_wrapped_function(self):
+        def fn():
+            def f():
+                pass
+
+            sm = staticmethod(f)
+            before = sm.__isabstractmethod__
+            f.__isabstractmethod__ = True
+            after = sm.__isabstractmethod__
+            sm.__dict__["__isabstractmethod__"] = False
+            return before, after, sm.__isabstractmethod__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_copied_annotations_and_key_order(self):
+        def fn():
+            def f(value: int) -> int:
+                return value
+
+            sm = staticmethod(f)
+            sm.x = 1
+            del sm.x
+            sm.x = 2
+            return tuple(sm.__dict__), sm.__annotations__ is f.__annotations__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_instance_dict_escapes(self):
+        def fn():
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            sm.x = [1, 2]
+            sm.alias = sm
+            return sm, attrs, sm
+
+        sm, attrs, alias = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(sm, alias)
+        self.assertIs(sm.alias, sm)
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.x, [1, 2])
+        attrs["x"].append(3)
+        self.assertEqual(sm.x, [1, 2, 3])
+
+    @parametrize("use_dict", [False, True])
+    def test_staticmethod_tensor_attribute_cached_reconstruction(self, use_dict):
+        def fn(value):
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            if use_dict:
+                attrs["x"] = value
+            else:
+                sm.x = value
+            return sm, attrs, value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        first = None
+        for value in (torch.ones(3), torch.zeros(3)):
+            sm, attrs, _ = compiled(value)
+            self.assertIs(sm.x, value)
+            self.assertIs(sm.__dict__, attrs)
+            self.assertIsNot(sm, first)
+            first = sm
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("nested_graph_breaks", [False, True])
+    def test_staticmethod_attributes_across_graph_break(self, nested_graph_breaks):
+        def fn():
+            sm = staticmethod(None)
+            attrs = sm.__dict__
+            sm.x = [1]
+            torch._dynamo.graph_break()
+            attrs["x"].append(2)
+            sm.y = 3
+            del sm.x
+            return sm, attrs
+
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            sm, attrs = torch.compile(fn, backend="eager")()
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.y, 3)
+        self.assertNotIn("x", attrs)
+
+    @parametrize("name", ["__func__", "__wrapped__"])
+    @parametrize("delete", [False, True])
+    def test_staticmethod_readonly_members(self, name, delete):
+        def fn():
+            sm = staticmethod(len)
+            sm.__dict__[name] = "shadow"
+            try:
+                if delete:
+                    delattr(sm, name)
+                else:
+                    setattr(sm, name, None)
+            except AttributeError:
+                return getattr(sm, name) is len, sm.__dict__[name]
+            return False, None
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @parametrize(
+        "name", ["__func__", "__wrapped__", "__isabstractmethod__", "__dict__"]
+    )
+    def test_staticmethod_hasattr_after_deleting_shadow(self, name):
+        def fn(x):
+            sm = staticmethod(len)
+            sm.__dict__[name] = "shadow"
+            del sm.__dict__[name]
+            return hasattr(sm, name), getattr(sm, name, None) is not None, x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_staticmethod_missing_attribute_errors(self):
+        def fn():
+            sm = staticmethod(None)
+            errors = []
+            try:
+                del sm.missing
+            except AttributeError as exc:
+                errors.append(str(exc))
+            sm.x = 1
+            del sm.x
+            try:
+                sm.x
+            except AttributeError as exc:
+                errors.append(str(exc))
+            return errors
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_wrapped_function_and_attributes_escape(self):
+        def fn():
+            def f(value):
+                return value
+
+            sm = staticmethod(f)
+            sm.x = 42
+            return sm, f, sm.__dict__
+
+        sm, fn, attrs = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(sm.__func__, fn)
+        self.assertIs(sm.__dict__, attrs)
+        self.assertEqual(sm.x, 42)
+        self.assertEqual(sm(5), 5)
+
+    def test_staticmethod_call_in_graph(self):
+        def fn(x):
+            def f(value):
+                return value.sin() + 1
+
+            return staticmethod(f)(x)
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter, fullgraph=True)(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+
+    def test_staticmethod_noncallable_in_graph(self):
+        def fn(x):
+            try:
+                staticmethod(None)()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x, None
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_staticmethod_function_backed_self_reference_escapes(self):
+        def fn(x):
+            sm = staticmethod(_staticmethod_identity)
+            sm.alias = sm
+            return sm, sm.__dict__, sm, x + 1
+
+        x = torch.randn(3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        previous = None
+        for _ in range(2):
+            sm, attrs, alias, result = compiled(x)
+            self.assertIs(sm, alias)
+            self.assertIs(sm.alias, sm)
+            self.assertIs(attrs, sm.__dict__)
+            self.assertIsNot(sm, previous)
+            self.assertEqual(result, x + 1)
+            previous = sm
+
+    @parametrize("use_dict", [False, True])
+    @parametrize("reinsert", [False, True])
+    def test_staticmethod_copied_attribute_mutations_escape(self, use_dict, reinsert):
+        def fn():
+            def f():
+                "original doc"
+
+            sm = staticmethod(f)
+            if use_dict:
+                del sm.__dict__["__doc__"]
+                del sm.__dict__["__name__"]
+            else:
+                del sm.__doc__
+                del sm.__name__
+            if reinsert:
+                sm.__name__ = "renamed"
+            return sm, sm.__dict__, tuple(sm.__dict__)
+
+        expected, _, keys = fn()
+        result, attrs, traced_keys = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )()
+        self.assertIs(attrs, result.__dict__)
+        self.assertEqual(attrs, expected.__dict__)
+        self.assertEqual(tuple(attrs), keys)
+        self.assertEqual(traced_keys, keys)
+
+    def test_staticmethod_decorated_function_metadata(self):
+        def original():
+            "original doc"
+
+        @functools.wraps(original)
+        def wrapper():
+            "wrapper doc"
+
+        def fn():
+            sm = staticmethod(wrapper)
+            return sm, sm.__dict__.copy()
+
+        result, attrs = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result.__dict__, staticmethod(wrapper).__dict__)
+        self.assertEqual(attrs, result.__dict__)
+
+    @parametrize("binding", ["function", "method", "classmethod"])
+    @parametrize("name", ["__name__", "__qualname__", "__doc__", "__module__"])
+    @parametrize("mutation_before", [False, True])
+    def test_staticmethod_metadata_alias_snapshot(self, binding, name, mutation_before):
+        class Obj:
+            def method(self):
+                "original doc"
+
+            @classmethod
+            def classmethod(cls):
+                "original doc"
+
+        obj = Obj()
+        target = (
+            _staticmethod_identity
+            if binding == "function"
+            else getattr(obj, binding).__func__
+        )
+        original = getattr(target, name)
+        self.addCleanup(setattr, target, name, original)
+
+        def fn(x, obj, f):
+            alias = (
+                _staticmethod_identity
+                if binding == "function"
+                else getattr(obj, binding)
+            )
+            before = getattr(alias, name)
+            if mutation_before:
+                setattr(f, name, "changed")
+            sm = staticmethod(alias)
+            if not mutation_before:
+                setattr(f, name, "changed")
+            return x + 1, sm, before, getattr(sm, name), sm.__dict__
+
+        x = torch.randn(3)
+        expected = fn(x, obj, target)
+        setattr(target, name, original)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, obj, target)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[2:], expected[2:])
+        self.assertEqual(getattr(result[1], name), getattr(expected[1], name))
+        self.assertEqual(tuple(result[1].__dict__), tuple(expected[1].__dict__))
+        self.assertIs(result[4], result[1].__dict__)
+        if binding == "function":
+            self.assertIs(result[1].__func__, target)
+        else:
+            self.assertIs(result[1].__func__.__func__, target)
+
+    @unittest.skipIf(sys.version_info >= (3, 14), "annotations are forwarded lazily")
+    @parametrize("mutation_before", [False, True])
+    def test_staticmethod_cached_annotations_alias_snapshot(self, mutation_before):
+        target = _staticmethod_identity
+        original = target.__annotations__
+        self.addCleanup(setattr, target, "__annotations__", original)
+        target.__annotations__ = {"value": int}
+
+        def fn(x, f):
+            alias = _staticmethod_identity
+            before = len(alias.__annotations__)
+            if mutation_before:
+                f.__annotations__ = {"value": str, "return": str}
+            sm = staticmethod(alias)
+            if not mutation_before:
+                f.__annotations__ = {"value": str, "return": str}
+            return x + 1, sm, before, sm.__annotations__
+
+        x = torch.randn(3)
+        expected = fn(x, target)
+        target.__annotations__ = {"value": int}
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, target)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(result[2:], expected[2:])
+        self.assertEqual(result[1].__annotations__, expected[1].__annotations__)
+        self.assertIs(result[3], result[1].__annotations__)
+        self.assertIs(result[1].__func__, target)
+
+    @parametrize("name", ["__name__", "__doc__"])
+    def test_staticmethod_metadata_alias_guard(self, name):
+        target = _staticmethod_identity
+        original = getattr(target, name)
+        self.addCleanup(setattr, target, name, original)
+        other = types.FunctionType(target.__code__, target.__globals__)
+        setattr(target, name, "original")
+        setattr(other, name, "original")
+
+        def fn(x, f):
+            alias = _staticmethod_identity
+            before = getattr(alias, name)
+            setattr(f, name, "changed")
+            sm = staticmethod(alias)
+            return x + 1, sm, before, getattr(sm, name)
+
+        x = torch.randn(3)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for f, expected in ((target, "changed"), (other, "original")):
+            setattr(target, name, "original")
+            result = compiled(x, f)
+            self.assertEqual(result[0], x + 1)
+            self.assertEqual(result[2:], ("original", expected))
+            self.assertEqual(getattr(result[1], name), expected)
+            self.assertIs(result[1].__func__, target)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_staticmethod_callable_metadata_uses_traced_attributes(self):
+        class Callable:
+            @property
+            def __name__(self):
+                return self.label
+
+            def __call__(self):
+                return 1
+
+        def fn():
+            wrapped = Callable()
+            wrapped.label = "original"
+            sm = staticmethod(wrapped)
+            wrapped.label = "changed"
+            return sm, sm.__name__
+
+        result, name = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(name, "original")
+        self.assertEqual(result.__name__, "original")
+        self.assertEqual(result.__func__.label, "changed")
+
+    @parametrize("delete_after", [False, True])
+    def test_staticmethod_callable_metadata_key_order_escapes(self, delete_after):
+        class Callable:
+            def __call__(self):
+                return 1
+
+        def fn(x):
+            wrapped = Callable()
+            wrapped.__name__ = "original"
+            wrapped.__qualname__ = "qualified"
+            wrapped.__annotations__ = {"value": int}
+            sm = staticmethod(wrapped)
+            if delete_after:
+                del wrapped.__name__
+            return x + 1, sm, sm.__dict__, tuple(sm.__dict__)
+
+        x = torch.randn(3)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result[0], expected[0])
+        self.assertIs(result[2], result[1].__dict__)
+        self.assertEqual(result[2:], expected[2:])
+        self.assertEqual(tuple(result[1].__dict__), expected[3])
+
+    @parametrize("kind", ["staticmethod", "object"])
+    @parametrize("via_dict", [False, True])
+    def test_deleted_instance_attr_hasattr_class_fallback(self, kind, via_dict):
+        class Obj:
+            "class doc"
+
+        def fn(x):
+            obj = staticmethod(len) if kind == "staticmethod" else Obj()
+            obj.__doc__ = "shadow"
+            if via_dict:
+                del obj.__dict__["__doc__"]
+            else:
+                del obj.__doc__
+            return x + 1, hasattr(obj, "__doc__"), getattr(obj, "__doc__", "missing")
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("use_existing", [False, True])
+    @parametrize("mutation_before", [False, True])
+    def test_staticmethod_wrapped_metadata_mutation_escapes(
+        self, use_existing, mutation_before
+    ):
+        def existing():
+            "original doc"
+
+        def fn():
+            def nested():
+                "original doc"
+
+            f = existing if use_existing else nested
+            if mutation_before:
+                f.__doc__ = "changed doc"
+            sm = staticmethod(f)
+            if not mutation_before:
+                f.__doc__ = "changed doc"
+            return sm, f
+
+        result, wrapped = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(
+            result.__doc__, "changed doc" if mutation_before else "original doc"
+        )
+        self.assertEqual(wrapped.__doc__, "changed doc")
+
+    @unittest.skipIf(sys.version_info >= (3, 14), "annotations are copied lazily")
+    def test_staticmethod_annotation_replacement_escapes(self):
+        def fn():
+            def f(value: int):
+                return value
+
+            sm = staticmethod(f)
+            f.__annotations__ = {"value": str}
+            return sm, f
+
+        result, wrapped = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result.__annotations__, {"value": int})
+        self.assertEqual(wrapped.__annotations__, {"value": str})
+
+    @unittest.skipIf(sys.version_info >= (3, 14), "annotations are copied lazily")
+    def test_staticmethod_annotations_snapshot_after_function_mutation(self):
+        def wrapped():
+            pass
+
+        def fn():
+            wrapped.__annotations__ = {"before": int}
+            sm = staticmethod(wrapped)
+            wrapped.__annotations__ = {"after": str}
+            return sm.__annotations__, wrapped.__annotations__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_staticmethod_builtin_without_annotations(self):
+        def fn():
+            sm = staticmethod(time.time)
+            return sm, hasattr(sm, "__annotations__")
+
+        result, has_annotations = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result.__dict__, staticmethod(time.time).__dict__)
+        self.assertEqual(
+            has_annotations, hasattr(staticmethod(time.time), "__annotations__")
+        )
+
+    def test_staticmethod_function_without_module(self):
+        namespace = {}
+        exec("def f(): pass", namespace)
+        wrapped = namespace["f"]
+
+        def fn():
+            sm = staticmethod(wrapped)
+            return sm, sm.__module__
+
+        result, module = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result.__dict__, staticmethod(wrapped).__dict__)
+        self.assertIsNone(module)
+
+    def test_staticmethod_escaping_hash(self):
+        def fn():
+            sm = staticmethod(len)
+            return sm, hash(sm)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        result, value = torch.compile(fn, backend="eager")()
+        self.assertEqual(value, hash(result))
+
+    def test_staticmethod_assume_constant_result(self):
+        @torch._dynamo.assume_constant_result
+        def inspect_staticmethod(sm):
+            return sm.__func__ is len
+
+        def fn():
+            return inspect_staticmethod(staticmethod(len))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assume_constant_result argument conversion"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(torch.compile(fn, backend="eager")())
+
+    def test_staticmethod_constant_result_preserves_identity(self):
+        @torch._dynamo.assume_constant_result
+        def same(first, second):
+            return first is second
+
+        def fn():
+            sm = staticmethod(len)
+            return same(sm, sm)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
+
+    def test_staticmethod_constant_result_pending_mutation(self):
+        @torch._dynamo.assume_constant_result
+        def read_attr(sm):
+            return sm.label
+
+        def fn():
+            sm = staticmethod(len)
+            sm.label = "changed"
+            return read_attr(sm)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assume_constant_result argument conversion"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(torch.compile(fn, backend="eager")(), "changed")
+
+    def test_existing_staticmethod_constant_result(self):
+        @torch._dynamo.assume_constant_result
+        def same(first, second):
+            return first is second
+
+        def fn(sm):
+            return same(sm, sm)
+
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(staticmethod(len))
+        )
+
+    def test_staticmethod_in_reconstructed_generator(self):
+        def fn():
+            def gen():
+                yield staticmethod(len)
+                yield staticmethod(len)
+
+            iterator = gen()
+            next(iterator)
+            return iterator
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(next(result).__func__, len)
 
     def test_classmethod_constructor_reconstruct(self):
         """The descriptor must survive being returned out of the graph."""
@@ -2295,6 +3234,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         expected = fn(x)
         actual = compiled_fn(x)
         self.assertEqual(actual, expected)
+
+
+instantiate_parametrized_tests(TpGetattroTests)
 
 
 if __name__ == "__main__":

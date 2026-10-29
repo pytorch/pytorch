@@ -4699,7 +4699,9 @@ def object_has_getattribute(value: object) -> bool:
     return class_has_getattribute(type(value))
 
 
-def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
+def object_setattr_ignore_descriptor(
+    obj: Any, name: str, value: Any, reinsert: bool = False
+) -> None:
     # Mirror the instance-dict update path in _PyObject_GenericSetAttrWithDict:
     # https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L1679-L1741
     try:
@@ -4712,6 +4714,8 @@ def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
         # to _PyObject_GenericSetAttrWithDict:
         # https://github.com/python/cpython/blob/v3.13.0/Modules/_threadmodule.c#L1707-L1730
         d = threading.local.__getattribute__(obj, "__dict__")
+    if reinsert:
+        d.pop(name, None)
     d[name] = value
 
 

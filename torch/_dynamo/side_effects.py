@@ -242,6 +242,10 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
+    # A function slot and its __dict__ can both contain the same name. The
+    # primary table holds the latest write; this retains the other binding.
+    attr_mutation_overlaps: dict[VariableTracker, dict[str, VariableTracker]]
+    instance_dict_deleted_keys: dict[VariableTracker, set[str]]
     keepalive: list[object]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
@@ -253,6 +257,9 @@ class SideEffects:
         store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
         | None = None,
         attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
+        | None = None,
+        instance_dict_deleted_keys: dict[VariableTracker, set[str]] | None = None,
+        attr_mutation_overlaps: dict[VariableTracker, dict[str, VariableTracker]]
         | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
@@ -277,6 +284,8 @@ class SideEffects:
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.attr_mutation_kinds = attr_mutation_kinds or {}
+        self.instance_dict_deleted_keys = instance_dict_deleted_keys or {}
+        self.attr_mutation_overlaps = attr_mutation_overlaps or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
@@ -404,6 +413,8 @@ class SideEffects:
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
             and self.attr_mutation_kinds == other.attr_mutation_kinds
+            and self.attr_mutation_overlaps == other.attr_mutation_overlaps
+            and self.instance_dict_deleted_keys == other.instance_dict_deleted_keys
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
         )
@@ -425,6 +436,10 @@ class SideEffects:
             return "store_attr_mutations: unknown diff"
         elif self.attr_mutation_kinds != other.attr_mutation_kinds:
             return "attr_mutation_kinds: unknown diff"
+        elif self.attr_mutation_overlaps != other.attr_mutation_overlaps:
+            return "attr_mutation_overlaps: unknown diff"
+        elif self.instance_dict_deleted_keys != other.instance_dict_deleted_keys:
+            return "instance_dict_deleted_keys: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
@@ -445,6 +460,12 @@ class SideEffects:
             },
             attr_mutation_kinds={
                 k: dict(v) for k, v in self.attr_mutation_kinds.items()
+            },
+            instance_dict_deleted_keys={
+                k: set(v) for k, v in self.instance_dict_deleted_keys.items()
+            },
+            attr_mutation_overlaps={
+                k: dict(v) for k, v in self.attr_mutation_overlaps.items()
             },
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
@@ -569,6 +590,18 @@ class SideEffects:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
             self.attr_mutation_kinds[item] = {}
+        existing = self.store_attr_mutations[item]
+        if (
+            name in existing
+            and self.get_attr_mutation_kind(item, name) is not mutation_kind
+        ):
+            new_instance_key = (
+                mutation_kind is AttrMutationKind.INSTANCE_DICT
+                and name not in self.attr_mutation_overlaps.get(item, {})
+            )
+            self.attr_mutation_overlaps.setdefault(item, {})[name] = existing[name]
+            if new_instance_key:
+                existing.pop(name)
         self.store_attr_mutations[item][name] = value
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
@@ -583,21 +616,25 @@ class SideEffects:
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
-        # `obj.__dict__` ordering is observable (e.g. list(obj.__dict__)). When a
-        # key is re-added after being deleted, CPython appends it at the end
-        # rather than reusing its old slot. store_attr_mutations is an
-        # insertion-ordered dict, so a plain re-store of an existing key would
-        # keep the stale position; drop the deleted entry first so the new value
-        # re-inserts at the end.
-        if not isinstance(value, variables.DeletedVariable):
-            existing = self.store_attr_mutations.get(item, {}).get(name)
-            if isinstance(existing, variables.DeletedVariable):
-                # store_attr always writes both maps together, so the
-                # attr_mutation_kinds entry is guaranteed present here; use del
-                # for both to surface any invariant violation.
-                del self.store_attr_mutations[item][name]
-                del self.attr_mutation_kinds[item][name]
+        existing = (
+            self.load_attr(
+                item,
+                name,
+                deleted_ok=True,
+                mutation_kind=AttrMutationKind.INSTANCE_DICT,
+            )
+            if self.has_pending_mutation_of_attr(
+                item, name, AttrMutationKind.INSTANCE_DICT
+            )
+            else None
+        )
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
+        if isinstance(value, variables.DeletedVariable):
+            self.instance_dict_deleted_keys.setdefault(item, set()).add(name)
+        elif isinstance(existing, variables.DeletedVariable):
+            # Reinsertion appends the key; updates retain its original position.
+            self.store_attr_mutations[item].pop(name)
+            self.store_attr_mutations[item][name] = value
 
     def get_attr_mutation_kind(
         self, item: VariableTracker, name: str
@@ -614,13 +651,20 @@ class SideEffects:
         name: str,
         deleted_ok: bool = False,
         check: bool = False,
+        mutation_kind: AttrMutationKind | None = None,
     ) -> VariableTracker:
         if check:
             if not self.is_attribute_mutation(item):
                 raise AssertionError(
                     f"Expected attribute mutation for {item} in load_attr"
                 )
-        result = self.store_attr_mutations[item][name]
+        if (
+            mutation_kind is not None
+            and self.get_attr_mutation_kind(item, name) is not mutation_kind
+        ):
+            result = self.attr_mutation_overlaps[item][name]
+        else:
+            result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented(
                 gb_type="Attempted to read a deleted variable",
@@ -732,6 +776,8 @@ class SideEffects:
         ):
             return False
         if mutation_kinds is None:
+            return True
+        if name in self.attr_mutation_overlaps.get(item, {}):
             return True
         mutation_kind = self.get_attr_mutation_kind(item, name)
         if isinstance(mutation_kinds, AttrMutationKind):
@@ -1050,7 +1096,10 @@ class SideEffects:
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
                     visit,  # noqa: F821
-                    self.store_attr_mutations[var],
+                    [
+                        self.store_attr_mutations[var],
+                        self.attr_mutation_overlaps.get(var, {}),
+                    ],
                 )
 
         def is_live(var: VariableTracker) -> bool:
@@ -1135,6 +1184,16 @@ class SideEffects:
         self.attr_mutation_kinds = {
             k: v
             for k, v in self.attr_mutation_kinds.items()
+            if is_live(k) or k in gen_reachable_new
+        }
+        self.instance_dict_deleted_keys = {
+            k: v
+            for k, v in self.instance_dict_deleted_keys.items()
+            if is_live(k) or k in gen_reachable_new
+        }
+        self.attr_mutation_overlaps = {
+            k: v
+            for k, v in self.attr_mutation_overlaps.items()
             if is_live(k) or k in gen_reachable_new
         }
 
@@ -1252,13 +1311,11 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
-            elif isinstance(var, variables.ExceptionVariable):
-                # Exceptions cannot be built via object.__new__ (CPython rejects
-                # it), so reconstruct() constructs by calling the type. Cache
-                # the result so later references load the single instance; any
-                # __dict__ attributes replay in codegen_update_mutated.
-                var.reconstruct(cg)
+            elif var.reconstruct_for_side_effects(cg):
+                # These types cannot use object.__new__. Cache reconstruction
+                # before replaying their instance attributes.
                 cg.add_cache(var)
+                cg.clear_tos()
                 var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
@@ -2023,8 +2080,25 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     # account for this reversal, we iterate through the mutable attributes in
     # reverse order.
     side_effect_occurred = False
-    for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
-        mutation_kind = side_effects.get_attr_mutation_kind(var, name)
+    mutations = []
+    if isinstance(var.mutation_type, AttributeMutationNew):
+        mutations.extend(
+            (name, value, AttrMutationKind.GENERIC_SETATTR)
+            for name, value in var.get_reconstruction_attributes().items()
+        )
+    for name, value in side_effects.store_attr_mutations.get(var, {}).items():
+        kind = side_effects.get_attr_mutation_kind(var, name)
+        if name in side_effects.attr_mutation_overlaps.get(var, {}):
+            other_kind = (
+                AttrMutationKind.GENERIC_SETATTR
+                if kind is AttrMutationKind.INSTANCE_DICT
+                else AttrMutationKind.INSTANCE_DICT
+            )
+            mutations.append(
+                (name, side_effects.attr_mutation_overlaps[var][name], other_kind)
+            )
+        mutations.append((name, value, kind))
+    for name, value, mutation_kind in reversed(mutations):
         if isinstance(var, variables.NewGlobalVariable):
             cg.tx.output.update_co_names(name)
             cg(value)
@@ -2049,11 +2123,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                     [*create_call_function(1, False), create_instruction("POP_TOP")]
                 )
                 side_effect_occurred = True
-            elif (
-                isinstance(var, variables.UserDefinedObjectVariable)
-                and mutation_kind is AttrMutationKind.INSTANCE_DICT
-            ):
-                original_dict = getattr(getattr(var, "value", None), "__dict__", {})
+            elif mutation_kind is AttrMutationKind.INSTANCE_DICT:
+                original_dict = var.get_dict_vt(cg.tx).items.item_dict
                 # If the key only existed in the traced instance dict, the
                 # add/delete sequence is a replay no-op.
                 if name in original_dict:
@@ -2082,10 +2153,7 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 cg(var.source)
                 ctx.suffixes.append([create_instruction("DELETE_ATTR", argval=name)])
                 side_effect_occurred = True
-        elif (
-            isinstance(var, variables.UserDefinedObjectVariable)
-            and mutation_kind is AttrMutationKind.INSTANCE_DICT
-        ):
+        elif mutation_kind is AttrMutationKind.INSTANCE_DICT:
             cg.add_push_null(
                 lambda: cg.load_import_from(
                     utils.__name__, "object_setattr_ignore_descriptor"
@@ -2094,9 +2162,14 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             cg(var.source)  # type: ignore[attr-defined]
             cg(variables.ConstantVariable(name))
             cg(value)
+            cg(
+                variables.ConstantVariable(
+                    name in side_effects.instance_dict_deleted_keys.get(var, ())
+                )
+            )
             ctx.suffixes.append(
                 [
-                    *create_call_function(3, False),
+                    *create_call_function(4, False),
                     create_instruction("POP_TOP"),
                 ]
             )

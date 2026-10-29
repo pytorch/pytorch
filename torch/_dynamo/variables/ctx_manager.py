@@ -161,7 +161,9 @@ class ContextWrappingVariable(VariableTracker):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
         if isinstance(args[0], NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(args[0], self)
+            result = WrappedNestedUserFunctionVariable(args[0], self, tx)
+            tx.output.side_effects.track_attribute_mutation_new(result)
+            return result
         elif isinstance(args[0], SkipFunctionVariable):
             return WrappedSkipFunctionVariable(args[0], self)
         elif isinstance(

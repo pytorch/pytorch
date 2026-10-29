@@ -110,10 +110,56 @@ class SlotsAndProperty:
         self._x = value * 2
 
 
+@instantiate_parametrized_tests
 class TestSlotsAttrAssignment(TestCase):
     """Tests for attribute assignment on objects with __slots__."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("new_object", [False, True])
+    @parametrize("module", [False, True])
+    @parametrize("existing_attr", [False, True])
+    def test_super_delattr_instance_dict(self, new_object, module, existing_attr):
+        class Object:
+            def __init__(self):
+                if existing_attr:
+                    self.tmp = 0
+
+            def remove(self):
+                super().__delattr__("tmp")
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                if existing_attr:
+                    self.tmp = 0
+
+            def forward(self, x):
+                self.tmp = x
+                del self.tmp
+                return x + 1
+
+        cls = Module if module else Object
+
+        def fn(x, obj):
+            if new_object:
+                obj = cls()
+            if module:
+                value = obj(x)
+            else:
+                obj.tmp = x
+                obj.remove()
+                value = x + 1
+            return obj, "tmp" in obj.__dict__, hasattr(obj, "tmp"), value
+
+        x = torch.randn(3)
+        expected = fn(x, cls())
+        obj, in_dict, has_attr, value = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, cls())
+        self.assertEqual((in_dict, has_attr, value), expected[1:])
+        self.assertNotIn("tmp", obj.__dict__)
+        self.assertFalse(hasattr(obj, "tmp"))
 
     def test_valid_slot_assignment(self):
         # Case 1: assign to a declared slot — should succeed

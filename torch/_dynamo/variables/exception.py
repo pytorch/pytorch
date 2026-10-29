@@ -205,6 +205,7 @@ class ExceptionVariable(VariableTracker):
         super().__init__(source=source, mutation_type=mutation_type)
         self.exc_type = exc_type
         self.args = args
+        self.initial_args = args
         if init_kwargs:
             unimplemented(
                 gb_type="Keyword args passed to exception constructor",
@@ -230,29 +231,46 @@ class ExceptionVariable(VariableTracker):
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
+    def get_dict_vt(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "variables.DunderDictVariable":
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            tx.output.side_effects.track_attribute_mutation_new(self)
+        return super().get_dict_vt(tx)
+
+    def reconstruct_for_side_effects(self, codegen: "PyCodegen") -> bool:
+        self._reconstruct_exception(codegen)
+        return True
+
+    def _reconstruct_exception(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
-        codegen.foreach(self.args)
-        codegen.call_function(len(self.args), False)
+        codegen.foreach(self.initial_args)
+        codegen.call_function(len(self.initial_args), False)
 
-        def codegen_attr(name: str) -> None:
-            attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
-                codegen.dup_top()
-                codegen(attr)
-                codegen.extend_output(codegen.rot_n(2))
-                codegen.store_attr(name)
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        attrs: dict[str, VariableTracker] = {}
+        if self.args is not self.initial_args:
+            attrs["args"] = variables.TupleVariable(self.args)
+        if not self.__context__.is_constant_none():
+            attrs["__context__"] = self.__context__
+        if not self.__cause__.is_constant_none():
+            attrs["__cause__"] = self.__cause__
+        if "__cause__" in attrs or not self.__suppress_context__.is_constant_match(
+            False
+        ):
+            attrs["__suppress_context__"] = self.__suppress_context__
+        return attrs
 
-        codegen_attr("__context__")
-        codegen_attr("__cause__")
-        codegen_attr("__suppress_context__")
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self._reconstruct_exception(codegen)
+        for name, attr in self.get_reconstruction_attributes().items():
+            codegen.dup_top()
+            codegen(attr)
+            codegen.extend_output(codegen.rot_n(2))
+            codegen.store_attr(name)
+            codegen.clear_tos()
 
     def python_type(self) -> type:
         return self.exc_type
@@ -440,6 +458,7 @@ class ExceptionVariable(VariableTracker):
 
     tp_getset = {
         "__class__": GetSet(getset_build(lambda s: s.exc_type), unmodeled_setter),
+        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
         "__context__": GetSet(lambda s, _: s.__context__, _set_context),
         "__cause__": GetSet(lambda s, _: s.__cause__, _set_cause),
         "__traceback__": GetSet(lambda s, _: s.__traceback__, _set_traceback),
@@ -521,12 +540,8 @@ class StopIterationVariable(ExceptionVariable):
         "value": Member(lambda s, _: s.value, _set_value),
     }
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        super().reconstruct(codegen)
-        codegen.dup_top()
-        codegen(self.value)
-        codegen.extend_output(codegen.rot_n(2))
-        codegen.store_attr("value")
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        return {**super().get_reconstruction_attributes(), "value": self.value}
 
 
 def _set_kwarg_attr(name: str) -> Setter:
@@ -560,14 +575,15 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
         self._attrs = {name: init_kwargs.pop(name, none) for name in self._kwarg_attrs}
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        super().reconstruct(codegen)
-        for name, val in self._attrs.items():
-            if not (istype(val, ConstantVariable) and val.value is None):
-                codegen.dup_top()
-                codegen(val)
-                codegen.extend_output(codegen.rot_n(2))
-                codegen.store_attr(name)
+    def get_reconstruction_attributes(self) -> dict[str, VariableTracker]:
+        return {
+            **super().get_reconstruction_attributes(),
+            **{
+                name: val
+                for name, val in self._attrs.items()
+                if not val.is_constant_none()
+            },
+        }
 
 
 class AttributeErrorVariable(_KwargAttrExceptionVariable):

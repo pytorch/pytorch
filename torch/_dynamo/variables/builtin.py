@@ -1377,12 +1377,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is StopIteration:
-                    return variables.StopIterationVariable(fn, args, kwargs)
+                    result = variables.StopIterationVariable(fn, args, kwargs)
                 elif fn is AttributeError:
-                    return variables.AttributeErrorVariable(fn, args, kwargs)
+                    result = variables.AttributeErrorVariable(fn, args, kwargs)
                 elif fn is NameError:
-                    return variables.NameErrorVariable(fn, args, kwargs)
-                return variables.ExceptionVariable(fn, args, kwargs)
+                    result = variables.NameErrorVariable(fn, args, kwargs)
+                else:
+                    result = variables.ExceptionVariable(fn, args, kwargs)
+                tx.output.side_effects.track_attribute_mutation_new(result)
+                return result
 
             return create_exception_class_object
 
@@ -3032,7 +3035,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.StaticMethodVariable(func)
+        return variables.StaticMethodVariable.create(tx, func)
 
     def call_next(
         self,
@@ -3870,12 +3873,24 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if istype(obj, variables.UserFunctionVariable):
+            # A discarded HOP trace can leave the VT marked but unregistered
+            # in the current side effects table.
+            obj = obj._get_mutation_owner(tx)
+        if (
+            istype(obj, variables.UserFunctionVariable)
+            and obj.source is not None
+            and name_var.is_python_constant()
+            and obj.lookup_tp_getset_member(name_var.as_python_constant()) is None
+        ):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         if isinstance(
             obj,
             (
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
+                variables.StaticMethodVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
