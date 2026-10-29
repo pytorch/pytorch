@@ -29,6 +29,7 @@ from torch.testing._internal.common_fsdp import (
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     MixtureOfExperts,
     NestedWrappedModule,
@@ -197,7 +198,7 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            init_kwargs={"delay_after_loss_ms": 250},
+            init_kwargs={"delay_after_loss_ms": 50},
         )
 
     @skip_if_lt_x_gpu(2)
@@ -218,7 +219,7 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            init_kwargs={"delay_before_reduction_ms": 250},
+            init_kwargs={"delay_before_reduction_ms": 50},
         )
 
     def _dummy_ddp_fn(self, model):
@@ -264,12 +265,12 @@ class TestParityWithDDP(FSDPTest):
             ref_init_fn=self._dummy_ddp_fn,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            init_kwargs={"delay_before_free_ms": 250},
+            init_kwargs={"delay_before_free_ms": 50},
             **fsdp_kwargs,
         )
 
 
-class TestParamInit(FSDPTest):
+class TestParamInit(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_param_change_after_init(self, mixed_precision):
@@ -309,7 +310,7 @@ class TestParamInit(FSDPTest):
         )
 
 
-class TestHooks(FSDPTest):
+class TestHooks(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
     def test_pre_backward_hook_registration(self, cuda_first: bool):
@@ -399,7 +400,7 @@ class TestHooks(FSDPTest):
             self.assertTrue(register_post_bwd_mock.called)
 
 
-class TestNoGrad(FSDPTest):
+class TestNoGrad(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_transformer_no_grad(self, mixed_precision):

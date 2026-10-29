@@ -201,7 +201,11 @@ function eventStack(e, allocated, reserved) {
       reserved,
     )} reserved)\n${event}`;
   }
-  const user_metadata_str = format_user_metadata(e.user_metadata);
+  let user_metadata_str = format_user_metadata(e.user_metadata);
+  if (e.internal_metadata) {
+    const internal_str = `Internal Metadata:\n  ${e.internal_metadata}`;
+    user_metadata_str += (user_metadata_str ? '\n' : '') + internal_str;
+  }
   const frames_str = format_frames(e.frames);
   const forward_frames_str = format_forward_frames(e.forward_frames);
   return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str + forward_frames_str;
@@ -785,7 +789,7 @@ function annotate_snapshot(snapshot) {
       // set unique version for each time an address is used
       // so that ctrl-f can be used to search for the beginning
       // and end of allocations and segments
-      t.stream = stream_name(t.stream);
+      if (t.stream != null) t.stream = stream_name(t.stream);
       switch (t.action) {
         case 'free_completed':
           t.version = snapshot.block_version(t.addr, true);
@@ -823,7 +827,7 @@ function annotate_snapshot(snapshot) {
   snapshot.device_traces = new_traces;
 
   for (const seg of snapshot.segments) {
-    seg.stream = stream_name(seg.stream);
+    if (seg.stream != null) seg.stream = stream_name(seg.stream);
     seg.version = snapshot.segment_version(seg.address, false);
     let addr = seg.address;
     for (const b of seg.blocks) {
@@ -859,6 +863,7 @@ function annotate_snapshot(snapshot) {
 
 function MemoryPlot(
   svg,
+  axis_svg,
   data,
   left_pad,
   width,
@@ -885,8 +890,6 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  // Use formatSize with showBytes=false for clean axis labels
-  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -918,18 +921,55 @@ function MemoryPlot(
     .enter()
     .append('polygon')
     .attr('points', format_points)
-    .attr('fill', d => colors[d.color % colors.length])
+    .attr('fill', d => data.grouped_segments && d.elem === 'summarized' ? '#ddd' : colors[d.color % colors.length])
     .attr('opacity', d => d.opacity ?? 1)
     .attr('stroke', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'black' : null)
     .attr('stroke-width', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 3 : null)
     .attr('vector-effect', d => typeof d.elem === 'string' && d.elem.startsWith('pool:') ? 'non-scaling-stroke' : null);
 
-  const axis = plot_coordinate_space.append('g').call(yaxis);
+  const axis = axis_svg.append('g');
+  let axis_domain = yscale.domain();
+
+  function drawAxis() {
+    const bounds = axis_svg.node().getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return;
+    }
+
+    const max_value = Math.max(...axis_domain.map(Math.abs));
+    const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
+    const unit_index = Math.min(
+      units.length - 1,
+      Math.max(0, Math.floor(Math.log(max_value) / Math.log(1024))),
+    );
+    const unit = 1024 ** unit_index;
+    const unit_domain = axis_domain.map(value => value / unit);
+    const tick_count = Math.max(2, Math.floor(bounds.height / 50));
+    const tick_step = Math.abs(d3.tickStep(...unit_domain, tick_count));
+    const precision = tick_step === 0
+      ? 0
+      : Math.max(0, Math.min(3, -Math.floor(Math.log10(tick_step))));
+    const tick_values = d3
+      .ticks(...unit_domain, tick_count)
+      .map(value => value * unit);
+    const axis_scale = scaleLinear().domain(axis_domain).range([bounds.height, 0]);
+    const yaxis = axisLeft(axis_scale)
+      .tickValues(tick_values)
+      .tickFormat(value => `${(value / unit).toFixed(precision)}${units[unit_index]}B`);
+
+    axis
+      .attr('transform', `translate(${left_pad * bounds.width / width}, 0)`)
+      .call(yaxis);
+  }
+
+  new ResizeObserver(drawAxis).observe(axis_svg.node());
+  drawAxis();
 
   function handleZoom(event) {
     const t = event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(event.transform.rescaleY(yscale)));
+    axis_domain = event.transform.rescaleY(yscale).domain();
+    drawAxis();
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
@@ -954,32 +994,65 @@ function MemoryPlot(
       );
     },
     set_delegate: delegate => {
+      function timestep_at(event) {
+        if (!data.grouped_segments) return null;
+        const x = d3.pointer(event, scrub_group.node())[0];
+        return Math.max(0, Math.min(max_timestep - 1, Math.floor(xscale.invert(x))));
+      }
       if (getTraceInteractionMode() === 'hover') {
         // Hover mode: show on mouseover, pin on click
         plot
-          .on('mouseover', function (_e, _d) {
-            delegate.set_selected(d3.select(this));
+          .on('mouseover', function (event) {
+            delegate.set_selected(d3.select(this), timestep_at(event));
           })
-          .on('mousedown', function (_e, _d) {
+          .on('mousedown', function (event) {
             delegate.default_selected = d3.select(this);
+            delegate.default_timestep = timestep_at(event);
+            delegate.default_event = delegate.set_selected(delegate.default_selected, delegate.default_timestep);
           })
           .on('mouseleave', function (_e, _d) {
-            delegate.set_selected(delegate.default_selected);
+            delegate.set_selected(delegate.default_selected, delegate.default_timestep, delegate.default_event);
           });
+        if (data.grouped_segments) {
+          plot.on('mousemove', function (event) {
+            delegate.set_selected(d3.select(this), timestep_at(event));
+          });
+        }
       } else {
         // Click mode: show only on click
         plot
-          .on('click', function (_e, _d) {
+          .on('click', function (event) {
             delegate.default_selected = d3.select(this);
-            delegate.set_selected(d3.select(this));
+            delegate.default_timestep = timestep_at(event);
+            delegate.default_event = delegate.set_selected(delegate.default_selected, delegate.default_timestep);
           });
       }
     },
   };
 }
 
-function ContextViewer(text, data) {
+function ContextViewer(text, data, event_select = null) {
   let current_selected = null;
+  let current_event = -1;
+  let selected_events = [];
+
+  function show_event() {
+    const id = current_selected.datum().elem;
+    const event = selected_events[current_event];
+    const change = event && event.action !== 'segment_snapshot'
+      ? `\nSelected event ${event.timestep}: mapped capacity ${formatSize(event.before, false)} to ${formatSize(event.after, false)}.`
+      : '';
+    text.text(data.context_for_id(id) + change + (event ? `\n\n${event.context}` : ''));
+    event_select.property('value', current_event);
+  }
+  if (event_select) {
+    event_select.on('change', function () {
+      current_event = Number(this.value);
+      delegate.default_selected = current_selected;
+      delegate.default_event = current_event;
+      show_event();
+    });
+  }
 
   function restore_search_highlight(d) {
     if (!d) return;
@@ -1003,9 +1076,28 @@ function ContextViewer(text, data) {
     }
   }
 
-  return {
+  const delegate = {
     default_selected: null,
-    set_selected: d => {
+    default_timestep: null,
+    default_event: null,
+    set_selected: (d, timestep = null, selected_event = null) => {
+      let events = [];
+      let event_index = -1;
+      if (event_select && d && typeof d.datum().elem === 'number') {
+        const id = d.datum().elem;
+        events = data.segment_events_for_id(id);
+        let lo = 0;
+        let hi = events.length;
+        while (timestep != null && lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (events[mid].timestep <= timestep) lo = mid + 1;
+          else hi = mid;
+        }
+        event_index = lo - 1;
+        if (selected_event != null) event_index = selected_event;
+      }
+      const same = current_selected && d && current_selected.node() === d.node();
+      if (event_select && same && current_event === event_index) return event_index;
       if (current_selected !== null) {
         const prev = current_selected.datum();
         const is_pool = prev && typeof prev.elem === 'string' && prev.elem.startsWith('pool:');
@@ -1018,12 +1110,15 @@ function ContextViewer(text, data) {
       }
       if (d === null) {
         text.text('');
+        if (event_select) event_select.style('display', 'none');
       } else {
         const dd = d.datum();
         if (dd.elem === 'summarized') {
           text.html(
-            'Small tensors that were not plotted to cutdown on render time.\n' +
-              'Use detail slider to see smaller allocations.',
+            data.grouped_segments
+              ? 'Other segments hidden by the detail limit.\nUse the detail slider to see more segment groups.'
+              : 'Small tensors that were not plotted to cutdown on render time.\n' +
+                'Use detail slider to see smaller allocations.',
           );
         } else if (typeof dd.elem === 'string' && dd.elem.startsWith('pool:')) {
           const pool_key = dd.elem.slice(5);
@@ -1032,14 +1127,36 @@ function ContextViewer(text, data) {
         } else {
           text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`);
         }
+        if (event_select) {
+          event_select.style('display', events.length ? 'block' : 'none');
+          if (!same) {
+            event_select.selectAll('option').remove();
+            event_select.append('option').attr('value', -1).text('Group summary');
+            events.forEach((event, i) => {
+              const delta = event.after - event.before;
+              event_select.append('option').attr('value', i).text(
+                event.action === 'segment_snapshot'
+                  ? `Initial observed range: ${event.addr.toString(16)}, ${formatSize(event.size, false)}`
+                  : `Event ${event.timestep}: ${event.action.replace('segment_', '')} ` +
+                    `${delta >= 0 ? '+' : ''}${formatSize(delta, false)} ` +
+                    `(${formatSize(event.before, false)} to ${formatSize(event.after, false)})`,
+              );
+            });
+          }
+        }
         const is_pool_sel = typeof dd.elem === 'string' && dd.elem.startsWith('pool:');
         d.attr('stroke', 'black')
           .attr('stroke-width', is_pool_sel ? 5 : 1)
           .attr('vector-effect', 'non-scaling-stroke');
       }
       current_selected = d;
+      current_event = event_index;
+      selected_events = events;
+      if (event_select && d && typeof d.datum().elem === 'number') show_event();
+      return event_index;
     },
   };
+  return delegate;
 }
 
 function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
@@ -1064,6 +1181,7 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
       mini_points.push([i, m]);
     }
   }
+  mini_points.push([max_at_time.length, max_at_time.at(-1) ?? 0]);
 
   let points = mini_points.map(([t, o]) => `${minixscale(t)}, ${yscale(o)}`);
   points = points.join(' ');
@@ -1131,13 +1249,20 @@ function create_trace_view(
   plot_segments = false,
   max_entries = 15000,
   include_private_inactive = false,
+  segment_options = {grouped: true},
 ) {
   const left_pad = 70;
-  const data = process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive);
+  const data = process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive, segment_options);
   dst.selectAll('svg').remove();
   dst.selectAll('div').remove();
 
+  const detail_limit = max_entries;
   max_entries = Math.min(max_entries, data.elements_length);
+  if (data.history_error) {
+    dst.append('div').text(
+      `Final snapshot only - recorded history cannot be reconciled. ${data.history_error}`,
+    );
+  }
   if (include_private_inactive) {
     dst.append('div')
       .attr('style', 'padding: 4px 8px; background: #fff3cd; border: 1px solid #ffc107; font-size: 13px; margin-bottom: 4px;')
@@ -1145,22 +1270,56 @@ function create_trace_view(
           + 'This view requires that MemPools are not deleted before torch.cuda.memory._snapshot() is called.');
   }
   const d = dst.append('div');
+  function redraw(options = {}, detail = detail_limit) {
+    create_trace_view(dst, snapshot, device, plot_segments, detail, include_private_inactive, {
+      ...segment_options, ...options,
+      address_query: plot_segments ? search_input.node().value : '',
+      frame_query: plot_segments ? frame_input.node().value : '',
+    });
+  }
+  if (plot_segments && data.streams.length > 1) {
+    d.append('label').text('Stream: ');
+    const streams = d.append('select').attr('aria-label', 'Stream');
+    streams.append('option').attr('value', '').text('All');
+    for (const stream of data.streams) {
+      streams.append('option').attr('value', stream).text(stream === 'unknown' ? 'Unknown' : stream);
+    }
+    streams.property('value', segment_options.stream ?? '')
+      .on('change', function () { redraw({stream: this.value || null}); });
+    d.append('span').text('  |  ');
+  }
+  if (plot_segments && snapshot.categories.length && data.has_expandable) {
+    d.append('label').text('View: ');
+    const view = d.append('select').attr('aria-label', 'Segment view');
+    view.append('option').attr('value', 'groups').text('Segment groups');
+    view.append('option').attr('value', 'categories').text('Mapping categories');
+    view.property('value', segment_options.grouped ? 'groups' : 'categories')
+      .on('change', function () { redraw({grouped: this.value === 'groups'}); });
+    d.append('span').text('  |  ');
+  }
   d.append('input')
     .attr('type', 'range')
     .attr('min', 0)
     .attr('max', data.elements_length)
     .attr('value', max_entries)
     .on('change', function () {
-      create_trace_view(dst, snapshot, device, plot_segments, this.value, include_private_inactive);
+      redraw({}, this.value);
     });
   d.append('label').text(
-    `Detail: ${max_entries} of ${data.elements_length} entries`,
+    `Detail: ${max_entries} of ${data.elements_length} ${data.grouped_segments ? 'segment groups' : 'entries'}`,
   );
+  if (data.grouped_segments) {
+    dst.append('div').text('Expandable groups are inferred from mapped addresses. Select a band near a growth step to inspect its mapping event.');
+  }
+  if (plot_segments && segment_options.stream != null) {
+    dst.append('div').text(`Showing stream ${segment_options.stream}: peak mapped capacity ${formatSize(data.max_size, false)} (selected stream only).`);
+  }
 
   d.append('span').text('  |  ');
   const search_input = d.append('input')
     .attr('type', 'text')
     .attr('placeholder', 'Search address (hex)...')
+    .property('value', segment_options.address_query ?? '')
     .attr('style', 'width: 180px; margin-left: 4px; font-family: monospace;');
   const search_label = d.append('label')
     .attr('style', 'margin-left: 4px;');
@@ -1169,6 +1328,7 @@ function create_trace_view(
   const frame_input = d.append('input')
     .attr('type', 'text')
     .attr('placeholder', 'Search stack frame...')
+    .property('value', segment_options.frame_query ?? '')
     .attr('style', 'width: 200px; margin-left: 4px; font-family: monospace;');
   const frame_label = d.append('label')
     .attr('style', 'margin-left: 4px;');
@@ -1180,25 +1340,43 @@ function create_trace_view(
       'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
     );
 
-  const plot_svg = grid_container
+  const plot_container = grid_container
+    .append('div')
+    .attr(
+      'style',
+      'position: relative; grid-column: 1; grid-row: 1; width: 100%; height: 100%; min-height: 0; overflow: hidden;',
+    );
+  const plot_svg = plot_container
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 576')
     .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
+    .attr('style', 'width: 100%; height: 100%;');
+  const axis_svg = plot_container
+    .append('svg')
+    .attr('display', 'block')
+    .attr(
+      'style',
+      'position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;',
+    );
 
-  const plot = MemoryPlot(plot_svg, data, left_pad, 1024, 576);
+  const plot = MemoryPlot(plot_svg, axis_svg, data, left_pad, 1024, 576);
 
-  if (snapshot.categories.length !== 0) {
+  if (snapshot.categories.length !== 0 && !data.grouped_segments) {
     Legend(plot_svg.append('g'), snapshot.categories);
   }
 
   const mini_svg = grid_container
+    .append('div')
+    .attr(
+      'style',
+      'grid-column: 1; grid-row: 2; width: 100%; height: 100%; min-height: 0; overflow: hidden;',
+    )
     .append('svg')
     .attr('display', 'block')
     .attr('viewBox', '0 0 1024 60')
     .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;');
+    .attr('style', 'width: 100%; height: 100%;');
 
   MiniMap(mini_svg, plot, data, left_pad, 1024);
   const context_div = grid_container
@@ -1207,7 +1385,13 @@ function create_trace_view(
       'style',
       'grid-column: 1; grid-row: 3; width: 100%; height: 100%; min-height: 0; overflow: auto;',
     );
-  const delegate = ContextViewer(context_div.append('pre').text('none'), data);
+  const event_select = data.grouped_segments
+    ? context_div.append('select').attr('aria-label', 'Mapping event')
+      .attr('style', 'display:none;max-width:100%;font-family:monospace;')
+    : null;
+  const context_text = context_div.append('pre').text('none');
+  if (plot_segments) context_text.style('white-space', 'pre-wrap').style('overflow-wrap', 'anywhere');
+  const delegate = ContextViewer(context_text, data, event_select);
   plot.set_delegate(delegate);
 
   function apply_search_highlights() {
@@ -1224,7 +1408,7 @@ function create_trace_view(
           .attr('data-frame-match', null);
         return;
       }
-      const ctx = data.context_for_id(dd.elem);
+      const ctx = data.search_context_for_id ? data.search_context_for_id(dd.elem) : data.context_for_id(dd.elem);
       const ctx_lower = ctx.toLowerCase();
       const addr_hit = addr_query && ctx_lower.includes(addr_query);
       const frame_hit = frame_query && ctx_lower.includes(frame_query);
@@ -1264,6 +1448,7 @@ function create_trace_view(
 
   search_input.on('input', apply_search_highlights);
   frame_input.on('input', apply_search_highlights);
+  if (segment_options.address_query || segment_options.frame_query) apply_search_highlights();
 }
 
 function create_settings_view(dst, snapshot, device) {

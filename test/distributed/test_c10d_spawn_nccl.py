@@ -9,6 +9,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
@@ -30,6 +31,8 @@ NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 if not TEST_WITH_DEV_DBG_ASAN:
 
     class TestDistributedNNFunctionsNccl(TestDistributedNNFunctions):
+        hw_classification = HardwareClassification.CUDA
+
         # Test Common Ops First.
         @requires_accelerator_dist_backend()
         @skip_if_lt_x_gpu(2)

@@ -31,7 +31,7 @@ class TORCH_API LoopNest {
   // A convenience constructor for the case when all tensors are output tensors
   LoopNest(const std::vector<Tensor>& output_tensors);
 
-  // A constructor for building a LoopNest from an Stmt and a list of output
+  // A constructor for building a LoopNest from a Stmt and a list of output
   // buffers.
   LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs);
 

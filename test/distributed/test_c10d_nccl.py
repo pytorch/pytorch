@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gzip
 import json
 import logging
 import os
@@ -23,23 +24,27 @@ from unittest import mock, SkipTest
 import torch
 import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
-from torch.distributed.distributed_c10d import SHRINK_ABORT as NCCL_SHRINK_ABORT
+from torch.distributed.distributed_c10d import (
+    SHRINK_ABORT as NCCL_SHRINK_ABORT,
+    SHRINK_DEFAULT as NCCL_SHRINK_DEFAULT,
+)
 
-if torch.accelerator.current_accelerator() is None:
-    print("No accelerator available, skipping tests", file=sys.stderr)
+
+if not c10d.is_available() or not c10d.is_nccl_available():
+    print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+
 
 import test_c10d_common
 from test_c10d_common import (
     ConvNet,
     DoubleGpuNet,
     FFTModel,
-    devices_for_rank,
+    gpus_for_rank,
     ModuleForDdpCommHook,
 )
 
 import torch.distributed as dist
-import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
@@ -47,13 +52,25 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_distributed import (
+    core_dumps_disabled,
     get_required_world_size,
     get_timeout,
     init_multigpu_helper,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
-    requires_accelerator_dist_backend,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
@@ -68,15 +85,21 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_SANDCASTLE,
+    isRocmArchAnyOf,
+    MI200_ARCH,
+    MI350_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    skipIfRocmArch,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -90,17 +113,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-BFLOAT16_AVAILABLE = False
-if (acc := torch.accelerator.current_accelerator()):
-    device_module = getattr(torch, acc.type, None)
-    if device_module and hasattr(device_module, 'is_bf16_supported'):
-        BFLOAT16_AVAILABLE = device_module.is_bf16_supported()
-DEVICE_TYPE = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
+BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
+    torch.version.cuda is not None or torch.version.hip is not None
 )
-BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+NCCL_BACKEND = "nccl-legacy"
 
 _start_time = time.time()
 _logger = logging.getLogger(__name__)
@@ -150,113 +166,125 @@ _log_configure(level=logging.INFO, force=True)
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @retry_on_connect_failures
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
     def test_common_errors(self):
-        vars = {
-            "WORLD_SIZE": "1",
-            "RANK": "0",
-            "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": str(common.find_free_port()),
-        }
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so the default process group must not survive a failed attempt.
+        try:
+            vars = {
+                "WORLD_SIZE": "1",
+                "RANK": "0",
+                "MASTER_ADDR": "127.0.0.1",
+                "MASTER_PORT": str(common.find_free_port()),
+            }
 
-        class Env:
-            def __init__(self, vars):
-                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
+            class Env:
+                def __init__(self, vars):
+                    self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
-            def __enter__(self):
-                self.env_patcher.start()
+                def __enter__(self):
+                    self.env_patcher.start()
 
-            def __exit__(self, type, value, traceback):
-                self.env_patcher.stop()
+                def __exit__(self, type, value, traceback):
+                    self.env_patcher.stop()
 
-        def without(d, key):
-            d = d.copy()
-            d.pop(key)
-            return d
-
-        def withouts(d, keys):
-            d = d.copy()
-            for key in keys:
+            def without(d, key):
+                d = d.copy()
                 d.pop(key)
-            return d
+                return d
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=BACKEND, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            def withouts(d, keys):
+                d = d.copy()
+                for key in keys:
+                    d.pop(key)
+                return d
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            with self.assertRaisesRegex(ValueError, "RANK expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=BACKEND, rank=0)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            c10d.init_process_group(backend=BACKEND, rank=0, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                with self.assertRaisesRegex(ValueError, "RANK expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(vars):
-            c10d.init_process_group(backend=BACKEND)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_ADDR")):
-            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
-            with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(vars):
+                c10d.init_process_group(backend=NCCL_BACKEND)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_PORT")):
-            self.assertEqual(None, os.environ.get("MASTER_PORT"))
-            with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(without(vars, "MASTER_ADDR")):
+                self.assertEqual(None, os.environ.get("MASTER_ADDR"))
+                with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?world_size={1}")
-            _, _, size = next(gen)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "MASTER_PORT")):
+                self.assertEqual(None, os.environ.get("MASTER_PORT"))
+                with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            gen = c10d.rendezvous(f"env://?rank={0}")
-            _, rank, _ = next(gen)
-            self.assertEqual(rank, 0)
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?world_size={1}")
+                _, _, size = next(gen)
+                self.assertEqual(size, 1)
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
-            _, rank, size = next(gen)
-            self.assertEqual(rank, 0)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                gen = c10d.rendezvous(f"env://?rank={0}")
+                _, rank, _ = next(gen)
+                self.assertEqual(rank, 0)
+
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
+                _, rank, size = next(gen)
+                self.assertEqual(rank, 0)
+                self.assertEqual(size, 1)
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
-    @requires_accelerator_dist_backend()
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_nccl()
     @retry_on_connect_failures
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
     def test_default_store_timeout_nccl(self):
-        self._test_default_store_timeout(BACKEND)
+        self._test_default_store_timeout(NCCL_BACKEND)
+
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
@@ -280,6 +308,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
 
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
     device_type = "cuda"
 
     def setUp(self):
@@ -324,17 +353,19 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(1)
     def test_scalable_init(self):
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
-        self._init_process_group(device_id=self.device)
+        self._init_process_group(backend=NCCL_BACKEND, device_id=self.device)
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -352,18 +383,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
 
-        # These tests are expected to throw SIGABRT(6);
-        # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        # These tests are expected to exit with SIGABRT(6): the device-side
+        # assert is surfaced as an error by the runtime, the test catches it
+        # and exits 6. That holds on ROCm too, as long as the child has core
+        # dumps off - see core_dumps_disabled() in test_nan_assert.
         #
-        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
-        #       clean exit(6) → exit code 6
-        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
-        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
-        #       exit code -6
+        # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
         TEST_NAN_ASSERT_RETURN = (
-            0
-            if (IS_SANDCASTLE and not TEST_MULTIGPU)
-            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
+            0 if (IS_SANDCASTLE and not TEST_MULTIGPU) else signal.SIGABRT
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -394,7 +421,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, "nccl")
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -468,7 +495,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -494,7 +521,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # initialize pg for the first time
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -511,7 +538,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # re-initialize pg
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=new_store,
@@ -620,12 +647,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # pg.all_gather_single(output, nan_tensor)
 
         backend._set_enable_nan_check(True)
-        try:
-            pg.all_gather_single(output, nan_tensor)
-        except Exception:
-            sys.exit(signal.SIGABRT)
+        with core_dumps_disabled():
+            try:
+                pg.all_gather_single(output, nan_tensor)
+            except Exception:
+                sys.exit(signal.SIGABRT)
 
-        dist.destroy_process_group()
+            dist.destroy_process_group()
 
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
@@ -639,7 +667,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank:d}")
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         t = torch.ones(3, 4, dtype=torch.bfloat16, device=device)
         if self.rank != 0:
@@ -664,7 +695,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         x = torch.ones((10,), device=device) * self.rank
         t = torch.ones(3, 4, device=device)
@@ -680,7 +714,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_gather_single(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         device = torch.device(f"cuda:{self.rank:d}")
         torch.cuda.set_device(device)
@@ -748,25 +785,33 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml is available.
-        pynvml provides python bindings for NVIDIA NVML functionalities.
-        Here we are interested in: nvmlDeviceGetComputeRunningProcesses
+        A helper for `test_extra_cuda_context`, if pynvml (CUDA) or amdsmi (ROCm)
+        is available. They provide python bindings for NVML / AMD SMI.
+        Here we are interested in: nvmlDeviceGetComputeRunningProcesses /
+        amdsmi_get_gpu_process_list
         """
-        import pynvml
+        if torch.version.hip:
+            # Raises ModuleNotFoundError if amdsmi is not available.
+            handle = torch.cuda._get_amdsmi_handler(self.rank)
+            import amdsmi
+        else:
+            import pynvml
 
-        pynvml.nvmlInit()
+            pynvml.nvmlInit()
 
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         work = c10d.all_reduce(x, async_op=True)
 
-        # Wait for non-0 ranks to garbage collect Work -- this is the latest
-        # point where extra CUDA context can be created
-        if self.rank == 0:
-            time.sleep(5)
         del work
-        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
-        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        # Wait for every rank to delete Work without touching another CUDA context.
+        store = c10d.distributed_c10d._get_default_store()
+        store.barrier("work_deleted", self.world_size)
+        if torch.version.hip:
+            processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+        else:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+            processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
 
         # A barrier for non-0 ranks
@@ -784,6 +829,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         A helper for `test_extra_cuda_context`, if pynvml is NOT available.
         If extra context is created, it would manifest into device 0's memory usage.
         """
+        if torch.version.hip:
+            raise SkipTest(
+                "Requires amdsmi on ROCm: an extra HIP context uses almost no device "
+                "memory, while the first RCCL kernel launch allocates ~1 GB of scratch "
+                "on the rank's own device, so memory growth cannot detect it."
+            )
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         # Rank 0 takes a snapshot before collective -- this snapshot should have
@@ -826,7 +877,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank:d}")
         c10d.init_process_group(
-            backend="nccl",
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -853,7 +904,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank:d}")
         c10d.init_process_group(
-            backend="nccl",
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -870,9 +921,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.reduce_scatter_single(x, y)
         c10d.barrier()
 
-        # Wait a bit for remote processes to touch my device
-        if self.rank == 0:
-            time.sleep(5)
+        # Wait for every rank to finish the operations without touching CUDA.
+        store.barrier("sync_ops_done", self.world_size)
 
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
@@ -986,7 +1036,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # e.g., self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+            backend=NCCL_BACKEND,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
         )
         pg = dist.distributed_c10d._get_default_group()
         self.assertEqual(pg.rank(), self.rank)
@@ -1008,7 +1061,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         store = c10d.FileStore(self.file_name, self.world_size)
         base_opts = dict(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
 
         # test the default value coming from the `init_process_group` kwarg default
@@ -1046,7 +1102,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("backend", [None, "nccl"])
+    @parametrize("backend", [None, NCCL_BACKEND])
     def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
@@ -1060,21 +1116,22 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         pg = dist.distributed_c10d._get_default_group()
         pg.allreduce(torch.rand(10).cuda(self.rank))
         self._check_nccl_timeout(timedelta(seconds=123))
-        pg._get_backend(torch.device(f"cuda:{self.rank}"))._set_default_timeout(
-            timedelta(seconds=23)
-        )
+        dist.set_timeout(timedelta(seconds=23), pg)
         self._check_nccl_timeout(timedelta(seconds=23))
         pg.allreduce(torch.rand(10).cuda(self.rank))
-        c10d.set_timeout(timedelta(seconds=252), pg)
+        dist.set_timeout(timedelta(seconds=252), pg)
         self._check_nccl_timeout(timedelta(seconds=252))
         # the deprecated `_set_pg_timeout` alias still works
         with self.assertWarnsRegex(FutureWarning, "_set_pg_timeout"):
             c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=99), pg)
         self._check_nccl_timeout(timedelta(seconds=99))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("backend", [None, "nccl"])
+    @parametrize("backend", [None, NCCL_BACKEND])
     def test_extend_nccl_pg_timeout(self, backend):
         torch.cuda.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1087,14 +1144,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
-        backend = dist.get_backend_impl(device=torch.device(f"cuda:{self.rank}"))
         w = pg.allreduce(torch.rand(10).cuda(self.rank))
         self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
-        backend._set_default_timeout(timedelta(seconds=3))
+        dist.set_timeout(timedelta(seconds=3), pg)
+        dist.barrier()
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
+            # Hold the first allreduce until rank 1 has issued both allreduces:
+            # w1 completing earlier releases its extension before w2 exists.
+            store.wait(["extend_timeout_issued"])
             time.sleep(5)
             pg.allreduce(torch.rand(10).cuda(self.rank))
             time.sleep(5)
@@ -1108,6 +1168,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            store.set("extend_timeout_issued", "1")
             self.assertEqual(w1.timeout, timedelta(seconds=13))
             self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
@@ -1120,6 +1181,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             w = pg.allreduce(torch.rand(10).cuda(self.rank))
             self.assertEqual(w.timeout, timedelta(seconds=8))
             w.wait()
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -1130,7 +1194,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1145,7 +1209,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @skip_but_pass_in_sandcastle_if(
-        DEVICE_TYPE == "cuda" and torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
+        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
     )
     def test_comm_split_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
@@ -1187,6 +1251,28 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # the default group should stay lazy
         self.assertEqual(backend._is_initialized(), False)
         torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("blocking", [0, 1])
+    def test_backend_split_with_lazy_parent(self, blocking: int):
+        # The parent has no communicator yet, so the member creates the child
+        # via a fresh init and non-members have no nocolor split to join.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(device)
+        opts = self.opts()
+        opts.config.blocking = blocking
+        child = backend.split(c10d.distributed_c10d._get_default_store(), [0], opts)
+        self.assertEqual(backend._is_initialized(), False)
+        if self.rank == 0:
+            tensor = torch.ones(1, device=device)
+            child.allreduce([tensor]).wait()
+            self.assertEqual(tensor, torch.ones_like(tensor))
+        else:
+            self.assertIsNone(child)
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -1234,6 +1320,35 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_comm_split_initialized_parent_with_lazy_default(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        default_pg = self._create_process_group_nccl(store, self.opts())
+        default_backend = default_pg._get_backend(device)
+        self.assertFalse(default_backend._is_initialized())
+
+        ranks = list(range(self.world_size))
+        parent = c10d.new_group(ranks)
+        parent_backend = parent._get_backend(device)
+        self.assertFalse(parent_backend._is_initialized())
+        with self.assertRaisesRegex(RuntimeError, "Parent process group backend"):
+            c10d.split_group(parent, [ranks])
+
+        tensor = torch.full((1,), self.rank, device=device)
+        dist.all_reduce(tensor, group=parent)
+        self.assertTrue(parent_backend._is_initialized())
+        self.assertFalse(default_backend._is_initialized())
+
+        child = c10d.split_group(parent, [ranks])
+        self.assertIsInstance(child, c10d.ProcessGroup)
+        self.assertIsNone(child.bound_device_id)
+        dist.broadcast(tensor, 0, group=child)
+        self.assertEqual(tensor, torch.full_like(tensor, sum(ranks)))
+
+        c10d.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_world_pg_created_after_another_nccl_pg(self):
         # Regression test: ProcessGroupNCCL::groupRanks() used to derive the
         # identity rank mapping only when local_id_ == 0. local_id_ is a
@@ -1247,7 +1362,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank}")
         # (1) burn local_id_ == 0 on an unrelated nccl pg.
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.PrefixStore("prior", store),
@@ -1255,7 +1370,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
         # (2) the real default pg -> global_ranks_in_group empty.
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.PrefixStore("world", store),
@@ -1286,7 +1401,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         # create nccl processgroup with opts
         c10d.init_process_group(
-            "cpu:gloo,cuda:nccl",
+            "cpu:gloo,cuda:nccl-legacy",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1358,13 +1473,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_backend_filter(self):
-        # Hybrid parent (cpu:gloo + cuda:nccl); request only cuda:nccl in the
+        # Hybrid parent (cpu:gloo + cuda:nccl-legacy); request only cuda:nccl-legacy in the
         # child via the new `backend` arg. The child should only have the cuda
         # backend, and the gloo backend should not be split.
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         c10d.init_process_group(
-            "cpu:gloo,cuda:nccl",
+            "cpu:gloo,cuda:nccl-legacy",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1375,7 +1490,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         cuda_backend = pg._get_backend(torch.device("cuda"))
 
         subg_ranks = [0, 1]
-        ng = c10d.split_group(pg, [subg_ranks], backend="cuda:nccl")
+        ng = c10d.split_group(pg, [subg_ranks], backend="cuda:nccl-legacy")
         if self.rank in subg_ranks:
             self.assertIsNotNone(ng)
             ng_cuda = ng._get_backend(torch.device("cuda"))
@@ -1384,7 +1499,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             with self.assertRaises(Exception):
                 ng._get_backend(torch.device("cpu"))
             self.assertEqual(
-                c10d.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl"
+                c10d.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl-legacy"
             )
 
             cuda_tensor = torch.full((1,), self.rank).cuda(device)
@@ -1396,13 +1511,27 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_merge_group_clones_store_for_uninitialized_child(self):
+        parent_store = c10d.FileStore(self.file_name, self.world_size)
+        parent = self._create_process_group_nccl(parent_store, self.opts())
+        merge_store = test_c10d_common._CloneTrackingStore()
+
+        child = parent.merge_remote_group(merge_store, 1)
+
+        self.assertEqual(merge_store.clone_count, 1)
+        self.assertEqual(child.size(), 1)
+        child.shutdown()
+        dist.destroy_process_group()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_backend_validation(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         c10d.init_process_group(
-            "cpu:gloo,cuda:nccl",
+            "cpu:gloo,cuda:nccl-legacy",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1411,7 +1540,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         pg = c10d.distributed_c10d._get_default_group()
 
-        # Backend name mismatch (parent has cuda:nccl, request cuda:gloo).
+        # Backend name mismatch (parent has cuda:nccl-legacy, request cuda:gloo).
         with self.assertRaisesRegex(ValueError, "Backend mismatch"):
             c10d.split_group(pg, [[0, 1]], backend="cuda:gloo")
 
@@ -1496,7 +1625,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1659,21 +1788,27 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(3)
-    def test_shrink_group_multiple_comms(self):
+    @parametrize("shrink_flags", [NCCL_SHRINK_DEFAULT, NCCL_SHRINK_ABORT])
+    def test_shrink_group_multiple_comms(self, shrink_flags):
         """Test shrink_group across a subgroup and the default group."""
-        device, _ = self._setup_shrink_test("multiple_comms")
+        device, default_pg = self._setup_shrink_test("multiple_comms")
         ranks_to_exclude = [self.world_size - 1]
 
         subgroup = c10d.new_group(list(range(self.world_size)))
-        self._shrink_or_destroy(ranks_to_exclude, subgroup, device, "subgroup")
+        self._shrink_or_destroy(
+            ranks_to_exclude, subgroup, device, "subgroup", shrink_flags=shrink_flags
+        )
 
-        dist.barrier()
+        self._test_collective_on_shrunk_group(
+            default_pg, device, [], "default after subgroup shrink"
+        )
 
         self._shrink_or_destroy(
             ranks_to_exclude,
-            c10d.distributed_c10d._get_default_group(),
+            default_pg,
             device,
             "default",
+            shrink_flags=shrink_flags,
         )
 
     def _test_shrink_group_with_flag(self, shrink_flag, flag_name, rank_to_exclude):
@@ -1915,7 +2050,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name + f"_{test_suffix}", world_size)
         device = torch.device(f"cuda:{self.rank}")
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=world_size,
             rank=self.rank,
             store=store,
@@ -1990,7 +2125,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         """
         if self.rank in ranks_to_exclude:
             if shrink_flags & NCCL_SHRINK_ABORT:
-                pg._get_backend(torch.device(device)).abort()
+                dist.get_backend_impl(pg, torch.device(device)).abort()
             else:
                 c10d.destroy_process_group(pg)
             return
@@ -2094,7 +2229,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.destroy_process_group()
         else:
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
-            dist.destroy_process_group()
+            # Survivors shrink with NCCL_SHRINK_ABORT and abort the parent, so
+            # the excluded rank must abort too; destroy here would hang.
+            dist.get_backend_impl(pg1, torch.device(device)).abort()
             return
 
         # Performance analysis (only for participating ranks)
@@ -2139,6 +2276,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             device_id=device_idx,
         )
         dist.all_reduce(torch.empty(1, device=torch.device("cuda", device_idx)))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -2229,22 +2369,23 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-        if DEVICE_TYPE == "cuda" and c10d.is_nccl_available():
-            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def _get_process_group(self):
         store = self._get_store()
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
-    def _test_backend(
+    def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
     ):
         process_group = self._get_process_group()
@@ -2252,13 +2393,13 @@ class DistributedDataParallelTest(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params_and_grads(self):
         # test ddp with complex parameters and gradients
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
-        device = torch.device(f"{DEVICE_TYPE}:{device_id}")
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
 
         torch.manual_seed(42 + self.rank)
         model = nn.Sequential(
@@ -2369,13 +2510,13 @@ class DistributedDataParallelTest(
                 "Final model parameters don't match after training",
             )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_mixed_real_and_complex_params(self):
         # test ddp with mixed real and complex parameters and gradients
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
-        device = torch.device(f"{DEVICE_TYPE}:{device_id}")
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
 
         class MixedModule(nn.Module):
             def __init__(self):
@@ -2498,11 +2639,11 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(dist.DistBackendError):
-                pg.allreduce([inp]).wait(timedelta(seconds=5))
+                pg.allreduce([inp]).wait(timedelta(milliseconds=1))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.
             try:
-                pg.allreduce([torch.ones(2).to(f"{DEVICE_TYPE}:{self.rank}")]).wait()
+                pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
             except dist.DistBackendError as e:
                 self.assertTrue("aborted" in str(e))
             else:
@@ -2517,75 +2658,75 @@ class DistributedDataParallelTest(
         # the watchdog has run on the rank, and there is no reliable way
         # to confirm it has run.
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_backend_multi_device_ids_not_allowed(self):
-        int_devices = list(range(torch.accelerator.device_count()))
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
+    def test_nccl_backend_multi_device_ids_not_allowed(self):
+        int_devices = list(range(torch.cuda.device_count()))
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         with self.assertRaisesRegex(
             ValueError, "device_ids can only be None or contain a single element."
         ):
-            self._test_backend(devices, int_devices)
+            self._test_nccl_backend(devices, int_devices)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_backend_single_device_module_device_ids_None(self):
-        self._test_backend(None, None)
+    def test_nccl_backend_single_device_module_device_ids_None(self):
+        self._test_nccl_backend(None, None)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_backend_single_device_module_empty_device_ids(self):
+    def test_nccl_backend_single_device_module_empty_device_ids(self):
         # This tests the backward compatibility of accepting an empty list as `device_ids`,
         # although we no longer document this in favor of the default value of `None`,
         # which is consistent with multi-device modules and CPU modules.
-        self._test_backend(None, [])
+        self._test_nccl_backend(None, [])
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_backend_multi_device_module_device_ids_None(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
-        self._test_backend(devices, None, multi_device=True)
+    def test_nccl_backend_multi_device_module_device_ids_None(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, None, multi_device=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_backend_1gpu_module_device_ids_integer_list(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
-        self._test_backend(devices, int_devices)
+    def test_nccl_backend_1gpu_module_device_ids_integer_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, int_devices)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_backend_1gpu_module_device_ids_torch_device_list(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
-        self._test_backend(devices, devices)
+    def test_nccl_backend_1gpu_module_device_ids_torch_device_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, devices)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    def test_backend_2gpu_module(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
-        self._test_backend(devices, None, multi_device=True)
+    def test_nccl_backend_2gpu_module(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, None, multi_device=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(8)
-    def test_backend_4gpu_module(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
-        self._test_backend(devices, None, multi_device=True)
+    def test_nccl_backend_4gpu_module(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, None, multi_device=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_ddp_multi_device_module_config(self):
-        device_ids = devices_for_rank(self.world_size)[self.rank]
+        gpus = gpus_for_rank(self.world_size)[self.rank]
 
-        self.assertTrue(len(device_ids) >= 2, "expecting at least 2 devices per process")
+        self.assertTrue(len(gpus) >= 2, "expecting at least 2 gpus per process")
 
         process_group = self._get_process_group()
 
-        device_ids = device_ids[:2]
-        model = DoubleGpuNet(device_ids)
+        gpus = gpus[:2]
+        model = DoubleGpuNet(gpus)
 
         with self.assertRaisesRegex(
             ValueError,
@@ -2593,7 +2734,7 @@ class DistributedDataParallelTest(
             "single-device/multiple-device GPU modules or CPU modules",
         ):
             DistributedDataParallel(
-                model, output_device=device_ids[1], process_group=process_group
+                model, output_device=gpus[1], process_group=process_group
             )
 
         with self.assertRaisesRegex(
@@ -2616,13 +2757,12 @@ class DistributedDataParallelTest(
     def _test_fp16(self, gradient_as_bucket_view=False):
         process_group = self._get_process_group()
 
-        dev_ids = devices_for_rank(self.world_size)[self.rank]
-        device = torch.device(DEVICE_TYPE, dev_ids[0])
-        model = nn.Linear(1, 1, bias=False).to(device).half()
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
         nn.init.constant_(model.weight, 1)
         ddp_model = DistributedDataParallel(
             model,
-            device_ids=[dev_ids[0]],
+            device_ids=[gpus[0]],
             process_group=process_group,
             bucket_cap_mb=0.001,
             gradient_as_bucket_view=gradient_as_bucket_view,
@@ -2631,7 +2771,7 @@ class DistributedDataParallelTest(
         # Input 2**15, so that the gradients will overflow with a
         # world_size of 2, unless we normalize the gradient by the
         # world_size before the reduction
-        input = torch.tensor([[2**15]]).to(device).half()
+        input = torch.tensor([[2**15]]).cuda(gpus[0]).half()
 
         # Step model
         ddp_model.train()
@@ -2641,12 +2781,12 @@ class DistributedDataParallelTest(
 
         self.assertFalse(any(torch.isinf(p.grad).any() for p in ddp_model.parameters()))
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_fp16(self):
         self._test_fp16()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_fp16_grad_is_view(self):
         self._test_fp16(gradient_as_bucket_view=True)
@@ -2681,7 +2821,7 @@ class DistributedDataParallelTest(
                     F.softmax(self.fc3(x), dim=1),
                 )
 
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             ForwardReturnValueModule().float().to(device_id),
             device_ids=[device_id],
@@ -2741,17 +2881,17 @@ class DistributedDataParallelTest(
             unbox=lambda obj: obj["list"][3],
         )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_arbitrary_forward_return_value(self):
         self._test_arbitrary_forward_return_value()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_arbitrary_forward_return_value_grad_is_view(self):
         self._test_arbitrary_forward_return_value(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_with_lazy_parameters(self):
         process_group = self._get_process_group()
@@ -2767,9 +2907,9 @@ class DistributedDataParallelTest(
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
         dist.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -2792,7 +2932,7 @@ class DistributedDataParallelTest(
                 # we can use it to trigger a reducer error.
                 return (F.softmax(x, dim=1), self.fc3)
 
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         batch_size = 4
         criterion = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.float)
@@ -2879,37 +3019,37 @@ class DistributedDataParallelTest(
 
     # TODO: Combine the following tests once https://github.com/pytorch/pytorch/issues/55967
     # is resolved.
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_find_unused_parameters_kwarg_debug_detail(self):
         self._test_find_unused_parameters_kwarg()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["INFO"])
     def test_find_unused_parameters_kwarg_debug_info(self):
         self._test_find_unused_parameters_kwarg()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["OFF"])
     def test_find_unused_parameters_kwarg_debug_off(self):
         self._test_find_unused_parameters_kwarg()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_find_unused_parameters_kwarg_grad_is_view_debug_detail(self):
         self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["INFO"])
     def test_find_unused_parameters_kwarg_grad_is_view_debug_info(self):
         self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["OFF"])
     def test_find_unused_parameters_kwarg_grad_is_view_debug_off(self):
@@ -2943,7 +3083,7 @@ class DistributedDataParallelTest(
                     F.softmax(self.module1(x), dim=1),
                 )
 
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             MultipleOutputModule().float().to(device_id),
             device_ids=[device_id],
@@ -2965,17 +3105,17 @@ class DistributedDataParallelTest(
         loss2 = criterion(output2, target)
         loss2.backward()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_multiple_outputs_multiple_backward(self):
         self._test_multiple_outputs_multiple_backward()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_multiple_outputs_multiple_backward_grad_is_view(self):
         self._test_multiple_outputs_multiple_backward(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_no_grad(self):
         """
@@ -2996,7 +3136,7 @@ class DistributedDataParallelTest(
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             NoGradModule().float().to(device_id),
             device_ids=[device_id],
@@ -3026,8 +3166,8 @@ class DistributedDataParallelTest(
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
         # module.
-        int_devices = devices_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device(f"{DEVICE_TYPE}:" + str(i)) for i in int_devices]
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         process_group = self._get_process_group()
         global_batch_size = self.world_size
 
@@ -3074,17 +3214,17 @@ class DistributedDataParallelTest(
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_accumulate_gradients_module(self):
         self._test_accumulate_gradients_module()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_accumulate_gradients_module_with_grad_is_view(self):
         self._test_accumulate_gradients_module(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_failure_recovery(self):
         process_group = self._get_process_group()
@@ -3111,7 +3251,7 @@ class DistributedDataParallelTest(
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = TestModel().float().to(device_id)
         ddp = DistributedDataParallel(
             model,
@@ -3136,7 +3276,7 @@ class DistributedDataParallelTest(
 
         store = c10d.FileStore(recovery_filename, self.world_size)
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
         ddp = DistributedDataParallel(
@@ -3154,11 +3294,11 @@ class DistributedDataParallelTest(
             loss = criterion(output, target)
             loss.backward()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_pass_default_pg(self):
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
@@ -3229,6 +3369,12 @@ class DistributedDataParallelTest(
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
                         tol = 3.0e-3 if has_half else 1.0e-5
+                        if has_half and TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH):
+                            # MIOpen picks fp16 implicit-GEMM group conv solvers on
+                            # gfx90a that lose intermediate precision, and the DDP vs
+                            # full-batch accumulation order difference amplifies it.
+                            # https://github.com/ROCm/rocm-libraries/issues/11938
+                            tol = 8.0e-3
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -3290,10 +3436,10 @@ class DistributedDataParallelTest(
                             )
                             raise
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_grad_layout_1devicemodule_1replicaperprocess(self):
-        dev0 = torch.device(f"{DEVICE_TYPE}:" + str(devices_for_rank(self.world_size)[self.rank][0]))
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         # Tells DDP to use just one device.
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
@@ -3301,12 +3447,12 @@ class DistributedDataParallelTest(
         local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_grad_layout_2devicemodule(self):
-        int_devices = devices_for_rank(self.world_size)[self.rank][:2]
-        dev0 = torch.device(f"{DEVICE_TYPE}:" + str(int_devices[0]))
-        dev1 = torch.device(f"{DEVICE_TYPE}:" + str(int_devices[1]))
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
         # DDP's default behavior for a multi-device module is "don't replicate."
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
@@ -3314,12 +3460,12 @@ class DistributedDataParallelTest(
         local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_param_layout_mismatch_error(self):
         process_group = self._get_process_group()
 
-        dev0 = torch.device(f"{DEVICE_TYPE}:" + str(devices_for_rank(self.world_size)[self.rank][0]))
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         layer_devs = dev0
         layer_formats = (
             [torch.contiguous_format] * 4
@@ -3348,7 +3494,7 @@ class DistributedDataParallelTest(
         state=None,
         static_graph=False,
     ):
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -3363,11 +3509,11 @@ class DistributedDataParallelTest(
 
         return gpu_model
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_future_passing(self):
+    def test_ddp_comm_hook_future_passing_gpu_nccl(self):
         """
-        This unit test verifies whether the Future object is passed properly using accelerator backend.
+        This unit test verifies whether the Future object is passed properly using nccl backend.
         The hook callback function creates a Future object and sets a value to it.
         """
         process_group = self._get_process_group()
@@ -3379,7 +3525,7 @@ class DistributedDataParallelTest(
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
-    def _test_ddp_comm_hook_allreduce_hook(
+    def _test_ddp_comm_hook_allreduce_hook_nccl(
         self, gradient_as_bucket_view=False, static_graph=False
     ):
         """
@@ -3408,7 +3554,7 @@ class DistributedDataParallelTest(
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_default_ddp_comm_hooks(self, gradient_as_bucket_view=False):
+    def _test_default_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether default Python DDP communication hooks ALLREDUCE, FP16_COMPRESS
         and BF16_COMPRESS, can give the same result with the case of no hook registered.
@@ -3422,7 +3568,6 @@ class DistributedDataParallelTest(
             not TEST_WITH_ROCM
             and BFLOAT16_AVAILABLE
             and c10d.is_nccl_available()
-            and DEVICE_TYPE == "cuda"
             and torch.cuda.nccl.version() >= (2, 10)
         ):
             hook_options.append(default.bf16_compress_hook)
@@ -3485,7 +3630,7 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_powerSGD_ddp_comm_hook(self, gradient_as_bucket_view=False):
+    def _test_powerSGD_ddp_comm_hook_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether Python DDP communication hook POWER_SGD
         can give the same result with the case of no hook registered.
@@ -3514,7 +3659,7 @@ class DistributedDataParallelTest(
                 # check whether the grads are equal to what DDP without hook would return.
                 self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_builtin_ddp_comm_hooks(self, gradient_as_bucket_view=False):
+    def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether built-in C++ DDP communication hooks ALLREDUCE and FP16_COMPRESS
         can give the same result with the case of no hook registered.
@@ -3533,62 +3678,62 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_with_future(self):
-        self._test_ddp_comm_hook_allreduce_hook()
+    def test_ddp_comm_hook_allreduce_hook_nccl(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_default_ddp_comm_hooks(self):
-        self._test_default_ddp_comm_hooks()
+    def test_default_ddp_comm_hooks_nccl(self):
+        self._test_default_ddp_comm_hooks_nccl()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_fp16_compress_hook_wrapper(self):
+    def test_fp16_compress_wrapper_nccl(self):
         self._test_fp16_compress_wrapper()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    def test_bf16_compress_hook_wrapper(self):
+    def test_bf16_compress_wrapper_nccl(self):
         self._test_bf16_compress_wrapper()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_builtin_ddp_comm_hooks(self):
-        self._test_builtin_ddp_comm_hooks()
+    def test_builtin_ddp_comm_hooks_nccl(self):
+        self._test_builtin_ddp_comm_hooks_nccl()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_powerSGD_ddp_comm_hook(self):
-        self._test_powerSGD_ddp_comm_hook()
+    def test_powerSGD_ddp_comm_hook_nccl(self):
+        self._test_powerSGD_ddp_comm_hook_nccl()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_with_future_grad_is_view(self):
-        self._test_ddp_comm_hook_allreduce_hook(gradient_as_bucket_view=True)
+    def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allreduce_with_future_static_graph(self):
-        self._test_ddp_comm_hook_allreduce_hook(static_graph=True)
+    def test_ddp_comm_hook_allreduce_hook_nccl_static_graph(self):
+        self._test_ddp_comm_hook_allreduce_hook_nccl(static_graph=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_default_ddp_comm_hooks_is_view(self):
-        self._test_default_ddp_comm_hooks(gradient_as_bucket_view=True)
+    def test_default_ddp_comm_hooks_nccl_is_view(self):
+        self._test_default_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_fp16_compress_wrapper_is_view(self):
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
@@ -3598,19 +3743,19 @@ class DistributedDataParallelTest(
     def test_bf16_compress_wrapper_is_view(self):
         self._test_bf16_compress_wrapper(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_builtin_ddp_comm_hooks_grad_is_view(self):
-        self._test_builtin_ddp_comm_hooks(gradient_as_bucket_view=True)
+    def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
+        self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_powerSGD_ddp_comm_hook_grad_is_view(self):
-        self._test_powerSGD_ddp_comm_hook(gradient_as_bucket_view=True)
+    def test_powerSGD_ddp_comm_hook_nccl_grad_is_view(self):
+        self._test_powerSGD_ddp_comm_hook_nccl(gradient_as_bucket_view=True)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_comm_hook_allreduce_with_then(self):
+    def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that calls allreduce and then
         multiplies the result by ten and divides by two gives the expected result.
@@ -3651,7 +3796,7 @@ class DistributedDataParallelTest(
         def forward(self, input):
             return input + self.a * self.f
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_weight_sharing(self):
         process_group = self._get_process_group()
@@ -3665,7 +3810,7 @@ class DistributedDataParallelTest(
         for try_set_to_none, use_bucket_view in product((False, True), (False, True)):
             m = torch.nn.Sequential(
                 self.AcceptsParam(p, dev + 1), self.AcceptsParam(p, dev + 1)
-            ).to(torch.device(DEVICE_TYPE, dev))
+            ).cuda(dev)
 
             m = torch.nn.parallel.DistributedDataParallel(
                 m,
@@ -3695,7 +3840,7 @@ class DistributedDataParallelTest(
                         + f"set_to_none = {try_set_to_none}, use_bucket_view = {use_bucket_view}",
                     )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_packed_sequence(self):
         """
@@ -3705,7 +3850,7 @@ class DistributedDataParallelTest(
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -3756,21 +3901,21 @@ class DistributedDataParallelTest(
         for p1, p2 in zip(lstm.parameters(), lstm_ddp.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_channels_last_contig(self):
         process_group = self._get_process_group()
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank}")
         tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(
             memory_format=torch.channels_last
         )
         process_group.broadcast([tensor]).wait()
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_complex_params(self):
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
         N, C, H, W = 1, 16, 64, 64
         ddp_model = DistributedDataParallel(
             FFTModel(hin=H, win=W, n_features=C).to(device_id),
@@ -3787,14 +3932,14 @@ class DistributedDataParallelTest(
         loss.backward()
         optimizer.step()
 
-        torch.accelerator.synchronize(device_id)
+        torch.cuda.synchronize(device=device_id)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_bucket_cap_mb_list_initialization(self):
         """Test that bucket_cap_mb_list is properly converted to bucket_bytes_cap_list"""
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
 
         # Create a simple model for testing
         model = nn.Sequential(
@@ -3830,12 +3975,12 @@ class DistributedDataParallelTest(
             lambda msg: f"{msg}\nbucket_bytes_cap should be {expected_bucket_bytes_cap}",
         )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_bucket_cap_mb_list_default_behavior(self):
         """Test that default bucket_cap_mb is used when neither parameter is provided"""
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
 
         model = nn.Sequential(
             nn.Linear(10, 20),
@@ -3865,12 +4010,12 @@ class DistributedDataParallelTest(
             "bucket_bytes_cap_list should be empty when not provided",
         )
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_bucket_cap_mb_alone(self):
         """Test that bucket_cap_mb works correctly when provided alone"""
         process_group = self._get_process_group()
-        device_id = devices_for_rank(self.world_size)[self.rank][0]
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
 
         model = nn.Sequential(
             nn.Linear(10, 20),
@@ -3902,7 +4047,10 @@ class DistributedDataParallelTest(
             "bucket_bytes_cap_list should be empty when bucket_cap_mb_list not provided",
         )
 
+
 class WorkHookTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2
@@ -3928,11 +4076,11 @@ class WorkHookTest(MultiProcessTestCase):
     def _get_process_group(self):
         store = self._get_store()
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_broadcast(self):
         pg = self._get_process_group()
@@ -3945,7 +4093,7 @@ class WorkHookTest(MultiProcessTestCase):
             durations.append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
-        tensor = torch.ones([2, 3]).to(torch.device(DEVICE_TYPE, self.rank)) * self.rank
+        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
         pg.broadcast([tensor]).wait()
         pg.broadcast([tensor]).wait()
 
@@ -3958,9 +4106,9 @@ class WorkHookTest(MultiProcessTestCase):
         for duration in durations:
             self.assertTrue(duration > 0)
 
-        self.assertEqual(tensor, torch.zeros([2, 3]).to(torch.device(DEVICE_TYPE, self.rank)))
+        self.assertEqual(tensor, torch.zeros([2, 3]).cuda(self.rank))
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_mixed_ops(self):
         pg = self._get_process_group()
@@ -3973,7 +4121,7 @@ class WorkHookTest(MultiProcessTestCase):
             durations.append(work_info.active_duration.total_seconds())
 
         pg._register_on_completion_hook(hook)
-        tensor = torch.ones([2, 3]).to(torch.device(DEVICE_TYPE, self.rank))
+        tensor = torch.ones([2, 3]).cuda(self.rank)
         tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
         # intentionally using async ops.
         pg.allreduce(tensor)
@@ -3991,18 +4139,18 @@ class WorkHookTest(MultiProcessTestCase):
 
         self.assertEqual(
             tensor,
-            torch.ones([2, 3]).to(torch.device(DEVICE_TYPE, self.rank)) * self.world_size * self.world_size,
+            torch.ones([2, 3]).cuda(self.rank) * self.world_size * self.world_size,
         )
 
         self.assertEqual(
             tensor_list,
             [
-                torch.ones([2, 3]).to(torch.device(DEVICE_TYPE, self.rank)) * self.world_size
+                torch.ones([2, 3]).cuda(self.rank) * self.world_size
                 for _ in range(self.world_size)
             ],
         )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_with_ddp(self):
         pg = self._get_process_group()
@@ -4040,7 +4188,7 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
         ctor_allreduce = num_hook_fired.get(OpType.ALLREDUCE, 0)
 
-        x = torch.zeros(2, 1000).to(torch.device(DEVICE_TYPE, self.rank))
+        x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()
 
         c10d.destroy_process_group(pg)
@@ -4054,10 +4202,10 @@ class WorkHookTest(MultiProcessTestCase):
     # Not testing FSDP due to https://github.com/pytorch/pytorch/issues/90848.
     # We cannot disable workCleanupLoop() as hooks are fired in that thread.
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_all_gather_object(self):
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
 
         pg = self._get_process_group()
         num_hook_fired: dict[int, int] = {}
@@ -4087,13 +4235,15 @@ class WorkHookTest(MultiProcessTestCase):
 
         c10d.destroy_process_group(pg)
 
-        self.assertTrue(OpType.ALLGATHER in num_hook_fired)
+        self.assertTrue(OpType._ALLGATHER_BASE in num_hook_fired)
         self.assertEqual(len(num_hook_fired), 1)
-        # two allgathers, one for size and another for values
-        self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
-        self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
+        # two all_gather_single, one for size and another for values
+        self.assertEqual(num_hook_fired[OpType._ALLGATHER_BASE], 2)
+        self.assertTrue(
+            all(duration > 0 for duration in durations[OpType._ALLGATHER_BASE])
+        )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_on_completion_hook_seq(self):
         pg = self._get_process_group()
@@ -4107,7 +4257,7 @@ class WorkHookTest(MultiProcessTestCase):
             seq = work_info.seq
 
         pg._register_on_completion_hook(hook)
-        tensor = torch.ones([2, 3]).to(torch.device(DEVICE_TYPE, self.rank)) * self.rank 
+        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
         work_count = 3
         for _ in range(work_count):
             work += 1
@@ -4120,7 +4270,10 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(num_hook_fired, work_count)
         self.assertEqual(work, seq)
 
+
 class NcclErrorHandlingTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -4285,6 +4438,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
+        os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "0"
         # set heartbeat timeout to a small value so that we don't wait too long for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4342,7 +4496,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         # initialize pg for the first time
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             timeout=timedelta(seconds=2),
             world_size=self.world_size,
             rank=self.rank,
@@ -4381,7 +4535,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         new_store = c10d.FileStore(new_file_name, self.world_size)
         # re-initialize pg
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=new_store,
@@ -4420,8 +4574,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
 
-
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
@@ -4429,11 +4584,16 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
                 # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
                 # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-                "NCCL_ALGO": "NVLS",
                 "NCCL_DEBUG": "INFO",
                 "NCCL_DEBUG_SUBSYS": "NVLS",
                 "NCCL_DEBUG_FILE": nccl_debug_file.name,
             }
+            # NCCL 2.31 uses NCCL_ALGO to exclude symmetric kernels.
+            if (
+                torch.cuda.nccl.version() < (2, 31)
+                or self._testMethodName == "test_nccl_user_buffer_registration"
+            ):
+                nccl_env["NCCL_ALGO"] = "NVLS"
             if torch.cuda.nccl.version() >= (2, 24, 3):
                 nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
             self.env_patcher = mock.patch.dict(os.environ, nccl_env)
@@ -4456,7 +4616,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
         c10d.init_process_group(
-            backend="nccl",
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -4490,7 +4650,10 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
             nccl_debug_file_content = f.read()
             # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
             # should show successful registration in debug output
-            if torch.cuda.nccl.version() >= (2, 24, 3):
+            nccl_version = torch.cuda.nccl.version()
+            if nccl_version >= (2, 32):
+                self.assertRegex(nccl_debug_file_content, "NVLS UB registered")
+            elif nccl_version >= (2, 24, 3):
                 self.assertRegex(
                     nccl_debug_file_content, "successfully registered NVLS"
                 )
@@ -4507,7 +4670,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         with torch.cuda.device(device):
             # Eager init the nccl comm so that we don't implicitly create one during register_mem_pool
             c10d.init_process_group(
-                backend="nccl",
+                backend=NCCL_BACKEND,
                 rank=self.rank,
                 world_size=self.world_size,
                 store=store,
@@ -4554,9 +4717,11 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def device(self):
-        return f"{DEVICE_TYPE}:{self.rank}"
+        return f"cuda:{self.rank}"
 
     def setUp(self):
         super().setUp()
@@ -4603,28 +4768,34 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if self.rank != root_rank:
             self.assertEqual(tensors, target)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         ranks = [0, 1]
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_coalesced_manager_op_integrity(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank:d}")
+        device = torch.device(f"cuda:{self.rank:d}")
         with self.assertRaisesRegex(
             RuntimeError,
             "Coalescing manager requires all collectives to be the same type",
@@ -4637,7 +4808,13 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_single(output, t)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # symmetric-memory rendezvous succeeds but the first device-side atomic on
+    # the peer's signal pad in one_shot_all_reduce never completes and the test
+    # hangs; passes on gfx950 outside those runners and on the mi300 runners
+    # with the same image. Skipped on that arch until the runner P2P path is
+    # understood.
+    @skipIfRocmArch(MI350_ARCH)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -4669,7 +4846,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         os.environ["TEST_INTRA_NODE_COMM"] = "1"
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend="nccl",
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -4721,7 +4898,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device(f"cuda:{self.rank:d}")
@@ -4740,7 +4920,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -4750,9 +4930,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
         # test the process group works as expected
-        t = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, self.rank))
+        t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
         pg.allreduce(t).wait()
-        expected_tensor = torch.tensor([3] * 10).to(torch.device(DEVICE_TYPE, self.rank))
+        expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
@@ -4762,7 +4942,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.is_high_priority_stream = True
         self._test_pass_nccl_options(pg_opts)
 
-    @requires_nccl()  
+    @requires_nccl()
     @requires_nccl_version(
         (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
@@ -4878,7 +5058,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with tempfile.NamedTemporaryFile() as nccl_debug_file:
             os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
             dist.init_process_group(
-                "nccl", world_size=self.world_size, rank=self.rank, store=store
+                NCCL_BACKEND, world_size=self.world_size, rank=self.rank, store=store
             )
             pg = c10d.new_group([0, 1], group_desc="test_desc")
             t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
@@ -4910,63 +5090,99 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 32, 3), "Need NCCL 2.32.3+ for testing nvls_host_mode in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("nvls_host_mode", [0, 1, 2, 3, 2147483647])
+    def test_pass_nccl_options_config_nvls_host_mode(self, nvls_host_mode):
+        if c10d.ProcessGroupNCCL.get_build_nccl_version() < (2, 32, 3):
+            raise SkipTest("nvls_host_mode requires building with NCCL 2.32.3+")
+
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        self.assertEqual(nccl_cfg.nvls_host_mode, -2147483648)
+        self.assertEqual(pg_opts.config.nvls_host_mode, -2147483648)
+
+        nccl_cfg.nvls_host_mode = nvls_host_mode
+        self.assertEqual(nccl_cfg.nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.copy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        self.assertEqual(copy.deepcopy(nccl_cfg).nvls_host_mode, nvls_host_mode)
+        pg_opts.config = nccl_cfg
+        self.assertEqual(pg_opts.config.nvls_host_mode, nvls_host_mode)
+
+        copied_opts = copy.deepcopy(pg_opts)
+        pg_opts.config.nvls_host_mode = -2147483648
+        self.assertEqual(copied_opts.config.nvls_host_mode, nvls_host_mode)
+        self._test_pass_nccl_options(copied_opts)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size, store=store
+            backend=NCCL_BACKEND,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
         )
 
-        t = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
         c10d.all_reduce(t)
-        expected_tensor = torch.tensor([3] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
+        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
         self.assertEqual(expected_tensor, t)
 
         # Test with new_group
         pg = c10d.new_group([0, 1])
-        t = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
         pg.allreduce(t).wait()
         self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([0])
         if self.rank == 0:
-            t = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
-            expected_tensor = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             pg.allreduce(t).wait()
             self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([1])
         if self.rank == 1:
-            t = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
-            expected_tensor = torch.tensor([self.rank + 1] * 10).to(torch.device(DEVICE_TYPE, 2 * self.rank))
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             pg.allreduce(t).wait()
             self.assertEqual(expected_tensor, t)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_nccl_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size, store=store
+            backend=NCCL_BACKEND,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
         )
 
         c10d.barrier(device_ids=[self.rank])
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_unwaited(self) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size, store=store
+            backend=NCCL_BACKEND,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
         )
 
         # Case 1: Run collectives under context manager, and don't call wait on them.
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             input = torch.full(
-                (10240, 10240), float(self.rank), device=f"{DEVICE_TYPE}:{self.rank}"
+                (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             # Non-functional collectives run under the context manager is registered in the work registry.
@@ -4980,26 +5196,29 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
         for _ in range(50000):
             input = torch.full(
-                (1024, 1024), float(self.rank), device=f"{DEVICE_TYPE}:{self.rank}"
+                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
         # Work registry size is unchanged, since non-functional collectives not run under
         # the context manager is not registered in the work registry.
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_wait_tensor(self) -> None:
         # Verify that c10d_functional.wait_tensor() can be invoked on
         # output tensor of non-functional collective
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size, store=store
+            backend=NCCL_BACKEND,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
         )
 
         # Case 1: under context manager (i.e. work is registered in registry)
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
-            input1 = torch.full((10, 10), float(self.rank), device=f"{DEVICE_TYPE}:{self.rank}")
+            input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
@@ -5007,7 +5226,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
         # Case 2: not under context manager (i.e. work is not registered in registry)
-        input1 = torch.full((10, 10), float(self.rank), device=f"{DEVICE_TYPE}:{self.rank}")
+        input1 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         dist.all_reduce(input1, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
@@ -5016,7 +5235,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.ops.c10d_functional.wait_tensor(input1)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
-        input2 = torch.full((10, 10), float(self.rank), device=f"{DEVICE_TYPE}:{self.rank}")
+        input2 = torch.full((10, 10), float(self.rank), device=f"cuda:{self.rank}")
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         work = dist.all_reduce(input2, op=dist.ReduceOp.SUM, async_op=True)
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
@@ -5024,45 +5243,45 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         self.assertEqual(input1, input2)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_nccl_warn_not_in_group_debug_detail(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["INFO"])
     def test_nccl_warn_not_in_group_debug_info(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_nncl_rank_membership(self):
-        self._test_rank_membership(backend=BACKEND)
+        self._test_rank_membership(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_tensor_dtype_mismatch(self):
-        self._test_tensor_dtype_mismatch(backend=BACKEND)
+        self._test_tensor_dtype_mismatch(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_tensor_dtype_complex(self):
-        self._test_tensor_dtype_complex(backend=BACKEND)
+        self._test_tensor_dtype_complex(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_base_k(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5075,12 +5294,12 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         dist.reduce_scatter_single(output_tensor, input_tensors)
         self.assertEqual(output_tensor, input_tensors[self.rank] * self.world_size)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5099,7 +5318,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend=NCCL_BACKEND,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
         )
         device = torch.device(f"cuda:{self.rank}")
         torch.cuda.set_device(device)
@@ -5168,6 +5390,8 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
@@ -5188,7 +5412,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     def test_allgather_base(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5208,7 +5432,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
             self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5226,12 +5450,13 @@ instantiate_parametrized_tests(NcclProcessGroupWithDispatchedCollectivesTests)
 
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-        if DEVICE_TYPE == "cuda" and c10d.is_nccl_available():
-            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
@@ -5245,25 +5470,25 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync(self):
-        self._test_new_group_local_sync(backend=BACKEND)
+        self._test_new_group_local_sync(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_sanity_check(self):
-        self._test_new_group_local_sync_sanity_check(backend=BACKEND)
+        self._test_new_group_local_sync_sanity_check(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_duplicated_pg(self):
-        self._test_new_group_local_sync_duplicate_pg(backend=BACKEND)
+        self._test_new_group_local_sync_duplicate_pg(backend=NCCL_BACKEND)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_new_group_ordered(self):
-        self._test_new_group_ordered(backend=BACKEND)
+        self._test_new_group_ordered(backend=NCCL_BACKEND)
 
     def _init_two_pg2_subgroups(self, world_size: int = 4):
         if world_size != 4:
@@ -5272,7 +5497,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             )
         store = c10d.FileStore(self.file_name, world_size)
         c10d.init_process_group(
-            backend=BACKEND, store=store, rank=self.rank, world_size=world_size
+            backend=NCCL_BACKEND, store=store, rank=self.rank, world_size=world_size
         )
         # every rank creates the same sub groups
         # including unused sub groups in the current rank
@@ -5280,7 +5505,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         b_group = c10d.new_group([2, 3])
         return a_group if self.rank < 2 else b_group
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_gather_subgroup(self, group_rank):
@@ -5290,7 +5515,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             return
 
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         input = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             gather_list = [torch.empty_like(input) for _ in range(subgroup.size())]
@@ -5332,7 +5557,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     async_op=False,
                 )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_gather_object_subgroup(self, group_rank):
@@ -5345,7 +5570,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
         # discrepancy #1
         # have to set device or else gather_object gets wrong device from 'current_device = _get_pg_default_device(group)
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
 
         input = {"rank": self.rank}
         if self.rank == 0 or self.rank == 2:
@@ -5373,7 +5598,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     input, object_gather_list=None, dst=self.rank - 1, group=subgroup
                 )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_reduce_subgroup(self, group_rank):
@@ -5381,7 +5606,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
             expected = x + torch.ones((10,), device=device) * (self.rank + 1)
@@ -5396,7 +5621,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             else:
                 c10d.reduce(x, dst=self.rank - 1, group=subgroup, async_op=False)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     @parametrize("async_op", [True, False])
@@ -5405,7 +5630,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
             if async_op:
@@ -5433,7 +5658,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 else:
                     c10d.send(x, dst=self.rank - 1, group=subgroup)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_batch_send_recv_subgroup(self, group_rank):
@@ -5441,7 +5666,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         ops = []
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
@@ -5467,7 +5692,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             for work in dist.batch_isend_irecv(ops):
                 work.wait()
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_broadcast_subgroup(self, group_rank):
@@ -5475,7 +5700,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = torch.empty((10,), device=device)
             if group_rank:
@@ -5491,7 +5716,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             else:
                 c10d.broadcast(x, src=self.rank, group=subgroup)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize(
         "set_device",
@@ -5506,10 +5731,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
         if set_device == SetDeviceMethod.TORCH_CUDA_SET:
-            torch.accelerator.set_device_index(self.rank)
+            torch.cuda.set_device(self.rank)
             device = None
         else:
-            device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+            device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = [{}]
             if group_rank:
@@ -5529,7 +5754,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     x, dst=self.rank - 1, group=subgroup, device=device
                 )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize(
         "set_device",
@@ -5544,10 +5769,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
         if set_device == SetDeviceMethod.TORCH_CUDA_SET:
-            torch.accelerator.set_device_index(self.rank)
+            torch.cuda.set_device(self.rank)
             device = None
         else:
-            device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+            device = torch.device(f"cuda:{self.rank:d}")
         if self.rank == 0 or self.rank == 2:
             x = [{}]
             if group_rank:
@@ -5571,7 +5796,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     x, src=self.rank, group=subgroup, device=device
                 )
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_scatter_subgroup(self, group_rank):
@@ -5579,7 +5804,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((10,), device=device)
         expected = torch.ones((10,), device=device) * self.rank
         if self.rank == 0 or self.rank == 2:
@@ -5600,7 +5825,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 )
         self.assertEqual(x, expected)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_scatter_object_list_subgroup(self, group_rank):
@@ -5608,7 +5833,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         if self.rank >= world_size:
             return
         subgroup = self._init_two_pg2_subgroups(world_size)
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
         scatter_object_output_list = [None]
         expected = [{"rank": self.rank}]
         if self.rank == 0 or self.rank == 2:
@@ -5648,16 +5873,16 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 )
         self.assertEqual(scatter_object_output_list, expected)
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):
+        device = torch.device(f"cuda:{self.rank}")
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5680,6 +5905,8 @@ instantiate_parametrized_tests(LargeCommTest)
 
 
 class SparseCollective(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 1
@@ -5716,12 +5943,12 @@ class SparseCollective(MultiProcessTestCase):
             # output shape: (batch_size, 1)
             return output
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_ddp_set_sparse_metadata(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5754,6 +5981,8 @@ class SparseCollective(MultiProcessTestCase):
 
 
 class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 1
@@ -5788,7 +6017,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
 
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5855,7 +6084,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     @property
     def local_device(self):
-        return torch.device(DEVICE_TYPE, self.rank_to_GPU[self.rank][0])
+        return torch.device("cuda", self.rank_to_GPU[self.rank][0])
 
     def _join_processes(self, fn):
         # We need to patch sys.exit() as skip_if will use sys.exit() and
@@ -5883,7 +6112,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def _create_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            BACKEND, world_size=self.world_size, rank=self.rank, store=store
+            NCCL_BACKEND, world_size=self.world_size, rank=self.rank, store=store
         )
         pg = c10d.distributed_c10d._get_default_group()
         return pg
@@ -5904,7 +6133,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, BACKEND)
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     def _trace_basename(self):
         # we pass the base to the env, and the dump util will append rank
@@ -5917,8 +6146,9 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return "started" if timing_enabled else "scheduled"
 
 
-
 class NCCLTraceTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
         self.assertEqual(ver, "2.10")
@@ -6027,8 +6257,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = json.loads(
             torch._C._distributed_c10d._dump_nccl_trace_json(
                 includeCollectives=include_collectives
@@ -6054,8 +6283,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = pickle.loads(
             torch._C._distributed_c10d._dump_nccl_trace(
                 includeCollectives=include_collectives
@@ -6085,14 +6313,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         torch._C._distributed_c10d._reset_fr_recording_nccl()
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
@@ -6180,7 +6407,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
-        f = pg.barrier()
+        opts = c10d.BarrierOptions()
+        opts.device_ids = [device.index]
+        f = pg._get_backend(device).barrier(opts)
         f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
@@ -6382,7 +6611,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_coalesced_ops * (ops_per_coalesce + 1))
@@ -6920,7 +7149,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         torch.cuda.synchronize(device=self.local_device)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), num_repeats * (ops_per_repeat))
@@ -6969,7 +7198,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(output_tensor, expected_tensor)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), self.world_size + 1)
@@ -7022,7 +7251,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
-            time.sleep(1)
+            pg._wait_for_pending_works()
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
 
@@ -7080,7 +7309,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify buffer is full with 10 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7094,7 +7323,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we get exactly 10 new entries, not 20
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7139,7 +7368,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset the flight recorder
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7149,7 +7378,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Verify we only get the 3 new entries, not 10
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7189,7 +7418,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Reset at this point (reset happens at index 5)
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7200,7 +7429,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should get exactly 8 entries, properly ordered
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7243,7 +7472,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # First reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7253,7 +7482,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Second reset
         torch._C._distributed_c10d._reset_fr_recording_nccl()
@@ -7263,7 +7492,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
+        pg._wait_for_pending_works()
 
         # Should only see the last 4 entries
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
@@ -7293,7 +7522,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     def _create_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -7319,6 +7548,8 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
@@ -7369,9 +7600,10 @@ instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
 
-
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+    hw_classification = HardwareClassification.CUDA
+
     @check_if_test_is_skipped
     def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
@@ -7426,6 +7658,8 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
 @skip_but_pass_in_sandcastle
 class NcclErrorDumpTest(NCCLTraceTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     def _wait_process(self, rank, timeout):
         try:
             self.processes[rank].join(timeout)
@@ -7482,10 +7716,12 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 
 # tests that needs to be run with a larger world size
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
-            "nccl",
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -7522,7 +7758,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, "nccl")
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_if_lt_x_gpu(8)
@@ -7656,111 +7892,73 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
-@unittest.skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
-class SymmMemCftHandleTest(MultiProcessTestCase):
-    """Host-side NCCL CFT logical-endpoint handles exposed on _SymmetricMemory.
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
+class CollectiveAnnotationTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+    world_size = 2
 
-    These are the `(le_id, le_offset)` coordinates a custom kernel feeds to the
-    device-side `ncclCft` put/get/red family, so the handle only means anything
-    for the group it was rendezvoused with.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        # The backend has to be chosen before the child processes start.
-        # `set_backend` cannot do it: by the time a test body runs the
-        # allocator has already been handed out once and it refuses to swap.
-        # TORCH_SYMMMEM is read at static-init time instead, and spawn passes
-        # the environment down.
-        backend = "CUDA" if self._testMethodName.endswith("wrong_backend") else "NCCL"
-        os.environ["TORCH_SYMMMEM"] = backend
-        self.addCleanup(os.environ.pop, "TORCH_SYMMMEM", None)
-        self._spawn_processes()
-
-    @property
-    def world_size(self) -> int:
-        return 2
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
 
     @property
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def _init_process(self):
-        # Checked here rather than with a class decorator: the p2p probe calls
-        # into torch.cuda, and at class-definition time that would initialize a
-        # CUDA context on the main process, which this file asserts against.
-        if not PLATFORM_SUPPORTS_SYMM_MEM:
-            raise SkipTest("Test requires SymmMem support")
-        for peer in range(self.world_size):
-            if peer == self.rank:
-                continue
-            if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
-                raise SkipTest("Test requires p2p access")
+    @skipIfRocm
+    def test_captured_collective_is_annotated(self):
+        if not TEST_CUDA_GRAPH_TOOLS_ID:
+            self.skipTest("CUDA graph annotations are unavailable")
+        from torch.cuda.graph_annotations import get_kernel_annotations
 
         torch.cuda.set_device(self.device)
-        pg_opts = dist.ProcessGroupNCCL.Options()
-        # ncclHostCftFallback: create the CFT logical endpoints if the hardware
-        # allows, otherwise silently proceed without them. The endpoints are
-        # made during window registration, i.e. inside rendezvous, so this has
-        # to be set before the communicator exists.
-        pg_opts.config.host_cft_mode = 3
-        dist.init_process_group(
-            backend="nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=dist.FileStore(self.file_name, self.world_size),
-            pg_options=pg_opts,
-            device_id=self.device,
-        )
-        self.addCleanup(dist.destroy_process_group)
-        # The NCCL backend rendezvous looks the communicator up rather than
-        # creating it, so force it into existence first (see test_nccl.py).
-        dist.all_reduce(torch.ones(1, device=self.device))
-        t = symm_mem.empty(1024, dtype=torch.float32, device=self.device)
-        return symm_mem.rendezvous(t, group=dist.group.WORLD.group_name)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, enable_annotations=True):
+            dist.all_reduce(x)
+        annotations = [
+            a
+            for kernel_annotations in get_kernel_annotations().values()
+            for a in kernel_annotations
+            if "Collective name" in a
+        ]
+        self.assertTrue(annotations, "no kernel carries collective metadata")
+        for annotation in annotations:
+            self.assertEqual(annotation["Collective name"], "all_reduce")
+            self.assertEqual(annotation["In msg nelems"], 1024)
 
-    @requires_nccl()
-    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
-    @skip_if_lt_x_gpu(2)
-    def test_get_cft_handle(self) -> None:
-        hdl = self._init_process()
-        self.assertEqual(symm_mem.get_backend(self.device), "NCCL")
-        _, self_le_offset = hdl.get_peer_cft_handle(self.rank)
-
-        le_ids = set()
-        for peer in range(self.world_size):
-            le_id, le_offset = hdl.get_peer_cft_handle(peer)
-            self.assertNotIn(le_id, le_ids, f"peer {peer} reuses le_id {le_id}")
-            le_ids.add(le_id)
-            # Every rank maps the buffer at the same offset in the symmetric
-            # space, so only the endpoint varies from peer to peer.
-            self.assertEqual(le_offset, self_le_offset)
-
-        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
-            hdl.get_peer_cft_handle(self.world_size)
-        with self.assertRaisesRegex(RuntimeError, "invalid peer"):
-            hdl.get_peer_cft_handle(-1)
-
-        try:
-            # Collective on first call unless the endpoint was created eagerly
-            # at window registration, so every rank has to reach this.
-            _, mc_le_offset = hdl.get_multimem_cft_handle()
-            self.assertEqual(mc_le_offset, self_le_offset)
-        except RuntimeError:
-            # NCCL disables CFT multicast when NVLS is unavailable, uniformly
-            # across ranks, so nobody is left waiting in the collective above.
-            pass
-
-    @requires_nccl()
-    @requires_nccl_version((2, 31, 2), "Need NCCL 2.31.2+ for host-side CFT")
-    @skip_if_lt_x_gpu(2)
-    def test_get_cft_handle_wrong_backend(self) -> None:
-        hdl = self._init_process()
-        self.assertEqual(symm_mem.get_backend(self.device), "CUDA")
-        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
-            hdl.get_peer_cft_handle(0)
-        with self.assertRaisesRegex(RuntimeError, "only available on the NCCL"):
-            hdl.get_multimem_cft_handle()
+    @skipIfRocm
+    def test_cuspy_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(profiler_configs=[CuspyConfig()])
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            if os.path.exists(trace_path + ".gz"):
+                with gzip.open(trace_path + ".gz", "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        kernels = [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
 
 if __name__ == "__main__":

@@ -181,7 +181,6 @@ at::Tensor nansum_backward(
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
 std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
-at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
     const at::Tensor& inp,
@@ -196,15 +195,6 @@ at::Tensor prod_backward(
     at::Tensor result,
     int64_t dim,
     bool keepdim);
-at::Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB);
-at::Tensor solve_backward_self(
-    const at::Tensor& grad,
-    const at::Tensor& self,
-    const at::Tensor& A);
 at::Tensor solve_backward_A(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -382,20 +372,13 @@ at::Tensor evenly_distribute_backward(
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    const std::optional<c10::Scalar>& correction,
-    bool keepdim);
-at::Tensor var_jvp(
-    const at::Tensor& self_t,
-    const at::Tensor& self_p,
-    const at::Tensor& result,
-    at::OptionalIntArrayRef dim_opt,
     const std::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor std_backward(
@@ -596,9 +579,6 @@ at::Tensor slogdet_backward(
     const at::Tensor& pivots);
 at::Tensor log1p_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
-at::Tensor sparse_constructor_values_backward(
-    const at::Tensor& sparse_grad_out,
-    const at::Tensor& indices);
 at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,
@@ -766,6 +746,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool, 3> output_mask);
+Tensor grid_sampler_2d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners);
 std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     const Tensor& ggI,
     const Tensor& ggGrid,
@@ -776,6 +765,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     int64_t padding_mode,
     bool align_corners,
     std::array<bool, 3> output_mask);
+Tensor grid_sampler_3d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners);
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,
@@ -796,17 +794,6 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
     double p,
     const Tensor& pdist,
     std::array<bool, 3> output_mask);
-Tensor fft_backward(
-    const Tensor& self,
-    const Tensor& grad,
-    int64_t signal_ndim,
-    bool complex_input,
-    bool complex_output,
-    bool inverse,
-    IntArrayRef checked_signal_sizes,
-    int64_t normalization,
-    bool onesided,
-    IntArrayRef output_sizes);
 Tensor fft_r2c_backward(
     const Tensor& grad,
     at::IntArrayRef dim,
@@ -933,6 +920,14 @@ std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
 Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_y1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);

@@ -61,25 +61,22 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
-            # create DTensor from Tensor
-            _tensor = torch.empty(*input_size, device=self.device_type)
+            # create DTensor from Tensor, each rank holds an input_size shard
+            _tensor = torch.empty(
+                input_size[0], input_size[1] * self.world_size, device=self.device_type
+            )
             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
 
             # DTensor random init
             dtensor = init_op(dtensor, *args, **kwargs)
-            local_tensor = dtensor.to_local()
 
-            # compare with local tensors from other ranks
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    slice_idx = (
-                        slice(input_size[0]),
-                        slice(
-                            other_rank * input_size[1], (other_rank + 1) * input_size[1]
-                        ),
-                    )
-                    # other rank should have a different local tensor
-                    self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
+            @maybe_run_for_local_tensor
+            def check_shards_differ(full_tensor):
+                shards = full_tensor.split(input_size[1], dim=1)
+                for a, b in itertools.combinations(shards, 2):
+                    self.assertNotEqual(a, b)
+
+            check_shards_differ(dtensor.full_tensor())
 
     @with_comms
     def test_init_ops(self):
@@ -590,6 +587,35 @@ class DistTensorRandomOpTest(DTensorTestBase):
             compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
+    @skip_unless_torch_gpu
+    def test_deterministic_multinomial_1d(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        probs = torch.ones(self.world_size, 64, device=self.device_type)
+
+        @maybe_run_for_local_tensor
+        def check_chunks(tensor, equal):
+            for a, b in itertools.combinations(tensor.chunk(self.world_size), 2):
+                if equal:
+                    self.assertEqual(a, b)
+                else:
+                    self.assertNotEqual(a, b)
+
+        for replacement in (True, False):
+            # each rank samples its own row, so the rows should differ
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(0)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            check_chunks(samples.full_tensor(), False)
+
+            # the categories dim is redistributed to Replicate before sampling,
+            # so every rank should draw the same samples
+            dtensor = distribute_tensor(probs, device_mesh, [Shard(1)])
+            samples = torch.multinomial(dtensor, 32, replacement=replacement)
+            local_tensor = funcol.all_gather_single(
+                samples.to_local(), gather_dim=0, group=(device_mesh, 0)
+            )
+            check_chunks(local_tensor, True)
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_deterministic_uniform_2d(self):
         mesh = torch.arange(self.world_size).reshape(2, 2)
@@ -732,19 +758,47 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
+    def test_run_dtensor_rng_op_rejects_non_accelerator(self):
+        """run_dtensor_rng_op only supports the current accelerator device."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+
+        with self.assertRaisesRegex(
+            RuntimeError, "run_dtensor_rng_op only supports the current accelerator"
+        ):
+            run_dtensor_rng_op(
+                0, 4, torch.ops.aten.rand_like.default, torch.empty(8, device="cpu")
+            )
+
+    @skip_unless_torch_gpu
+    def test_run_dtensor_rng_op_on_accelerator(self):
+        """run_dtensor_rng_op runs on the accelerator and advances the offset."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+        from torch.distributed.tensor._random import _PhiloxState
+
+        device_mod = torch.get_device_module(self.device_type)
+        device_mod.manual_seed(0)
+        x = torch.empty(8, device=self.device_type)
+        offset_before = _PhiloxState(device_mod.get_rng_state()).offset.clone()
+
+        out = run_dtensor_rng_op(0, 4, torch.ops.aten.rand_like.default, x)
+
+        offset_after = _PhiloxState(device_mod.get_rng_state()).offset
+        self.assertEqual(out.device.type, self.device_type)
+        self.assertEqual(offset_after, offset_before + 4)
+
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
-        device_module = torch.get_device_module(self.device_type)
+        device_mod = torch.get_device_module(self.device_type)
         torch.manual_seed(0)
         results = []
-        rng_states = [device_module.get_rng_state()]
+        rng_states = [device_mod.get_rng_state()]
         for _ in range(num_runs):
             x = create_input()
             result = fn(x)
             results.append(result.to_local().clone())
-            rng_states.append(device_module.get_rng_state())
+            rng_states.append(device_mod.get_rng_state())
         # verify RNG state advances after each call
         for i in range(len(rng_states) - 1):
             self.assertFalse(
@@ -1043,6 +1097,9 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # cross-pp-stage seeding is not simulated in local tensor mode
         "test_pipeline_parallel_manual_seed",
+        # LocalTensorMode has no rule for the run_dtensor_rng_op HigherOrderOperator
+        "test_run_dtensor_rng_op_rejects_non_accelerator",
+        "test_run_dtensor_rng_op_on_accelerator",
     ],
 )
 

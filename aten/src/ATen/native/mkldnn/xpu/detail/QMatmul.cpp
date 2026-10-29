@@ -1,4 +1,6 @@
 #include <ATen/BlasBackend.h>
+#include <ATen/Context.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
@@ -415,7 +417,8 @@ inline ScaleSpec make_scale_spec(
     int64_t M,
     int64_t K,
     int64_t N,
-    const std::string& arg_type) {
+    const std::string& arg_type,
+    at::ScalarType scale_dtype = at::kFloat) {
   TORCH_CHECK(
       arg_type == "src" || arg_type == "wei",
       "Expected arg_type to be 'src' or 'wei', but got '",
@@ -446,22 +449,25 @@ inline ScaleSpec make_scale_spec(
       // Blockwise 1x128 scaling (DeepSeek style)
       // For SRC (A): scale shape [M, ceil_div(K, 128)], groups = {1, 128}
       // For WEI (B): scale shape [ceil_div(K, 128), N], groups = {128, 1}
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
+      auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
+          ? dnnl::memory::data_type::e8m0
+          : dnnl::memory::data_type::f32;
       return {
-          (1 << 0) | (1 << 1),
+          mask,
           is_src ? dnnl::memory::dims{1, 128} : dnnl::memory::dims{128, 1},
-          dnnl::memory::data_type::f32};
+          dt};
     }
 
     case at::blas::ScalingType::BlockWise128x128: {
       // Blockwise 128x128 scaling (2D block scaling)
       // For SRC (A): scale shape [M // 128, K // 128], groups = {128, 128}
       // For WEI (B): scale shape [K // 128, N // 128], groups = {128, 128}
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
-      return {
-          (1 << 0) | (1 << 1),
-          dnnl::memory::dims{128, 128},
-          dnnl::memory::data_type::f32};
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
+      auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
+          ? dnnl::memory::data_type::e8m0
+          : dnnl::memory::data_type::f32;
+      return {mask, dnnl::memory::dims{128, 128}, dt};
     }
 
     case at::blas::ScalingType::BlockWise1x32: {
@@ -572,8 +578,10 @@ sycl::event scaled_matmul(
   bool bias_as_post_op = with_bias && with_alpha;
 
   // 1.2 Create primitive descriptor and set scales mask
-  const ScaleSpec src_spec = make_scale_spec(scaling_choice_a, M, K, N, "src");
-  const ScaleSpec wei_spec = make_scale_spec(scaling_choice_b, M, K, N, "wei");
+  const ScaleSpec src_spec =
+      make_scale_spec(scaling_choice_a, M, K, N, "src", scale_a.scalar_type());
+  const ScaleSpec wei_spec =
+      make_scale_spec(scaling_choice_b, M, K, N, "wei", scale_b.scalar_type());
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 

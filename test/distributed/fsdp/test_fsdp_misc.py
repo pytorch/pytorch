@@ -936,8 +936,10 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             def __init__(self, rank):
                 super().__init__()
                 self.rank = rank
-                self.a = nn.Linear(1, 1).cuda(self.rank)
-                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
+                self.a = nn.Linear(1, 1).to(torch.device(device_type, self.rank))
+                self.b = nn.Linear(1, 1).to(
+                    torch.device(device_type, (self.rank + 1) % dist.get_world_size())
+                )
 
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
@@ -970,7 +972,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         context = (
             (
                 self.assertRaisesRegex(
-                    ValueError, f"Inconsistent.*{DEVICE_TYPE}:{self.rank} vs {DEVICE_TYPE}:0"
+                    ValueError,
+                    f"Inconsistent.*{device_type}:{self.rank} vs {device_type}:0",
                 )
             )
             if self.rank != 0
@@ -1152,7 +1155,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module unexpectedly has parameters on cpu. Make "
-            f"sure to move the module to {DEVICE_TYPE}:0 before training.",
+            f"sure to move the module to {device_type}:0 before training.",
         ):
             fsdp_model(inp)
 
@@ -1164,8 +1167,8 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module with parameter CPU offloading enabled has "
-            f"parameters on {DEVICE_TYPE}:0. Make sure to not move the module from CPU "
-            "when offloading parameters.",
+            f"parameters on {device_type}:0. Make sure to not move the module from "
+            "CPU when offloading parameters.",
         ):
             fsdp_model(inp)
 
