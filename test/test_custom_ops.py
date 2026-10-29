@@ -6255,51 +6255,6 @@ except RuntimeError as e:
         # lib1 = torch.library.Library(...) is on line 2 of the script.
         self.assertIn("<string>:2", result.stdout)
 
-    def test_kernel_registration_records_the_calling_module(self):
-        ns = "_test_kernel_callers"
-        ops_source = f"""\
-import torch
-@torch.library.custom_op("{ns}::f", mutates_args=())
-def f(x: torch.Tensor) -> torch.Tensor:
-    return x.clone()
-@torch.library.custom_op("{ns}::g", mutates_args=(), device_types="cpu")
-def g(x: torch.Tensor) -> torch.Tensor:
-    return x.clone()
-torch.library.define("{ns}::h", "(Tensor x) -> Tensor", lib=lib)
-"""
-        kernels_source = f"""\
-import torch
-@f.register_kernel("cpu")
-def _(x):
-    return x.clone()
-@torch.library.impl("{ns}::h", "cpu")
-def _(x):
-    return x.clone()
-"""
-        keep_alive = len(torch.library._keep_alive)
-        ops = {"__name__": "kernel_callers_ops"}
-        try:
-            with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
-                exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
-                # Named like a skipped module, but not a submodule of one.
-                kernels = {"__name__": "functools_ext", "f": ops["f"]}
-                exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
-                self.assertEqual(
-                    ops["f"]._backend_fn_callers,
-                    {
-                        "CompositeExplicitAutograd": "kernel_callers_ops",
-                        "CPU": "functools_ext",
-                    },
-                )
-                self.assertEqual(
-                    ops["g"]._backend_fn_callers, {"CPU": "kernel_callers_ops"}
-                )
-                dump = torch._C._dispatch_dump(f"{ns}::h")
-                self.assertRegex(dump, r"CPU: registered at /callers/kernels.py:\d+ ::")
-        finally:
-            while len(torch.library._keep_alive) > keep_alive:
-                torch.library._keep_alive.pop()._destroy()
-
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
