@@ -88,6 +88,10 @@ inline void matrix_barrier() {
 // l <= ihi whose subdiagonal entry H[l, l-1] is negligible, or 0. That entry is
 // set to zero, deflating the problem [Arbenz, Algorithm 4.4, with the
 // convergence test of Algorithm 4.5].
+//
+// Like LAPACK's xLAHQR, an entry that passes that test must also pass the more
+// conservative one of Ahues and Kressner, which compares it with the rest of
+// its 2x2 block.
 template <typename P, typename I>
 int find_active_window(
     P H,
@@ -99,9 +103,21 @@ int find_active_window(
   const float small_num = kSafeMin * n;
   int l = 0;
   for (int k = 1 + tid; k <= ihi; k += nthreads) {
-    const float diag = abs1(H[(k - 1) + (k - 1) * n]) + abs1(H[k + k * n]);
-    if (abs1(H[k + (k - 1) * n]) <= max(small_num, kEps * diag)) {
+    const float2 a = H[(k - 1) + (k - 1) * n];
+    const float2 d = H[k + k * n];
+    const float h = abs1(H[k + (k - 1) * n]);
+    if (h <= small_num) {
       l = k;
+    } else if (h <= kEps * (abs1(a) + abs1(d))) {
+      const float b = abs1(H[(k - 1) + k * n]);
+      const float ab = max(h, b);
+      const float ba = min(h, b);
+      const float aa = max(abs1(d), abs1(a - d));
+      const float bb = min(abs1(d), abs1(a - d));
+      const float s = aa + ab;
+      if (ba * (ab / s) <= max(small_num, kEps * (bb * (aa / s)))) {
+        l = k;
+      }
     }
   }
   // The previous reduction may still be reading scratch
@@ -626,10 +642,25 @@ kernel void eig_hessenberg(
     const I m = n - k - 1;
     device float2* x = A_b + (k + 1) + k * n;
     const float2 alpha = x[0];
+    // ||x_k|| is computed with x_k scaled by 2^-exponent, near its largest
+    // entry, so that the squares can't underflow or overflow, like LAPACK's
+    // xNRM2. Scaling by a power of 2 is exact, so otherwise the result is the
+    // same as without scaling.
+    float tail_max = 0;
+    for (I i = 1 + tid; i < m; i += nthreads) {
+      tail_max = max(tail_max, max(fabs(x[i].x), fabs(x[i].y)));
+    }
+    tail_max = c10::metal::threadgroup_max(scratch, tail_max, tid, nthreads);
+    int exponent;
+    frexp(max(tail_max, max(fabs(alpha.x), fabs(alpha.y))), exponent);
     float tail_part = 0;
     for (I i = 1 + tid; i < m; i += nthreads) {
-      tail_part += dot(x[i], x[i]);
+      const float2 x_i =
+          float2(ldexp(x[i].x, -exponent), ldexp(x[i].y, -exponent));
+      tail_part += dot(x_i, x_i);
     }
+    // The previous reduction may still be reading scratch
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     const float tail_norm2 =
         c10::metal::threadgroup_sum(scratch, tail_part, tid, nthreads);
 
@@ -638,9 +669,11 @@ kernel void eig_hessenberg(
     // simplifies to 1 + |alpha| / ||x_k||.
     float t = 0;
     float2 beta = alpha;
-    if (tail_norm2 > 0) {
+    if (tail_max > 0) {
       const float alpha_abs = c10::metal::hypot(alpha.x, alpha.y);
-      const float x_norm = precise::sqrt(alpha_abs * alpha_abs + tail_norm2);
+      const float alpha_scaled = ldexp(alpha_abs, -exponent);
+      const float x_norm = ldexp(
+          precise::sqrt(alpha_scaled * alpha_scaled + tail_norm2), exponent);
       const float2 phase = alpha_abs > 0 ? alpha / alpha_abs : float2(1, 0);
       beta = -x_norm * phase;
       const float2 inv = c10::metal::div(float2(1, 0), alpha - beta);

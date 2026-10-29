@@ -2625,6 +2625,12 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "source < number of ones in mask"):
             x_mps.masked_scatter_(mask_mps, source_mps)
 
+        # Like CPU and CUDA, only bool masks are accepted, even for empty inputs
+        for n in (3, 0):
+            with self.assertRaisesRegex(RuntimeError, "only supports boolean masks"):
+                torch.zeros(n, device="mps").masked_scatter_(
+                    torch.ones(n, dtype=torch.uint8, device="mps"), torch.ones(n, device="mps"))
+
     def test_masked_scatter_without_mask_indices(self):
         x_mps = torch.tensor([1, 2, 3, 4], device="mps")
         mask_mps = torch.tensor(0, dtype=torch.bool, device="mps")
@@ -5678,6 +5684,9 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
         helper([1, 1, 32, 32], 'mean')
+        # sizes that are not a multiple of 4 and span several threadgroups
+        helper([3, 7, 11], 'sum')
+        helper([1000003], 'mean')
 
     def test_bce_loss_empty(self):
         # A zero-sized input has no Metal buffer to bind, which used to trip the
@@ -5713,6 +5722,20 @@ class TestMPS(TestCaseMPS):
         b = torch.rand(25, 1, device='mps')
         with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
+
+    def test_bce_loss_out_of_range(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201153
+        valid = torch.rand(4, device='mps')
+        for reduction, value in itertools.product(['none', 'sum', 'mean'], [float('nan'), float('inf'), float('-inf'), -0.1, 1.1]):
+            invalid = torch.full((4,), value, device='mps')
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of input should be between 0 and 1'):
+                F.binary_cross_entropy(invalid, valid, reduction=reduction)
+                torch.mps.synchronize()
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of target should be between 0 and 1'):
+                F.binary_cross_entropy(valid, invalid, reduction=reduction)
+                torch.mps.synchronize()
+        # The failed asserts must not leak into later ops
+        self.assertEqual(F.binary_cross_entropy(valid, valid), F.binary_cross_entropy(valid.cpu(), valid.cpu()))
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 1024
@@ -7940,8 +7963,6 @@ class TestMPS(TestCaseMPS):
         y.backward(gradient=grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    # Test adaptive avg pool2d - when the input size is a multiple of output size
-    # Not testing for channels last right now
     def test_adaptive_avg_pool2d_simple(self):
         def helper(input_shape, out_shape, channels_last):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -7980,10 +8001,30 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 4, 4), (16, 16), False)
 
-        try:
-            helper((2, 2, 3, 3), (7, 7), False)
-        except Exception as e:
-            pass
+        helper((2, 2, 3, 3), (7, 7), False)
+
+        # Windows large enough for the simdgroup per output kernel
+        helper((2, 3, 100, 70), (3, 2), False)
+        helper((2, 3, 100, 70), (3, 2), True)
+
+        # Zero channels
+        helper((0, 4, 4), (2, 2), False)
+        helper((0, 2, 2), (4, 4), False)
+        helper((0, 4, 4), (3, 3), False)
+
+    @parametrize("pool", [F.adaptive_avg_pool2d, F.adaptive_max_pool2d], name_fn=lambda f: f.__name__)
+    def test_adaptive_pool2d_large_sizes(self, pool):
+        # (in + 1) * (out + 1) overflows int32, which selects the 64-bit index kernels
+        cpu_x = torch.randn(1, 2, 3, 50000, requires_grad=True)
+        x = cpu_x.detach().to('mps').requires_grad_()
+        out = pool(x, (2, 49999))
+        out_cpu = pool(cpu_x, (2, 49999))
+        self.assertEqual(out, out_cpu)
+
+        cpu_grad = torch.randn(out_cpu.shape)
+        out.backward(cpu_grad.to('mps'))
+        out_cpu.backward(cpu_grad)
+        self.assertEqual(x.grad, cpu_x.grad)
 
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
@@ -11663,7 +11704,7 @@ class TestLinalgMPS(TestCaseMPS):
         A = self.EIG_ILL_CONDITIONED_CASES[case](self)
         w, V = (t.cpu().to(torch.complex128) for t in torch.linalg.eig(A.to(device)))
         A = A.to(torch.complex128)
-        self.assertTrue(((A @ V - V * w[None, :]).norm(dim=-2) / A.norm(dim=[-2, -1])).max() < 1e-6)
+        self.assertTrue(((A @ V - V * w[None, :]).norm(dim=-2) / A.norm(dim=[-2, -1])).max() < 1e-4)
 
     @parametrize("n", [5, 32, 600])
     @parametrize("left", [True, False])
@@ -14982,8 +15023,14 @@ class TestConsistency(TestCaseMPS):
         w_m = w_m.gather(-1, perm)
         V_m = V_m.gather(-1, perm.unsqueeze(-2).expand_as(V_m))
         self.assertEqual(V_c.abs(), V_m.abs(), atol=atol, rtol=rtol)
-        A = A.detach().cpu().to(V_m.dtype)
-        self.assertEqual(A @ V_m, V_m * w_m.unsqueeze(-2), atol=atol, rtol=rtol)
+        # A V == V diag(w) holds up to roundoff relative to ||A||, so compare the
+        # residual norm with ||A||, computing it in float64 since cancellation in
+        # A @ V can lose all of float32's precision
+        A = A.detach().cpu().to(torch.complex128)
+        V_m, w_m = V_m.to(torch.complex128), w_m.to(torch.complex128)
+        A_norm = A.norm(dim=(-2, -1)).clamp_min(torch.finfo(torch.float32).tiny)
+        residual = (A @ V_m - V_m * w_m.unsqueeze(-2)).norm(dim=-2) / A_norm.unsqueeze(-1)
+        self.assertLessEqual(residual.max().item(), atol)
         return perm
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)

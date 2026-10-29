@@ -989,6 +989,13 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
                 torch.randn(n, n, dtype=dtype).triu()[perm[:, None], perm],
                 # A badly scaled 2x2 diagonal matrix
                 torch.diag(torch.tensor([2.0**127, 1.0], dtype=dtype)),
+                torch.block_diag(
+                    torch.tensor([1]),
+                    1e-25 * torch.roll(torch.eye(3, dtype=dtype), -1, 0),
+                    torch.tensor([-1]),
+                    torch.tensor([0]),
+                ),
+                torch.tensor([[1e12, 1e12], [0.01, 1]], dtype=dtype),
             ]
 
             if dtype.is_complex:
