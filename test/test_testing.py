@@ -31,11 +31,10 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, skipIfRocm,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, known_failure_skip_if, skipIfRocm, skipIfRocmArch,
+    skipIfRocmVersionAtLeast, skipIfRocmVersionInRange,
 )
-from torch.testing._internal.rerun_code_skip import (
-    mark_rerun_code_skip, rerun_code_skip, rerun_code_skip_reason, rocm_message_is_known_bug,
-)
+from torch.testing._internal.rerun_code_skip import mark_rerun_code_skip, rerun_code_skip, rerun_code_skip_reason
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -793,7 +792,7 @@ class TestJunitXml(TestCase):
 @contextlib.contextmanager
 def _rerun_code_skips_on_rocm(enabled):
     with contextlib.ExitStack() as stack:
-        for module in ("rerun_code_skip", "common_utils", "common_device_type"):
+        for module in ("rerun_code_skip", "common_utils"):
             stack.enter_context(unittest.mock.patch(f"torch.testing._internal.{module}.RUN_CODE_SKIPS", enabled))
         for module in ("common_utils", "common_device_type"):
             stack.enter_context(unittest.mock.patch(f"torch.testing._internal.{module}.TEST_WITH_ROCM", True))
@@ -848,43 +847,35 @@ class TestRerunCodeSkip(TestCase):
         self.assertIs(mark_rerun_code_skip(TestFoo, "known failure"), TestFoo)
         self.assertEqual(rerun_code_skip_reason(TestFoo.test_a, TestFoo), "known failure")
 
-    @parametrize("msg, known", [
-        subtest(("test doesn't currently work on the ROCm stack", True), name="default_message"),
-        subtest(("https://github.com/pytorch/pytorch/issues/1", True), name="issue_url"),
-        subtest(("ROCm may have different numerical behavior", True), name="numerical"),
-        subtest(("PTX is not supported on ROCm", False), name="ptx"),
-        subtest(("needs hipBLASLt", False), name="hipblas"),
-        subtest(("NVIDIA-only feature", False), name="nvidia_only"),
-        subtest(("Marked as skipped for MIOpen", False), name="other"),
-    ])
-    def test_rocm_message_is_known_bug(self, msg, known):
-        self.assertEqual(rocm_message_is_known_bug(msg), known)
-
     @parametrize("rerun", [False, True])
-    def test_skip_if_rocm(self, rerun):
+    def test_known_failure_skip_if(self, rerun):
         with _rerun_code_skips_on_rocm(rerun):
-            known_bug = skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/1")(_returns_ran)
-            missing_api = skipIfRocm(msg="needs hipBLASLt")(_returns_ran)
+            decorated = known_failure_skip_if(lambda: True, "known failure")(_returns_ran)
             if rerun:
-                self.assertEqual(known_bug(None), "ran")
+                self.assertEqual(decorated(None), "ran")
             else:
                 with self.assertRaises(unittest.SkipTest):
-                    known_bug(None)
-            with self.assertRaises(unittest.SkipTest):
-                missing_api(None)
-            reason = "skipIfRocm: https://github.com/pytorch/pytorch/issues/1" if rerun else None
-            self.assertEqual(rerun_code_skip_reason(known_bug, None), reason)
-            self.assertIsNone(rerun_code_skip_reason(missing_api, None))
+                    decorated(None)
+        self.assertEqual(rerun_code_skip_reason(decorated, None), "known failure" if rerun else None)
 
-    def test_skip_cuda_if_rocm_marks_only_cuda(self):
-        with _rerun_code_skips_on_rocm(True):
-            marked = skipCUDAIfRocm(msg="https://github.com/pytorch/pytorch/issues/1")(_returns_ran)
+    def test_rocm_skips_are_not_marked(self):
         cuda_cls = type("TestFooCUDA", (), {"device_type": "cuda"})
-        cpu_cls = type("TestFooCPU", (), {"device_type": "cpu"})
-        self.assertEqual(
-            rerun_code_skip_reason(marked, cuda_cls), "skipCUDAIfRocm: https://github.com/pytorch/pytorch/issues/1"
-        )
-        self.assertIsNone(rerun_code_skip_reason(marked, cpu_cls))
+        with _rerun_code_skips_on_rocm(True):
+            skip_if_rocm = [
+                skipIfRocm(_returns_ran),
+                skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/1")(_returns_ran),
+            ]
+            for fn in skip_if_rocm:
+                with self.assertRaises(unittest.SkipTest):
+                    fn(None)
+            others = [
+                skipCUDAIfRocm(_returns_ran),
+                skipIfRocmArch(("gfx942",))(_returns_ran),
+                skipIfRocmVersionAtLeast([7, 0])(_returns_ran),
+                skipIfRocmVersionInRange([7, 0], [7, 1], "regression")(_returns_ran),
+            ]
+        for fn in skip_if_rocm + others:
+            self.assertIsNone(rerun_code_skip_reason(fn, cuda_cls))
 
 
 def _junit_outcome(case: ET.Element) -> tuple[str, str | None]:

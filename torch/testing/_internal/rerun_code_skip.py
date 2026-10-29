@@ -1,6 +1,10 @@
 # mypy: allow-untyped-defs
 """Known-failure skips that rerun-disabled-tests runs instead of skipping.
 
+Only tests that opt in with ``rerun_code_skip`` or
+``common_utils.known_failure_skip_if`` are marked; other skips, including
+``skipIfRocm``, stay skipped.
+
 In rerun-disabled-tests mode a marked test runs even though it is not in the
 disabled-tests JSON. test/conftest.py reports its skip reason as the
 ``code_skip`` JUnit property, and tools/stats/check_disabled_tests.py uploads
@@ -17,17 +21,6 @@ RUN_CODE_SKIPS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 # Maps a device type, or None for every device, to (reason, condition).
 # functools.wraps copies it onto outer wrappers such as instantiate_test.
 _REASONS_ATTR = "__pt_rerun_code_skip_reasons__"
-
-# Messages that mean "this API is not there on ROCm", not "this test is a
-# known failure". Checked before the known-bug phrases.
-_UNSUPPORTED_API_MARKERS = (
-    "ptx",
-    "cuda-specific",
-    "cuda specific",
-    "hipblas",
-    "nvidia-only",
-    "nvidia only",
-)
 
 
 def _forwarding_wrapper(fn):
@@ -72,20 +65,3 @@ def rerun_code_skip_reason(fn, cls):
         if condition is None or condition():
             return reason
     return None
-
-
-def rocm_message_is_known_bug(msg: str) -> bool:
-    """True when a ROCm skip message is a known failure, not a missing API.
-
-    Known failure: a GitHub issue URL, "doesn't currently work", or a
-    numerical-mismatch reason. Missing API: PTX, CUDA-specific codegen,
-    hipBLAS, or NVIDIA-only.
-    """
-    text = msg.lower()
-    if any(marker in text for marker in _UNSUPPORTED_API_MARKERS):
-        return False
-    if "github.com/" in text and "/issues/" in text:
-        return True
-    if "doesn't currently work" in text or "does not currently work" in text:
-        return True
-    return "numerical" in text

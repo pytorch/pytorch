@@ -95,7 +95,6 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.rerun_code_skip import (
     mark_rerun_code_skip,
     rerun_code_skip_reason,
-    rocm_message_is_known_bug,
     RUN_CODE_SKIPS,
 )
 from torch.utils._import_utils import _check_module_exists
@@ -2532,16 +2531,13 @@ def skipIfNNModuleInlined(
     return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    skip_if = known_failure_skip_if if rocm_message_is_known_bug(msg) else lazy_skip_if
-    decorator = skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
+    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     """Old skipIfRocm that silently drops classes from discovery. Migrate to skipIfRocm."""
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
-        if RUN_CODE_SKIPS and TEST_WITH_ROCM and rocm_message_is_known_bug(msg):
-            return mark_rerun_code_skip(fn, reason)
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -2564,7 +2560,7 @@ def isRocmArchAnyOf(arch: tuple[str, ...]):
     return any(x in rocmArch for x in arch)
 
 def skipIfRocmArch(arch: tuple[str, ...]):
-    return known_failure_skip_if(
+    return lazy_skip_if(
         lambda: TEST_WITH_ROCM and isRocmArchAnyOf(arch),
         f"skipIfRocm: test skipped on {arch}",
     )
@@ -2691,7 +2687,7 @@ def skipIfRocmVersionLessThan(version=None):
 # Skips a test on ROCm if the version is at least the given major.minor tuple.
 # Use for failures introduced in a ROCm release that pass on older versions,
 # e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
-# Built on known_failure_skip_if so it works on both test methods and test classes.
+# Built on lazy_skip_if so it works on both test methods and test classes.
 def skipIfRocmVersionAtLeast(version=None):
     def _should_skip():
         if not TEST_WITH_ROCM:
@@ -2702,7 +2698,7 @@ def skipIfRocmVersionAtLeast(version=None):
             and version is not None
             and rocm_version_tuple >= tuple(version)
         )
-    return known_failure_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
 
 # Skips a test on ROCm when the version is in [first_bad, first_good), for a
 # regression introduced in one release and fixed in a later one. The window
@@ -2711,7 +2707,7 @@ def skipIfRocmVersionInRange(first_bad, first_good, reason):
     def _should_skip():
         return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
     window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
-    return known_failure_skip_if(_should_skip, f"{reason} ({window})")
+    return lazy_skip_if(_should_skip, f"{reason} ({window})")
 
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(

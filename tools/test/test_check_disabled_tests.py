@@ -15,7 +15,7 @@ from tools.stats.check_disabled_tests import process_report, save_results
 
 sys.path.remove(str(REPO_ROOT))
 
-CODE_SKIP = "skipIfRocm: https://github.com/pytorch/pytorch/issues/1"
+CODE_SKIP = "known failure: https://github.com/pytorch/pytorch/issues/1"
 CODE_SKIP_PROPERTY = (
     f'<properties><property name="code_skip" value="{CODE_SKIP}"/></properties>'
 )

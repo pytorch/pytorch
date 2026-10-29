@@ -57,11 +57,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     validate_test_name,
 )
-from torch.testing._internal.rerun_code_skip import (
-    mark_rerun_code_skip,
-    rocm_message_is_known_bug,
-    RUN_CODE_SKIPS,
-)
 
 
 _T = TypeVar("_T")
@@ -2459,8 +2454,6 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
 def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipCUDAIfRocm: {msg}"
-        if RUN_CODE_SKIPS and TEST_WITH_ROCM and rocm_message_is_known_bug(msg):
-            return mark_rerun_code_skip(fn, reason, "cuda")
         return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
 
     if func:
