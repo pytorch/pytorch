@@ -154,7 +154,8 @@ def fetch_issue(repo: str, number: int) -> tuple[dict, list[str]]:
 
 
 def publish(summary: str) -> None:
-    print(summary)
+    # The runner recognizes legacy ##[commands] anywhere in a log line.
+    print(json.dumps({"summary": summary}).replace("##[", r"\u0023\u0023["))
     if path := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(path, "a") as f:
             f.write(summary + "\n")
