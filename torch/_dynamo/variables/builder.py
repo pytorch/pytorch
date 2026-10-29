@@ -225,7 +225,7 @@ from .base import (
     VariableTrackerMeta,
 )
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable
+from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 from .ctx_manager import (
     AutocastModeVariable,
     CudagraphOverrideVariable,
@@ -243,6 +243,7 @@ from .descriptors import (
     MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
+    WrapperDescriptorVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -251,6 +252,7 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
+from .exception import FrameSummaryVariable
 from .functions import (
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
@@ -265,6 +267,7 @@ from .functions import (
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
+    BaseHOPVariable,
     LocalMapWrappedHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
@@ -337,6 +340,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
+    AllowInGraphKind,
     DispatchKeySetVariable,
     FuncTorchInterpreterVariable,
     TorchCtxManagerClassVariable,
@@ -935,6 +939,68 @@ class VariableBuilder:
     ) -> UserFunctionVariable:
         """Wrap a caller-selected function without applying trace-rule overrides."""
         return UserFunctionVariable(value, source=source, **options)
+
+    @staticmethod
+    def create_internal_base_hop(
+        value: HigherOrderOperator,
+        source: Source | None = None,
+        **kwargs: Any,
+    ) -> BaseHOPVariable:
+        """Create the BaseHOP fallback selected by the HOP factory."""
+        from torch._higher_order_ops import BaseHOP
+
+        if not isinstance(value, BaseHOP):
+            raise AssertionError(f"Expected BaseHOP, got {type(value)}")
+        return BaseHOPVariable(value, source, **kwargs)
+
+    @staticmethod
+    def create_internal_method_descriptor(
+        descriptor: types.MethodDescriptorType,
+        owner: VariableTracker,
+        source: Source | None = None,
+    ) -> MethodDescriptorVariable:
+        """Create a method descriptor with its already-built owner VT."""
+        if not isinstance(descriptor, types.MethodDescriptorType):
+            raise AssertionError(f"Expected method descriptor, got {type(descriptor)}")
+        if not isinstance(owner, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker owner, got {type(owner)}")
+        return MethodDescriptorVariable(descriptor, owner=owner, source=source)
+
+    @staticmethod
+    def create_internal_wrapper_descriptor(
+        descriptor: types.WrapperDescriptorType,
+        owner: VariableTracker,
+        source: Source | None = None,
+    ) -> WrapperDescriptorVariable:
+        """Create a wrapper descriptor with its already-built owner VT."""
+        if not isinstance(descriptor, types.WrapperDescriptorType):
+            raise AssertionError(f"Expected wrapper descriptor, got {type(descriptor)}")
+        if not isinstance(owner, VariableTracker):
+            raise AssertionError(f"Expected VariableTracker owner, got {type(owner)}")
+        return WrapperDescriptorVariable(descriptor, owner=owner, source=source)
+
+    @staticmethod
+    def create_internal_wrapper_user_function(
+        wrapper_obj: Any,
+        attr_to_trace: str,
+        source: Source | None = None,
+    ) -> WrapperUserFunctionVariable:
+        """Create a wrapper function without applying trace-rule overrides."""
+        if not (
+            is_function_or_wrapper(wrapper_obj)
+            or is_lru_cache_wrapped_function(wrapper_obj)
+        ):
+            raise AssertionError(
+                f"Expected function or wrapper, got {type(wrapper_obj)}"
+            )
+        return WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, source=source)
+
+    @staticmethod
+    def create_internal_torch_function_mode_stack_entry(
+        source: Source,
+    ) -> TorchFunctionModeVariable:
+        """Create the synthetic default-device mode-stack entry."""
+        return TorchFunctionModeVariable(None, source=source)
 
     def __init__(
         self,
@@ -5573,6 +5639,33 @@ class SourcelessBuilder:
         Includes exception types; no generic reclassification is applied.
         """
         return BuiltinVariable(value)
+
+    @staticmethod
+    def create_internal_fake_id(
+        value: int, kind: FakeValueKind = FakeValueKind.ID
+    ) -> FakeIdVariable:
+        return FakeIdVariable(value, kind=kind)
+
+    @staticmethod
+    def create_internal_frame_summary(value: Any) -> FrameSummaryVariable:
+        return FrameSummaryVariable(value)
+
+    @staticmethod
+    def create_internal_itertools(value: Any) -> ItertoolsVariable:
+        return ItertoolsVariable(value)
+
+    @staticmethod
+    def create_internal_torch_ctx_manager(
+        value: Any,
+    ) -> TorchCtxManagerClassVariable:
+        """Wrap a compiler-selected context manager without trace-rule overrides."""
+        return TorchCtxManagerClassVariable(value)
+
+    @staticmethod
+    def create_internal_torch_function(
+        value: Callable[..., Any], kind: AllowInGraphKind | None = None
+    ) -> TorchInGraphFunctionVariable:
+        return TorchInGraphFunctionVariable(value, kind=kind)
 
     @overload
     @staticmethod
