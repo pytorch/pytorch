@@ -2711,9 +2711,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 torch._dynamo.config.allow_empty_graphs,
                 inductor_config.triton.autotune_at_compile_time,
                 inductor_config.triton.multi_kernel,
+                inductor_config.multi_kernel_hints,
             )
 
-        ambient, captured = (False,) * 5 + (1,), (True,) * 5 + (0,)
+        ambient, captured = (False,) * 5 + (1, [64]), (True,) * 5 + (0, [])
         with (
             functorch_config.patch(
                 bundled_autograd_cache=False,
@@ -2722,7 +2723,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ),
             torch._dynamo.config.patch(allow_empty_graphs=False),
             inductor_config.patch(
-                {"triton.autotune_at_compile_time": False, "triton.multi_kernel": 1}
+                {
+                    "triton.autotune_at_compile_time": False,
+                    "triton.multi_kernel": 1,
+                    "multi_kernel_hints": [64],
+                }
             ),
         ):
             self.assertEqual(flags(), ambient)
@@ -2736,9 +2741,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     with _capture_config():
                         raise RuntimeError("boom")
                 self.assertEqual(flags(), ambient)
-            self.assertEqual(len(logs.records), 2)
+            self.assertEqual(len(logs.records), 3)
             self.assertIn("autotune_at_compile_time=False", logs.output[0])
             self.assertIn("multi_kernel=1 to 0", logs.output[1])
+            self.assertIn("multi_kernel_hints=[64] to []", logs.output[2])
 
             # Config values are per thread, so a worker entering the scope
             # patches only itself and the main thread stays ambient.
