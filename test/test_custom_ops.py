@@ -727,10 +727,80 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         op = self.ns().pyobject_dispatch_profiled.default
         self.assertTrue(op._is_pyobj_dispatcher_enabled())
-        with torch.profiler.profile() as prof:
-            f(torch.randn(3))
-        names = {e.name for e in prof.events()}
-        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+        name = f"{self.test_ns}::pyobject_dispatch_profiled"
+        for enabled in (True, False):
+            op._enable_pyobj_dispatch(enabled)
+            with torch.profiler.profile(record_shapes=True) as prof:
+                f(torch.randn(3))
+            events = [e for e in prof.events() if e.name == name]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].input_shapes, [[3]])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    @scoped_load_inline
+    def test_pyobject_dispatch_samples_callbacks_once(self, load_inline):
+        # A sampled RecordFunction callback sees each call with its sampling
+        # probability, whether or not the call takes the PyObject fast path.
+        module = load_inline(
+            name="test_pyobject_dispatch_sampled_callback",
+            cpp_sources="""
+#include <ATen/record_function.h>
+#include <torch/extension.h>
+#include <atomic>
+#include <string>
+
+static std::atomic<int64_t> calls{0};
+static std::string op_name;
+static at::CallbackHandle handle = 0;
+
+void add_callback(const std::string& name, double p) {
+  op_name = name;
+  at::set_record_function_seed_for_testing(0);
+  handle = at::addGlobalCallback(
+      at::RecordFunctionCallback(
+          [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+            if (op_name == fn.name()) {
+              calls++;
+            }
+            return nullptr;
+          })
+          .scopes({at::RecordScope::FUNCTION})
+          .samplingProb(p));
+}
+
+void remove_callback() {
+  at::removeCallback(handle);
+}
+
+int64_t count() {
+  return calls.load();
+}
+""",
+            functions=["add_callback", "remove_callback", "count"],
+            verbose=True,
+        )
+
+        @torch.library.custom_op(f"{self.test_ns}::sampled", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        x = torch.randn(2)
+        n = 4000
+        counts = []
+        module.add_callback(f"{self.test_ns}::sampled", 0.5)
+        try:
+            for enabled in (True, False):
+                f._opoverload._enable_pyobj_dispatch(enabled)
+                before = module.count()
+                for _ in range(n):
+                    f(x)
+                counts.append(module.count() - before)
+        finally:
+            module.remove_callback()
+        # ~2000 each, give or take ~32; sampling twice would give ~1000.
+        for count in counts:
+            self.assertGreater(count, 0.4 * n)
+            self.assertLess(count, 0.6 * n)
 
     @skipIfTorchDynamo("Checks which dispatcher kernels run in eager")
     def test_skip_autograd_kernel_if_no_grad(self):
