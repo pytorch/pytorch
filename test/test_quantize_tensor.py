@@ -509,6 +509,56 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
 
     @parametrize(
+        "shape,dim",
+        (
+            subtest(((64, 128), (1, 0)), name="matrix"),
+            subtest(((2, 64, 128, 3), (2, 1)), name="trailing_batch"),
+        ),
+    )
+    @parametrize(
+        "is_square_scaling,is_scale_swizzled",
+        (
+            subtest((False, False), name="compact"),
+            subtest((True, True), name="square"),
+        ),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_dim_m_recipe_fallback(
+        self, shape, dim, is_square_scaling, is_scale_swizzled, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, dim, is_square_scaling, is_scale_swizzled
+        )
+        qdata, scales = _quantize_mxfp8_tma(
+            data_hp, dim, is_square_scaling, is_scale_swizzled
+        )
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+        self.assertEqual(qdata.stride(dim[-1]), 1)
+        self.assertEqual(scales.stride(dim[-1]), 1)
+
+    @parametrize(
+        "is_square_scaling,is_scale_swizzled,error",
+        (
+            subtest((False, False, "compact scales require"), name="compact"),
+            subtest((True, True, "square scaling requires"), name="square"),
+        ),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_dual_unsupported_recipe(
+        self, is_square_scaling, is_scale_swizzled, error, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device)
+        # Copying cannot make both dual orientations use a dim-k-only recipe.
+        with self.assertRaisesRegex(ValueError, error):
+            _quantize_mxfp8_tma_dual(data_hp, is_square_scaling, is_scale_swizzled)
+
+    @parametrize(
         "layout",
         (
             "leading",
