@@ -2168,8 +2168,8 @@ def _custom_op_modules(
     op_names: Iterable[tuple[str, str]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
     """The modules registering the ops among ``op_names``, and the custom ops among
-    them that no importable module is known to register. Warns about those, and
-    about the ops torch defines only at runtime."""
+    them that no importable module is known to register. Warns about the ops torch
+    defines only at runtime; callers warn about the unrecorded ones."""
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
     lazy: dict[str, set[str]] = {}
@@ -2192,19 +2192,34 @@ def _custom_op_modules(
             ", ".join(sorted(ops)),
             setup,
         )
-    if unrecorded:
-        log.warning(
-            "torch.compiler.precompile: the captured graphs call %s, which no "
-            "importable module is known to register: defined in __main__, defined "
-            "with torch.library.define, or a C++ op without set_python_module. The "
-            "artifact serves only where something else "
-            "registers them before it is loaded. Define a Python op with "
-            "torch.library.custom_op in an importable module, and give a C++ op "
-            "m.set_python_module; for a library's ops, import that library before "
-            "loading the artifact.",
-            ", ".join(sorted({op_name for op_name, _ in unrecorded})),
-        )
     return tuple(sorted(modules)), tuple(sorted(unrecorded))
+
+
+def _warn_unrecorded(
+    unrecorded: Iterable[tuple[str, str]], fallback_modules: Sequence[str] = ()
+) -> None:
+    """Warns about the ops ``_custom_op_modules`` found no module for, naming the
+    ``fallback_modules`` the artifact imports in case they register them."""
+    if not (names := sorted({op_name for op_name, _ in unrecorded})):
+        return
+    serves = (
+        f"The artifact imports {', '.join(fallback_modules)}, the modules its "
+        "frames run in, as a best-effort fallback, and serves only where those or "
+        "something else register them before it is loaded."
+        if fallback_modules
+        else "The artifact serves only where something else registers them before "
+        "it is loaded."
+    )
+    log.warning(
+        "torch.compiler.precompile: the captured graphs call %s, which no "
+        "importable module is known to register: defined in __main__, defined "
+        "with torch.library.define, or a C++ op without set_python_module. %s "
+        "Define a Python op with torch.library.custom_op in an importable module, "
+        "and give a C++ op m.set_python_module; for a library's ops, import that "
+        "library before loading the artifact.",
+        ", ".join(names),
+        serves,
+    )
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
@@ -2336,7 +2351,9 @@ def _build_python_source(
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(compiled._gm)
-        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops, keys)
+        modules, unrecorded = _custom_op_modules(ops)
+        _warn_unrecorded(unrecorded)
+        _write_custom_op_imports(buf, modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2393,7 +2410,9 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(gm)
-        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops, keys)
+        modules, unrecorded = _custom_op_modules(ops)
+        _warn_unrecorded(unrecorded)
+        _write_custom_op_imports(buf, modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
