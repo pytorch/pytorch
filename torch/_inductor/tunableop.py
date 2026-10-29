@@ -67,10 +67,14 @@ _TUNE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_TUNING", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
 )
-# Reuse: TUNING=0 is harmless -- it never tunes, and RecordBorrowed persists
-# regardless -- but RECORD_UNTUNED makes the manager skip ReadFile, leaving the
-# worker with an empty results map and nothing to borrow.
-_REUSE_BLOCKING_ENV = (("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),)
+# Reuse: TUNING=0 is harmless, it never tunes. These each break it --
+# RECORD_UNTUNED skips ReadFile, NEAREST_MATCH=0 stops borrowing, and
+# RECORD_BORROWED=0 keeps the validated winner out of the results file.
+_REUSE_BLOCKING_ENV = (
+    ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
+    ("PYTORCH_TUNABLEOP_NEAREST_MATCH", "0"),
+    ("PYTORCH_TUNABLEOP_RECORD_BORROWED", "0"),
+)
 _env_warned = False
 _warned_faults: OrderedSet[str] = OrderedSet()
 
@@ -111,7 +115,7 @@ def is_reuse_mode() -> bool:
     """True while consuming the results file: borrow and validate, never tune."""
     if _mode() != "reuse" or not torch.cuda.is_available():
         return False
-    _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will find nothing to borrow")
+    _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will not borrow or record")
     return True
 
 
