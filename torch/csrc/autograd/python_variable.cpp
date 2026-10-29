@@ -359,7 +359,8 @@ static bool check_has_torch_dispatch(PyObject* obj) {
   if (THPVariable_CheckExact(obj)) {
     return false;
   }
-  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
+  static PyObject* name = PyUnicode_InternFromString("__torch_dispatch__");
+  py::object attr = PyObject_FastGetAttr(obj, name);
   return (
       attr.ptr() != nullptr &&
       attr.ptr() != torch::disabled_torch_dispatch_impl());
