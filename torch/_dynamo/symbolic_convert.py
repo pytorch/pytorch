@@ -1201,11 +1201,11 @@ def break_graph_if_unsupported(
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
 
-            if (package := self.output.package) is not None:
+            if (package := self.output.package) and package.records_graph_break_ops:
                 from .variables.torch import BaseTorchVariable
 
                 # The instruction runs eagerly, so the ops it calls or passes must be
-                # registered when it is served.
+                # registered when served. Lazy items are read, never realized.
                 popped = self.stack[len(self.stack) - (int(push) - stack_effect) :]
                 vts: list[VariableTracker] = []
                 VariableTracker.visit(vts.append, popped)
@@ -1215,8 +1215,12 @@ def break_graph_if_unsupported(
                         devices |= _tensor_device_types(v.peek_value())
                     elif isinstance(v, TensorVariable) and v.device:
                         devices |= {v.device.type}
-                for vt in popped:
-                    if isinstance(vt, BaseTorchVariable):
+                for vt in map(VariableTracker.unwrap, popped):
+                    if isinstance(vt, LazyVariableTracker):
+                        package.add_graph_break_op(
+                            vt.peek_value(), device_types=devices
+                        )
+                    elif isinstance(vt, BaseTorchVariable):
                         package.add_graph_break_op(vt.value, device_types=devices)
 
             log.debug("%s triggered compile", inst.opname)
