@@ -125,9 +125,9 @@ function pip_uninstall() {
 # venv shadow the image's. `venv --system-site-packages` doesn't do this: the
 # image Python is itself a venv, and that flag exposes the base interpreter.
 # The venv gets no pip or setuptools of its own, so the image's are used. Its
-# `pip` and `pip3` run `python -m pip` with the venv's interpreter, so they
-# install into the venv; without them, `pip` would be the image's script and
-# install into the image.
+# `pip`, `pip3` and `pip3.<minor>` run `python -m pip` with the venv's
+# interpreter, so they install into the venv; without them, `pip` would be the
+# image's script and install into the image.
 function create_venv_over_image() {
   local venv_dir=$1
   local add_image_sites
@@ -136,7 +136,7 @@ function create_venv_over_image() {
   local venv_python
   venv_python="$(cd "${venv_dir}" && pwd)/bin/python"
   echo "import site; ${add_image_sites}" > "$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/_ci_image.pth"
-  for name in pip pip3; do
+  for name in pip pip3 "pip3.$("${venv_python}" -c 'import sys; print(sys.version_info.minor)')"; do
     printf '#!/bin/sh\nexec "%s" -m pip "$@"\n' "${venv_python}" > "${venv_dir}/bin/${name}"
     chmod +x "${venv_dir}/bin/${name}"
   done
