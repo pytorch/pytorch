@@ -1797,7 +1797,24 @@ def _(
     return None
 
 
-trace_triton_kernel_wrapper = trace_user_kernel_wrapper
+def _triton_hop_kwargs(
+    kernel_idx: int,
+    constant_args_idx: int,
+    grid: list["TritonGridType"],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    launch_kwargs: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """The Triton HOP arguments that the shared helpers pass through unchanged
+    (everything but kwargs, tensors_to_clone and tensor_bases)."""
+    hop_kwargs: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+    }
+    if launch_kwargs:
+        hop_kwargs["launch_kwargs"] = launch_kwargs
+    return hop_kwargs
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
@@ -1821,7 +1838,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    trace_triton_kernel_wrapper(
+    trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
         node_args,
@@ -1860,14 +1877,9 @@ def triton_kernel_wrapper_mutation_functionalize(
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
-    hop_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-    }
-    if launch_kwargs:
-        hop_kwargs["launch_kwargs"] = launch_kwargs
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
@@ -1896,14 +1908,9 @@ def triton_kernel_wrapper_functional_dense(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    hop_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-    }
-    if launch_kwargs:
-        hop_kwargs["launch_kwargs"] = launch_kwargs
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
     return functional_hop_dense(
         triton_kernel_wrapper_mutation,
         hop_kwargs=hop_kwargs,
@@ -1956,13 +1963,13 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    ret = trace_triton_kernel_wrapper(
+    ret = trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_functional,
         node_args,
     )
     if ret is None:
-        raise AssertionError("trace_triton_kernel_wrapper returned None")
+        raise AssertionError("trace_user_kernel_wrapper returned None")
     return ret
 
 
@@ -1978,14 +1985,9 @@ def triton_kernel_wrapper_functional_functionalize(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    hop_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-    }
-    if launch_kwargs:
-        hop_kwargs["launch_kwargs"] = launch_kwargs
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
     return functionalize_functional_hop(
         ctx,
         triton_kernel_wrapper_functional,
@@ -2069,6 +2071,15 @@ class TritonHOPifier(UserKernelHOPifier):
 
     def is_callable(self, maybe_callable: object) -> bool:
         raise NotImplementedError("abstract method")
+
+    @staticmethod
+    def get_kernel_source(
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+    ) -> "Source | None":
+        kernel_source = getattr(variable, "kernel_source", None)
+        if kernel_source is None:
+            kernel_source = getattr(variable, "source", None)
+        return kernel_source
 
     def call_grid(  # type: ignore[no-untyped-def]
         self,
