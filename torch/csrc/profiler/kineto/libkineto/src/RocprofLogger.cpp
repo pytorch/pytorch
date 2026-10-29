@@ -1063,8 +1063,9 @@ void RocprofLogger::stopLogging() {
     LOG_FIRST_N(WARNING, 10)
         << "Stopped waiting for " << pending
         << " kernel dispatch record(s) after " << dispatchRecordWait_.count()
-        << " ms; their GPU events are missing from this trace. Raise "
-        << "ROCPROF_DISPATCH_RECORD_WAIT_MSECS to wait longer.";
+        << " ms; their GPU events are missing from this trace. Kernels still "
+        << "running when profiling stopped cannot be recorded; for kernels "
+        << "that had finished, raise ROCPROF_DISPATCH_RECORD_WAIT_MSECS.";
   }
 }
 
