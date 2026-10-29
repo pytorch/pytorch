@@ -2,8 +2,8 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
@@ -11,7 +11,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <cstring>
 #include <exception>
 #include <set>
@@ -58,7 +57,7 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   auto keyPrefix = fmt::format("nccl_storekey_{}", generation_);
   std::vector<std::string> keys;
   keys.reserve(numIds);
-  for (int index = 0; index < numIds; ++index) {
+  for (const auto index : c10::irange(numIds)) {
     keys.push_back(
         numIds == 1 ? keyPrefix : fmt::format("{}_{}", keyPrefix, index));
   }
@@ -67,11 +66,10 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   if (rootIndex >= 0) {
     ncclUniqueId uniqueId;
     const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
-    if (ncclErr != ncclSuccess) {
-      throw std::runtime_error(
-          "Failed to get NCCL unique ID: " +
-          std::string(nccl_api_->getErrorString(ncclErr)));
-    }
+    TORCH_CHECK(
+        ncclErr == ncclSuccess,
+        "Failed to get NCCL unique ID: ",
+        nccl_api_->getErrorString(ncclErr));
 
     std::vector<uint8_t> vec(
         reinterpret_cast<uint8_t*>(&uniqueId),
@@ -82,10 +80,10 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   store->wait(keys, timeout_);
   auto values = store->multiGet(keys);
   std::vector<ncclUniqueId> uniqueIds(numIds);
-  for (int index = 0; index < numIds; ++index) {
-    if (values[index].size() != sizeof(ncclUniqueId)) {
-      throw std::runtime_error("Invalid NCCL unique ID size");
-    }
+  for (const auto index : c10::irange(numIds)) {
+    TORCH_CHECK(
+        values[index].size() == sizeof(ncclUniqueId),
+        "Invalid NCCL unique ID size");
     std::memcpy(&uniqueIds[index], values[index].data(), sizeof(ncclUniqueId));
   }
   return uniqueIds;
@@ -105,7 +103,7 @@ void populateNcclConfigFromHints(
   // Iterate over the hints and set the corresponding fields in the config.  For
   // string arguments, NCCL uses a "const char*" instead of a std::string.  The
   // strings only need to be valid for the duration of the
-  // ncclCommInitRankConfig call, so we use .c_str() directly.
+  // ncclCommInitRankConfig call, so we use .c_str() directly, except commName.
 
   for (const auto& [key, val] : hints) {
     if (kLayerHints.count(key)) {
@@ -141,7 +139,9 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.trafficClass=" << config.trafficClass;
     } else if (key == "commName") {
-      config.commName = val.c_str();
+      // NCCL keeps the pointer for the comm's lifetime and passes it to
+      // profiler plugins, so leak a copy as the NCCLConfig pybind setter does.
+      config.commName = strdup(val.c_str());
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.commName=" << config.commName;
     } else if (key == "collnetEnable" || key == "collnet_enable") {
@@ -199,9 +199,6 @@ ncclComm_t NCCLBootstrap::createNcclComm(
   // TODO: add logging on failures and successes
   // TODO: get the local rank
   ncclConfig_t config = base_config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
-#endif
 
   constexpr int kDefaultRanksPerRoot = 128;
   const int ranksPerRoot =
@@ -227,11 +224,10 @@ ncclComm_t NCCLBootstrap::createNcclComm(
     ncclErr = nccl_api_->commInitRankConfig(
         &nccl_comm, comm_size_, uniqueId, rank_, &config);
   }
-  if (nccl_comm == nullptr) {
-    throw std::runtime_error(
-        "Failed to initialize NCCL communicator: " +
-        std::string(nccl_api_->getErrorString(ncclErr)));
-  }
+  TORCH_CHECK(
+      nccl_comm != nullptr,
+      "Failed to initialize NCCL communicator: ",
+      nccl_api_->getErrorString(ncclErr));
   try {
     waitForNcclCompletion(
         *nccl_api_,

@@ -38,7 +38,7 @@ static inline Tensor repeat_interleave_common(
   } else {
     total = cumsum[-1].item<int64_t>();
     TORCH_CHECK(
-        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+        repeats.min().item<int64_t>() >= 0, "repeats can not be negative");
   }
 
   Tensor result = at::empty({total}, repeats.options());
