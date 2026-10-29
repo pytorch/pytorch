@@ -32,7 +32,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = (
+DEVICE_TYPE = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
@@ -53,11 +53,11 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(device_type)
+        return dist.get_default_backend_for_device(DEVICE_TYPE)
 
     @classmethod
     def device_type(cls) -> str:
-        return device_type
+        return DEVICE_TYPE
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -71,7 +71,7 @@ class ReplicateTest(MultiProcContinuousTest):
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         replicate_size = 2
         return init_device_mesh(
-            device_type,
+            DEVICE_TYPE,
             (replicate_size, 1, self.world_size // replicate_size),
             mesh_dim_names=("replicate", "shard", "tp"),
         )
@@ -201,7 +201,7 @@ class ReplicateTest(MultiProcContinuousTest):
         """
 
         device = torch.device(
-            f"{device_type}:{self.rank % torch.accelerator.device_count()}"
+            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
         )
         model = Net().to(device)
         replicate_model = deepcopy(model)
@@ -229,7 +229,7 @@ class ReplicateTest(MultiProcContinuousTest):
         """
 
         device = torch.device(
-            f"{device_type}:{self.rank % torch.accelerator.device_count()}"
+            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
         )
         model = Net().to(device)
         replicate_model = deepcopy(model)
@@ -300,7 +300,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(DEVICE_TYPE)
         replicate(ref_model, mesh=replicate_mesh)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
@@ -311,7 +311,7 @@ class ReplicateTest(MultiProcContinuousTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + replicate_pg.rank() + 1)
-        device = torch.device(device_type)
+        device = torch.device(DEVICE_TYPE)
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []

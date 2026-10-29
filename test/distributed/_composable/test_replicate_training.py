@@ -72,23 +72,23 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_root_move_forward_input_to_device(self):
-        device = torch.device(globals()["device"].type, 0)
+        device0 = torch.device(device.type, 0)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
                 # Check that Replicate moved the inputs to GPU, including recursing
                 # into the tuple data structure
-                if not (x.device == device):
-                    raise AssertionError(f"Expects {device} but got {x.device}")
-                if not (ys[0].device == device):
-                    raise AssertionError(f"Expects {device} but got {ys[0].device}")
-                if not (ys[1].device == device):
-                    raise AssertionError(f"Expects {device} but got {ys[1].device}")
+                if not (x.device == device0):
+                    raise AssertionError(f"Expects {device0} but got {x.device}")
+                if not (ys[0].device == device0):
+                    raise AssertionError(f"Expects {device0} but got {ys[0].device}")
+                if not (ys[1].device == device0):
+                    raise AssertionError(f"Expects {device0} but got {ys[1].device}")
                 y = ys[0] + ys[1]
                 return x + y + 1
 
-        model = ParamlessModule().to(device)
-        replicate(model).to(device)
+        model = ParamlessModule().to(device0)
+        replicate(model).to(device0)
         x = torch.randn((3,))
         ys = (torch.randn((3,)), torch.randn((3,)))
         self.assertEqual(x.device, torch.device("cpu"))
@@ -105,17 +105,17 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
-        device = torch.device(globals()["device"].type, 0)
+        device0 = torch.device(device.type, 0)
         # Single Replicate group
         torch.manual_seed(42)
-        model = MLP(3, device)
+        model = MLP(3, device0)
         # Since seed is per process, not per thread, we broadcast to ensure
         # the same parameters across ranks
         for param in model.parameters():
             dist.broadcast(param, src=0)
         ref_model = copy.deepcopy(model)
         replicate(model)  # root only
-        inp = torch.randn((2, 3), device=device.type)
+        inp = torch.randn((2, 3), device=device0.type)
         self._assert_dtensor_params(model.parameters())
         self._assert_same_params(model.parameters(), ref_model.parameters())
         model(inp)
@@ -127,7 +127,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
 
         # Multiple Replicate groups
         torch.manual_seed(42)
-        model = nn.Sequential(MLP(3, device), MLP(3, device))
+        model = nn.Sequential(MLP(3, device0), MLP(3, device0))
         for param in model.parameters():
             dist.broadcast(param, src=0)
         ref_model = copy.deepcopy(model)
@@ -154,17 +154,17 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
-        device = torch.device(globals()["device"].type, 0)
+        device0 = torch.device(device.type, 0)
         # Single Replicate group
-        model = MLP(8, device)
+        model = MLP(8, device0)
         replicate(model)  # root only
-        inp = torch.randn((2, 8), device=device.type)
+        inp = torch.randn((2, 8), device=device0.type)
         self._assert_dtensor_params(model.parameters())
         model(inp).sum().backward()
         self._assert_dtensor_params(model.parameters())
 
         # Multiple Replicate groups
-        model = MLP(8, device)
+        model = MLP(8, device0)
         replicate(model.in_proj)
         replicate(model.out_proj)
         replicate(model)
@@ -211,7 +211,7 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
         # better numerics. The important part is changing the dtype.
 
         torch.manual_seed(42)
-        mlp_dim, device, dtype = 4, globals()["device"], torch.float64
+        mlp_dim, dtype = 4, torch.float64
         model = MLP(mlp_dim, device=device)
         for param in model.parameters():
             dist.broadcast(param, src=0)
@@ -281,7 +281,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         model = nn.Sequential(
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
-        ref_model = copy.deepcopy(model).to(globals()["device"])
+        ref_model = copy.deepcopy(model).to(device)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         replicate(model)
@@ -1151,7 +1151,7 @@ class TestReplicateTPTraining(FSDPTest):
         dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).to(globals()["device"])
+        ref_model = copy.deepcopy(model).to(device)
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
 
@@ -1185,7 +1185,6 @@ class TestReplicateTPTraining(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
-        device = globals()["device"]
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []

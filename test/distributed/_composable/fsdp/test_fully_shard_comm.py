@@ -2617,6 +2617,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         super()._run(*args, **kwargs)
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
+    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
         not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
@@ -2757,11 +2758,11 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
                     divisions.append(func)
                 return func(*args, **(kwargs or {}))
 
-        model = nn.Linear(8, 4, bias=False, device=device.type)
+        model = nn.Linear(8, 4, bias=False, device=device)
         fully_shard(model, mesh=init_device_mesh(device.type, (1,)))
         if divide_factor is not None:
             model.set_gradient_divide_factor(divide_factor)
-        inp = torch.ones(3, 8, device=device.type)
+        inp = torch.ones(3, 8, device=device)
         loss = model(inp).sum()
         with RecordDivisions():
             loss.backward()
