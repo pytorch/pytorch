@@ -163,7 +163,7 @@ The author is fixing what the last review asked for, so each round should leave 
 1. **Settle the earlier blocking findings first.** For each one, check HEAD: fixed, still present, or answered by the author or a maintainer with a claim that holds up at HEAD. Report one that is still present again, with the same substance, as a continuing finding; drop one that is fixed or convincingly answered.
 2. **Review what changed since the last review in full.** `/tmp/pr-interdiff.txt`, when present, holds the changes to the PR's files since the commit the last review saw (`original_commit_id` on its findings). Without it, compare the code the earlier findings point at with HEAD. Changed and new code gets the same scrutiny as in a first review.
 3. **Don't move the goalposts on code the last review already covered.** For code unchanged since the last review, raise a new blocking finding only for a defect with a concrete failure (wrong behavior, a crash, a security or backward-compatibility break), and say why it was not raised before. Any other new point about unchanged code is non-blocking.
-4. **Keep earlier non-blocking points non-blocking** unless the code changed in a way that makes them worse.
+4. **Keep earlier non-blocking points non-blocking** unless the code changed in a way that makes them worse, or you can now show the concrete failure rule 3 requires; then make it blocking and say what you found that the earlier review did not.
 
 ## Review Workflow
 
