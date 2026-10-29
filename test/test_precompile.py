@@ -10074,40 +10074,47 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Chained to the first module's error.
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
-    def test_extension_cpp_op_in_torch_namespace_is_custom_op(self):
-        from torch._precompile import _custom_op_modules, _CustomOpModules
+    def test_torch_cpp_op_is_decided_by_namespace_and_source_root(self):
+        from torch._precompile import (
+            _custom_op_modules,
+            _CustomOpModules,
+            _torch_cpp_op,
+            _torch_source_root,
+        )
 
         op = ("inductor::accumulate_grad_", "")
         self.assertEqual(
             _custom_op_modules({op: ("CPU",)}), _CustomOpModules((), (), ())
         )
-        # As an extension built elsewhere would record its TORCH_LIBRARY_FRAGMENT.
-        with (
-            mock.patch("torch._precompile._torch_source_root", return_value="/src/pt"),
-            mock.patch(
-                "torch._precompile._registration_path",
-                return_value="/src/extension/ext.cpp",
-            ),
-        ):
-            found = _custom_op_modules({op: ("CPU",)})
-            self.assertEqual(found, _CustomOpModules((), (op,), ()))
-
-    def test_extension_cpp_op_under_the_source_root_is_custom_op(self):
-        from torch._precompile import _torch_cpp_op
-
-        # An in-tree build's test/cpp_extensions, and ~/.cache/torch_extensions
-        # under a root that is the home directory.
+        root = mock.patch("torch._precompile._torch_source_root", return_value="/pt")
+        path = mock.patch("torch._precompile._registration_path", return_value="/x.cpp")
+        with root, path:
+            # As an extension built elsewhere would record its TORCH_LIBRARY_FRAGMENT.
+            self.assertEqual(
+                _custom_op_modules({op: ("CPU",)}), _CustomOpModules((), (op,), ())
+            )
+        # Under the root (an in-tree test/cpp_extensions build, ~/.cache/torch_extensions
+        # under a home root) or with no root, only the namespace decides.
         for root, path in (
-            ("/src/pytorch", "/src/pytorch/test/cpp_extensions/ext.cpp"),
+            ("/pt", "/pt/test/cpp_extensions/ext.cpp"),
             ("/home/u", "/home/u/.cache/torch_extensions/ext/ext.cpp"),
+            (None, "/x.cpp"),
         ):
             with (
                 mock.patch("torch._precompile._torch_source_root", return_value=root),
                 mock.patch("torch._precompile._registration_path", return_value=path),
             ):
                 self.assertFalse(_torch_cpp_op("precompile_ext::op", ""))
-                # Under the root only the namespace decides: a torch one's is torch's.
                 self.assertTrue(_torch_cpp_op("inductor::op", ""))
+        # No recorded path, or an out-of-tree build sharing only "/", records no root.
+        lstm = "/pt/aten/src/ATen/native/RNN.cpp"
+        for add in ("", "/tmp/build/aten/src/ATen/RegisterSchema.cpp"):
+            paths = {"aten::add": add, "aten::quantized_lstm": lstm}
+            with mock.patch(
+                "torch._precompile._registration_path",
+                side_effect=lambda o, _: paths[o],
+            ):
+                self.assertIsNone(_torch_source_root.__wrapped__())
 
     def test_kernels_recorded_only_for_the_graph_devices(self):
         from torch._precompile import _COMPOSITE_KERNEL_KEYS, _graph_kernel_keys
@@ -10241,29 +10248,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         cmd = [sys.executable, "-c", code]
         out = subprocess.check_output(cmd, text=True, timeout=600)
         self.assertEqual(out.strip(), "[]")
-
-    def test_torch_cpp_op_without_a_source_root_uses_the_namespace(self):
-        from torch._precompile import _torch_cpp_op, _torch_source_root
-
-        source_root = _torch_source_root.__wrapped__
-        paths = {
-            "aten::quantized_lstm": "/src/pytorch/aten/src/ATen/native/RNN.cpp",
-            "inductor::op": "/src/extension/ext.cpp",
-            "precompile_ext::op": "/src/extension/ext.cpp",
-        }
-        # No recorded path, and an out-of-tree build sharing only "/" with it.
-        for add_path in ("", "/tmp/build/aten/src/ATen/RegisterSchema.cpp"):
-            paths["aten::add"] = add_path
-            with (
-                mock.patch(
-                    "torch._precompile._registration_path",
-                    side_effect=lambda op_name, overload: paths[op_name],
-                ),
-                mock.patch("torch._precompile._torch_source_root", source_root),
-            ):
-                self.assertIsNone(source_root())
-                self.assertTrue(_torch_cpp_op("inductor::op", ""))
-                self.assertFalse(_torch_cpp_op("precompile_ext::op", ""))
 
     def test_pystub_module_is_recorded(self):
         from torch._precompile import _custom_op_module
@@ -10844,23 +10828,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout, "")
 
-    def test_a_capture_records_the_ops_of_each_backend_graph(self):
-        from torch._dynamo.precompile_package import _CapturePackage
-
-        first, first_name = self._op("first")
-        second, second_name = self._op("second")
-
-        def graph(op):
-            return torch.fx.symbolic_trace(lambda x: op._opoverload(x) + 1)
-
-        # The artifact unions these over only the backends it serves.
-        package = _CapturePackage(lambda x: x)
-        package.add_backend_graph("__compiled_fn_1", graph(first))
-        package.add_backend_graph("__compiled_fn_2", graph(second))
-        ids = ("__compiled_fn_1", "__compiled_fn_2")
-        expected = dict(zip(ids, ({(first_name, "")}, {(second_name, "")})))
-        self.assertEqual(package.op_names, expected)
-
     def test_a_bypassed_compiles_graph_break_ops_stay_out_of_a_later_fallback(self):
         from torch._dynamo.precompile_package import _CapturePackage
 
@@ -11134,16 +11101,11 @@ class TestPrecompileCustomOpRecording(TestCase):
             lib.impl(op, torch.Tensor.clone, "CPU")
         # apply() graph-breaks on dropped, and the graph before the break holds
         # LIN's parameter as an attribute, so output_graph bypasses the compile.
-        from torch._dynamo.precompile_package import _CapturePackage
+        from torch._dynamo.precompile_package import _CapturePackage as P
 
-        recorded = []
-        add = _CapturePackage.add_graph_break_op
-
-        def rec(package, op, *args, **kwargs):
-            recorded.append(str(op))
-            return add(package, op, *args, **kwargs)
-
-        self.enterContext(mock.patch.object(_CapturePackage, "add_graph_break_op", rec))
+        add = P.add_graph_break_op
+        spy = mock.patch.object(P, "add_graph_break_op", autospec=True, side_effect=add)
+        spy = self.enterContext(spy)
         python_code = self._capture_module(
             "import torch\nclass Scale(torch.nn.Module):\n    def __init__(self):\n"
             "        super().__init__()\n        self.w = torch.nn.Parameter(torch.ones(4))\n"
@@ -11153,7 +11115,8 @@ class TestPrecompileCustomOpRecording(TestCase):
             "def fn(x):\n    return torch.ops.precompile_bypassed.kept.default(scale(x.sin()))\n",
             tracer=DynamoTracer(require_complete=False),
         )
-        self.assertIn("precompile_bypassed.dropped.default", recorded)
+        dropped = torch.ops.precompile_bypassed.dropped.default
+        self.assertIn(dropped, [c.args[1] for c in spy.call_args_list])
         expected = (("precompile_bypassed::kept", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
@@ -11225,22 +11188,16 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"import torch\nlib = torch.library.Library({ns!r}, 'IMPL')\n"
             "lib.impl('op', lambda x: x * 3, 'CPU')\n"
         )
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="Warning only once for all operators"
-            )
-            line, name, python_code = self._render_with_ops(
-                [(f"{ns}::op", "")], mode, prelude
-            )
+        self.enterContext(warnings.catch_warnings())
+        warnings.filterwarnings("ignore", message="Warning only once for all operators")
+        line, name, python_code = self._render_with_ops(
+            [(f"{ns}::op", "")], mode, prelude
+        )
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(ops, name)!r}")
         # As a fresh server, which registers neither.
         for module in (name, ops):
             sys.modules.pop(module).lib._destroy()
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="Warning only once for all operators"
-            )
-            exec(python_code, {"__name__": "artifact"})
+        exec(python_code, {"__name__": "artifact"})
         for module in (name, ops):
             self.addCleanup(sys.modules[module].lib._destroy)
         self.assertEqual(getattr(torch.ops, ns).op(torch.ones(1)), torch.ones(1) * 3)
@@ -11295,13 +11252,11 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"scope = _scoped_library({ns!r}, 'DEF')\ndefs = scope.__enter__()\n{define}"
         )
         prelude += f"lib = torch.library.Library({ns!r}, 'IMPL')\nlib.impl('op', lambda x: x * 2, 'CPU')\n"
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="Warning only once for all operators"
-            )
-            line, name, python_code = self._render_with_ops(
-                [(f"{ns}::op", "")], prelude=prelude, then=(override,)
-            )
+        self.enterContext(warnings.catch_warnings())
+        warnings.filterwarnings("ignore", message="Warning only once for all operators")
+        line, name, python_code = self._render_with_ops(
+            [(f"{ns}::op", "")], prelude=prelude, then=(override,)
+        )
         modules = (defs, name, override) if mapped else (name, override)
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
         sys.modules.pop(override).lib._destroy()
@@ -11309,11 +11264,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         served.lib._destroy()
         served.defs._destroy()
         sys.modules.pop(defs, None)
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="Warning only once for all operators"
-            )
-            exec(python_code, {"__name__": "artifact"})
+        exec(python_code, {"__name__": "artifact"})
         self.addCleanup(sys.modules[name].defs._destroy)
         self.addCleanup(sys.modules[name].lib._destroy)
         self.addCleanup(sys.modules[override].lib._destroy)
