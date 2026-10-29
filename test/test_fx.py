@@ -1972,6 +1972,26 @@ assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
             torch.fx.symbolic_trace(Outer())
         self.assertEqual(seen, [True])
 
+    def test_nested_tracer_init_resolves_lazy_globals_of_autowrap_modules_unpatched(
+        self,
+    ):
+        seen = []
+        scope = self._lazy_globals("helper", self._records_unpatched(seen))
+
+        class LazyModule(types.ModuleType):
+            @property
+            def __dict__(self):
+                return scope
+
+        class Outer(torch.nn.Module):
+            def forward(self, x):
+                torch.fx.Tracer(autowrap_modules=(LazyModule("lazy_mod"),))
+                return x + 1
+
+        with self._patch_is_lazy_import():
+            torch.fx.symbolic_trace(Outer())
+        self.assertEqual(seen, [True])
+
     def test_nested_trace_reverts_inner_patches_first_and_reapplies_them_last(self):
         # The child's globals resolve in the inner module_call_wrapper, after both
         # traces patched Module.__call__ and the inner one recorded the outer wrapper

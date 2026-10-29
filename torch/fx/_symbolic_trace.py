@@ -335,6 +335,11 @@ class Tracer(TracerBase):
 
         super().__init__()
 
+        # A Tracer built inside another trace must not resolve lazy globals under it.
+        if CURRENT_PATCHER is not None:
+            for m in autowrap_modules:
+                _resolve_lazy_imports(CURRENT_PATCHER, m.__dict__)
+
         # Functions we will eagerly wrap when we see them while tracing
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
         self._autowrap_function_ids: set[int] = {
