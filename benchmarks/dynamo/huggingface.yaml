@@ -26,6 +26,7 @@ skip:
       - Qwen/Qwen3.5-0.8B
       - Qwen/Qwen2.5-0.5B-Instruct
       - google/gemma-3-1b-it
+      - openai/whisper-large-v3-turbo
       - mistralai/Mistral-7B-Instruct-v0.3
       - openai/gpt-oss-20b
 
@@ -75,6 +76,7 @@ batch_size:
     Qwen/Qwen3.5-0.8B: 8
     Qwen/Qwen2.5-0.5B-Instruct: 8
     google/gemma-3-1b-it: 8
+    openai/whisper-large-v3-turbo: 8
     mistralai/Mistral-7B-Instruct-v0.3: 8
     openai/gpt-oss-20b: 8
 

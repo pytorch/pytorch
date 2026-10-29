@@ -101,6 +101,7 @@ def check_graph_breaks(
                 "Qwen/Qwen3.5-0.8B",
                 "Qwen/Qwen2.5-0.5B-Instruct",
                 "google/gemma-3-1b-it",
+                "openai/whisper-large-v3-turbo",
                 "mistralai/Mistral-7B-Instruct-v0.3",
                 "openai/gpt-oss-20b",
                 # Discovered after gfx950 CI enablement and rocm 7.2
