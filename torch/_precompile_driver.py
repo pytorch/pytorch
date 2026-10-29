@@ -600,6 +600,8 @@ def _build_multigraph_forward():
     if "_import_custom_op_modules" in globals():
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
+        if "__main__" in SERVED_MODULES:
+            _import("__main__")  # Refused before section 0 imports anything.
         _import_custom_op_modules(SERVED_MODULES, _import)
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
