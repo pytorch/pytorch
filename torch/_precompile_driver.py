@@ -100,12 +100,29 @@ def _import_custom_op_modules(served=(), import_served=None):
     import torch
 
     import_errors = {}
+
+    # find_spec imports a dotted name's parents, so this follows the ordered imports.
+    def found(module):
+        try:
+            return module != "__main__" and (
+                module in sys.modules or importlib.util.find_spec(module) is not None
+            )
+        except Exception:
+            return False
+
+    # The entry may register a served module find_spec cannot locate (a plugin
+    # loader), so a module not found yet is looked up again after the entry imports.
+    def import_or_entry(module):
+        if not found(module) and ENTRY_MODULE in served:
+            import_served(ENTRY_MODULE)
+        import_served(module)
+
     # A module imported from inside another finished first, so the order alone
     # would import an override nested in the module it overrides before that one.
     owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
     for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
         if import_served is not None and module in served:
-            import_served(module)
+            import_or_entry(module)
             continue
         try:
             importlib.import_module(module)
@@ -115,16 +132,9 @@ def _import_custom_op_modules(served=(), import_served=None):
     # A served module that does not import fails the load here, not at the op
     # check, which would report its ops missing. A __main__ entry is refused
     # before section 0 runs.
-    # find_spec imports a dotted name's parents, so this follows the ordered imports.
     for module in served:
-        try:
-            found = module != "__main__" and (
-                module in sys.modules or importlib.util.find_spec(module) is not None
-            )
-        except Exception:
-            found = False
-        if not found and import_served is not None:
-            import_served(module)
+        if not found(module) and import_served is not None:
+            import_or_entry(module)
     missing = []
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     for name, overload in CUSTOM_OPS:
