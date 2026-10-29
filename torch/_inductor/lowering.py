@@ -9046,6 +9046,11 @@ def signbit(x):
         torch.uint64,
     ):
         return full_like(x, False, dtype=torch.bool)
+    if is_strict_cuda_triton(x.get_device()) and x.get_dtype() in (
+        torch.float16,
+        torch.bfloat16,
+    ):
+        x = to_dtype(x, torch.float32)
     fn = ops_wrapper("signbit")
     return make_pointwise(fn, override_return_dtype=torch.bool)(x)
 
