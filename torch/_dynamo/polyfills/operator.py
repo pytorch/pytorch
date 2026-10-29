@@ -5,7 +5,6 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-import sys
 from typing import Any, overload, SupportsIndex, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -28,6 +27,7 @@ __all__ = [
     "add",
     "and_",
     "attrgetter",
+    "call",
     "concat",
     "contains",
     "countOf",
@@ -206,12 +206,9 @@ def truth(a: Any, /) -> bool:
     return py_operator.truth(a)
 
 
-if sys.version_info >= (3, 11):
-    __all__.append("call")
-
-    @substitute_in_graph(operator.call, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
-    def call(obj: Callable[..., Any], /, *args, **kwargs) -> Any:
-        return py_operator.call(obj, *args, **kwargs)
+@substitute_in_graph(operator.call, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
+def call(obj: Callable[..., Any], /, *args, **kwargs) -> Any:
+    return py_operator.call(obj, *args, **kwargs)
 
 
 @substitute_in_graph(operator.getitem, can_constant_fold_through=False)  # type: ignore[arg-type,misc]
