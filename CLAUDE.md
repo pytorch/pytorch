@@ -7,8 +7,9 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
   approved the exact content. Fully-agent-generated contributions are banned and
   will be closed.
 - **Mark all AI-generated content.** Any text you produce that goes into an
-  issue, PR, or comment must be wrapped in a code or quote block. Never present
-  your output as human-written.
+  issue, PR, or comment must go under a section heading that labels it as
+  AI-generated (e.g. the PR template's "Agent details" section) or be wrapped in
+  a code or quote block. Never present your output as human-written.
 - **Never emit only raw AI text as a reply**. Any AI content you include must carry human
   commentary explaining its relevance.
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
@@ -31,6 +32,15 @@ Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch fi
 # PR Review
 
 When asked to review a PR, always use the /pr-review skill.
+
+# Deprecations
+
+When deprecating, freezing, or removing a public API or component, use the
+/deprecate-feature skill. The
+[backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy)
+is the source of truth for warning periods. The skill itself is a provisional
+process that we are evaluating in practice, not a rule: if the human driving
+the change thinks a step does not apply, skip it and say so.
 
 # Environment
 

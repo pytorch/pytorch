@@ -17,8 +17,10 @@ from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
     disable_gc,
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -101,6 +103,8 @@ def comparable(value):
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_exception(self):
         def fn(x):
             x = torch.cos(x)
@@ -558,13 +562,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(out, inp + 1))
 
     def test_observed_exception_with_non_string_args(self):
+        class NonStringArgs:
+            def __getitem__(self, key):
+                raise KeyError(1)
+
+        value = NonStringArgs()
+
         def fn(x):
             try:
-                type("A", (), {"__doc__": "x\udcdcy"})
-            except UnicodeEncodeError:
+                value[0]
+            except KeyError:
                 return x + 1
             return x
 
+        common_constant_types.add(NonStringArgs)
+        self.addCleanup(common_constant_types.discard, NonStringArgs)
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
@@ -800,6 +812,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin() + 1 + 2.0)
+
+    @parametrize(
+        "exc_args, expected",
+        [((404,), "404"), (("code", 500), "('code', 500)")],
+    )
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_classdef_exception_nonstring_args(self, exc_args, expected):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+
+                class A:
+                    raise ValueError(*exc_args)
+            except ValueError as e:
+                return t.sin() + (1 if str(e) == expected else 0)
+            return t.cos()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin() + 1)
 
     def test_nn_module_getattr(self):
         class A:

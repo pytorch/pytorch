@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -14,7 +14,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, detect_fake_mode
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
@@ -23,6 +23,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import (
+    canonicalize_dim,
     is_boolean_dtype,
     is_expandable_to,
     is_integer_dtype,
@@ -33,7 +34,13 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
-from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..fx_utils import (
+    FakeTensorUpdater,
+    get_fake_args_kwargs,
+    get_node_storage,
+    get_storage,
+    same_tensor_meta,
+)
 from ..kernel.symmetric_mm import quack_symmetric_mm
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -366,6 +373,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
+
+    # This pass adds data dependencies, so run it after mandatory ordering
+    # dependencies are explicit and the graph is topologically sorted.
+    if config.pattern_matcher:
+        GraphTransformObserver(gm, "reuse_dtype_conversions").apply_graph_pass(
+            reuse_dtype_conversions
+        )
 
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
         move_constructors_to_gpu
@@ -1138,13 +1152,16 @@ def pointless_cumsum_check(match: Match) -> bool:
             _users=MULTIPLE,
         ),
         KeywordArg("dim"),
+        dtype=KeywordArg("out_dtype"),
         _users=MULTIPLE,
     ),
     extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
-def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
+def pointless_cumsum_replacement(
+    match: Match, shape, fill_value, device, dtype, dim, out_dtype
+):
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
@@ -1153,7 +1170,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
-    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    out_dtype = out_dtype or dtype
     bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[bad-argument-type]
     integral_out = bool_out or is_integer_dtype(out_dtype)
@@ -1243,8 +1260,12 @@ def is_valid_splitwithsizes_cat(match):
     if len(split_nodes) != 1 or len(cat_nodes) != 1:
         return False
     split_node, cat_node = split_nodes[0], cat_nodes[0]
-    # The dim of split and cat should match for passthrough
-    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+    # The dim of split and cat should match for passthrough; a negative dim
+    # and its positive twin name the same axis
+    split_dim = get_arg_value(split_node, 2, "dim")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    rank = cat_node.meta["val"].ndim
+    if _canonicalize_dim_arg(rank, split_dim) != _canonicalize_dim_arg(rank, cat_dim):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1265,6 +1286,18 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+
+def _canonicalize_dim_arg(rank, dim):
+    # a dim left at its default comes through as None; that default is 0
+    d = dim if dim is not None else 0
+    try:
+        return canonicalize_dim(rank, d)
+    except IndexError:
+        # eager cat tolerates any dim when every input is a legacy (0,)
+        # empty, so an out-of-range dim can reach this check; compare raw
+        # rather than crash the pattern match
+        return d
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -1485,6 +1518,55 @@ def true_noop(*args, **kwargs):
     return True
 
 
+def _collect_output_storage(
+    graph: torch.fx.Graph,
+) -> OrderedSet[int | None]:
+    return OrderedSet(
+        get_node_storage(output)
+        for output in pytree.tree_leaves(graph.output_node().args[0])
+        if isinstance(output, torch.fx.Node)
+    )
+
+
+def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
+    """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
+
+    This is a denylist of consumers known to observe placement: ``as_strided``, whose
+    storage offset is relative to the storage, and user-defined Triton kernels, which
+    are opaque and may need an aligned base, for example to build a TMA descriptor on
+    the host or on the device. Other opaque consumers, such as custom ops and extern
+    fallback kernels, are intentionally not included. Views are followed through
+    single- and multi-output view ops.
+    """
+    storage = get_node_storage(node)
+    if storage is None:
+        return False
+    placement_dependent = (
+        aten.as_strided.default,
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+    )
+    pending = [node]
+    seen = OrderedSet([node])
+    while pending:
+        current = pending.pop()
+        for user in current.users:
+            if user.target in placement_dependent:
+                return True
+            if user.op != "call_function" or user in seen:
+                continue
+            val = user.meta.get("val")
+            outputs = val if isinstance(val, (list, tuple)) else [val]
+            if any(
+                isinstance(out, torch.Tensor)
+                and torch._C._has_storage(out)
+                and get_storage(out) == storage
+                for out in outputs
+            ):
+                seen.add(user)
+                pending.append(user)
+    return False
+
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -1501,16 +1583,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
         inputs.add(node)
         input_storages.add(get_node_storage(node))
 
-    output_node = next(iter(reversed(graph.nodes)))
-    if output_node.op != "output":
-        raise AssertionError(f"expected output node, got {output_node.op}")
-    outputs = output_node.args[0]
-    if not isinstance(outputs, (list, tuple)):
-        # nested subgraphs can have singleton outputs
-        outputs = (outputs,)
-    for out in outputs:
-        if isinstance(out, torch.fx.Node):
-            output_storages.add(get_node_storage(out))
+    output_node = graph.output_node()
+    output_storages = _collect_output_storage(graph)
 
     # Storages mutated in this graph. At this point the graph is functional except for
     # the input mutations AOT emits (copy_, plus set_ / resize_storage_bytes_ for FSDP).
@@ -1588,9 +1662,190 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_meta(node, src) and cond(*args, **kwargs):
+            # A non-view noop such as clone has fresh storage at offset 0. Replacing it
+            # with a source at another offset changes what storage-relative users read,
+            # so compare offsets only when such a user exists.
+            if same_tensor_meta(
+                node,
+                src,
+                skip_storage_offset=node_is_view
+                or not _depends_on_storage_offset(node),
+            ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+
+
+# We can potentially generalize to arbitrary view ops by validating
+# compatible storage regions.
+_SUPPORTED_DTYPE_CONVERSION_VIEWS = OrderedSet(
+    [
+        aten.narrow.default,
+        aten.permute.default,
+        aten.select.int,
+        aten.slice.Tensor,
+        aten.squeeze.dim,
+        aten.t.default,
+        aten.transpose.int,
+        aten.unsqueeze.default,
+        aten.view.default,
+    ]
+)
+
+
+def _replay_view(
+    view: torch.fx.Node, old: torch.fx.Node, new: torch.Tensor
+) -> torch.Tensor:
+    target = view.target
+    if not callable(target):
+        raise AssertionError("expected call_function target")
+    args, kwargs = pytree.tree_map(
+        lambda value: (
+            new
+            if value is old
+            else value.meta["val"]
+            if isinstance(value, torch.fx.Node)
+            else value
+        ),
+        (view.args, view.kwargs),
+    )
+    fake_mode = detect_fake_mode((args, kwargs))
+    if fake_mode is None:
+        raise AssertionError("expected FakeTensor inputs")
+    with fake_mode:
+        return target(*args, **kwargs)
+
+
+def reuse_dtype_conversions(graph: torch.fx.Graph) -> None:
+    """Reuse dtype conversions across supported direct views.
+
+    Finds:
+        base_conversion = convert(x, dtype)
+        conversion = convert(view_op(x, ...), dtype)
+
+    and replaces the second conversion with:
+        replacement = view_op(base_conversion, ...)
+    """
+    # Skip if the graph contains mutation beyond the copy_ output epilogue.
+    if graph.find_nodes(op="call_function", target=aten.set_.default):
+        return
+
+    output_storages = _collect_output_storage(graph)
+
+    # Index retained base conversions by
+    # (input storage ID, source dtype, destination dtype).
+    base_conversions_by_storage: defaultdict[
+        tuple[int, torch.dtype, torch.dtype], list[torch.fx.Node]
+    ] = defaultdict(list)
+    convert = prims.convert_element_type.default
+
+    rewrites = 0
+    # For each conversion:
+    # identify bucket
+    # search earlier retained bases
+    # if compatible base exists:
+    #     remove conversion
+    # else:
+    #     retain conversion as another base
+    for conversion in graph.find_nodes(op="call_function", target=convert):
+        source = cast(torch.fx.Node, get_arg_value(conversion, 0, "a"))
+        source_val = source.meta.get("val")
+        conversion_val = conversion.meta.get("val")
+        source_storage = get_node_storage(source)
+        conversion_storage = get_node_storage(conversion)
+        if not (
+            isinstance(source_val, torch.Tensor)
+            and isinstance(conversion_val, torch.Tensor)
+            and is_gpu(source_val.device.type)
+            and source_storage is not None
+            and conversion_storage is not None
+        ):
+            continue
+        key = (source_storage, source_val.dtype, conversion_val.dtype)
+        base_conversions = base_conversions_by_storage[key]
+        # Find a previous conversion that this conversion can reuse.
+        base_conversion = next(
+            (
+                base_conversion
+                for base_conversion in base_conversions
+                # first = convert(x, dtype)
+                # second = convert(x, dtype)
+                if source is get_arg_value(base_conversion, 0, "a")
+                # first = convert(x, dtype)
+                # second = convert(view_op(x,..), dtype)
+                or (
+                    source.op == "call_function"
+                    and source.target in _SUPPORTED_DTYPE_CONVERSION_VIEWS
+                    and source.args[0] is get_arg_value(base_conversion, 0, "a")
+                )
+            ),
+            None,
+        )
+        if base_conversion is None:
+            base_conversions.append(conversion)
+            continue
+
+        base_storage = get_node_storage(base_conversion)
+        # Do not introduce new aliasing between graph outputs: if both storages
+        # reach outputs, reusing the base would merge them.
+        if conversion_storage in output_storages and base_storage in output_storages:
+            base_conversions.append(conversion)
+            continue
+
+        base_source = cast(torch.fx.Node, get_arg_value(base_conversion, 0, "a"))
+        if source is base_source:
+            # Two identical conversions detected.
+            replacement = base_conversion
+        else:
+            view_target = cast(Callable[..., Any], source.target)
+            base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
+            # Replay view_op(base_conversion) to:
+            # 1. Verify that the view is valid for the converted base.
+            # 2. Produce FakeTensor metadata for the compatibility check below.
+            try:
+                replacement_val = _replay_view(source, base_source, base_conversion_val)
+            except (RuntimeError, ValueError):
+                # RuntimeError includes GuardOnDataDependentSymNode from symbolic
+                # views. ValueError occurs when the converted base layout cannot
+                # support the original view.
+                base_conversions.append(conversion)
+                continue
+
+            # Intermediate strides and storage offsets may change, but preserve
+            # them when the conversion is visible in the graph outputs.
+            if not same_tensor_meta(
+                replacement_val,
+                conversion_val,
+                skip_strides=conversion_storage not in output_storages,
+                skip_storage_offset=conversion_storage not in output_storages,
+            ):
+                base_conversions.append(conversion)
+                continue
+
+            replacement_args, replacement_kwargs = pytree.tree_map(
+                lambda value: base_conversion if value is base_source else value,
+                (source.args, source.kwargs),
+            )
+            with graph.inserting_before(conversion):
+                replacement = graph.call_function(
+                    view_target, replacement_args, replacement_kwargs
+                )
+            replacement.meta = conversion.meta.copy()
+            replacement.meta["val"] = replacement_val
+
+        conversion.replace_all_uses_with(replacement)
+        graph.erase_node(conversion)
+
+        pending = [source]
+        while pending:
+            unused = pending.pop()
+            if unused.op != "call_function" or unused.users or unused.is_impure():
+                continue
+            pending.extend(unused.all_input_nodes)
+            graph.erase_node(unused)
+        rewrites += 1
+
+    if rewrites:
+        counters["inductor"]["reuse_dtype_conversions"] += rewrites
 
 
 def remove_assert_ops(graph: torch.fx.Graph):
@@ -1926,30 +2181,33 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.cat,
-        ListOf(
-            CallFunction(
-                operator.getitem,
+# see cat_splitwithsizes below for why both arities are registered
+for _cat_arity, _split_arity in itertools.product((1, 2), (2, 3)):
+
+    @register_lowering_pattern(
+        CallFunction(
+            aten.cat,
+            ListOf(
                 CallFunction(
-                    aten.split_with_sizes,
-                    KeywordArg("input_"),
+                    operator.getitem,
+                    CallFunction(
+                        aten.split_with_sizes,
+                        KeywordArg("input_"),
+                        Ignored(),
+                        *([Ignored()] * (_split_arity - 2)),
+                        _users=MULTIPLE,
+                    ),
                     Ignored(),
-                    Ignored(),
-                    _users=MULTIPLE,
                 ),
-                Ignored(),
             ),
+            *([Ignored()] * (_cat_arity - 1)),
         ),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
-)
-def splitwithsizes_cat_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_splitwithsizes_cat,
+        output_metadata_is_input="input_",
+    )
+    def splitwithsizes_cat_replace(match, input_):
+        return input_
 
 
 def is_valid_cat_splitwithsizes(match):
@@ -1963,12 +2221,17 @@ def is_valid_cat_splitwithsizes(match):
     if len(cat_node.users) > 1:
         return False
 
-    # the dim of the cat and split should match
-    dim = get_arg_value(split_node, 2, "dim")
-    if dim != get_arg_value(cat_node, 1, "dim"):
+    cat_inputs = list(get_arg_value(cat_node, 0))
+
+    # the dim of the cat and split should match; a negative dim and its
+    # positive twin name the same axis. rank comes from the cat output since
+    # inputs can be legacy 1D empties
+    rank = cat_node.meta["val"].ndim
+    dim = _canonicalize_dim_arg(rank, get_arg_value(split_node, 2, "dim"))
+    cat_dim = _canonicalize_dim_arg(rank, get_arg_value(cat_node, 1, "dim"))
+    if dim != cat_dim:
         return False
 
-    cat_inputs = list(get_arg_value(cat_node, 0))
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # the number of input tensors in cat and the
     # length of the split sizes should match
@@ -1980,6 +2243,10 @@ def is_valid_cat_splitwithsizes(match):
         # should match the corresponding split size
         if "val" not in cat_input.meta:
             return False
+        if cat_input.meta["val"].ndim != rank:
+            # legacy 1D empties ride along in cat with a lower rank than the
+            # output; indexing them on the canonical dim would raise
+            return False
         cat_input_size = cat_input.meta["val"].size(dim)
         if cat_input_size != split_size:
             return False
@@ -1987,24 +2254,28 @@ def is_valid_cat_splitwithsizes(match):
     return True
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.split_with_sizes,
+# dim defaults to 0 for both ops, and aot autograd does not fill in defaults,
+# so every omitted trailing dim arg needs its own pattern arity
+for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
+
+    @register_lowering_pattern(
         CallFunction(
-            aten.cat,
-            KeywordArg("input_"),
+            aten.split_with_sizes,
+            CallFunction(
+                aten.cat,
+                KeywordArg("input_"),
+                *([Ignored()] * (_cat_arity - 1)),
+                _users=MULTIPLE,
+            ),
             Ignored(),
-            _users=MULTIPLE,
+            *([Ignored()] * (_split_arity - 2)),
         ),
-        Ignored(),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
-)
-def cat_splitwithsizes_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_cat_splitwithsizes,
+        output_metadata_is_input="input_",
+    )
+    def cat_splitwithsizes_replace(match, input_):
+        return input_
 
 
 # reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity
@@ -2084,11 +2355,9 @@ def should_prefer_unfused_addmm(match):
         return False
     if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
         return False
-    beta = match.kwargs.get("beta", 1)
-    if inp_val.device.type != "cuda" and beta == 0:
-        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
-        if not is_expandable_to(inp_val.shape, mm_shape):
-            return False
+    # tuned_addmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
+        return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):
@@ -2101,6 +2370,9 @@ def should_prefer_unfused_baddbmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
     if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
+    # tuned_baddbmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
         return False
 
     output = match.output_node()
@@ -2141,16 +2413,10 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
-    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
-
     def repl(inp, x1, x2, alpha, beta):
-        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
-            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
-        if beta == 0 and drop_input_for_beta_zero:
-            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result
@@ -2207,11 +2473,6 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
-    # addmm skips the operand scaled by 0, so it wouldn't propagate its NaN/inf
-    alpha = match.output_node().kwargs.get("alpha", 1)
-    if not isinstance(alpha, (int, float)) or alpha == 0:
-        return False
-
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -2256,13 +2517,8 @@ def is_valid_addmm_fusion(match):
     extra_check=is_valid_addmm_fusion,
 )
 def addmm(match, mat1, mat2, *, inp):
-    add = match.output_node()
-    alpha = add.kwargs.get("alpha", 1)
-    # add(inp, mm, alpha) = inp + alpha * mm; add(mm, inp, alpha) = mm + alpha * inp
-    scale = {} if alpha == 1 else {"alpha" if add.args[0] is inp else "beta": alpha}
-
     def repl(inp, mat1, mat2):
-        return aten.addmm(inp, mat1, mat2, **scale)
+        return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
 
@@ -2675,7 +2931,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
-        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+        if i is not None and i.meta["val"].dtype in [torch.bool, torch.uint8]:
             any_byte_bool_indices = True
 
     val = args_[2].meta["val"]
@@ -2888,11 +3144,13 @@ class ConstructorMoverPass:
                     gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
                     node.replace_all_uses_with(
                         gpu_node,
-                        lambda x: x
-                        not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
-                        + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default
-                        and x.target != "output",
+                        lambda x: (
+                            x
+                            not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
+                            + unsqueezed_nodes
+                            and x.target != torch.ops.aten.copy_.default
+                            and x.target != "output"
+                        ),
                     )
                     last_node = gpu_node
 
@@ -2948,6 +3206,10 @@ class ConstructorMoverPass:
                 equal_constructor_sets[obj] = set1
             return set1
 
+        # a moved cpu placeholder keeps its cpu tensor for the output use, but a
+        # moved constructor changes the device the caller sees
+        returned_constructors: OrderedSet[fx.Node] = OrderedSet()
+
         queue: list[fx.Node] = list(constructors)
 
         for c in queue:
@@ -2961,6 +3223,11 @@ class ConstructorMoverPass:
                 if self.cannot_be_moved(user):
                     cannot_move_to_gpu.update(dependencies)
                     break
+
+                if user.target == "output":
+                    returned_constructors.update(
+                        c for c in dependencies if c.op != "placeholder"
+                    )
 
                 # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
@@ -2990,6 +3257,8 @@ class ConstructorMoverPass:
         for node in cpu_indeg:
             if constructor_dependencies[node]:
                 cannot_move_to_gpu.update(constructor_dependencies[node])
+
+        cannot_move_to_gpu.update(returned_constructors)
 
         all_cannot_move_to_gpu = cannot_move_to_gpu.copy()
         for constructor in cannot_move_to_gpu:
