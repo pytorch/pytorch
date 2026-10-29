@@ -1,0 +1,1690 @@
+# Source of truth for CODEOWNERS. After editing, regenerate CODEOWNERS with
+#   python scripts/codeowners/generate_codeowners.py
+# or `lintrunner -a`; the CODEOWNERS_GENERATED lint fails until they match.
+#
+# Each entry under `ownership` is a label group: a `name`, its labels, its owners,
+# and every path it owns, listed once. The name is a stable identifier that
+# doesn't change when a label is renamed; it is the group's most specific label
+# followed by its other labels, or the CODEOWNERS section name for paths without
+# labels. Ownership status is `owners` alone; `[]` means no owner recorded yet.
+# Handles are written without the leading @. A path with handles is an active
+# CODEOWNERS rule (those handles get review requests); a bare path is a
+# commented rule. `section` is the CODEOWNERS section the group's paths are
+# written under; it is kept temporarily for scripts/codeowners/owners.py.
+
+planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
+# CODEOWNERS section order (temporary, see above).
+sections:
+  - core_aten_native_ops
+  - functorch
+  - compiler_autograd
+  - core_aten_linalg
+  - sparse
+  - core_aten_optimizers
+  - core_aten_runtime
+  - core_c10_dispatch
+  - autograd
+  - core_csrc_misc
+  - core_lazy_runtime
+  - core_tests
+  - backend_device_runtime
+  - backend_cuda
+  - backend_mps
+  - backend_xpu
+  - backend_rocm
+  - backend_vulkan
+  - python_core_api
+  - python_nn_api
+  - python_data_api
+  - python_specialized_api
+  - python_api_tests
+  - cpp_runtime_tests
+  - jit_torchscript
+  - cpp_api_custom_ops
+  - onnx_export
+  - quantization
+  - profiler
+  - mobile_runtime
+  - mobile_android
+  - mobile_delegates
+  - infra_ci
+  - infra_github_automation
+  - infra_build_packaging
+  - third_party_core_build_deps
+  - third_party_backend_deps
+  - third_party_serialization_schema
+  - benchmark_compiler
+  - distributed
+  - infra_developer_tools
+  - infra_linting
+  - infra_codegen
+  - infra_test
+  - benchmark_operator_runtime
+  - benchmark_models
+  - caffe2
+  - serialization_package
+  - compiler_export_fx
+  - compiler_dynamo
+  - compiler_inductor
+  - nativert
+  - ai_agent_tooling
+  - docs_general
+  - protected_codeownership
+section_notes:
+  protected_codeownership:
+    - "# DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet."
+    - "# Keep these rules last so they override broader patterns."
+
+ownership:
+  - name: functorch
+    labels: ["module: functorch"]
+    owners: [Chillee, kshitij12345, zou3519]
+    section: functorch
+    paths:
+      - /aten/src/ATen/functorch/
+      - /functorch/
+      - /test/functorch/
+      - /torch/_functorch/
+      - /torch/csrc/functorch/
+      - /torch/func/
+      - /test/functorch/test_ops.py: [zou3519, chillee, kshitij12345]
+      - /test/functorch/test_vmap.py: [zou3519, chillee, kshitij12345]
+  - name: compiled_autograd
+    labels: ["module: compiled autograd"]
+    owners: []
+    section: compiler_autograd
+    paths:
+      - /test/compiled_autograd_skips/
+  - name: aotdispatch
+    labels: ["module: aotdispatch"]
+    owners: [aorenste, bdhirsh]
+    section: compiler_autograd
+    paths:
+      - /test/functorch/test_aot_joint_with_descriptors.py
+      - /test/functorch/test_aotdispatch.py: [ezyang, Chillee]
+      - /test/functorch/test_codegen_backward_epilogue.py
+      - /test/functorch/test_codegen_backward_prologue.py
+      - /test/functorch/test_codegen_debug_assert.py
+      - /test/functorch/test_codegen_dedup.py
+      - /test/functorch/test_codegen_mutation_epilogue.py
+      - /test/functorch/test_codegen_output_alias.py
+      - /test/functorch/test_codegen_runtime_wrapper.py
+      - /test/functorch/test_compile_to_python.py
+      - /test/functorch/test_memory_efficient_fusion.py
+      - /test/functorch/test_minifier.py
+      - /test/functorch/test_source_emit.py
+      - /test/functorch/test_subclass_codegen.py
+      - /test/test_functionalization_of_rng_ops.py
+      - /torch/_functorch/_aot_autograd/
+      - /torch/_functorch/aot_autograd.py: [bdhirsh, aorenste]
+      - /torch/_functorch/compile_utils.py
+      - /torch/_functorch/compilers.py
+      - /torch/_functorch/partitioners.py
+      - /torch/_functorch/_aot_autograd/*.py: [bdhirsh, aorenste]
+  - name: complex_aotdispatch
+    labels: ["module: aotdispatch", "module: complex"]
+    owners: [amjames, hameerabbasi]
+    section: compiler_autograd
+    paths:
+      - /torch/_functorch/_aot_autograd/complex_decomposition.py: [hameerabbasi, amjames]
+  - name: linear_algebra
+    labels: ["module: linear algebra"]
+    owners: [lezcano, nikitaved]
+    section: core_aten_linalg
+    paths:
+      - /aten/src/ATen/native/**/*LinearAlgebra*: [lezcano, nikitaved]
+      - /aten/src/ATen/native/BatchLinearAlgebra.cpp
+      - /aten/src/ATen/native/BatchLinearAlgebra.h
+      - /aten/src/ATen/native/BatchLinearAlgebraKernel.cpp
+      - /aten/src/ATen/native/Blas.cpp
+      - /aten/src/ATen/native/BlasKernel.cpp
+      - /aten/src/ATen/native/CPUBlas.cpp
+      - /aten/src/ATen/native/CPUBlas.h
+      - /aten/src/ATen/native/Cross.cpp
+      - /aten/src/ATen/native/Cross.h
+      - /aten/src/ATen/native/FunctionOfAMatrixUtils.cpp
+      - /aten/src/ATen/native/FunctionOfAMatrixUtils.h
+      - /aten/src/ATen/native/GroupedMMUtils.h
+      - /aten/src/ATen/native/LinearAlgebra.cpp
+      - /aten/src/ATen/native/LinearAlgebra.h
+      - /aten/src/ATen/native/LinearAlgebraUtils.h
+      - /aten/src/ATen/native/TriangularOps.cpp
+      - /aten/src/ATen/native/TriangularOpsUtils.h
+      - /test/test_linalg.py: [lezcano, nikitaved]
+      - /test/test_matmul_cuda.py
+      - /torch/linalg/: [lezcano, nikitaved]
+      - /aten/src/ATen/native/Distance.cpp
+      - /aten/src/ATen/native/Distance.h
+  - name: fft
+    labels: ["module: fft"]
+    owners: []
+    section: core_aten_linalg
+    paths:
+      - /aten/src/ATen/native/SpectralOps.cpp
+      - /aten/src/ATen/native/SpectralOpsUtils.h
+      - /test/test_spectral_ops.py
+  - name: floatx_linear_algebra
+    labels: ["module: linear algebra", "module: floatx (formerly float8)"]
+    owners: [drisspg, slayton58]
+    section: core_aten_linalg
+    paths:
+      - /aten/src/ATen/native/ScaledBlas.cpp
+      - /aten/src/ATen/native/ScaledBlasUtils.cpp
+      - /aten/src/ATen/native/ScaledBlasUtils.h
+      - /test/test_scaled_matmul_cuda.py: [drisspg, slayton58]
+  - name: sparse
+    labels: ["module: sparse"]
+    owners: [amjames, nikitaved, pearu]
+    section: sparse
+    paths:
+      - /aten/src/ATen/native/SparseTensorUtils.cpp
+      - /aten/src/ATen/native/SparseTensorUtils.h
+      - /aten/src/ATen/native/sparse/: [amjames, pearu, nikitaved]
+      - /test/expect/TestSparseCPU.test_print_coalesced_cpu_float64.expect
+      - /test/expect/TestSparseCPU.test_print_uncoalesced_cpu_float64.expect
+      - /test/expect/TestSparseCUDA.test_print_coalesced_cuda_float64.expect
+      - /test/expect/TestSparseCUDA.test_print_uncoalesced_cuda_float64.expect
+      - /test/expect/TestSparseCompressedDeviceCPU.test_print_SparseBSC_cpu.expect
+      - /test/expect/TestSparseCompressedDeviceCPU.test_print_SparseBSR_cpu.expect
+      - /test/expect/TestSparseCompressedDeviceCPU.test_print_SparseCSC_cpu.expect
+      - /test/expect/TestSparseCompressedDeviceCPU.test_print_SparseCSR_cpu.expect
+      - /test/expect/TestSparseCompressedDeviceCUDA.test_print_SparseBSC_cuda.expect
+      - /test/expect/TestSparseCompressedDeviceCUDA.test_print_SparseBSR_cuda.expect
+      - /test/expect/TestSparseCompressedDeviceCUDA.test_print_SparseCSC_cuda.expect
+      - /test/expect/TestSparseCompressedDeviceCUDA.test_print_SparseCSR_cuda.expect
+      - /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseBSC_xpu.expect
+      - /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseBSR_xpu.expect
+      - /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseCSC_xpu.expect
+      - /test/expect/TestSparseCompressedDeviceXPU.test_print_SparseCSR_xpu.expect
+      - /test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
+      - /test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
+      - /test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
+      - /test/expect/TestSparseMeta.test_print_meta_SparseBSR_float64.expect
+      - /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
+      - /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
+      - /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+      - /test/test_sparse.py: [amjames, pearu, nikitaved]
+      - /test/test_sparse_csr.py: [amjames, pearu, nikitaved]
+      - /test/test_sparse_semi_structured.py
+      - /torch/sparse/: [amjames, pearu, nikitaved]
+      - /aten/src/ATen/SparseCsrTensorImpl.cpp: [amjames, pearu, nikitaved]
+      - /aten/src/ATen/SparseCsrTensorImpl.h
+      - /aten/src/ATen/SparseCsrTensorUtils.h
+      - /aten/src/ATen/SparseTensorImpl.cpp: [amjames, pearu, nikitaved]
+      - /aten/src/ATen/SparseTensorImpl.h
+  - name: mta
+    labels: ["module: mta"]
+    owners: [janeyx99]
+    section: core_aten_optimizers
+    paths:
+      - /aten/src/ATen/native/Foreach*: [janeyx99]
+      - /torch/foreach/: [janeyx99]
+      - /test/test_foreach.py: [janeyx99]
+  - name: optimizer
+    labels: ["module: optimizer"]
+    owners: [albanD, janeyx99]
+    section: core_aten_optimizers
+    paths:
+      - /aten/src/ATen/native/Fused*: [janeyx99]
+      - /test/test_functional_optim.py
+      - /torch/optim/: [albanD, janeyx99]
+      - /test/optim/: [janeyx99]
+      - /test/test_optim.py: [janeyx99]
+  - name: autograd
+    labels: ["module: autograd"]
+    owners: [albanD, soulitzer]
+    section: autograd
+    paths:
+      - /torch/autograd/: [albanD, soulitzer]
+      - /torch/csrc/autograd/: [albanD, soulitzer]
+      - /test/test_ops_fwd_gradients.py: [soulitzer]
+      - /test/test_ops_gradients.py: [soulitzer]
+      - /test/autograd/: [soulitzer]
+      - /test/test_autograd.py: [soulitzer]
+      - /test/test_autograd_fallback.py: [soulitzer]
+  - name: abi
+    labels: ["module: abi"]
+    owners: [janeyx99]
+    section: core_csrc_misc
+    paths:
+      - /torch/csrc/shim*: [janeyx99]
+      - /torch/csrc/stable/: [janeyx99]
+  - name: lazy
+    labels: ["module: lazy"]
+    owners: []
+    section: core_lazy_runtime
+    paths:
+      - /torch/csrc/lazy/
+  - name: mtia
+    labels: ["module: mtia"]
+    owners: [egienvalue]
+    section: backend_device_runtime
+    paths:
+      - /aten/src/ATen/detail/MTIAHooksInterface.h: [egienvalue]
+      - /torch/csrc/mtia/: [egienvalue]
+  - name: cuda
+    labels: ["module: cuda"]
+    owners: [Aidyn-A, eqy, syed-ahmed]
+    section: backend_cuda
+    paths:
+      - /aten/src/ATen/cuda/: [eqy, syed-ahmed, Aidyn-A]
+      - /aten/src/ATen/native/cuda/: [eqy, syed-ahmed, Aidyn-A]
+      - /test/test_cow.py
+      - /test/test_cuda.py
+      - /test/test_cuda_compatibility.py
+      - /test/test_cuda_expandable_segments.py
+      - /test/test_cuda_graph_debug.py
+      - /test/test_cuda_graph_utils.py
+      - /test/test_cuda_nvml_based_avail.py
+      - /test/test_cuda_primary_ctx.py
+      - /test/test_cuda_sanitizer.py
+      - /torch/backends/cuda/: [eqy, syed-ahmed, Aidyn-A]
+      - /torch/backends/cusparselt/
+      - /torch/csrc/cuda/: [eqy, syed-ahmed, Aidyn-A]
+      - /torch/cuda/: [eqy, syed-ahmed, Aidyn-A]
+      - /c10/cuda/: [eqy, syed-ahmed, Aidyn-A]
+  - name: cublas_cuda
+    labels: ["module: cuda", "module: cublas"]
+    owners: [drisspg, slayton58]
+    section: backend_cuda
+    paths:
+      - /aten/src/ATen/native/cuda/Blas.cpp: [drisspg, slayton58]
+      - /aten/src/ATen/native/cuda/GroupedBlas.cpp: [drisspg, slayton58]
+      - /aten/src/ATen/cuda/CUDABlas.cpp: [drisspg, slayton58]
+      - /aten/src/ATen/cuda/CUDABlas.h: [drisspg, slayton58]
+  - name: floatx_cuda
+    labels: ["module: cuda", "module: floatx (formerly float8)"]
+    owners: [drisspg, slayton58]
+    section: backend_cuda
+    paths:
+      - /aten/src/ATen/native/cuda/ScaledBlas.cpp: [drisspg, slayton58]
+  - name: cudnn_cuda
+    labels: ["module: cuda", "module: cudnn"]
+    owners: [Aidyn-A, eqy, syed-ahmed]
+    section: backend_cuda
+    paths:
+      - /torch/backends/cudnn/: [eqy, syed-ahmed, Aidyn-A]
+      - /aten/src/ATen/native/cudnn/: [eqy, syed-ahmed, Aidyn-A]
+      - /aten/src/ATen/cudnn/: [eqy, syed-ahmed, Aidyn-A]
+  - name: mps
+    labels: ["module: mps"]
+    owners: [Isalia20, malfet]
+    section: backend_mps
+    paths:
+      - /aten/src/ATen/mps/: [malfet, Isalia20]
+      - /aten/src/ATen/native/mps/: [malfet, Isalia20]
+      - /c10/metal/: [malfet, Isalia20]
+      - /test/test_mps.py: [malfet, Isalia20]
+      - /torch/backends/mps/
+      - /torch/csrc/mps/
+      - /torch/mps/
+  - name: ios_mobile
+    labels: ["oncall: mobile", "module: ios"]
+    owners: []
+    section: backend_mps
+    paths:
+      - /aten/src/ATen/metal/
+      - /test/metal/
+      - /test/test_metal.py
+  - name: xpu
+    labels: ["module: xpu"]
+    owners: [EikanWang, gujinghui]
+    section: backend_xpu
+    paths:
+      - /aten/src/ATen/xpu/: [EikanWang, gujinghui]
+      - /c10/xpu/: [EikanWang, gujinghui]
+      - /test/test_xpu.py: [EikanWang, gujinghui]
+      - /test/test_xpu_expandable_segments.py
+      - /test/xpu/: [EikanWang, gujinghui]
+      - /torch/csrc/xpu/: [EikanWang, gujinghui]
+      - /torch/xpu/: [EikanWang, gujinghui]
+      - /aten/src/ATen/native/mkldnn/xpu/: [EikanWang, gujinghui]
+  - name: rocm
+    labels: ["module: rocm"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: backend_rocm
+    paths:
+      - /aten/src/ATen/hip/: [jeffdaily, jithunnair-amd]
+      - /torch/backends/miopen/
+      - /c10/hip/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/native/miopen/: [jeffdaily, jithunnair-amd]
+      - /aten/src/ATen/miopen/: [jeffdaily, jithunnair-amd]
+  - name: vulkan
+    labels: ["module: vulkan"]
+    owners: []
+    section: backend_vulkan
+    paths:
+      - /aten/src/ATen/native/vulkan/
+  - name: dsl_native_ops
+    labels: ["module: dsl-native-ops"]
+    owners: [drisspg, pearu, slayton58]
+    section: python_core_api
+    paths:
+      - /torch/_native/: [slayton58, drisspg]
+      - /torch/_native/ops/linear_cross_entropy/: [slayton58, pearu]
+      - /test/python_native/test_lce_fused_grad_logits_kernel.py: [slayton58, pearu]
+      - /test/python_native/test_linear_cross_entropy_override.py: [slayton58, pearu]
+  - name: complex
+    labels: ["module: complex"]
+    owners: [amjames, hameerabbasi]
+    section: python_core_api
+    paths:
+      - /torch/_subclasses/complex_tensor/: [hameerabbasi, amjames]
+      - /test/complex_tensor/: [hameerabbasi, amjames]
+  - name: faketensor
+    labels: ["module: fakeTensor"]
+    owners: [aorenste]
+    section: python_core_api
+    paths:
+      - /torch/_subclasses/fake_tensor.py: [aorenste]
+      - /torch/_subclasses/fake_utils.py: [aorenste]
+  - name: headeronly_abi
+    labels: ["module: abi", "module: headeronly"]
+    owners: [janeyx99]
+    section: python_core_api
+    paths:
+      - /torch/header_only_apis.txt: [janeyx99]
+      - /torch/headeronly/: [janeyx99]
+  - name: hipify_rocm
+    labels: ["module: rocm", "module: hipify"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: python_core_api
+    paths:
+      - /torch/utils/hipify/: [jeffdaily, jithunnair-amd]
+  - name: pytree
+    labels: ["module: pytree"]
+    owners: [XuehaiPan]
+    section: python_core_api
+    paths:
+      - /torch/utils/_pytree.py: [XuehaiPan]
+      - /torch/utils/_cxx_pytree.py: [XuehaiPan]
+  - name: nn
+    labels: ["module: nn"]
+    owners: [albanD, jbschlosser]
+    section: python_nn_api
+    paths:
+      - /torch/nn/: [albanD, jbschlosser]
+  - name: nn_dsl_native_ops
+    labels: ["module: dsl-native-ops", "module: nn"]
+    owners: [drisspg, pearu, slayton58]
+    section: python_nn_api
+    paths:
+      - /torch/nn/modules/linear_cross_entropy*.py: [slayton58, pearu]
+  - name: nn_utils_parametrize
+    labels: ["module: nn", "module: nn.utils.parametrize"]
+    owners: [lezcano]
+    section: python_nn_api
+    paths:
+      - /torch/nn/utils/parametriz*.py: [lezcano]
+  - name: flex_attention
+    labels: ["module: flex attention"]
+    owners: [drisspg]
+    section: python_nn_api
+    paths:
+      - /torch/nn/attention/flex_attention.py: [drisspg]
+  - name: dataloader
+    labels: ["module: dataloader"]
+    owners: [aelavender, divyanshk, ramanishsingh, scotts]
+    section: python_data_api
+    paths:
+      - /torch/utils/data/: [divyanshk, ramanishsingh, scotts, aelavender]
+  - name: masked_operators
+    labels: ["module: masked operators"]
+    owners: []
+    section: python_specialized_api
+    paths:
+      - /test/test_masked.py
+      - /test/test_maskedtensor.py
+      - /torch/masked/
+  - name: tensorboard
+    labels: ["module: tensorboard"]
+    owners: []
+    section: python_specialized_api
+    paths:
+      - /torch/utils/tensorboard/
+  - name: sdpa
+    labels: ["module: sdpa"]
+    owners: [liangel-02]
+    section: python_api_tests
+    paths:
+      - /test/test_varlen_attention.py: [liangel-02]
+  - name: jit
+    labels: ["oncall: jit"]
+    owners: []
+    section: jit_torchscript
+    paths:
+      - /test/cpp/jit/test_jit_logging_levels.cpp
+      - /test/cpp/jit/test_jit_type.cpp
+      - /test/cpp/jit/test_save_load.cpp
+      - /test/jit/
+      - /test/jit_hooks/
+      - /test/test_jit.py
+      - /test/test_jit_autocast.py
+      - /test/test_jit_disabled.py
+      - /test/test_jit_fuser.py
+      - /test/test_jit_fuser_legacy.py
+      - /test/test_jit_fuser_te.py
+      - /test/test_jit_legacy.py
+      - /test/test_jit_llga_fuser.py
+      - /test/test_jit_profiling.py
+      - /test/test_jit_simple.py
+      - /test/test_jit_string.py
+      - /test/test_tensorexpr.py
+      - /test/test_tensorexpr_pybind.py
+      - /torch/csrc/jit/
+      - /torch/jit/
+      - /torch/csrc/jit/python/init.cpp
+  - name: jiterator
+    labels: ["module: jiterator"]
+    owners: []
+    section: jit_torchscript
+    paths:
+      - /test/test_jiterator.py
+  - name: cpp_extensions
+    labels: ["module: cpp-extensions"]
+    owners: [ezyang, fmassa, malfet]
+    section: cpp_api_custom_ops
+    paths:
+      - /torch/utils/cpp_extension.py: [fmassa, ezyang, malfet]
+  - name: onnx
+    labels: ["module: onnx"]
+    owners: [justinchuby, titaiwangms, xadupre]
+    section: onnx_export
+    paths:
+      - /test/onnx/: [titaiwangms, xadupre, justinchuby]
+      - /torch/onnx/: [titaiwangms, xadupre, justinchuby]
+      - /torch/csrc/jit/passes/onnx.h: [titaiwangms, xadupre]
+      - /torch/csrc/jit/passes/onnx.cpp: [titaiwangms, xadupre]
+      - /torch/csrc/jit/passes/onnx/: [titaiwangms, xadupre]
+  - name: quantization
+    labels: ["oncall: quantization"]
+    owners: [digantdesai, jerryzh168, jianyuh, salilsdesai]
+    section: quantization
+    paths:
+      - /test/ao/: [jerryzh168]
+      - /test/onnx/test_models_quantized_onnxruntime.py
+      - /test/quantization/: [jerryzh168]
+      - /test/test_quantization.py: [jerryzh168]
+      - /torch/ao/
+      - /torch/ao/quantization/: [jerryzh168]
+      - /torch/ao/nn/intrinsic/: [jerryzh168]
+      - /torch/ao/nn/quantized/: [jerryzh168]
+      - /torch/ao/nn/quantizable/: [jerryzh168]
+      - /torch/ao/nn/qat/: [jerryzh168]
+      - /torch/quantization/: [jerryzh168]
+      - /aten/src/ATen/native/quantized/: [jerryzh168, salilsdesai, digantdesai, jianyuh]
+      - /aten/src/ATen/native/quantized/cpu/: [jerryzh168, salilsdesai, digantdesai, jianyuh]
+      - /aten/src/ATen/native/quantized/cuda/: [jerryzh168]
+      - /aten/src/ATen/native/quantized/cudnn/: [jerryzh168]
+      - /aten/src/ATen/native/ao_sparse/: [salilsdesai, digantdesai, jianyuh]
+  - name: profiler
+    labels: ["oncall: profiler"]
+    owners: [ryanzhang22, scotts]
+    section: profiler
+    paths:
+      - /test/cpp/profiler/test_profiler_collection.cpp
+      - /test/profiler/
+      - /test/test_throughput_benchmark.py
+      - /torch/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/autograd/profiler.py
+      - /torch/autograd/profiler_legacy.py
+      - /torch/autograd/profiler_util.py
+      - /torch/csrc/autograd/profiler*: [scotts, ryanzhang22]
+      - /torch/csrc/autograd/profiler.h
+      - /torch/csrc/autograd/profiler_kineto.cpp
+      - /torch/csrc/autograd/profiler_kineto.h
+      - /torch/csrc/autograd/profiler_legacy.cpp
+      - /torch/csrc/autograd/profiler_legacy.h
+      - /torch/csrc/autograd/profiler_python.cpp
+      - /torch/csrc/autograd/profiler_python.h
+      - /torch/csrc/profiler/: [scotts, ryanzhang22]
+      - /torch/profiler/: [scotts, ryanzhang22]
+  - name: mobile
+    labels: ["oncall: mobile"]
+    owners: []
+    section: mobile_runtime
+    paths:
+      - /test/cpp/jit/test_mobile_type_parser.cpp
+      - /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
+      - /test/mobile/
+      - /test/test_mobile_optimizer.py
+      - /torch/csrc/jit/mobile/
+  - name: android
+    labels: ["module: android"]
+    owners: []
+    section: mobile_android
+    paths:
+      - /android/
+      - /test/mobile/custom_build/
+  - name: mobile_delegates
+    labels: ["oncall: mobile", "module: mobile delegates"]
+    owners: []
+    section: mobile_delegates
+    paths:
+      - /test/test_vulkan.py
+      - /test/test_xnnpack_integration.py
+      - /torch/backends/_coreml/
+      - /torch/backends/_nnapi/
+      - /torch/backends/xnnpack/
+      - /torch/csrc/jit/backends/
+  - name: ci
+    labels: ["module: ci"]
+    owners: [pytorch/pytorch-dev-infra]
+    section: infra_ci
+    paths:
+      - /.ci/: [pytorch/pytorch-dev-infra]
+  - name: rocm_ci
+    labels: ["module: ci", "module: rocm"]
+    owners: [jeffdaily]
+    section: infra_ci
+    paths:
+      - /.ci/docker/ubuntu-rocm/: [jeffdaily]
+      - /.ci/docker/common/install_roc*.sh: [jeffdaily]
+      - /.ci/docker/common/install_amdsmi.sh: [jeffdaily]
+      - /.ci/docker/ci_commit_pins/rocm-*.txt: [jeffdaily]
+  - name: inductor_ci
+    labels: ["module: ci", "module: inductor"]
+    owners: [Chillee, desertfire, eellison, jataylo, jeffdaily, jithunnair-amd, pruthvistony]
+    section: infra_ci
+    paths:
+      - /.ci/docker/ci_commit_pins/triton.txt: [desertfire, Chillee, eellison, jeffdaily, jataylo, jithunnair-amd, pruthvistony]
+  - name: xpu_ci
+    labels: ["module: ci", "module: xpu"]
+    owners: [EikanWang, gujinghui]
+    section: infra_ci
+    paths:
+      - /.ci/docker/ci_commit_pins/triton-xpu.txt: [EikanWang, gujinghui]
+  - name: github_automation_ci
+    labels: ["module: ci", "module: github automation"]
+    owners: [pytorch/pytorch-dev-infra]
+    section: infra_github_automation
+    paths:
+      - /.github/: [pytorch/pytorch-dev-infra]
+  - name: build
+    labels: ["module: build"]
+    owners: []
+    section: infra_build_packaging
+    paths:
+      - /.ci/wheel/
+      - /.coveragerc
+      - /.ctags.d/
+      - /.dockerignore
+      - /.editorconfig
+      - /.gdbinit
+      - /.git-blame-ignore-revs
+      - /.gitattributes
+      - /.gitignore
+      - /.lldbinit
+      - /.spin/
+      - /BUCK.oss
+      - /CMakeLists.txt
+      - /Dockerfile
+      - /Makefile
+      - /buckbuild.bzl
+      - /build.bzl
+      - /build_variables.bzl
+      - /cmake/
+      - /codex_setup.sh
+      - /defs.bzl
+      - /docker.Makefile
+      - /mkldnn.bzl
+      - /pt_ops.bzl
+      - /pt_template_srcs.bzl
+      - /pyproject.toml
+      - /pytest.ini
+      - /setup.py
+      - /ubsan.supp
+      - /ufunc_defs.bzl
+      - /version.txt
+  - name: build_third_party
+    labels: ["module: third_party", "module: build"]
+    owners: []
+    section: third_party_core_build_deps
+    paths:
+      - /.gitmodules
+      - /requirements-build.txt
+      - /requirements.txt
+      - /third_party/
+  - name: third_party
+    labels: ["module: third_party"]
+    owners: []
+    section: third_party_backend_deps
+    paths:
+      - /third_party/NNPACK
+      - /third_party/VulkanMemoryAllocator
+      - /third_party/XNNPACK
+      - /third_party/aiter
+      - /third_party/composable_kernel
+      - /third_party/cpuinfo
+      - /third_party/cudnn_frontend
+      - /third_party/cutlass
+      - /third_party/fbgemm
+      - /third_party/flash-attention
+      - /third_party/gemmlowp/
+      - /third_party/ideep
+      - /third_party/kleidiai
+      - /third_party/pthreadpool
+      - /third_party/xnnpack.buck.bzl
+      - /third_party/xnnpack_buck_shim.bzl
+      - /third_party/xnnpack_src_defs.bzl
+      - /third_party/xnnpack_wrapper_defs.bzl
+  - name: third_party_profiler
+    labels: ["oncall: profiler", "module: third_party"]
+    owners: [ryanzhang22, scotts]
+    section: third_party_backend_deps
+    paths:
+      - /third_party/dynolog_headers/: [scotts, ryanzhang22]
+  - name: xpu_third_party
+    labels: ["module: third_party", "module: xpu"]
+    owners: [EikanWang, gujinghui]
+    section: third_party_backend_deps
+    paths:
+      - /third_party/xpu.txt: [EikanWang, gujinghui]
+  - name: serialization_third_party
+    labels: ["module: third_party", "module: serialization"]
+    owners: []
+    section: third_party_serialization_schema
+    paths:
+      - /third_party/flatbuffers
+      - /third_party/miniz-3.0.2/
+      - /third_party/protobuf
+  - name: onnx_third_party
+    labels: ["module: third_party", "module: onnx"]
+    owners: []
+    section: third_party_serialization_schema
+    paths:
+      - /third_party/onnx
+  - name: benchmark
+    labels: ["module: benchmark"]
+    owners: []
+    section: benchmark_compiler
+    paths:
+      - /benchmarks/
+  - name: distributed
+    labels: ["oncall: distributed"]
+    owners: []
+    section: distributed
+    paths:
+      - /benchmarks/distributed/
+      - /test/distributed/
+      - /torch/csrc/distributed/
+      - /torch/distributed/
+  - name: optimizer_distributed
+    labels: ["oncall: distributed", "module: optimizer"]
+    owners: [weifengpy]
+    section: distributed
+    paths:
+      - /torch/distributed/optim/: [weifengpy]
+  - name: tensorpipe
+    labels: ["module: tensorpipe"]
+    owners: [jiayisuse, lw]
+    section: distributed
+    paths:
+      - /torch/csrc/distributed/rpc/tensorpipe_agent.cpp: [jiayisuse, lw]
+      - /torch/csrc/distributed/rpc/tensorpipe_agent.h: [jiayisuse, lw]
+  - name: c10d
+    labels: ["module: c10d"]
+    owners: [d4l3k, fduwjj, kapilsh, kwen2501]
+    section: distributed
+    paths:
+      - /test/cpp/c10d/: [d4l3k, fduwjj, kapilsh]
+      - /torch/csrc/distributed/c10d/: [d4l3k, fduwjj, kapilsh]
+      - /torch/csrc/distributed/c10d/Backend.*: [kwen2501]
+      - /torch/csrc/distributed/c10d/Ops.*: [kwen2501]
+      - /torch/distributed/distributed_c10d.py: [d4l3k, fduwjj, kapilsh]
+  - name: fsdp
+    labels: ["module: fsdp"]
+    owners: [weifengpy]
+    section: distributed
+    paths:
+      - /torch/csrc/distributed/fsdp/: [weifengpy]
+      - /torch/distributed/_composable/fsdp/: [weifengpy]
+      - /torch/distributed/_composable/replicate_with_fsdp.py: [weifengpy]
+      - /torch/distributed/fsdp/: [weifengpy]
+  - name: ddp
+    labels: ["module: ddp"]
+    owners: [weifengpy]
+    section: distributed
+    paths:
+      - /torch/distributed/_composable/replicate.py: [weifengpy]
+      - /torch/nn/parallel/: [weifengpy]
+  - name: dtensor
+    labels: ["module: dtensor"]
+    owners: [weifengpy]
+    section: distributed
+    paths:
+      - /torch/distributed/tensor/placement_types.py: [weifengpy]
+      - /torch/distributed/tensor/_ops/_view_ops.py: [weifengpy]
+      - /torch/distributed/tensor/_ops/_matrix_ops.py: [weifengpy]
+  - name: build_rocm
+    labels: ["module: rocm", "module: build"]
+    owners: [jeffdaily, jithunnair-amd]
+    section: infra_developer_tools
+    paths:
+      - /tools/amd_build/: [jeffdaily, jithunnair-amd]
+  - name: lint
+    labels: ["module: lint"]
+    owners: []
+    section: infra_linting
+    paths:
+      - /.bc-linter.yml
+      - /.clang-format
+      - /.clang-tidy
+      - /.cmakelintrc
+      - /.flake8
+      - /.github/actionlint.yaml
+      - /.github/scripts/lint_native_functions.py
+      - /.github/scripts/lintrunner.sh
+      - /.github/workflows/_lint.yml
+      - /.github/workflows/apply-lint.yml
+      - /.github/workflows/lint-bc.yml
+      - /.github/workflows/lint.yml
+      - /.lintrunner.toml
+      - /mypy-strict.ini
+      - /mypy.ini
+      - /mypy_plugins/
+      - /pyrefly.toml
+      - /scripts/codeowners/
+      - /scripts/lint_urls.sh
+      - /scripts/lint_xrefs.sh
+      - /scripts/lintrunner.py
+      - /tools/linter/
+  - name: autograd_codegen
+    labels: ["module: codegen", "module: autograd"]
+    owners: [albanD, soulitzer]
+    section: infra_codegen
+    paths:
+      - /tools/autograd/: [albanD, soulitzer]
+  - name: codegen
+    labels: ["module: codegen"]
+    owners: []
+    section: infra_codegen
+    paths:
+      - /torchgen/
+  - name: testing
+    labels: ["module: testing"]
+    owners: [pytorch/pytorch-dev-infra]
+    section: infra_test
+    paths:
+      - /torch/testing/_internal/common_utils.py: [pytorch/pytorch-dev-infra]
+      - /torch/testing/_internal/common_methods_invocations.py
+      - /torch/testing/_internal/common_device_type.py
+      - /test/run_test.py: [pytorch/pytorch-dev-infra]
+  - name: higher_order_operators_testing
+    labels: ["module: testing", "module: higher order operators"]
+    owners: [aorenste, bohnstingl, tugsbayasgalan, ydwu4]
+    section: infra_test
+    paths:
+      - /torch/testing/_internal/hop_db.py: [tugsbayasgalan, ydwu4, aorenste, bohnstingl]
+  - name: operator_benchmarks
+    labels: ["module: benchmark", "module: operator benchmarks"]
+    owners: []
+    section: benchmark_operator_runtime
+    paths:
+      - /benchmarks/framework_overhead_benchmark/
+      - /benchmarks/functional_autograd_benchmark/
+      - /benchmarks/instruction_counts/
+      - /benchmarks/operator_benchmark/
+      - /benchmarks/overrides_benchmark/
+      - /benchmarks/profiler_benchmark/
+      - /benchmarks/record_function_benchmark/
+      - /benchmarks/sparse/
+      - /benchmarks/static_runtime/
+      - /test/test_functional_autograd_benchmark.py
+  - name: models_benchmark
+    labels: ["module: benchmark", "module: models"]
+    owners: []
+    section: benchmark_models
+    paths:
+      - /benchmarks/compare-fastrnn-results.py
+      - /benchmarks/data/
+      - /benchmarks/diffusion/
+      - /benchmarks/fastrnns/
+      - /benchmarks/gpt_fast/
+      - /benchmarks/inference/
+      - /benchmarks/nested/
+      - /benchmarks/transformer/
+  - name: serialization
+    labels: ["module: serialization"]
+    owners: []
+    section: serialization_package
+    paths:
+      - /benchmarks/serialization/
+      - /caffe2/serialize/
+      - /test/test_serialization.py
+      - /torch/serialization.py
+  - name: package_deploy
+    labels: ["module: package/deploy"]
+    owners: []
+    section: serialization_package
+    paths:
+      - /test/package/
+      - /test/test_package.py
+      - /torch/package/
+  - name: export
+    labels: ["oncall: export"]
+    owners: [angelayi, avikchaudhuri, tugsbayasgalan, ydwu4, zhxchen17]
+    section: compiler_export_fx
+    paths:
+      - /test/export/
+      - /torch/_export/: [avikchaudhuri, tugsbayasgalan, zhxchen17, ydwu4, angelayi]
+      - /torch/export/: [avikchaudhuri, tugsbayasgalan, zhxchen17, ydwu4, angelayi]
+      - /torch/_export/serde/schema.py: [SherlockNoMad, zhxchen17]
+  - name: fx
+    labels: ["module: fx"]
+    owners: []
+    section: compiler_export_fx
+    paths:
+      - /test/fx/
+      - /test/test_dynamic_spec_make_fx.py
+      - /test/test_fx.py
+      - /test/test_fx_experimental.py
+      - /test/test_fx_graph_print.py
+      - /test/test_fx_passes.py
+      - /test/test_fx_reinplace_pass.py
+      - /torch/fx/
+      - /torch/fx/proxy.py: [zou3519]
+  - name: higher_order_operators
+    labels: ["module: higher order operators"]
+    owners: [aorenste, bohnstingl]
+    section: compiler_export_fx
+    paths:
+      - /test/higher_order_ops/
+      - /torch/_higher_order_ops/: [aorenste, bohnstingl]
+      - /test/test_hop_infra.py: [aorenste, bohnstingl]
+  - name: dynamic_shapes
+    labels: ["module: dynamic shapes"]
+    owners: [laithsakka]
+    section: compiler_export_fx
+    paths:
+      - /torch/fx/experimental/symbolic_shapes.py: [laithsakka]
+      - /torch/fx/experimental/sym_node.py: [laithsakka]
+      - /torch/fx/experimental/recording.py: [laithsakka]
+  - name: proxytensor
+    labels: ["module: ProxyTensor"]
+    owners: [aorenste]
+    section: compiler_export_fx
+    paths:
+      - /torch/fx/experimental/proxy_tensor.py: [aorenste]
+  - name: dynamo
+    labels: ["module: dynamo"]
+    owners: []
+    section: compiler_dynamo
+    paths:
+      - /test/distributed/test_dynamo_distributed.py
+      - /test/dynamo/
+      - /test/dynamo_expected_failures/
+      - /test/dynamo_skips/
+      - /test/export/test_dynamic_shapes.py
+      - /test/onnx/exporter/test_dynamic_shapes.py
+      - /test/test_cpython_diff_sync.py
+      - /torch/_dynamo/
+      - /torch/csrc/dynamo/
+  - name: tvm_dynamo
+    labels: ["module: dynamo", "module: tvm"]
+    owners: [guan404ming]
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/backends/tvm.py: [guan404ming]
+  - name: complex_dynamo
+    labels: ["module: dynamo", "module: complex"]
+    owners: [amjames, hameerabbasi]
+    section: compiler_dynamo
+    paths:
+      - /test/dynamo/test_complex.py: [hameerabbasi, amjames]
+  - name: onnx_dynamo
+    labels: ["module: dynamo", "module: onnx"]
+    owners: [justinchuby, titaiwangms, xadupre]
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/backends/onnxrt.py: [titaiwangms, xadupre, justinchuby]
+  - name: higher_order_operators_dynamo
+    labels: ["module: dynamo", "module: higher order operators"]
+    owners: [aorenste, bohnstingl]
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/variables/higher_order_ops.py: [aorenste, bohnstingl]
+  - name: pytree_dynamo
+    labels: ["module: dynamo", "module: pytree"]
+    owners: [XuehaiPan]
+    section: compiler_dynamo
+    paths:
+      - /torch/_dynamo/polyfills/pytree.py: [XuehaiPan]
+  - name: inductor
+    labels: ["module: inductor"]
+    owners: []
+    section: compiler_inductor
+    paths:
+      - /test/distributed/test_inductor_collectives.py
+      - /test/distributed/test_inductor_compile_collectives.py
+      - /test/inductor/
+      - /test/inductor_expected_failures/
+      - /test/inductor_skips/
+      - /test/test_precompile.py
+      - /test/test_triton_utils.py
+      - /torch/_inductor/
+      - /torch/_precompile.py
+      - /torch/_precompile_driver.py
+      - /torch/csrc/inductor/
+      - /torch/utils/_indented_buffer.py
+  - name: flex_attention_inductor
+    labels: ["module: inductor", "module: flex attention"]
+    owners: [drisspg]
+    section: compiler_inductor
+    paths:
+      - /torch/_higher_order_ops/flex_attention.py: [drisspg]
+      - /torch/_inductor/kernel/flex/: [drisspg]
+      - /torch/_inductor/codegen/cpp_flex_attention_template.py: [drisspg]
+      - /test/inductor/test_flex_attention.py: [drisspg]
+      - /test/inductor/test_flex_decoding.py: [drisspg]
+  - name: nativert
+    labels: ["module: nativert"]
+    owners: []
+    section: nativert
+    paths:
+      - /test/cpp/nativert/
+      - /test/export/test_nativert.py
+      - /torch/csrc/api/include/torch/nativert/
+      - /torch/nativert/
+  - name: docs
+    labels: ["module: docs"]
+    owners: [albanD]
+    section: docs_general
+    paths:
+      - /docs/
+      - /docs/source/conf.py: [albanD]
+  - name: docs_distributed_infra
+    labels: ["oncall: distributed infra", "module: docs"]
+    owners: [d4l3k, kapilsh]
+    section: docs_general
+    paths:
+      - /docs/source/distributed*: [d4l3k, kapilsh]
+  - name: higher_order_operators_docs
+    labels: ["module: docs", "module: higher order operators"]
+    owners: [bohnstingl]
+    section: docs_general
+    paths:
+      - /docs/source/higher_order_ops/: [bohnstingl]
+  - name: xpu_docs
+    labels: ["module: docs", "module: xpu"]
+    owners: [EikanWang, gujinghui]
+    section: docs_general
+    paths:
+      - /docs/source/notes/get_start_xpu.md: [EikanWang, gujinghui]
+
+  # Paths without a label group yet, by CODEOWNERS section.
+  - name: core_aten_native_ops
+    owners: []
+    section: core_aten_native_ops
+    paths:
+      - /aten/
+  - name: core_aten_runtime
+    owners: []
+    section: core_aten_runtime
+    paths:
+      - /aten/CMakeLists.txt
+      - /aten/src/ATen/.gitignore
+      - /aten/src/ATen/ATen.h
+      - /aten/src/ATen/ATenConfig.cmake.in
+      - /aten/src/ATen/AccumulateType.cpp
+      - /aten/src/ATen/AccumulateType.h
+      - /aten/src/ATen/ArrayRef.h
+      - /aten/src/ATen/Backend.h
+      - /aten/src/ATen/Backtrace.h
+      - /aten/src/ATen/BlasBackend.h
+      - /aten/src/ATen/CMakeLists.txt
+      - /aten/src/ATen/CPUApplyUtils.h
+      - /aten/src/ATen/CPUGeneratorImpl.cpp
+      - /aten/src/ATen/CPUGeneratorImpl.h
+      - /aten/src/ATen/CachedTensorUtils.cpp
+      - /aten/src/ATen/CachedTensorUtils.h
+      - /aten/src/ATen/CollapseDims.h
+      - /aten/src/ATen/Config.h.in
+      - /aten/src/ATen/ConjugateFallback.cpp
+      - /aten/src/ATen/Context.cpp
+      - /aten/src/ATen/Context.h
+      - /aten/src/ATen/DLConvertor.cpp
+      - /aten/src/ATen/DLConvertor.h
+      - /aten/src/ATen/DTensorState.cpp
+      - /aten/src/ATen/DTensorState.h
+      - /aten/src/ATen/Device.h
+      - /aten/src/ATen/DeviceAccelerator.cpp
+      - /aten/src/ATen/DeviceAccelerator.h
+      - /aten/src/ATen/DeviceGuard.h
+      - /aten/src/ATen/DimVector.h
+      - /aten/src/ATen/Dispatch.cpp
+      - /aten/src/ATen/Dispatch.h
+      - /aten/src/ATen/Dispatch_v2.h
+      - /aten/src/ATen/DynamicLibrary.cpp
+      - /aten/src/ATen/DynamicLibrary.h
+      - /aten/src/ATen/EmptyTensor.cpp
+      - /aten/src/ATen/EmptyTensor.h
+      - /aten/src/ATen/ExpandBase.h
+      - /aten/src/ATen/ExpandUtils.cpp
+      - /aten/src/ATen/ExpandUtils.h
+      - /aten/src/ATen/FakeTensorDispatchTables.cpp
+      - /aten/src/ATen/FakeTensorDispatchTables.h
+      - /aten/src/ATen/Formatting.h
+      - /aten/src/ATen/FuncTorchTLS.cpp
+      - /aten/src/ATen/FuncTorchTLS.h
+      - /aten/src/ATen/FunctionalInverses.cpp
+      - /aten/src/ATen/FunctionalStorageImpl.cpp
+      - /aten/src/ATen/FunctionalStorageImpl.h
+      - /aten/src/ATen/FunctionalTensorWrapper.cpp
+      - /aten/src/ATen/FunctionalTensorWrapper.h
+      - /aten/src/ATen/FunctionalizeFallbackKernel.cpp
+      - /aten/src/ATen/FunctionalizeFallbackKernel.h
+      - /aten/src/ATen/Generator.h
+      - /aten/src/ATen/InferSize.h
+      - /aten/src/ATen/InitialTensorOptions.h
+      - /aten/src/ATen/Layout.h
+      - /aten/src/ATen/LegacyBatchedFallback.cpp
+      - /aten/src/ATen/LegacyBatchedFallback.h
+      - /aten/src/ATen/LegacyBatchedTensorImpl.cpp
+      - /aten/src/ATen/LegacyBatchedTensorImpl.h
+      - /aten/src/ATen/LegacyBatchingRegistrations.cpp
+      - /aten/src/ATen/LegacyVmapMode.cpp
+      - /aten/src/ATen/LegacyVmapMode.h
+      - /aten/src/ATen/LegacyVmapTransforms.cpp
+      - /aten/src/ATen/LegacyVmapTransforms.h
+      - /aten/src/ATen/LinalgBackend.h
+      - /aten/src/ATen/MapAllocator*
+      - /aten/src/ATen/MapAllocator.cpp
+      - /aten/src/ATen/MapAllocator.h
+      - /aten/src/ATen/MatrixRef.h
+      - /aten/src/ATen/MemoryOverlap.cpp
+      - /aten/src/ATen/MemoryOverlap.h
+      - /aten/src/ATen/NestedTensorImpl.cpp
+      - /aten/src/ATen/NestedTensorImpl.h
+      - /aten/src/ATen/NodeCreationHooks.cpp
+      - /aten/src/ATen/NodeCreationHooks.h
+      - /aten/src/ATen/NumericUtils.h
+      - /aten/src/ATen/OpMathType.h
+      - /aten/src/ATen/OpaqueTensorImpl.h
+      - /aten/src/ATen/PTThreadPool.h
+      - /aten/src/ATen/PadNd.h
+      - /aten/src/ATen/Parallel-inl.h
+      - /aten/src/ATen/Parallel.h
+      - /aten/src/ATen/ParallelCommon.cpp
+      - /aten/src/ATen/ParallelFuture.h
+      - /aten/src/ATen/ParallelNative.cpp
+      - /aten/src/ATen/ParallelNative.h
+      - /aten/src/ATen/ParallelOpenMP.cpp
+      - /aten/src/ATen/ParallelOpenMP.h
+      - /aten/src/ATen/ParallelThreadPoolNative.cpp
+      - /aten/src/ATen/PythonTorchFunctionTLS.cpp
+      - /aten/src/ATen/PythonTorchFunctionTLS.h
+      - /aten/src/ATen/ROCmFABackend.h
+      - /aten/src/ATen/SDPBackend.h
+      - /aten/src/ATen/SavedTensorHooks.cpp
+      - /aten/src/ATen/SavedTensorHooks.h
+      - /aten/src/ATen/Scalar.h
+      - /aten/src/ATen/ScalarOps.cpp
+      - /aten/src/ATen/ScalarOps.h
+      - /aten/src/ATen/ScalarType.h
+      - /aten/src/ATen/SequenceNumber.cpp
+      - /aten/src/ATen/SequenceNumber.h
+      - /aten/src/ATen/SmallVector.h
+      - /aten/src/ATen/Storage.h
+      - /aten/src/ATen/StorageUtils.cpp
+      - /aten/src/ATen/StorageUtils.h
+      - /aten/src/ATen/Tensor.h
+      - /aten/src/ATen/TensorAccessor.h
+      - /aten/src/ATen/TensorGeometry.cpp
+      - /aten/src/ATen/TensorGeometry.h
+      - /aten/src/ATen/TensorIndexing.cpp
+      - /aten/src/ATen/TensorIndexing.h
+      - /aten/src/ATen/TensorIterator.cpp
+      - /aten/src/ATen/TensorIterator.h
+      - /aten/src/ATen/TensorIteratorInternal.h
+      - /aten/src/ATen/TensorMeta.cpp
+      - /aten/src/ATen/TensorMeta.h
+      - /aten/src/ATen/TensorOperators.h
+      - /aten/src/ATen/TensorOptions.h
+      - /aten/src/ATen/TensorSubclassLikeUtils.h
+      - /aten/src/ATen/TensorUtils.cpp
+      - /aten/src/ATen/TensorUtils.h
+      - /aten/src/ATen/ThreadLocalPythonObjects.cpp
+      - /aten/src/ATen/ThreadLocalPythonObjects.h
+      - /aten/src/ATen/ThreadLocalState.cpp
+      - /aten/src/ATen/ThreadLocalState.h
+      - /aten/src/ATen/TracerMode.h
+      - /aten/src/ATen/TypeDefault.h
+      - /aten/src/ATen/Utils.cpp
+      - /aten/src/ATen/Utils.h
+      - /aten/src/ATen/Version.cpp
+      - /aten/src/ATen/Version.h
+      - /aten/src/ATen/VmapModeRegistrations.cpp
+      - /aten/src/ATen/WrapDimUtils.h
+      - /aten/src/ATen/WrapDimUtilsMulti.h
+      - /aten/src/ATen/ZeroTensorFallback.cpp
+      - /aten/src/ATen/accelerator/
+      - /aten/src/ATen/autocast_mode.cpp
+      - /aten/src/ATen/autocast_mode.h
+      - /aten/src/ATen/benchmarks/
+      - /aten/src/ATen/ceil_div.h
+      - /aten/src/ATen/code_template.h
+      - /aten/src/ATen/core/
+      - /aten/src/ATen/cpp_custom_type_hack.h
+      - /aten/src/ATen/cpu/
+      - /aten/src/ATen/detail/
+      - /aten/src/ATen/div_rtn.h
+      - /aten/src/ATen/dlpack.h
+      - /aten/src/ATen/jit_macros.h
+      - /aten/src/ATen/jiterator_macros.h
+      - /aten/src/ATen/mkl/
+      - /aten/src/ATen/nnapi/
+      - /aten/src/ATen/ops/
+      - /aten/src/ATen/quantized/
+      - /aten/src/ATen/record_function.cpp
+      - /aten/src/ATen/record_function.h
+      - /aten/src/ATen/templates/
+      - /aten/src/ATen/test/
+      - /aten/src/ATen/vulkan/
+      - /aten/src/README.md
+      - /aten/src/THC/
+      - /aten/tools/
+  - name: core_c10_dispatch
+    owners: []
+    section: core_c10_dispatch
+    paths:
+      - /c10/
+  - name: core_csrc_misc
+    owners: []
+    section: core_csrc_misc
+    paths:
+      - /torch/csrc/CudaIPCTypes.cpp
+      - /torch/csrc/CudaIPCTypes.h
+      - /torch/csrc/DataLoader.cpp
+      - /torch/csrc/DataLoader.h
+      - /torch/csrc/Device.cpp
+      - /torch/csrc/Device.h
+      - /torch/csrc/DeviceAccelerator.cpp
+      - /torch/csrc/DeviceAccelerator.h
+      - /torch/csrc/Dtype.cpp
+      - /torch/csrc/Dtype.h
+      - /torch/csrc/DynamicTypes.cpp
+      - /torch/csrc/DynamicTypes.h
+      - /torch/csrc/Event.cpp
+      - /torch/csrc/Event.h
+      - /torch/csrc/Exceptions.cpp
+      - /torch/csrc/Exceptions.h
+      - /torch/csrc/Export.h
+      - /torch/csrc/FakeTensorMode.cpp
+      - /torch/csrc/FakeTensorMode.h
+      - /torch/csrc/Generator.cpp
+      - /torch/csrc/Generator.h
+      - /torch/csrc/Layout.cpp
+      - /torch/csrc/Layout.h
+      - /torch/csrc/MemoryFormat.cpp
+      - /torch/csrc/MemoryFormat.h
+      - /torch/csrc/Module.cpp
+      - /torch/csrc/Module.h
+      - /torch/csrc/PyInterpreter.cpp
+      - /torch/csrc/PyInterpreter.h
+      - /torch/csrc/PyInterpreterHooks.cpp
+      - /torch/csrc/PyInterpreterHooks.h
+      - /torch/csrc/PyObjectConversion.cpp
+      - /torch/csrc/PyObjectConversion.h
+      - /torch/csrc/PyObjectConversionPythonImpl.cpp
+      - /torch/csrc/QScheme.cpp
+      - /torch/csrc/QScheme.h
+      - /torch/csrc/README.md
+      - /torch/csrc/Size.cpp
+      - /torch/csrc/Size.h
+      - /torch/csrc/Storage*
+      - /torch/csrc/Storage.cpp
+      - /torch/csrc/Storage.h
+      - /torch/csrc/StorageMethods.cpp
+      - /torch/csrc/StorageMethods.h
+      - /torch/csrc/StorageSharing.cpp
+      - /torch/csrc/StorageSharing.h
+      - /torch/csrc/Stream.cpp
+      - /torch/csrc/Stream.h
+      - /torch/csrc/THConcat.h
+      - /torch/csrc/THP.h
+      - /torch/csrc/TensorIterator.cpp
+      - /torch/csrc/TensorIterator.h
+      - /torch/csrc/TypeInfo.cpp
+      - /torch/csrc/TypeInfo.h
+      - /torch/csrc/Types.h
+      - /torch/csrc/acc/
+      - /torch/csrc/copy_utils.h
+      - /torch/csrc/cpu/
+      - /torch/csrc/empty.c
+      - /torch/csrc/export/
+      - /torch/csrc/functionalization/
+      - /torch/csrc/fx/
+      - /torch/csrc/instruction_counter/
+      - /torch/csrc/itt.cpp
+      - /torch/csrc/itt.h
+      - /torch/csrc/itt_wrapper.cpp
+      - /torch/csrc/itt_wrapper.h
+      - /torch/csrc/monitor/
+      - /torch/csrc/multiprocessing/
+      - /torch/csrc/onnx/
+      - /torch/csrc/python_headers.h
+      - /torch/csrc/serialization.cpp
+      - /torch/csrc/serialization.h
+      - /torch/csrc/stub.c
+      - /torch/csrc/tensor/
+      - /torch/csrc/utils.cpp
+      - /torch/csrc/utils.h
+      - /torch/csrc/utils/
+  - name: core_tests
+    owners: []
+    section: core_tests
+    paths:
+      - /test/HowToWriteTestsUsingFileCheck.md
+      - /test/allowlist_for_publicAPI.json: [albanD]
+      - /test/backends/
+      - /test/bench_mps_ops.py
+      - /test/conftest.py
+      - /test/create_dummy_torchscript_model.py
+      - /test/error_messages/
+      - /test/expect/HasDecompTest.test_aten_core_operators.expect
+      - /test/expect/HasDecompTest.test_has_decomposition.expect
+      - /test/expect/TestAutograd.test_function-x_grad_desc.expect
+      - /test/expect/TestAutograd.test_function-y_grad_desc.expect
+      - /test/expect/TestFXAPIBackwardCompatibility.test_class_member_back_compat-fx_backcompat_class_members.expect
+      - /test/expect/TestFXAPIBackwardCompatibility.test_function_back_compat-fx_backcompat_function_signatures.expect
+      - /test/expect/TestJit.test_cu_escaped_number.expect
+      - /test/expect/TestJit.test_import_method.expect
+      - /test/expect/TestJit.test_non_ascii_string.expect
+      - /test/expect/TestJit.test_pretty_printer-empty_float_list_test.expect
+      - /test/expect/TestJit.test_pretty_printer-empty_int_list_test.expect
+      - /test/expect/TestJit.test_pretty_printer-if_one.expect
+      - /test/expect/TestJit.test_pretty_printer-if_test.expect
+      - /test/expect/TestJit.test_pretty_printer-loop_use_test.expect
+      - /test/expect/TestJit.test_pretty_printer-print_weird_test.expect
+      - /test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
+      - /test/expect/TestJit.test_pretty_printer-while_if_test.expect
+      - /test/expect/TestJit.test_pretty_printer-while_test.expect
+      - /test/expect/TestPytorchExportModes.test_aten_fallback.expect
+      - /test/expect/TestPytorchExportModes.test_onnx_aten.expect
+      - /test/expect/TestScript.test_annot_ast_mypy_fn.expect
+      - /test/expect/TestScript.test_annot_ast_mypy_method.expect
+      - /test/expect/TestScript.test_annot_ast_py3_fn.expect
+      - /test/expect/TestScript.test_annot_ast_py3_method.expect
+      - /test/expect/TestScript.test_annot_string_mypy_fn.expect
+      - /test/expect/TestScript.test_annot_string_mypy_method.expect
+      - /test/expect/TestScript.test_annot_string_py3_fn.expect
+      - /test/expect/TestScript.test_annot_string_py3_method.expect
+      - /test/expect/TestScript.test_annotated_script_fn.expect
+      - /test/expect/TestScript.test_annotated_script_method.expect
+      - /test/expect/TestScript.test_format-stdout.expect
+      - /test/expect/TestScript.test_listconstruct_erasure.expect
+      - /test/expect/TestScript.test_parser_type_annotations.expect
+      - /test/expect/TestScript.test_parser_type_annotations_comment.expect
+      - /test/expect/TestScript.test_print-stdout.expect
+      - /test/expect/TestScript.test_python_frontend.expect
+      - /test/expect/TestScript.test_python_frontend_py2.expect
+      - /test/expect/TestScript.test_python_frontend_py3.expect
+      - /test/expect/TestScript.test_string_print-stdout.expect
+      - /test/expect/TestScript.test_torch_dot_tensor_annotation.expect
+      - /test/expect/TestTensorBoard.test_audio.expect
+      - /test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
+      - /test/expect/TestTensorBoard.test_caffe2_simple_model.expect
+      - /test/expect/TestTensorBoard.test_histogram_auto.expect
+      - /test/expect/TestTensorBoard.test_histogram_doane.expect
+      - /test/expect/TestTensorBoard.test_histogram_fd.expect
+      - /test/expect/TestTensorBoard.test_hparams_bool.expect
+      - /test/expect/TestTensorBoard.test_hparams_number.expect
+      - /test/expect/TestTensorBoard.test_hparams_string.expect
+      - /test/expect/TestTensorBoard.test_image_with_3_channel_batched.expect
+      - /test/expect/TestTensorBoard.test_image_with_boxes.expect
+      - /test/expect/TestTensorBoard.test_image_with_one_channel.expect
+      - /test/expect/TestTensorBoard.test_image_with_one_channel_batched.expect
+      - /test/expect/TestTensorBoard.test_image_without_channel.expect
+      - /test/expect/TestTensorBoard.test_mesh.expect
+      - /test/expect/TestTensorBoard.test_nested_nn_squential.expect
+      - /test/expect/TestTensorBoard.test_pr_curve.expect
+      - /test/expect/TestTensorBoard.test_pr_curve_raw.expect
+      - /test/expect/TestTensorBoard.test_pytorch_graph.expect
+      - /test/expect/TestTensorBoard.test_scalar_new_style.expect
+      - /test/expect/TestTensorBoard.test_text.expect
+      - /test/expect/TestTensorBoard.test_video.expect
+      - /test/expect/TestTorch.test_is_nonzero-empty.expect
+      - /test/expect/TestTorch.test_is_nonzero-multiple.expect
+      - /test/expect/TestTorch.test_print-non_contiguous.expect
+      - /test/expect/__init__.py
+      - /test/forward_backward_compatibility/
+      - /test/lazy/
+      - /test/linear.py
+      - /test/load_torchscript_model.py
+      - /test/minioptest_failures_dict.json
+      - /test/mkl_verbose.py
+      - /test/mkldnn_verbose.py
+      - /test/pytest_shard_custom.py
+      - /test/python_native/
+      - /test/run_doctests.sh
+      - /test/simulate_nccl_errors.py
+      - /test/slow_tests.json
+      - /test/test_accelerator.py
+      - /test/test_ao_sparsity.py
+      - /test/test_appending_byte_serializer.py
+      - /test/test_as_strided.py
+      - /test/test_autocast.py
+      - /test/test_autoload.py
+      - /test/test_binary_ufuncs.py
+      - /test/test_bmm_outer_product.py
+      - /test/test_bundled_images.py
+      - /test/test_bundled_inputs.py
+      - /test/test_ci_sanity_check_fail.py
+      - /test/test_comparison_utils.py
+      - /test/test_compile_benchmark_util.py
+      - /test/test_complex.py
+      - /test/test_content_store.py
+      - /test/test_dataloader.py
+      - /test/test_datapipe.py
+      - /test/test_decomp.py
+      - /test/test_determination.py
+      - /test/test_dispatch.py
+      - /test/test_dlpack.py
+      - /test/test_dynamic_shapes.py
+      - /test/test_expanded_weights.py
+      - /test/test_extension_utils.py
+      - /test/test_fake_tensor.py
+      - /test/test_file_check.py
+      - /test/test_flop_counter.py
+      - /test/test_function_schema.py
+      - /test/test_functionalization.py
+      - /test/test_futures.py
+      - /test/test_gpu_trace.py
+      - /test/test_hub.py
+      - /test/test_img/
+      - /test/test_import_stats.py
+      - /test/test_indexing.py
+      - /test/test_inspect_utils.py
+      - /test/test_itt.py
+      - /test/test_kernel_launch_checks.py
+      - /test/test_legacy_vmap.py
+      - /test/test_license.py
+      - /test/test_logging.py
+      - /test/test_meta.py
+      - /test/test_mkl_verbose.py
+      - /test/test_mkldnn.py
+      - /test/test_mkldnn_fusion.py
+      - /test/test_mkldnn_verbose.py
+      - /test/test_model_exports_to_core_aten.py
+      - /test/test_module_tracker.py
+      - /test/test_monitor.py
+      - /test/test_multigpu.py
+      - /test/test_multiprocessing.py
+      - /test/test_multiprocessing_spawn.py
+      - /test/test_namedtuple_return_api.py
+      - /test/test_native_functions.py
+      - /test/test_native_mha.py
+      - /test/test_nestedtensor.py
+      - /test/test_numa_binding.py
+      - /test/test_numba_integration.py
+      - /test/test_opaque_obj_v2.py
+      - /test/test_openmp.py
+      - /test/test_ops.py
+      - /test/test_ops_jit.py
+      - /test/test_ops_unbacked.py
+      - /test/test_out_dtype_op.py
+      - /test/test_overrides.py
+      - /test/test_per_overload_api.py
+      - /test/test_prims.py
+      - /test/test_privateuseone_python_backend.py
+      - /test/test_proxy_tensor.py
+      - /test/test_pruning_op.py
+      - /test/test_python_dispatch.py
+      - /test/test_pytree.py
+      - /test/test_reductions.py
+      - /test/test_rename_privateuse1_to_existing_device.py
+      - /test/test_scatter_gather_ops.py
+      - /test/test_schema_check.py
+      - /test/test_segment_reductions.py
+      - /test/test_set_default_mobile_cpu_allocator.py
+      - /test/test_shape_ops.py
+      - /test/test_show_pickle.py
+      - /test/test_sort_and_select.py
+      - /test/test_stateless.py
+      - /test/test_stateless_rng.py
+      - /test/test_static_runtime.py
+      - /test/test_subclass.py
+      - /test/test_sympy_utils.py
+      - /test/test_tensor_creation_ops.py
+      - /test/test_tensor_iterator.py
+      - /test/test_tensorboard.py
+      - /test/test_torch.py
+      - /test/test_torch_config_hash_determinism.py
+      - /test/test_torchfuzz_repros.py
+      - /test/test_tsan.py
+      - /test/test_type_info.py
+      - /test/test_type_promotion.py
+      - /test/test_unary_ufuncs.py
+      - /test/test_view_ops.py
+      - /test/test_weak.py
+      - /test/forward_backward_compatibility/check_forward_backward_compatibility.py: [larryliu0820]
+  - name: backend_device_runtime
+    owners: []
+    section: backend_device_runtime
+    paths:
+      - /test/custom_backend/
+      - /torch/backends/
+  - name: python_core_api
+    owners: []
+    section: python_core_api
+    paths:
+      - /torch/CMakeLists.txt
+      - /torch/_C/
+      - /torch/_C_flatbuffer/
+      - /torch/_VF.py
+      - /torch/__config__.py
+      - /torch/__future__.py
+      - /torch/__init__.py
+      - /torch/_appdirs.py
+      - /torch/_awaits/
+      - /torch/_compile.py
+      - /torch/_decomp/
+      - /torch/_dispatch/
+      - /torch/_environment.py
+      - /torch/_guards.py
+      - /torch/_jit_internal.py
+      - /torch/_lazy/
+      - /torch/_linalg_utils.py
+      - /torch/_lobpcg.py
+      - /torch/_lowrank.py
+      - /torch/_meta_registrations.py
+      - /torch/_numpy/
+      - /torch/_opaque_base.py
+      - /torch/_prims/
+      - /torch/_prims_common/
+      - /torch/_python_dispatcher.py
+      - /torch/_refs/
+      - /torch/_size_docs.py
+      - /torch/_sources.py
+      - /torch/_storage_docs.py
+      - /torch/_streambase.py
+      - /torch/_strobelight/
+      - /torch/_subclasses/
+      - /torch/_tensor.py
+      - /torch/_tensor_docs.py
+      - /torch/_tensor_iterator.py
+      - /torch/_tensor_str.py
+      - /torch/_thread_safe_fork.py
+      - /torch/_torch_docs.py
+      - /torch/_utils.py
+      - /torch/_utils_internal.py
+      - /torch/_vendor/
+      - /torch/_vmap_internals.py
+      - /torch/_weights_only_unpickler.py
+      - /torch/accelerator/
+      - /torch/amp/
+      - /torch/compiler/
+      - /torch/contrib/
+      - /torch/cpu/
+      - /torch/distributions/
+      - /torch/fft/
+      - /torch/functional.py
+      - /torch/futures/
+      - /torch/hub.py
+      - /torch/legacy/
+      - /torch/lib/
+      - /torch/monitor/
+      - /torch/mtia/
+      - /torch/multiprocessing/
+      - /torch/nested/
+      - /torch/numa/
+      - /torch/overrides.py
+      - /torch/py.typed
+      - /torch/quasirandom.py
+      - /torch/random.py
+      - /torch/return_types.py
+      - /torch/script.h
+      - /torch/signal/
+      - /torch/special/
+      - /torch/storage.py
+      - /torch/torch_version.py
+      - /torch/types.py
+      - /torch/utils/
+      - /torch/_vendor/quack/: [slayton58, drisspg]
+  - name: python_api_tests
+    owners: []
+    section: python_api_tests
+    paths:
+      - /test/cpython/
+      - /test/distributions/
+      - /test/nn/
+      - /test/test_modules.py
+      - /test/test_nn.py
+      - /test/test_nnapi.py
+      - /test/test_numpy_interop.py
+      - /test/test_transformers.py
+      - /test/test_type_hints.py
+      - /test/test_typing.py
+      - /test/torch_np/
+      - /test/typing/
+      - /test/xpu/test_transformers.py
+  - name: cpp_runtime_tests
+    owners: []
+    section: cpp_runtime_tests
+    paths:
+      - /test/cpp/
+      - /test/cpp_api_parity/
+      - /test/test_cpp_api_parity.py
+  - name: cpp_api_custom_ops
+    owners: []
+    section: cpp_api_custom_ops
+    paths:
+      - /aten/src/ATen/native/native_functions.yaml
+      - /aten/src/ATen/native/prim_native_functions.cpp
+      - /aten/src/ATen/native/tags.yaml: [ezyang]
+      - /aten/src/ATen/native/ts_native_functions.yaml
+      - /test/cpp/jit/test_custom_operators.cpp
+      - /test/cpp_extensions/
+      - /test/custom_operator/
+      - /test/jit/test_custom_operators.py
+      - /test/test_cpp_extensions_aot.py
+      - /test/test_cpp_extensions_jit.py
+      - /test/test_cpp_extensions_mtia_backend.py
+      - /test/test_cpp_extensions_stream_and_event.py
+      - /test/test_custom_ops.py
+      - /torch/_classes.py
+      - /torch/_custom_class_base.py
+      - /torch/_custom_op/
+      - /torch/_custom_ops.py
+      - /torch/_library/
+      - /torch/_ops.py
+      - /torch/csrc/api/
+      - /torch/csrc/jit/frontend/function_schema_parser.cpp
+      - /torch/csrc/jit/frontend/function_schema_parser.h
+      - /torch/csrc/jit/python/pybind_utils.cpp
+      - /torch/csrc/jit/python/pybind_utils.h
+      - /torch/csrc/utils/python_dispatch.cpp
+      - /torch/csrc/utils/python_dispatch.h
+      - /torch/custom_class.h
+      - /torch/custom_class_detail.h
+      - /torch/extension.h
+      - /torch/library.h
+      - /torch/library.py
+      - /torch/utils/_cpp_extension_versioner.py
+  - name: infra_developer_tools
+    owners: []
+    section: infra_developer_tools
+    paths:
+      - /.devcontainer/
+      - /.vscode/
+      - /benchmarks/README.md
+      - /benchmarks/compare.sh
+      - /benchmarks/upload_scribe.py
+      - /binaries/
+      - /scripts/
+      - /tools/
+  - name: infra_test
+    owners: []
+    section: infra_test
+    paths:
+      - /test/benchmark_utils/
+      - /test/junit_xml_testdata/
+      - /test/scripts/
+      - /test/spincli/
+      - /test/strobelight/
+      - /test/test_public_bindings.py: [albanD]
+      - /test/test_reuse_old_whl.py
+      - /test/test_testing.py
+      - /test/test_utils.py
+      - /test/test_utils_config_module.py
+      - /test/test_utils_filelock.py
+      - /test/torchci/
+      - /tools/test/
+      - /tools/testing/
+      - /torch/_logging/
+      - /torch/testing/
+      - /torch/utils/benchmark/
+  - name: caffe2
+    owners: []
+    section: caffe2
+    paths:
+      - /caffe2/
+  - name: compiler_export_fx
+    owners: []
+    section: compiler_export_fx
+    paths:
+      - /test/onnx/exporter/test_exportable_module.py
+      - /test/onnx/test_fx_type_promotion.py
+      - /test/package/package_bc/test_fx_module.pt
+  - name: ai_agent_tooling
+    owners: []
+    section: ai_agent_tooling
+    paths:
+      - /.agents/
+      - /.claude/
+      - /.github/actions/pi-agent/
+      - /.github/copilot-instructions.md
+      - /.github/pi/
+      - /.github/workflows/claude-autorevert-advisor.yml
+      - /.github/workflows/claude-code.yml
+      - /.github/workflows/claude-distributed-triage-cron.yml
+      - /.github/workflows/claude-distributed-triage.yml
+      - /.github/workflows/issue-triage-pi.yml
+      - /.github/workflows/issue-triage.yml
+      - /.github/workflows/pi-agent-tests.yml
+      - /.github/workflows/pi-triage-tests.yml
+      - /AGENTS.md
+      - /AI_POLICY.md
+      - /CLAUDE.md
+      - /torch/_dynamo/CLAUDE.md
+  - name: docs_general
+    owners: []
+    section: docs_general
+    paths:
+      - /CITATION.cff
+      - /CODE_OF_CONDUCT.md
+      - /CONTRIBUTING.md
+      - /GLOSSARY.md
+      - /LICENSE
+      - /NOTICE
+      - /README.md
+      - /RELEASE.md
+      - /SECURITY.md
+  - name: protected_codeownership
+    owners: []
+    section: protected_codeownership
+    paths:
+      - /CODEOWNERS: [albanD, malfet]
+      - /OWNERSHIP.yaml: [albanD, malfet]
+      - /.github/merge_rules.yaml: [pytorch/pytorch-dev-infra, albanD, malfet]
