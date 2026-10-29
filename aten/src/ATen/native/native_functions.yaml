@@ -11971,8 +11971,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: smooth_l1_loss_out
-    MPS: smooth_l1_loss_out_mps
+    CPU, CUDA, MPS, XPU: smooth_l1_loss_out
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   device_check: NoCheck   # TensorIterator
