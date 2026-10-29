@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
     register_fake,
     save_values_for_backward,
     saved_values,
+    validate_subgraph_args_types,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
@@ -342,27 +343,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
-        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
-        # cached GraphModule is unpickled (_deserialize_graph_module).
-        if not all(
-            isinstance(
-                o,
-                (
-                    torch.Tensor,
-                    int,
-                    torch.SymInt,
-                    torch.Generator,
-                    FakeScriptObject,
-                    torch.fx.Proxy,
-                ),
-            )
-            or is_custom_class(type(o))
-            for o in operands
-            if o is not None
-        ):
-            raise AssertionError(
-                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
-            )
+        validate_subgraph_args_types(
+            [o for o in operands if o is not None and not is_custom_class(type(o))],
+            extra_allowed_types=(torch.Generator, FakeScriptObject),
+        )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
