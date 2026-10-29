@@ -675,6 +675,38 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+def _collect_cpp_ir_constant_metadata_for_hash(
+    gm: torch.fx.GraphModule | None,
+) -> tuple[tuple[str, TensorMetadata, str | None], ...]:
+    """Keep exact geometry and storage bytes for readonly CPP constants.
+
+    Logical tolist() values omit padding read by native as_strided and can
+    lose floating NaN payload bits. CPP preserves the original storage.
+    """
+    from torch.fx.graph_module import _get_attr
+    from torch.utils._mode_utils import no_dispatch
+
+    if gm is None:
+        return ()
+    result = []
+    for node in gm.graph.nodes:
+        if node.op != "get_attr":
+            continue
+        target = str(node.target)
+        value = _get_attr(gm, target)
+        if not isinstance(value, torch.Tensor):
+            continue
+        digest = None
+        if not is_fake(value) and value.layout == torch.strided:
+            with no_dispatch():
+                storage = value.untyped_storage()
+                raw = torch.empty(0, dtype=torch.uint8, device=value.device)
+                raw.set_(storage, 0, (storage.nbytes(),), (1,))
+                digest = hashlib.sha256(raw.cpu().numpy().tobytes()).hexdigest()
+        result.append((target, extract_tensor_metadata(value), digest))
+    return tuple(result)
+
+
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
 # __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
 # reducer_override to avoid infinite recursion.
@@ -1032,6 +1064,21 @@ def build_code_hash(
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
+def _build_cpp_code_hash(root: str, hasher: hashlib._Hash) -> None:
+    source_root = Path(root)
+    sources = sorted(
+        path
+        for path in source_root.rglob("*")
+        if path.is_file()
+        and path.suffix in (".cpp", ".h")
+        and "tests" not in path.relative_to(source_root).parts
+    )
+    for path in sources:
+        relative_name = path.relative_to(source_root).as_posix()
+        hasher.update(relative_name.encode("utf-8") + b"\0")
+        hasher.update(hashlib.sha256(path.read_bytes()).digest())
+
+
 @torch_key_cache
 def torch_key() -> bytes:
     """
@@ -1054,6 +1101,12 @@ def torch_key() -> bytes:
                 hasher = hashlib.sha256()
                 hasher.update(torch.__version__.encode("utf-8"))
                 build_code_hash([root], "", hasher)
+                # The experimental native passes are JIT-built, not Python modules.
+                cpp_ir_root = os.path.join(
+                    inductor_root, "../csrc/inductor/experimental/loops_ir"
+                )
+                if os.path.isdir(cpp_ir_root):
+                    _build_cpp_code_hash(cpp_ir_root, hasher)
                 for path in extra_files:
                     if os.path.exists(path):
                         with open(path, "rb") as f:
@@ -1542,6 +1595,12 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
+        if config.experimental_cpp_ir:
+            # Standard tensor hash metadata omits storage offsets/bytes.
+            # CPP constant guards and alias geometry retain those fields.
+            self.cpp_ir_constant_metadata = _collect_cpp_ir_constant_metadata_for_hash(
+                gm
+            )
         # Replace opaque references with hashable ordinals. What's important
         # is that if the same reference appears twice then it's the same hash
         # value for each.

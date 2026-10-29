@@ -70,7 +70,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from torch._inductor import metrics
-    from torch._inductor.graph import GraphLowering
     from torch._library.fake_class_registry import FakeScriptObject
     from torch.export.pt2_archive._package_weights import Weights
 
@@ -512,6 +511,25 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
         return {**constants, **frozen_params, **g.opaque_value_type_classes}
 
 
+class LoweringOutputMetadata(Protocol):
+    """Code and storage metadata shared by Inductor lowering implementations."""
+
+    cache_key: str
+    cache_path: str
+    cache_linemap: list[tuple[int, str]]
+    device_types: OrderedSet[str]
+    device_idxs: OrderedSet[int]
+    mutated_inputs: OrderedSet[str]
+    mutated_input_idxs: OrderedSet[int]
+    constants: dict[str, torch.Tensor]
+    allocated_constant_name: dict[str, str]
+    torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
+    opaque_value_type_classes: dict[str, type]
+    kernel_free_cudagraph: bool
+    partition_maps: list[GraphPartitionMap] | None
+    has_uncaptured_partition: bool
+
+
 @dataclasses.dataclass
 class CompiledFxGraph(OutputCode):
     """
@@ -575,7 +593,7 @@ class CompiledFxGraph(OutputCode):
     def __init__(
         self,
         current_callable: _BoxedCallable | None,
-        graph: GraphLowering,
+        graph: LoweringOutputMetadata,
         gm: torch.fx.GraphModule,
         output_strides: list[tuple[_StrideExprStr, ...] | None],
         disabled_cudagraphs_reason: str | None,
