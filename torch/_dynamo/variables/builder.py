@@ -932,7 +932,8 @@ def _build_dict_items(
         (position, *build_key_value(position, key, item))
         for position, key, item in enumerate_items_with_dict_position(value)
     ]
-    if not isinstance(value, collections.OrderedDict):
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
         return {key: item for _, key, item in entries}
     # Preserve both dict storage order and OrderedDict iteration order.
     items = collections.OrderedDict((key, item) for _, key, item in sorted(entries))
