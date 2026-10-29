@@ -1466,5 +1466,66 @@ class InventorySchemaTest(TestCase):
             self.assertIn(key, leaf)
 
 
+class CompletionScorecardTests(TestCase):
+    def _full_cases(self):
+        return [
+            {
+                "model": model,
+                "test": test,
+                "cpp_numerics": mode,
+                "batch_size": spec[f"{test}_bs"],
+                "status": "pass",
+            }
+            for model, spec in suite.MODEL_MANIFEST.items()
+            for test in ("eval", "train")
+            for mode in ("strict_eager", "inductor")
+        ]
+
+    def test_subset_success_is_not_full_completion(self):
+        summary = suite._completion_summary(self._full_cases()[:2])
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+        self.assertEqual(summary["pass"], 2)
+
+    def test_all_forty_default_cases_complete(self):
+        summary = suite._completion_summary(self._full_cases())
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertTrue(summary["complete"])
+        self.assertEqual(summary["pass"], 40)
+
+    def test_duplicate_passes_cannot_replace_missing_cases(self):
+        summary = suite._completion_summary(self._full_cases()[:1] * 40)
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+
+    def test_empty_selection_never_completes(self):
+        summary = suite._completion_summary([])
+        self.assertFalse(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+
+    def test_skip_is_not_a_pass(self):
+        cases = self._full_cases()
+        cases[-1]["status"] = "skip"
+        summary = suite._completion_summary(cases)
+        self.assertFalse(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+        self.assertEqual(summary["skip_or_inventory"], 1)
+        self.assertEqual(summary["pass"], 39)
+
+    def test_smaller_batch_does_not_satisfy_manifest_goal(self):
+        cases = self._full_cases()
+        cases[-1]["batch_size"] = 1
+        summary = suite._completion_summary(cases)
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+
+    def test_inference_only_does_not_satisfy_training_goal(self):
+        cases = [case for case in self._full_cases() if case["test"] == "eval"]
+        summary = suite._completion_summary(cases)
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertFalse(summary["complete"])
+        self.assertEqual(summary["pass"], 20)
+
+
 if __name__ == "__main__":
     run_tests()
