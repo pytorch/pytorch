@@ -412,18 +412,25 @@ class TestColTileHost(TestCase):
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
-    def test_direct_plan_matches_the_indexed_tree(self, device):
-        x = torch.randn(2, 128, 33, device=device)
+    @parametrize("plan", ["direct", "split"])
+    def test_plan_matches_the_indexed_tree(self, device, plan):
+        """Preserve each row's inner-tree DAG with and without ordered column partials."""
+        shape = (2, 128, 33) if plan == "direct" else (100003, 32)
+        x = torch.randn(shape, device=device)
+        rows, columns = x.shape[-2:]
+        kept = [(columns, 1)] + ([(x.shape[0], rows * columns)] if x.dim() == 3 else [])
         trait = T.SumOps(acc=cutlass.Float32)
-        got = ct.reduce_ordered_col(trait, "ordered_direct", x, [torch.float32], 1)
+        got = ct.reduce_ordered_col(
+            trait, f"ordered_{plan}", x, [torch.float32], 1, allow_split=plan == "split"
+        )
         reference = kg._try_indexed_itree(
             trait,
-            "ordered_direct_reference",
+            f"ordered_{plan}_reference",
             x,
-            [(128, 33)],
-            [(33, 1), (2, 128 * 33)],
-            2 * 33,
-            128,
+            [(rows, columns)],
+            kept,
+            x.numel() // rows,
+            rows,
             [torch.float32],
             1,
         )
