@@ -2075,6 +2075,29 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
             )
 
+    def _test_sdpa_rewriter_31(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            attn_mask = torch.ones(
+                query.size(1), key.size(1), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            scale = 1.0 / math.sqrt(key.shape[-1])
+            return (
+                (torch.matmul(q, k.transpose(-2, -1)).mul(scale) + attn_mask)
+                .softmax(dim=-1)
+                .matmul(v)
+            )
+
+        self._check_common(dot_prod_attention)
+
     def _test_sdpa_rewriter_28(self):
         def dot_prod_attention(
             qkv: torch.Tensor,
@@ -2338,6 +2361,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_30_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
         )
+        test_sdpa_rewriter_31_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_31
+        )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25
@@ -2488,6 +2514,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_30_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
+        )
+        test_sdpa_rewriter_31_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_31
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

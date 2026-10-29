@@ -939,6 +939,32 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
     )
 
 
+# Same as pattern 14 but with mul(scale_factor) instead of div(inv_scale)
+def _sfdp_pattern_31(query, key, value, attn_mask, scale_factor):
+    # Permutations are needed to create clones in graph.
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    return (
+        (torch.matmul(q, k.transpose(-2, -1)).mul(scale_factor) + attn_mask)
+        .softmax(dim=-1)
+        .matmul(v)
+    )
+
+
+def _sfdp_replacement_31(query, key, value, attn_mask, scale_factor):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=scale_factor,
+    )
+
+
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
     perf_hint_log.info(
@@ -1425,6 +1451,13 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 [gp_bs1(), gp_bs1(), gp_bs1()],
                 s,
                 _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_31,
+                _sfdp_replacement_31,
+                [g(), g(), g(), m(), c()],
+                {},
+                _sfdp_extra_check(aten.mul.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
