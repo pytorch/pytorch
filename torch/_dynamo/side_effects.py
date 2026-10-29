@@ -1001,10 +1001,7 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
-        variable = variables.NewGlobalVariable(
-            mutation_type=AttributeMutationExisting(),
-            source=source,
-        )
+        variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
