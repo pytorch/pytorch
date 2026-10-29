@@ -46,6 +46,7 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
+from .graph_utils import _graph_device_types
 from .guards import (
     CheckFunctionManager,
     is_portable_function_guard,
@@ -1604,6 +1605,8 @@ class _CapturePackage(CompilePackage):
         # allow_serve_time_compiles=True. The artifact adds the ops Inductor's
         # Python code calls.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
+        # The device types each backend graph runs on, by backend id.
+        self.device_types: dict[str, frozenset[str]] = {}
         self.graph_break_op_names: set[tuple[str, str]] = set()
         # The current compile's graph-break ops, kept only if it records a guarded
         # code or falls back to eager, so a bypassed compile's ops are dropped like
@@ -1625,6 +1628,7 @@ class _CapturePackage(CompilePackage):
         from torch._precompile import _op_names
 
         self.op_names[backend_id] = _op_names(gm)
+        self.device_types[backend_id] = _graph_device_types(gm.graph)
 
     def add_graph_break_op(self, op: object) -> None:
         from torch._precompile import _overload_names
@@ -2171,6 +2175,7 @@ class PrecompileSession(Generic[_P, _R]):
             _called_op_names,
             _custom_op_modules,
             _custom_ops,
+            _device_kernel_keys,
             _multigraph_frames,
             _served_modules,
             _warn_unregistered_ops,
@@ -2182,10 +2187,13 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         op_names = set(self._package.graph_break_op_names)
+        # Graph-break ops run eagerly on the devices of any compiled frame.
+        device_types = set(self._package._device_types if op_names else ())
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
             op_names |= self._package.op_names.get(backend_id, set())
+            device_types |= self._package.device_types.get(backend_id, set())
             if isinstance(artifact, BundledAOTAutogradCacheArtifact):
                 # Inductor's code also calls the ops a post-grad pass inserted,
                 # and those of the backward.
@@ -2195,7 +2203,8 @@ class PrecompileSession(Generic[_P, _R]):
                         op_names |= _called_op_names(result.source_code)
         entry = self._served_entry()[0]
         ops = _custom_ops(op_names)
-        found = _custom_op_modules(ops)
+        keys = _device_kernel_keys(device_types)
+        found = _custom_op_modules(ops, keys)
         modules = found.modules
         served: set[str] = set()
         if found.unrecorded:
@@ -2206,7 +2215,7 @@ class PrecompileSession(Generic[_P, _R]):
             modules += tuple(sorted(served - set(modules)))
         _warn_unregistered_ops(found, sorted(served - set(found.modules)))
         return _build_multigraph_artifact(
-            entry, backends, summary, self._backend, self._fn, modules, ops
+            entry, backends, summary, self._backend, self._fn, modules, ops, keys
         )
 
 
