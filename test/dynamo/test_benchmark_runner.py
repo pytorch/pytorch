@@ -87,7 +87,7 @@ def _tiny_causal_lm(model_type, **config_overrides):
         "vocab_size": 32,
         "hidden_size": 16,
         "intermediate_size": 32,
-        "num_hidden_layers": 2,
+        "num_hidden_layers": 3 if model_type == "Qwen3_5" else 2,
         "num_attention_heads": 2,
         "num_key_value_heads": 1,
         "max_position_embeddings": 4096,
@@ -98,7 +98,7 @@ def _tiny_causal_lm(model_type, **config_overrides):
         config_kwargs["sliding_window"] = 8
     if model_type == "Qwen3_5":
         config_kwargs.update(
-            layer_types=["linear_attention", "full_attention"],
+            layer_types=["linear_attention", "linear_attention", "full_attention"],
             linear_num_key_heads=1,
             linear_num_value_heads=2,
             linear_key_head_dim=8,
@@ -535,6 +535,14 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, message):
             runner.validate_args(self._runner_args(extra, mode=mode))
 
+    def test_prefill_requires_transformers_version(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        with (
+            mock.patch("importlib.metadata.version", return_value="5.0.0"),
+            self.assertRaisesRegex(ValueError, "transformers>=.*, found 5.0.0"),
+        ):
+            runner.validate_args(self._runner_args())
+
     @parametrize("decode_length", (0, 2000))
     def test_decode_length_range(self, decode_length):
         runner = self.huggingface.HuggingfaceRunner()
@@ -668,7 +676,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             mock.patch.object(common, "write_outputs"),
             mock.patch.object(common, "output_signpost", return_value=0),
         ):
-            optimize = torch._dynamo.optimize("eager", nopython=True)
+            optimize = functools.partial(torch.compile, backend="eager", fullgraph=True)
             result = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
         self.assertEqual(result, status)
 
@@ -859,6 +867,13 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         ):
             output = runner.run_n_iterations(model, inputs, runner.prefill)
         self.assertEqual(starting_lengths, [0, 0])
+        linear_states = [
+            states.data_ptr()
+            for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
+            if is_linear
+            for states in (layer.conv_states[0], layer.recurrent_states[0])
+        ]
+        self.assertEqual(len(set(linear_states)), len(linear_states))
         self.assertEqual(output.shape, (2, 32))
         with torch.no_grad():
             expected = model.model(**inputs, use_cache=False, logits_to_keep=1)
@@ -907,7 +922,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
 
         def optimize(fn):
             compiled_functions.append(fn.__name__)
-            return torch._dynamo.optimize("eager", nopython=True)(fn)
+            return torch.compile(fn, backend="eager", fullgraph=True)
 
         with (
             mock.patch.object(common, "current_name", "tiny"),
