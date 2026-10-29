@@ -48,6 +48,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -215,14 +216,28 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
-    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
+    # Keys are the fake tensors to check for leaks; values are unused.
+    non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
-        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
+        self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
 
 
 fake_tensor_tls = FakeTensorTLS()
+
+
+# Called from FakeTensor.__init__, and from set_proxy_slot for every tensor
+# registered with a tracer. The latter also records C++ fakes, which have no
+# Python __init__, and fakes created before is_exporting() is set, such as the
+# nn.Module input parameters fakified by _fakify_module_inputs.
+def track_fake_tensor_for_export(t: object) -> None:
+    if (
+        torch.compiler.is_exporting()
+        and torch._export.config.detect_non_strict_fake_tensor_leaks
+        and is_fake_tensor(t)
+    ):
+        fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -1399,11 +1414,7 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
-        if (
-            torch.compiler.is_exporting()
-            and torch._export.config.detect_non_strict_fake_tensor_leaks
-        ):
-            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
+        track_fake_tensor_for_export(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
@@ -2293,12 +2304,13 @@ class FakeTensorMode(TorchDispatchMode):
                     normalize_to_only_use_kwargs=True,
                 )
                 for index in new_kwargs["indices"]:
-                    # index calls nonzero for bool or int8 tensors, and
-                    # therefore has a dynamic shape output. For other dtypes,
-                    # the output shape depends on the input shape (and not data)
+                    # index calls nonzero for bool or (deprecated) uint8 masks,
+                    # and therefore has a dynamic shape output. For other
+                    # dtypes, the output shape depends on the input shape (and
+                    # not data)
                     if isinstance(index, torch.Tensor) and index.dtype in (
                         torch.bool,
-                        torch.int8,
+                        torch.uint8,
                     ):
                         raise _BypassDispatchCache("dynamic output shape")
                 return

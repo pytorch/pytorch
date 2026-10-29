@@ -110,8 +110,9 @@ provider = { path = "tools/metadata", module = "dependencies" }
 # top level. The exclude list is likewise the only mechanism dropping
 # plumbing (.ci, .claude, .spin) that no include pattern covers.
 #
-# The flatbuffers/ittapi entries drop unneeded language bindings, which
-# also contain symlinks (#157814). resolve-symlinks = "error" fails the sdist
+# The flatbuffers/ittapi/NVTX entries drop unneeded language bindings, which
+# also contain symlinks (#157814; NVTX's rust/ crate links to its c/ headers).
+# resolve-symlinks = "error" fails the sdist
 # build if a symlink is still among the included files, naming it, instead of
 # silently copying its target (the "all" default) or storing a link. Every
 # tracked symlink is therefore listed explicitly below (negated here, dropped
@@ -140,6 +141,7 @@ include = [
     "!third_party/flatbuffers/kotlin/**",
     "!third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "!third_party/ittapi/rust/**",
+    "!third_party/NVTX/rust/**",
     # Symlinks (see resolve-symlinks above).
     "!third_party/XNNPACK/tools/xngen",
     "!third_party/cudnn_frontend/.claude/**",
@@ -156,6 +158,7 @@ exclude = [
     "third_party/flatbuffers/kotlin/**",
     "third_party/flatbuffers/docs/source/CONTRIBUTING.md",
     "third_party/ittapi/rust/**",
+    "third_party/NVTX/rust/**",
     # Symlinks (see resolve-symlinks above).
     ".dockerignore",
     "AGENTS.md",

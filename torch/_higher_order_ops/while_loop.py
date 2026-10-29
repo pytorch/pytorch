@@ -25,7 +25,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_clear_fake_constant
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -434,9 +434,7 @@ def while_loop_tracing(
             # be specialized to fixed values during tracing body_fn or cond_fn.
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
-                if hasattr(x, "constant") and x.constant is not None:
-                    # pyrefly: ignore [missing-attribute]
-                    x.constant = None
+                maybe_clear_fake_constant(x)
             return x
 
         with disable_proxy_modes_tracing():
