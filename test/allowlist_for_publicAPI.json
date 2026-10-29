@@ -531,7 +531,6 @@
     "RawValue",
     "Semaphore",
     "SimpleQueue",
-    "SpawnContext",
     "TimeoutError",
     "Value",
     "active_children",

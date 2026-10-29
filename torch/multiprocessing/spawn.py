@@ -24,7 +24,6 @@ __all__ = [
     "ProcessExitedException",
     "ProcessRaisedException",
     "spawn",
-    "SpawnContext",
     "start_processes",
 ]
 
@@ -218,14 +217,6 @@ class ProcessContext:
         msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
-
-
-class SpawnContext(ProcessContext):
-    def __init__(self, processes, error_files):
-        warnings.warn(
-            "SpawnContext is renamed to ProcessContext since 1.4 release.", stacklevel=2
-        )
-        super().__init__(processes, error_files)
 
 
 # Note: [start_processes]
