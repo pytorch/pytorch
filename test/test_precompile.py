@@ -9666,8 +9666,8 @@ class TestPrecompileCustomOpModules(TestCase):
         with open(artifact) as f:
             source = f.read()
         self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", source)
-        # Its kernel replaced no other, so its failed import only warns.
-        self.assertIn("CUSTOM_OP_KERNEL_MODULES = ()", source)
+        # Its kernel overrode no other, so its failed import only warns.
+        self.assertIn("CUSTOM_OP_OVERRIDE_MODULES = {}", source)
 
     @skipIfCrossRef
     @parametrize("shared", (False, True))
@@ -9730,19 +9730,21 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
     @skipIfCrossRef
-    @parametrize("override_breaks", (False, True))
-    def test_load_imports_the_overriding_kernel_module_last(self, override_breaks):
+    @parametrize("mode", ("load", "broken", "deferred", "reordered"))
+    def test_load_imports_the_overriding_kernel_module_last(self, mode):
         tag = uuid.uuid4().hex
         # Alphabetical order would import the overriding module first.
         override, vendor = f"precompile_a_override_{tag}", f"precompile_z_vendor_{tag}"
         cuda_only, ns = f"precompile_cuda_{tag}", f"precompile_override_test_{tag}"
         directory = self.enterContext(tempfile.TemporaryDirectory())
+        deferred = mode == "deferred"
         lib = f'import torch\nlib = torch.library.Library("{ns}", "IMPL")\n'
         sources = {
             vendor: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("op(Tensor x) -> Tensor")\nlib.impl("op", lambda x: x * 3, "CPU")\n',
-            override: 'import os\nif os.environ.get("PRECOMPILE_BREAK_OVERRIDE"):\n    raise ImportError("broken")\n'
+            # A deferred override registers its kernel only when enable() runs.
+            override: 'import os\nmode = os.environ.get("PRECOMPILE_OVERRIDE")\nif mode == "broken":\n    raise ImportError("broken")\n'
             + lib
-            + 'lib.impl("op", lambda x: x * 5, "CPU")\n',
+            + 'def enable():\n    lib.impl("op", lambda x: x * 5, "CPU")\nif mode != "deferred":\n    enable()\n',
             cuda_only: lib + 'lib.impl("op", lambda x: x * 7, "CUDA")\n',
         }
         for name, source in sources.items():
@@ -9759,6 +9761,8 @@ class TestPrecompileCustomOpModules(TestCase):
             if phase == "capture":
                 warnings.simplefilter("ignore")
                 import {vendor}, {override}, {cuda_only}
+                if {deferred}:
+                    {override}.enable()
                 op = torch.ops.{ns}.op.default
                 with capture(lambda x: op(x), artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
                     torch.testing.assert_close(cap(x), x * 5)
@@ -9766,6 +9770,9 @@ class TestPrecompileCustomOpModules(TestCase):
                 torch.testing.assert_close(load(artifact, cache)(x), x * 5)
                 assert "{cuda_only}" not in sys.modules
             else:
+                if phase == "reordered":
+                    warnings.simplefilter("ignore")
+                    import {override}, {vendor}
                 # vendor's x * 3 CPU kernel must not stand in for the override's.
                 try:
                     load(artifact, cache)
@@ -9778,21 +9785,26 @@ class TestPrecompileCustomOpModules(TestCase):
         )
         paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
         env = dict(os.environ)
-        for phase in ("capture", "broken" if override_breaks else "load"):
-            if phase == "broken":
-                env["PRECOMPILE_BREAK_OVERRIDE"] = "1"
+        for phase in ("capture", mode):
+            # The override breaks only at load; a deferred one is deferred at both.
+            breaks = phase != "capture" or deferred
+            env["PRECOMPILE_OVERRIDE"] = mode if breaks else ""
             cmd = [sys.executable, "-c", script, phase, *paths]
             out = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=900, env=env
             )
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertIn(f"ok {phase}", out.stdout)
-        if override_breaks:
+        if mode == "broken":
             self.assertIn(f"failed to import: {[override]!r}", out.stdout)
+        elif mode != "load":
+            replaced = [f"{ns}::op (CPU kernel of {override})"]
+            self.assertIn(f"another kernel replaced: {replaced!r}", out.stdout)
         with open(paths[0]) as f:
             source = f.read()
         self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", source)
-        self.assertIn(f"CUSTOM_OP_KERNEL_MODULES = {(override,)!r}", source)
+        overrides = {f"{ns}::op": {"CPU": override}}
+        self.assertIn(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}", source)
 
 
 def _decomposed_op_fn(x):
@@ -9933,7 +9945,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 "CUSTOM_OP_MODULES",
                 "CUSTOM_OPS",
                 "CUSTOM_OP_KERNELS",
-                "CUSTOM_OP_KERNEL_MODULES",
+                "CUSTOM_OP_OVERRIDE_MODULES",
             },
         )
         with self.assertNoLogs("torch._precompile", "DEBUG"):
@@ -9978,34 +9990,45 @@ class TestPrecompileCustomOpRecording(TestCase):
                 self.assertFalse(_torch_cpp_op("precompile_ext::op", ""))
 
     def test_kernels_recorded_only_for_the_graph_devices(self):
-        from torch._functorch._aot_autograd.codegen import PySourceBuilder
-        from torch._precompile import _graph_kernel_keys, _write_custom_op_imports
-        from torch.fx.experimental.proxy_tensor import make_fx
         from torch.library import _scoped_library
 
         ns = f"precompile_devices_{uuid.uuid4().hex}"
         lib = self.enterContext(_scoped_library(ns, "DEF"))
         lib.define("op(Tensor x) -> Tensor")
-        for key in ("CPU", "CUDA", "CompositeExplicitAutograd"):
+        for key in ("CPU", "SparseCPU", "CUDA", "CompositeExplicitAutograd"):
             lib.impl("op", lambda x: x.clone(), key)
         op = getattr(torch.ops, ns).op.default
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        artifact = os.path.join(directory, "artifact.py")
+        cache = os.path.join(directory, "artifact.cache")
+
+        def kernels(fn, *args):
+            with capture(
+                fn,
+                artifact_path=artifact,
+                cache_path=cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(*args)
+            with open(artifact) as f:
+                (line,) = [x for x in f if x.startswith("CUSTOM_OP_KERNELS = ")]
+            return ast.literal_eval(line.removeprefix("CUSTOM_OP_KERNELS = "))
+
         # A CPU graph does not require the op's CUDA kernel at load.
-        gm = make_fx(op)(torch.randn(2))
-        buf = PySourceBuilder()
-        _write_custom_op_imports(buf, (), ((f"{ns}::op", ""),), _graph_kernel_keys(gm))
-        namespace = {}
-        exec(buf.getvalue(), namespace)
         expected = {f"{ns}::op": ("CPU", "CompositeExplicitAutograd")}
-        self.assertEqual(namespace["CUSTOM_OP_KERNELS"], expected)
-        # A backend outside the default keys, and a layout's own key.
-        graph = torch.fx.Graph()
-        sparse, meta = graph.placeholder("sparse"), graph.placeholder("meta")
-        sparse.meta["val"] = torch.randn(2).to_sparse()
-        meta.meta["val"] = torch.randn(2, device="meta")
-        graph.output((sparse, meta))
-        keys = _graph_kernel_keys(torch.fx.GraphModule(torch.nn.Module(), graph))
-        self.assertEqual(keys[:2], ("Meta", "SparseCPU"))
-        self.assertTrue(all(k.startswith("Composite") for k in keys[2:]))
+        self.assertEqual(kernels(lambda x: op(x), torch.randn(2)), expected)
+        # A real-mode trace records no tensor for the sparse parameter, so its
+        # SparseCPU key comes from the example inputs.
+        model = torch.nn.Module()
+        sparse = torch.randn(2).to_sparse()
+        model.w = torch.nn.Parameter(sparse, requires_grad=False)
+        keys = ("CPU", "SparseCPU", "CompositeExplicitAutograd")
+
+        def fn(m, x):
+            return op(m.w).to_dense() + x
+
+        self.assertEqual(kernels(fn, model, torch.randn(2)), {f"{ns}::op": keys})
 
         # As does a Dynamo capture's.
         directory = self.enterContext(tempfile.TemporaryDirectory())
