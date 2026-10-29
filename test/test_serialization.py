@@ -1064,6 +1064,13 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    def test_set_from_file_invalid_size(self):
+        # 2**61 + 1 elements of size 8 wraps around to 8 bytes
+        for size, msg in ((2, "wrong byte size"), (2**61 + 1, "overflows"), (-1, "invalid storage size")):
+            buf = io.BytesIO(size.to_bytes(8, "little", signed=True) + b"\x00" * 8)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.UntypedStorage(8)._set_from_file(buf, None, False, 8)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
             return super().run(*args, **kwargs)
@@ -1074,7 +1081,10 @@ class TestSerialization(TestCase, SerializationMixin):
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
 
+    # tempfile wrapper __getattr__ mutates state while guards are built.
+    # TODO: Re-enable NGB when gh-197322 lands.
     @parametrize('weights_only', (True, False))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
 
