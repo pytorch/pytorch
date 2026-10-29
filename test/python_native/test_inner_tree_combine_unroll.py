@@ -115,6 +115,47 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         with self.assertRaisesRegex(ValueError, "aligned partial buffers"):
             kg._launch(op, key, [unaligned], [output])
 
+    @parametrize("name", ["sum", "var_mean"])
+    def test_multi_tile_async_combine_matches_default(self, device, name):
+        """Fold several cp.async tiles, fully and partly unrolled, to the default bits."""
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        trait = (
+            T.SumOps(acc=cutlass.Float32)
+            if name == "sum"
+            else T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        )
+        nouts = 1 if name == "sum" else 2
+        x = torch.randn(1, 1 << 23, device=device)
+
+        def run(arch, key):
+            with mock.patch.object(rt, "_itree_arch", return_value=arch):
+                plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, device=x.device)
+                combine = rt.itree_combine_plan(plan, 4, nfields=trait.nfields, nrows=1)
+                outs = rt.reduce_row_tile(
+                    trait,
+                    key,
+                    x,
+                    [torch.float32] * nouts,
+                    nouts=nouts,
+                    order="inner_tree",
+                )
+            return plan.split[0] // max(combine.combine_tile, 1), combine, outs
+
+        _, _, want = run(rt._ITREE_ARCH["default"], f"multitile_default_{name}")
+        hopper = rt._ITREE_ARCH[(9, 0)]
+        for unroll in (0, 4):
+            with self.subTest(unroll=unroll):
+                ntiles, combine, got = run(
+                    hopper._replace(combine_unroll=unroll), f"multitile_{unroll}_{name}"
+                )
+                self.assertGreater(ntiles, 1)
+                self.assertEqual(combine.combine_unroll, unroll)
+                for g, w in zip(got, want):
+                    self.assertEqual(g.view(torch.int32), w.view(torch.int32))
+
 
 instantiate_parametrized_tests(TestInnerTreeCombineUnroll)
 instantiate_device_type_tests(
