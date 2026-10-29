@@ -6663,6 +6663,30 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     },
                 )
 
+    def test_import_accepts_a_legacy_kernel_record(self):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, key, _ = self._bundle(pathlib.Path(tmp, "producer"))
+
+            def legacy_record(header):
+                for record in header["records"]:
+                    record.pop("group_format", None)
+
+            bundle = _replace_bundle_header(bundle, legacy_record)
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertEqual(
+                    get_cache_manager("ab" * 32).get_group("kernel.json"),
+                    {
+                        name: str(consumer / key / name)
+                        for name in ("kernel.json", "kernel.cubin")
+                    },
+                )
+
     def test_export_leaves_out_excluded_keys(self):
         from triton.runtime.cache import get_cache_manager
 
@@ -6709,6 +6733,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "duplicate_record",
             "member_path",
             "group_member",
+            "group_format",
             "native_suffix",
             "no_binary",
             "incomplete_group",
@@ -6727,6 +6752,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "duplicate_record": "Duplicate Triton runtime-cache record",
             "member_path": "Invalid Triton runtime-cache member name",
             "group_member": "Invalid Triton runtime-cache member name",
+            "group_format": "Invalid Triton runtime-cache group format",
             "native_suffix": "Invalid Triton runtime-cache native member",
             "no_binary": "has no binary",
             "incomplete_group": "Incomplete or unreferenced",
@@ -6761,6 +6787,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 "group_member": lambda h: rename(
                     h, "kernel.autotune.json", "__grp__kernel.autotune.json"
                 ),
+                "group_format": lambda h: kernel(h).update(group_format="unknown"),
                 "native_suffix": lambda h: rename(h, native, "launcher.txt"),
                 "no_binary": lambda h: kernel(h)["members"].remove("kernel.cubin"),
                 "incomplete_group": lambda h: kernel(h)["members"].append("kernel.ptx"),
