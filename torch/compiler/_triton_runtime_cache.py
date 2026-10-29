@@ -227,7 +227,17 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                 consumed.update(members)
                 consumed.add(name)
                 records.append(
-                    {"kind": "kernel", "key": key, "group": group, "members": members}
+                    {
+                        "kind": "kernel",
+                        "key": key,
+                        "group": group,
+                        "members": members,
+                        "group_format": (
+                            "filenames"
+                            if isinstance(entry["child_paths"], list)
+                            else "paths"
+                        ),
+                    }
                 )
             elif name.endswith(suffix):
                 add_file(key, name)
@@ -351,6 +361,8 @@ def _decode(
         if kind == "kernel":
             group = _member_name(record["group"])
             members = record["members"]
+            if record.get("group_format", "paths") not in ("paths", "filenames"):
+                raise RuntimeError("Invalid Triton runtime-cache group format")
             if group not in members or len(members) != len(set(members)):
                 raise RuntimeError("Incomplete Triton runtime-cache kernel group")
             if not any(name.endswith(_BINARY_SUFFIXES) for name in members):
@@ -399,8 +411,12 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
 
 
 def _group_contents(root: Path, record: dict[str, Any]) -> str:
-    # Both Triton formats accept the legacy mapping. Import writes paths for the
-    # final directory, not the staging directory where this group is assembled.
+    # Preserve the producer's representation: Inductor's strict bundle reload
+    # checks these bytes against its separately captured kernel artifacts.
+    if record.get("group_format", "paths") == "filenames":
+        return json.dumps({"child_paths": record["members"]})
+    # Legacy bundles omit group_format. Paths refer to the final directory,
+    # not the staging directory where this group is assembled.
     key = record["key"]
     return json.dumps(
         {"child_paths": {name: str(root / key / name) for name in record["members"]}}
