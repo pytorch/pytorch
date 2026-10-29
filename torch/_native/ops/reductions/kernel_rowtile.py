@@ -127,6 +127,8 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
+    uniform_count: bool = False
+    combine_weights: bool = False
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
@@ -274,6 +276,9 @@ class _ItreePlan(NamedTuple):
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
     combine_unroll: int = 0
+    # Nonzero only for equal, nonempty, power-of-two Welford partial counts.
+    combine_count: int = 0
+    combine_weights: bool = False
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -293,6 +298,8 @@ class _ItreePlan(NamedTuple):
             self.combine_grp,
             self.combine_tile,
             self.combine_unroll,
+            self.combine_count,
+            self.combine_weights,
         )
 
 
@@ -508,6 +515,9 @@ def itree_combine_plan(
     device: torch.device | int | str | None = None,
     nfields: int = 1,
     nrows: int | None = None,
+    *,
+    uniform_count: bool | None = None,
+    combine_weights: bool | None = None,
 ) -> _ItreePlan:
     """Plan the architecture-tuned, bit-neutral fold of each row's split partials.
 
@@ -515,6 +525,10 @@ def itree_combine_plan(
     `combine_group_bytes` and `nfields * itemsize` bounds the staged footprint.
     """
     arch = _itree_arch(device)
+    if uniform_count is None:
+        uniform_count = arch.uniform_count
+    if combine_weights is None:
+        combine_weights = arch.combine_weights
     if arch.combine_unroll < 0:
         raise ValueError("combine_unroll must be nonnegative")
     if arch.combine_async and arch.combine_rpb > WARP:
@@ -549,6 +563,18 @@ def itree_combine_plan(
     if not tile_n:
         # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
         rpb = _MULTIROW_ROWS_PER_BLOCK
+    count = (
+        itree.split[1]
+        if uniform_count
+        and tile_n
+        and itemsize == 4
+        and nfields == 3
+        and 0 < nbatch <= 2**24
+        and 0 < itree.split[1] <= 2**24
+        and itree.split[1] == itree.split[2]
+        and not (itree.split[1] & (itree.split[1] - 1))
+        else 0
+    )
     return _ItreePlan(
         "combine",
         1,
@@ -561,6 +587,8 @@ def itree_combine_plan(
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
+        combine_count=count,
+        combine_weights=bool(count and combine_weights),
     )
 
 
