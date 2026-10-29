@@ -351,8 +351,8 @@ def _dropout_fwd(
     x: Tensor, p: float = 0.5, training: bool = True
 ) -> tuple[Tensor, Tensor]:
     """Opaque training dropout: eager ``(out, bool_mask)``, one RNG consume."""
-    if not bool(training) or float(p) == 0.0:
-        raise RuntimeError("dropout boundary only for training with 0 < p <= 1")
+    if not bool(training) or not (0.0 < float(p) < 1.0):
+        raise RuntimeError("dropout boundary only for training with 0 < p < 1")
     out, mask = torch.ops.aten.native_dropout(x, float(p), bool(training))
     return out, mask
 
@@ -618,9 +618,9 @@ class BatchNormNativeBoundary:
 
 
 class DropoutNativeBoundary:
-    """Scoped adapter: training dropout (``0 < p <= 1``) -> opaque boundary."""
+    """Scoped adapter: training dropout (``0 < p < 1``) -> opaque boundary."""
 
-    version = BOUNDARY_MODULE_VERSION + ":do2"
+    version = BOUNDARY_MODULE_VERSION + ":do3"
 
     def __init__(self, numerics: str | None = None) -> None:
         self.numerics = _frozen_numerics(numerics)
@@ -628,11 +628,20 @@ class DropoutNativeBoundary:
         self.rejections: list[str] = []
 
     def applies(self, node: Any) -> bool:
+        # Never match our own boundary symbol (idempotency: a second pass
+        # must not treat dropout_fwd as another dropout site and duplicate
+        # the RNG consume).
+        if is_native_boundary_target(node.target):
+            return False
         return node.op == "call_function" and node.target in _DROPOUT_TARGETS
 
     def _parse(self, node: Any) -> tuple[Any, float, bool] | None:
         args = tuple(node.args)
         kwargs = dict(node.kwargs)
+        # Non-default Generator kwarg: unmodeled RNG source; never silently
+        # rewrite (the boundary always consumes the global CUDA RNG).
+        if kwargs.get("generator") is not None:
+            return None
         if node.target == torch.nn.functional.dropout:
             if not args:
                 return None
@@ -659,10 +668,9 @@ class DropoutNativeBoundary:
         t = kwargs.get(
             "train", kwargs.get("training", args[2] if len(args) > 2 else True)
         )
-        t = bool(t) if t is not None else True
-        if p is None:
+        if p is None or (t is not None and not isinstance(t, bool)):
             return None
-        return args[0], float(p), t
+        return args[0], float(p), True if t is None else t
 
     def rewrite(self, gm: torch.fx.GraphModule, node: Any) -> bool:
         parsed = self._parse(node)
@@ -670,22 +678,16 @@ class DropoutNativeBoundary:
             self.rejections.append(f"{node.name}: unparsable/inplace dropout args")
             return False
         x, p, training = parsed
-        if not training or p == 0.0:
-            return False  # identity profile: leave the node (no alias lie)
-        if not (0.0 < p <= 1.0):
+        if not training or p == 0.0 or p == 1.0:
+            # Identity (p == 0 / eval) or p == 1 edge-value profiles: leave the
+            # node (no alias lie, no silent sign/NaN resemanticization).
+            if p == 1.0 and training:
+                self.rejections.append(f"{node.name}: p==1 edge semantics unproven")
+            return False
+        if not (0.0 < p < 1.0):
             self.rejections.append(f"{node.name}: bad p={p}")
             return False
-        with gm.graph.inserting_before(node):
-            call = gm.graph.call_function(
-                torch.ops.loops_ir_native_dropout.dropout_fwd,
-                (x, float(p), bool(training)),
-            )
-            call.meta["loops_ir_boundary"] = BoundarySpec(
-                kind=BoundaryKind.RNG_STATE_UPDATE,
-                symbol=f"{DO_FWD_NS}::dropout_fwd",
-                version=self.version,
-                effect=BoundaryEffect.RNG_CONSUMES_ORDERED,
-            )
+        # Each original site consumes the CUDA RNG exactly once.
         with gm.graph.inserting_before(node):
             call = gm.graph.call_function(
                 torch.ops.loops_ir_native_dropout.dropout_fwd,
