@@ -41,6 +41,39 @@ parametrize_pytree_module = parametrize(
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("key_type", [float, complex, tuple, frozenset])
+    def test_input_nan_key_identity_guard(self, key_type):
+        def make_key():
+            value = float("nan")
+            return (
+                key_type([value]) if key_type in (tuple, frozenset) else key_type(value)
+            )
+
+        key = make_key()
+
+        def fn(x, mapping):
+            return x + mapping.get(key, 0)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for stored_key in (key, make_key(), key):
+            mapping = builtins.frozendict({stored_key: 10})
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_input_attribute_write_exception(self):
+        def fn(x, mapping):
+            try:
+                mapping.extra = 1
+            except AttributeError:
+                return x - 1
+            return x + 1
+
+        x = torch.ones(1)
+        mapping = builtins.frozendict(a=1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
     @parametrize("construct", [False, True])
     @parametrize("empty", [False, True])
     def test_repr_and_str(self, construct, empty):
