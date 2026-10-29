@@ -1872,6 +1872,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertIn("PARTITION_SIZE", code[0])
 
     @supported_platform
+    @skipCUDAIf(True, "CPU-only dtype restriction")
+    @skipXPUIf(True, "CPU-only dtype restriction")
+    def test_flash_decoding_fp32_query_bf16_kv_cache(self, device):
+        B, Hq, Hkv, KV_S, D = 2, 8, 2, 2048, 64
+        q = torch.randn(B, Hq, 1, D, device=device)
+        k = torch.randn(B, Hkv, KV_S, D, device=device, dtype=torch.bfloat16)
+        v = k.clone()
+        block_mask = create_block_mask(
+            lambda b, h, m, n: n >= 0, None, None, 1, KV_S, device=device
+        )
+        attention = torch.compile(
+            functools.partial(flex_attention, block_mask=block_mask, enable_gqa=True)
+        )
+        with self.assertRaisesRegex(
+            InductorError, "Unsupported key/value dtype on CPU"
+        ):
+            attention(q, k, v)
+
+    @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
         def score_mod(score, b, h, m, n):
