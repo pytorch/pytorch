@@ -57,6 +57,245 @@ struct convolution_forward_params {
 };
 
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
+// Common logic to prepare parameters for conv/deconv
+// quantization version
+void prepare_parameters(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    const ideep::tensor& dst,
+    const dnnl::memory::dims& dilates,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_points,
+    const std::vector<int32_t>& dst_zero_points,
+    const ideep::attr_t& attr,
+    const ideep::lowp_kind alowp_kind,
+    bool with_bias,
+    bool is_deconv,
+    ideep::tensor& weight_grouped, /* Output */
+    dnnl::memory::dims& dil_compatible, /* Output */
+    ideep::attr_t& op_attr, /* Output */
+    ideep::attr_t& src_attr, /* Output */
+    ideep::attr_t& weights_attr, /* Output */
+    ideep::attr_t& bias_attr, /* Output */
+    ideep::tensor::desc& src_desc, /* Output */
+    ideep::tensor::desc& weights_desc, /* Output */
+    ideep::tensor::desc& bias_desc, /* Output */
+    ideep::tensor::desc& dst_desc /* Output */) {
+  std::vector<float> dst_scales_in;
+  dnnl::memory::data_type dst_data_type;
+  op_attr.set_post_ops(attr.get_post_ops());
+
+  // make weights and dilates compatible with DNNL
+  weight_grouped = weights.make_grouped_weights(groups, is_deconv);
+  dil_compatible = ideep::utils::get_compatible_dilates(dilates);
+
+  auto& weights_scales_in =
+      weight_grouped.has_scale() ? weight_grouped.get_scale() : weights_scales;
+  if (!weights_scales_in.empty()) {
+#ifndef NDEBUG
+    dnnl::error::wrap_c_api(
+        alowp_kind == ideep::u8s8 || alowp_kind == ideep::s8s8
+            ? dnnl_success
+            : dnnl_invalid_arguments,
+        "Unsupported lowp kind");
+#endif
+    int scale_size = (weights_scales_in.size() > 1) ? dst_dims[1] : 1;
+    auto& src_scales_in = src.has_scale()
+        ? src.get_scale()
+        : (src_scales.empty() ? ideep::IDEEP_DEF_SCALE : src_scales);
+
+    // determine dst data type
+    if (dst.get_data_type() != dnnl::memory::data_type::undef) {
+      dst_data_type = dst.get_data_type();
+    } else if (dst_scales.empty() || dst_scales == ideep::IDEEP_DEF_SCALE) {
+      dst_data_type = dnnl::memory::data_type::f32;
+    } else if (attr.non_negitive_output()) {
+      dst_data_type = dnnl::memory::data_type::u8;
+    } else {
+      dst_data_type = dnnl::memory::data_type::s8;
+    }
+
+    // fill primitive attr
+    dst_scales_in =
+        dst_scales.empty() || dst_data_type == dnnl::memory::data_type::f32
+        ? ideep::IDEEP_DEF_SCALE
+        : dst_scales;
+    const auto default_zero_point = std::vector<int32_t>(1);
+    const auto& src_zero_point = src.has_zero_point() ? src.get_zero_point()
+        : src_zero_points.empty()                     ? default_zero_point
+                                                      : src_zero_points;
+    const auto& dst_zero_point = [&]() {
+      if (attr.has_op_kind(dnnl::primitive::kind::sum)) {
+        // Similar logic as dst_scales_in. Since when fused with sum, the dst will be the tensor of sum,
+        // In this case, the output tensor' dst_zero_points and dst_scales_in should be passed in explicitly.
+#ifndef NDEBUG
+        dnnl::error::wrap_c_api(
+            !dst_zero_points.empty() ? dnnl_success : dnnl_invalid_arguments,
+            "When conv fused with sum, dst_zero_points must be passed in.");
+#endif
+        return dst_zero_points;
+      } else {
+        // Keep the original logic for finding dst_zero_point when not fused with sum.
+        return dst.has_zero_point() ? dst.get_zero_point()
+            : dst_zero_points.empty() ? default_zero_point
+                                      : dst_zero_points;
+      }
+    }();
+
+    const auto src_zero_point_size =
+        static_cast<dnnl::memory::dim>(src_zero_point.size());
+    const auto dst_zero_point_size =
+        static_cast<dnnl::memory::dim>(dst_zero_point.size());
+#ifndef NDEBUG
+    dnnl::error::wrap_c_api(
+        src_zero_point_size == 1 && dst_zero_point_size == 1
+            ? dnnl_success
+            : dnnl_invalid_arguments,
+        "DNNL only support 1-dim zero_point");
+#endif
+
+    if (attr.has_op_kind(dnnl::primitive::kind::sum)) {
+      // Here we need to recalculate the scale of sum.
+      // When fused with sum, dst_scales_in is the final output tensor's scale.
+      // dst.scale is the scale of sum tensor.
+
+      float sum_scale = 1.0 / (dst.has_scale() ? dst.get_scale()[0] : 1.0f);
+
+      // When fused with sum, the dst tensor is same as the sum tensor.
+      // So the sum_zero_point will be fetched from the dst tensor.
+      int32_t sum_zero_point =
+          dst.has_zero_point() ? dst.get_zero_point()[0] : 0;
+      if (attr.has_op_kind(dnnl::primitive::kind::eltwise)) {
+        op_attr = ideep::attr_t::residual_with_sum_zero_point(
+            sum_scale, sum_zero_point);
+      } else {
+        op_attr = ideep::attr_t::fuse_sum(sum_scale, sum_zero_point);
+      }
+    }
+    // Set scales to op_attr
+    if (src_scales_in[0] != 1.0f) {
+      int src_scale_mask = 0;
+      op_attr.set_scales(
+          DNNL_ARG_SRC, src_scale_mask, {1.0f / src_scales_in[0]});
+    }
+    // For grouped conv, weight format is `goi...`, where g is groups and o and i are OC/IC per group.
+    // `weight.get_dim(0)` returns g * o and `get_dim(1)` returns i.
+    // For non-grouped conv (groups = 1), weight format is `oi...`.
+    // `weight.get_dim(0)` returns o and `get_dim(1)` returns i.
+    // So, it's always correct to get oc per group by `get_dim(0) / groups`
+    // For deconv, weight format is `gio...` (grouped) or `io...` (non-grouped)
+    // `weight.get_dim(0)` returns g * i or i and `get_dim(1)` always returns o.
+    int oc_per_group = is_deconv ? weight_grouped.get_dim(1)
+                                 : weight_grouped.get_dim(0) / groups;
+    auto wei_scale_mask = ideep::utils::conv_weight_scale_mask(
+        weights_scales_in.size(), oc_per_group, groups, is_deconv);
+    auto wei_scales = weights_scales_in;
+    if (!std::all_of(wei_scales.begin(), wei_scales.end(), [](float i) {
+          return i == 1.0f;
+        })) {
+      op_attr.set_scales(DNNL_ARG_WEIGHTS, wei_scale_mask, wei_scales);
+    }
+    if (dst_scales_in[0] != 1.0f) {
+      int dst_scale_mask = 0;
+      op_attr.set_scales(
+          DNNL_ARG_DST, dst_scale_mask, {1.0f / dst_scales_in[0]});
+    }
+    // Set zero points to op_attr (weight zero point is always 0. Do not set.)
+    // Only set non-zero zero points otherwise there is extra oneDNN overhead
+    if (src_zero_point[0] != 0) {
+      auto src_zp_mask = ideep::utils::tensor_zp_mask(src_zero_point_size);
+      op_attr.set_zero_points(DNNL_ARG_SRC, src_zp_mask, src_zero_point);
+    }
+    if (dst_zero_point[0] != 0) {
+      auto dst_zp_mask = ideep::utils::tensor_zp_mask(dst_zero_point_size);
+      op_attr.set_zero_points(DNNL_ARG_DST, dst_zp_mask, dst_zero_point);
+    }
+
+    src_desc = {
+        src.get_dims(),
+        alowp_kind == ideep::u8s8 ? dnnl::memory::data_type::u8
+                                  : dnnl::memory::data_type::s8,
+        dnnl::memory::format_tag::any};
+    if (src.get_data_type() == dnnl::memory::data_type::f32) {
+      src_attr = {0, src_scales_in};
+    }
+
+    weights_desc = ideep::tensor::desc(
+        weight_grouped.get_dims(),
+        dnnl::memory::data_type::s8,
+        dnnl::memory::format_tag::any);
+    if (groups > 1) {
+      weights_desc = weights_desc.to_grouped(groups);
+    }
+    if (weight_grouped.get_data_type() == dnnl::memory::data_type::f32) {
+      weights_attr = {
+          ideep::utils::tensor_scale_mask(scale_size, groups > 1),
+          weights_scales_in};
+    }
+
+    if (with_bias) {
+      bias_desc = {
+          bias.get_dims(),
+          dnnl::memory::data_type::f32,
+          dnnl::memory::format_tag::any}; // Use f32 instead of s32 to improve accuracy
+    }
+  } else {
+    if (src.has_scale()) {
+      auto src_scale = src.get_scale();
+      src_scale[0] = 1.0f / src_scale[0];
+      src_attr = {0, src_scale};
+    }
+
+#ifndef NDEBUG
+    dnnl::error::wrap_c_api(
+        one_of(
+            weight_grouped.get_data_type(),
+            dnnl::memory::data_type::f32,
+            dnnl::memory::data_type::bf16)
+            ? dnnl_success
+            : dnnl_invalid_arguments,
+        "Incorrect data type in weights");
+#endif
+
+    // align weights data type with src
+    dst_data_type = src.get_data_type() == dnnl::memory::data_type::bf16
+        ? dnnl::memory::data_type::bf16
+        : dnnl::memory::data_type::f32;
+    src_desc = src.get_desc().to_type(dst_data_type);
+    weights_desc = ideep::tensor::desc(
+        weight_grouped.get_dims(), dst_data_type, dnnl::memory::format_tag::any);
+    if (groups > 1) {
+      weights_desc = weights_desc.to_grouped(groups);
+    }
+
+    if (with_bias) {
+#ifndef NDEBUG
+      dnnl::error::wrap_c_api(
+          one_of(
+              bias.get_data_type(),
+              dnnl::memory::data_type::f32,
+              dnnl::memory::data_type::bf16)
+              ? dnnl_success
+              : dnnl_invalid_arguments,
+          "Incorrect data type in bias");
+#endif
+      bias_desc = bias.get_desc();
+    }
+  }
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+  dst_desc = attr.has_op_kind(dnnl::primitive::kind::sum)
+      ? dst.get_desc()
+      : ideep::tensor::desc(dst_dims, dst_data_type);
+}
+
+// Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv.
 // non-quantization version
 void prepare_parameters(
@@ -653,6 +892,122 @@ void compute_dispatch(
       params, src, weights, bias, dst);
 }
 
+// Ported from ideep::convolution_forward::compute_dispatch.
+// For int8
+template <bool with_bias, bool reorder_src, bool reorder_weight>
+void compute_dispatch(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    bool is_channels_last,
+    const ideep::attr_t& attr = ideep::attr_t(),
+    dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
+    dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
+    const ideep::lowp_kind alowp_kind = ideep::u8s8) {
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ideep::attr_t op_attr, src_attr, weights_attr, bias_attr;
+  ideep::tensor weights_grouped;
+  dnnl::memory::dims dil_compatible;
+
+  prepare_parameters(
+      src,
+      weights,
+      bias,
+      dst_dims,
+      dst,
+      dilates,
+      groups,
+      src_scales,
+      weights_scales,
+      dst_scales,
+      src_zero_point,
+      dst_zero_point,
+      attr,
+      alowp_kind,
+      with_bias,
+      false,
+      weights_grouped,
+      dil_compatible,
+      op_attr,
+      src_attr,
+      weights_attr,
+      bias_attr,
+      src_desc,
+      weights_desc,
+      bias_desc,
+      dst_desc);
+
+  // Used for to_mkldnn() path
+  auto pd = get_primitive_desc<with_bias>(
+      src_desc,
+      weights_desc,
+      bias_desc,
+      dst_desc,
+      strides,
+      dil_compatible,
+      padding_l,
+      padding_r,
+      is_channels_last,
+      op_attr,
+      aalgorithm,
+      aprop_kind);
+
+#ifdef __aarch64__
+  convolution_forward_params param(
+      std::move(pd.first),
+      std::move(pd.second),
+      std::move(op_attr),
+      groups,
+      std::move(bias_attr));
+#else
+  dnnl::convolution_forward primitive(pd);
+  convolution_forward_params param(
+      std::move(pd),
+      std::move(primitive),
+      std::move(op_attr),
+      groups,
+      std::move(bias_attr));
+#endif
+
+  // Prepare tensors for scales and zero points
+  if (param.op_attr.has_scales()) {
+    if (!param.all_scales) {
+      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+    }
+    for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
+      int dnnl_arg = arg_scale_pair.first;
+      const std::vector<float>& scale = arg_scale_pair.second.first;
+      ideep::tensor scales_m = ideep::tensor(scale);
+      param.all_scales->insert({dnnl_arg, scales_m});
+    }
+  }
+  if (param.op_attr.has_zero_points()) {
+    if (!param.all_zero_points) {
+      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
+    }
+    for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
+      int dnnl_arg = arg_zp_pair.first;
+      const std::vector<int32_t>& zp = arg_zp_pair.second.first;
+      ideep::tensor zp_m = ideep::tensor(zp);
+      param.all_zero_points->insert({dnnl_arg, zp_m});
+    }
+  }
+  do_compute<with_bias, reorder_src, reorder_weight>(
+      param, src, weights, bias, dst);
+}
+
 // Ported from ideep::convolution_forward::do_prepare.
 // For fp32
 template <bool with_bias>
@@ -764,6 +1119,105 @@ void compute_binary_dispatch(
 }
 
 } // namespace
+
+void convolution_forward_compute_v2(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr) {
+  bool is_channels_last = src.get_desc().is_channels_last() ||
+      weights.get_desc().is_channels_last();
+  if (bias.is_empty()) {
+    compute_dispatch</*with_bias=*/false, true, true>(
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        is_channels_last,
+        attr);
+  } else {
+    compute_dispatch</*with_bias=*/true, true, true>(
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        is_channels_last,
+        attr);
+  }
+}
+
+void convolution_forward_compute_v2(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr) {
+  bool is_channels_last = src.get_desc().is_channels_last() ||
+      weights.get_desc().is_channels_last();
+  static ideep::tensor dummy_bias;
+  compute_dispatch</*with_bias=*/false, true, true>(
+      src,
+      weights,
+      dummy_bias,
+      dst_dims,
+      dst,
+      strides,
+      dilates,
+      padding_l,
+      padding_r,
+      groups,
+      src_scales,
+      weights_scales,
+      dst_scales,
+      src_zero_point,
+      dst_zero_point,
+      is_channels_last,
+      attr);
+}
 
 void convolution_forward_compute_v3(
     const ideep::tensor& src,
