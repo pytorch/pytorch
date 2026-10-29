@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     CUSTOM_OP_MODULES: tuple[str, ...] = ()
     CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
     CUSTOM_OP_KERNELS: dict[str, tuple[str, ...]] = {}
-    CUSTOM_OP_KERNEL_MODULES: tuple[str, ...] = ()
+    CUSTOM_OP_OVERRIDE_MODULES: dict[str, dict[str, str]] = {}
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -85,10 +85,14 @@ if TYPE_CHECKING:
 def _import_custom_op_modules(served=(), import_served=None):
     """Import the modules registering the custom ops the graphs call, then check
     that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
-    registered, and that every module in CUSTOM_OP_KERNEL_MODULES imported.
-    Emitted as section 0 and called at exec time. The modules in ``served`` are
-    imported with ``import_served``, which fails the load if they do not import."""
+    registered, and that every module in CUSTOM_OP_OVERRIDE_MODULES imported and
+    still registers the active kernel it did at capture. Emitted as section 0 and
+    called at exec time. The modules in ``served`` are imported with
+    ``import_served``, which fails the load if they do not import."""
     import importlib
+    import os
+    import re
+    import sys
     import warnings
 
     import torch
@@ -116,25 +120,41 @@ def _import_custom_op_modules(served=(), import_served=None):
         for key in CUSTOM_OP_KERNELS.get(qualname, ()):
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
-    # Another module's kernel under the same key would pass the check above.
-    kernel_errors = [m for m in CUSTOM_OP_KERNEL_MODULES if m in import_errors]
-    if missing or kernel_errors:
+    # Another module's kernel under the same key would pass the check above, so
+    # the active kernel must be registered from the overriding module's file.
+    overridden = []
+    real = os.path.realpath
+    override_errors = set()
+    for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
+        dump = torch._C._dispatch_dump(qualname)
+        for key, module in owners.items():
+            pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
+            active = re.search(pattern, dump, re.MULTILINE)
+            path = getattr(sys.modules.get(module), "__file__", None)
+            if module in import_errors:
+                override_errors.add(module)
+            elif not (active and path and real(active[1]) == real(path)):
+                overridden.append(f"{qualname} ({key} kernel of {module})")
+    if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
         from torch._precompile import PrecompileError as _PrecompileError
 
-        errors = [import_errors[m] for m in kernel_errors] or [*import_errors.values()]
+        errors = [import_errors[m] for m in sorted(override_errors)]
         raise _PrecompileError(
             f"this artifact calls custom ops or kernels not registered here: "
-            f"{missing or 'none'}. Modules registering the kernels it ran at "
-            f"capture that failed to import: {kernel_errors or 'none'}. "
-            "Import the modules registering them before loading it. Modules "
-            f"that failed to import: {sorted(import_errors) or 'none'}."
-        ) from next(iter(errors), None)
+            f"{missing or 'none'}. Modules whose kernels overrode another kernel "
+            f"for the same key at capture that failed to import: "
+            f"{sorted(override_errors) or 'none'}. Overriding kernels it ran at "
+            f"capture that another kernel replaced: {overridden or 'none'}. "
+            "Import the modules registering them, and register no other kernel "
+            "over theirs, before loading it. Modules that failed to import: "
+            f"{sorted(import_errors) or 'none'}."
+        ) from next(iter(errors or import_errors.values()), None)
     for module, e in import_errors.items():
         warnings.warn(
-            f"importing custom op module {module!r} raised {e!r}; it registered "
-            "none of the kernels this artifact ran at capture, and the ops it calls "
-            "and their kernel keys are registered, so it loads anyway"
+            f"importing custom op module {module!r} raised {e!r}; none of its "
+            "kernels overrode another for the same key, and the ops this artifact "
+            "calls and their kernel keys are registered anyway, so it loads"
         )
 
 
