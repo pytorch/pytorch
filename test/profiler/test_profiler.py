@@ -1301,6 +1301,7 @@ x = torch.randn(64, 64, device="cuda")
             capture_output=True,
             text=True,
             env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 

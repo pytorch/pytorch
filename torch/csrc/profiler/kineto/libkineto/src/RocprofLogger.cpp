@@ -520,25 +520,22 @@ RocprofLogger& RocprofLogger::singleton() {
 RocprofLogger::RocprofLogger() {}
 
 namespace {
-thread_local std::deque<uint64_t>
-    t_externalIds[RocLogger::CorrelationDomain::size];
-// This owner keeps the returned pointer alive while clearLogs() invalidates
-// and releases the registry's copy from another thread.
-thread_local std::shared_ptr<ThreadTraceBuffer> t_threadBuffer;
-
 // A thread's thread_locals are destroyed when it exits; for the main thread
 // that happens inside exit(), before static destructors that can still make
 // traced HIP calls (rocBLAS/hipBLASLt unloading code objects while a session
-// is open). Thread_locals of one translation unit are constructed together in
-// declaration order and destroyed in reverse, so this marker, declared last,
-// flags the thread before any of the state above is gone.
+// is open). ~ThreadState sets t_threadExiting before its members are
+// destroyed, and the trivially destructible flag stays readable afterwards.
 thread_local bool t_threadExiting = false;
-struct ThreadExitMarker {
-  ~ThreadExitMarker() {
+struct ThreadState {
+  std::deque<uint64_t> externalIds[RocLogger::CorrelationDomain::size];
+  // This owner keeps the returned pointer alive while clearLogs() invalidates
+  // and releases the registry's copy from another thread.
+  std::shared_ptr<ThreadTraceBuffer> buffer;
+  ~ThreadState() {
     t_threadExiting = true;
   }
 };
-thread_local ThreadExitMarker t_threadExitMarker;
+thread_local ThreadState t_state;
 } // namespace
 
 void RocprofLogger::pushCorrelationID(uint64_t id, CorrelationDomain type) {
@@ -547,7 +544,7 @@ void RocprofLogger::pushCorrelationID(uint64_t id, CorrelationDomain type) {
           std::memory_order_relaxed)) {
     return;
   }
-  t_externalIds[type].push_back(id);
+  t_state.externalIds[type].push_back(id);
 }
 
 void RocprofLogger::popCorrelationID(CorrelationDomain type) {
@@ -556,8 +553,8 @@ void RocprofLogger::popCorrelationID(CorrelationDomain type) {
           std::memory_order_relaxed)) {
     return;
   }
-  if (!t_externalIds[type].empty()) {
-    t_externalIds[type].pop_back();
+  if (!t_state.externalIds[type].empty()) {
+    t_state.externalIds[type].pop_back();
   } else {
     LOG(ERROR)
         << "Attempt to popCorrelationID from an empty external Ids stack";
@@ -593,7 +590,7 @@ void RocprofLogger::clearLogs() {
 
 ThreadTraceBuffer* RocprofLogger::getThreadBuffer() {
   static RocprofLogger* dis = &singleton();
-  auto& buffer = t_threadBuffer;
+  auto& buffer = t_state.buffer;
 
   if (buffer == nullptr ||
       buffer->generation != dis->generation_.load(std::memory_order_acquire)) {
@@ -709,7 +706,7 @@ void RocprofLogger::api_callback(
     rocprofiler_user_data_t* user_data,
     [[maybe_unused]] void* callback_data) {
   // Calls made after this thread's thread_locals are gone (see
-  // ThreadExitMarker) happen during thread or process teardown; drop them.
+  // ThreadState) happen during thread or process teardown; drop them.
   if (t_threadExiting) {
     return;
   }
@@ -828,9 +825,10 @@ void RocprofLogger::api_callback(
           for (int it = RocLogger::CorrelationDomain::begin;
                it < RocLogger::CorrelationDomain::end;
                ++it) {
-            if (t_externalIds[it].size() > 0) {
+            if (t_state.externalIds[it].size() > 0) {
               buffer->externalCorrelations[it].emplace_back(
-                  record.correlation_id.internal, t_externalIds[it].back());
+                  record.correlation_id.internal,
+                  t_state.externalIds[it].back());
             }
           }
           break;
@@ -840,10 +838,10 @@ void RocprofLogger::api_callback(
         for (int it = RocLogger::CorrelationDomain::begin;
              it < RocLogger::CorrelationDomain::end;
              ++it) {
-          if (t_externalIds[it].size() > 0) {
+          if (t_state.externalIds[it].size() > 0) {
             std::lock_guard<std::mutex> lock(dis->externalCorrelationsMutex_);
             dis->externalCorrelations_[it].emplace_back(
-                record.correlation_id.internal, t_externalIds[it].back());
+                record.correlation_id.internal, t_state.externalIds[it].back());
           }
         }
       }
