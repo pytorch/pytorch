@@ -304,10 +304,10 @@ class CurrentDeviceVariable(VariableTracker):
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         return "torch.fx.experimental.proxy_tensor._coor_current_device()"
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # tp_richcompare_impl reports this device equal to an explicit cuda:N
         # whenever N is the running rank's index, so a hash has to agree with every
-        # cuda:N. Under CooR ConstantVariable.hash_impl drops the index from device
+        # cuda:N. Under CooR ConstantVariable.tp_hash_impl drops the index from device
         # hashes too, so all devices of one type share a bucket and equality decides:
         # two rank-relative devices are equal, and against an explicit cuda:N the
         # comparison is on the runtime index rather than silently unequal.
@@ -2952,7 +2952,7 @@ class TensorVariable(VariableTracker):
             ),
         )
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Tensor.__hash__ is `return id(self)`, so hash == id.
         # Always use the FakeTensor identity so aliased tensors
         # (e.g. y = x.add_(1)) hash consistently.
@@ -3439,7 +3439,7 @@ class SymNodeVariable(VariableTracker):
     ) -> VariableTracker:
         return self.nb_negative_impl(tx)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.evaluate_expr()), False
 
     def nb_positive_impl(
@@ -3538,7 +3538,7 @@ class NumpyNdarrayVariable(TensorVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, "unhashable type: 'numpy.ndarray'")
