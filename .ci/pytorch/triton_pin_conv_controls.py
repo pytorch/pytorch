@@ -51,8 +51,26 @@ class CaptureOriginal:
         self.captures = []
 
     def pytest_runtest_call(self, item):
+        if item.name != "test_conv_with_as_strided_cuda":
+            return
         import torch
 
+        policy = {
+            "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            "matmul_allow_fp16_reduction": torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+            "matmul_allow_bf16_reduction": torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+            "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "environment": {
+                k: v
+                for k, v in os.environ.items()
+                if k.startswith(("MIOPEN_", "ROCBLAS_", "HIPBLAS_"))
+            },
+        }
+        (REPORT / f"{self.label}-precision-policy.json").write_text(
+            json.dumps(policy, indent=2)
+        )
         module = item.module
         original_check = module.check_model
         original_equal = module._assert_equal_with_significant_stride_check
@@ -145,7 +163,7 @@ class CaptureOriginal:
             module.compile_fx = aten_graph
 
 
-def child(label, aten):
+def child(label, aten, prefix):
     import pytest
     import torch
     import triton
@@ -153,17 +171,22 @@ def child(label, aten):
     prop = torch.cuda.get_device_properties(0)
     assert torch.version.hip and "gfx950" in prop.gcnArchName
     assert torch.version.git_version == TORCH_HEAD
-    distributions = {
-        d.metadata["Name"]: d.version
+    distributions = [
+        {
+            "name": d.metadata["Name"],
+            "version": d.version,
+            "location": str(d.locate_file("")),
+        }
         for d in importlib.metadata.distributions()
         if "triton" in d.metadata.get("Name", "").lower()
-    }
+    ]
     assert triton.__file__ and hasattr(triton, "jit")
     probe = {
         "torch_sha": torch.version.git_version,
         "torch_config": torch.__config__.show(),
         "triton_file": triton.__file__,
         "triton_distributions": distributions,
+        "triton_distribution": importlib.metadata.version("triton"),
         "device": str(prop),
         "hip": torch.version.hip,
         "aten_graph_control": aten,
@@ -173,13 +196,21 @@ def child(label, aten):
     )
     print("CONV_NATIVE_PROVENANCE", json.dumps(probe), flush=True)
     plugin = CaptureOriginal(label, aten)
+    nodes = (
+        json.loads((ROOT / ".ci/pytorch/triton_pin_conv_ci_prefix.json").read_text())[
+            "nodes"
+        ]
+        if prefix
+        else [NODE]
+    )
     code = pytest.main(
         [
             "-s",
             "--tb=short",
             "--reruns=0",
             f"--junitxml={REPORT / (label + '.xml')}",
-            NODE,
+            "-x",
+            *nodes,
         ],
         plugins=[plugin],
     )
@@ -187,7 +218,7 @@ def child(label, aten):
     sys.exit(code)
 
 
-def phase(label, *, site=None, sha=None, aten=False):
+def phase(label, *, site=None, sha=None, aten=False, prefix=False):
     env = os.environ.copy()
     controls.configure_fusion(env, None)
     if site:
@@ -216,12 +247,14 @@ def phase(label, *, site=None, sha=None, aten=False):
     command = [sys.executable, str(Path(__file__).resolve()), "--child", label]
     if aten:
         command.append("--aten")
+    if prefix:
+        command.append("--ci-prefix")
     code = controls.run(
         command, cwd=ROOT / "test", env=env, name=label, check=False, timeout=1200
     )
     log = (REPORT / f"{label}.log").read_text(errors="replace")
     assert code in (0, 1) and "CONV_NUMERICS" in log
-    assert "1 passed" in log or "1 failed" in log
+    assert "passed" in log or "1 failed" in log
     assert "RuntimeError:" not in log
     with zipfile.ZipFile(
         DEBUG / f"{label}-generated-kernels.zip", "w", zipfile.ZIP_DEFLATED
@@ -244,12 +277,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--child")
     parser.add_argument("--aten", action="store_true")
+    parser.add_argument("--ci-prefix", action="store_true")
     args = parser.parse_args()
     REPORT.mkdir(parents=True, exist_ok=True)
     DEBUG.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
     if args.child:
-        child(args.child, args.aten)
+        child(args.child, args.aten, args.ci_prefix)
         return
     controls.REPORT, controls.WORK = REPORT, WORK
     provenance = {
@@ -263,6 +297,14 @@ def main():
         ).hexdigest(),
     }
     (REPORT / "source-provenance.json").write_text(json.dumps(provenance, indent=2))
+    if args.ci_prefix:
+        result = {
+            "mode": "original-ci-prefix",
+            "controls": {"ci-prefix": phase("ci-prefix", prefix=True)},
+        }
+        (REPORT / "results.json").write_text(json.dumps(result, indent=2))
+        print("CONV_CI_PREFIX_RESULTS", json.dumps(result), flush=True)
+        return
     results = {
         "aten": phase("aten", aten=True),
         "current_image": phase("current-image"),
