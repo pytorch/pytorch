@@ -1451,12 +1451,12 @@ class PointwiseStrictNumericsTest(TestCase):
         xfail = POINTWISE_XFAIL
         if (
             torch.version.hip is None
-            and _op_id(op) == "rsub"
+            and _op_id(op) in ("sub", "rsub")
             and dtype in (torch.float32, torch.float16, torch.bfloat16)
         ):
-            # Explicit FMA for alpha subtraction also makes rsub match eager.
+            # Explicit FMA for alpha subtraction makes sub and rsub match eager.
             # Keep the global ledger entries so all three dtypes are collected.
-            xfail = xfail - {("rsub", _dtype_label(dtype))}
+            xfail = xfail - {(_op_id(op), _dtype_label(dtype))}
         if IS_SM89 and dtype == torch.bfloat16 and _op_id(op) == "abs":
             import triton
 
