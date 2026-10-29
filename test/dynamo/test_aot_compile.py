@@ -1960,8 +1960,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
