@@ -99,8 +99,10 @@ def _import_custom_op_modules(served=(), import_served=None):
     import torch
 
     import_errors = {}
-    # In order, so a module overriding another's kernel registers it last.
-    for module in CUSTOM_OP_MODULES:
+    # A module imported from inside another finished first, so the order alone
+    # would import an override nested in the module it overrides before that one.
+    owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
+    for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
         if import_served is not None and module in served:
             import_served(module)
             continue

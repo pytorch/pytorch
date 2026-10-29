@@ -7644,7 +7644,6 @@ x, w = inputs(0)
 make_fx = sys.argv[4] == "make_fx"
 if phase == "capture":
     # Positive control: outside a capture this fn does build a multi-kernel.
-    # Under autotune_at_compile_time a multi-kernel def never reaches the module.
     with torch._inductor.config.patch({"triton.autotune_at_compile_time": False}):
         torch.compile(fn)(x, w)
     assert "sub-kernel" in benchmarked, benchmarked
@@ -9975,17 +9974,19 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
     @skipIfCrossRef
-    @parametrize("mode", ("load", "broken", "deferred", "reordered"))
+    @parametrize("mode", ("load", "broken", "deferred", "reordered", "nested"))
     def test_load_imports_the_overriding_kernel_module_last(self, mode):
         tag = uuid.uuid4().hex
         # Alphabetical order would import the overriding module first.
         override, vendor = f"precompile_a_override_{tag}", f"precompile_z_vendor_{tag}"
         cuda_only, ns = f"precompile_cuda_{tag}", f"precompile_override_test_{tag}"
         directory = self.enterContext(tempfile.TemporaryDirectory())
-        deferred = mode == "deferred"
+        deferred, nested = mode == "deferred", mode == "nested"
         lib = f'import torch\nlib = torch.library.Library("{ns}", "IMPL")\n'
         sources = {
-            vendor: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("op(Tensor x) -> Tensor")\nlib.impl("op", lambda x: x * 3, "CPU")\n',
+            vendor: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("op(Tensor x) -> Tensor")\nlib.impl("op", lambda x: x * 3, "CPU")\n'
+            # Imported from inside vendor, so it finishes first.
+            + (f"import {override}\n" if nested else ""),
             # A deferred override registers its kernel only when enable() runs.
             override: 'import os\nmode = os.environ.get("PRECOMPILE_OVERRIDE")\nif mode == "broken":\n    raise ImportError("broken")\n'
             + lib
@@ -10011,7 +10012,7 @@ class TestPrecompileCustomOpModules(TestCase):
                 op = torch.ops.{ns}.op.default
                 with capture(lambda x: op(x), artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
                     torch.testing.assert_close(cap(x), x * 5)
-            elif phase == "load":
+            elif phase in ("load", "nested"):
                 torch.testing.assert_close(load(artifact, cache)(x), x * 5)
                 assert "{cuda_only}" not in sys.modules
             else:
@@ -10042,12 +10043,13 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertIn(f"ok {phase}", out.stdout)
         if mode == "broken":
             self.assertIn(f"failed to import: {[override]!r}", out.stdout)
-        elif mode != "load":
+        elif mode not in ("load", "nested"):
             replaced = [f"{ns}::op (CPU kernel of {override})"]
             self.assertIn(f"another kernel replaced: {replaced!r}", out.stdout)
         with open(paths[0]) as f:
             source = f.read()
-        self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", source)
+        modules = (override, vendor) if nested else (vendor, override)
+        self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", source)
         overrides = {f"{ns}::op": {"CPU": override}}
         self.assertIn(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}", source)
 
@@ -10237,6 +10239,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 self.assertTrue(_torch_cpp_op("inductor::op", ""))
 
     def test_kernels_recorded_only_for_the_graph_devices(self):
+        from torch._precompile import _COMPOSITE_KERNEL_KEYS, _graph_kernel_keys
         from torch.library import _scoped_library
 
         ns = f"precompile_devices_{uuid.uuid4().hex}"
@@ -10279,6 +10282,12 @@ class TestPrecompileCustomOpRecording(TestCase):
             return op(m.w).to_dense() + x
 
         self.assertEqual(kernels(fn, model, torch.randn(2)), {f"{ns}::op": keys})
+        # QuantizedMeta, like many per-backend keys, does not parse as a key name.
+        quantized_meta = torch._C.DispatchKeySet(torch._C.DispatchKey.QuantizedMeta)
+        gm = torch.fx.symbolic_trace(lambda x: x)
+        with mock.patch.object(torch._C, "_dispatch_keys", return_value=quantized_meta):
+            keys = _graph_kernel_keys(gm, [torch.randn(2)])
+        self.assertEqual(keys, _COMPOSITE_KERNEL_KEYS)
 
         # As does a Dynamo capture's.
         def dynamo_capture(body):
