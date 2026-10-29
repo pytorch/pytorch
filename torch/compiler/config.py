@@ -227,11 +227,8 @@ any cudagraph.
 
 dynamic_shapes: bool = Config(alias="torch._dynamo.config.dynamic_shapes")
 """
-Controls whether the compilation pipeline supports dynamic tensor shapes.
-When enabled, the compiler can handle tensors with varying dimensions across
-different invocations. This is a cross-cutting setting that affects shape
-inference, guard generation, and code generation across the entire compilation
-stack.
+This is a legacy option that is no longer used. See ``assume_static_by_default``
+and ``automatic_dynamic_shapes`` instead.
 """
 
 assume_static_by_default: bool = Config(

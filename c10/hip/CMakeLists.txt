@@ -38,7 +38,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
 
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_hip PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  target_compile_definitions(c10_hip PRIVATE C10_CUDA_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")

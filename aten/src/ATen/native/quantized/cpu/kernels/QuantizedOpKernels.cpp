@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
 #include <ATen/Dispatch.h>
@@ -2382,15 +2383,15 @@ void qtopk_kernel(Tensor& values,
 
 template <typename T, bool ReluFused>
 inline void do_bn_compute(
-    typename T::underlying* X_ptr,
+    const typename T::underlying* X_ptr,
     typename T::underlying* Y_ptr,
     Vectorized<float> & fake_scale,
     Vectorized<float> & in_zp_vec,
     Vectorized<float> & scale_neg_zp_premul,
     int64_t out_zero_point,
     Vectorized<T> & out_zero_point_v,
-    float*  alpha,
-    float* beta,
+    const float* alpha,
+    const float* beta,
     int64_t vec_num,
     int64_t kVLen
 ) {
@@ -2424,13 +2425,13 @@ void q_batch_norm_kernel(
     Tensor& output) {
 
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
-    float* alpha = a.data_ptr<float>();
-    float* beta = b.data_ptr<float>();
+    const float* alpha = a.const_data_ptr<float>();
+    const float* beta = b.const_data_ptr<float>();
     auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
     auto maximum = std::numeric_limits<scalar_t::underlying>::max();
-    scalar_t::underlying* X =
-        reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
-    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
+    const scalar_t::underlying* X =
+        reinterpret_cast<const scalar_t::underlying*>(input.const_data_ptr());
+    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.mutable_data_ptr());
 
     constexpr int kVLen = Vectorized<float>::size();
     const int64_t outer_size = N * HxW;
@@ -2443,7 +2444,7 @@ void q_batch_norm_kernel(
     const auto lanes = static_cast<int64_t>(Vec::float_num_vecs() * kVLen);
     at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
-        auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
+        const auto* X_ptr = reinterpret_cast<const typename scalar_t::underlying*>(X + i * C);
         auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
         int64_t ch = 0;
 
@@ -2642,11 +2643,11 @@ void q_batch_norm_cpu_kernel(
     const Tensor& b,
     Tensor& output) {
   auto in_ptr = input.const_data_ptr<uint8_t>();
-  float* alpha_ptr = a.data_ptr<float>();
-  float* beta_ptr = b.data_ptr<float>();
+  const float* alpha_ptr = a.const_data_ptr<float>();
+  const float* beta_ptr = b.const_data_ptr<float>();
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, output.scalar_type(), "int8_batch_norm2d_cpu", [&] {
-        auto out_ptr = output.data_ptr<scalar_t>();
+        auto out_ptr = output.mutable_data_ptr<scalar_t>();
         q_batch_norm_cpu_kernel_impl<scalar_t>(
             N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr);
       });
@@ -2940,10 +2941,10 @@ void quantized_normalize_kernel(
         (affine_per_channel && beta.numel() == num_channels),
         "Unexpected size of beta");
 
-    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const scalar_t* X_data = X.const_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
-    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    scalar_t* Y_data = Y->mutable_data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
@@ -2970,12 +2971,12 @@ void quantized_normalize_kernel(
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
 
-        scalar_t* X_ptr = X_data + i * N;
+        const scalar_t* X_ptr = X_data + i * N;
         scalar_t* Y_ptr = Y_data + i * N;
 
         // First pass: calculate mean and variance.
 
-        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        const scalar_t::underlying* X_ptr_underlying = reinterpret_cast<const scalar_t::underlying*>(X_ptr);
         auto l_sum_shifted = hsum(X_ptr_underlying, N);
         auto l_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
         float l_mean_shifted_div_scale_x = static_cast<float>(l_sum_shifted) / N;
@@ -3031,7 +3032,7 @@ void quantized_normalize_kernel(
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
               int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
-              for (int i = 0; i < validDqvecLen; ++i) {
+              for (const auto i : c10::irange(validDqvecLen)) {
                 auto &dq = dqXVec[i];
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
@@ -3064,7 +3065,7 @@ void quantized_normalize_kernel(
                 .store(Y_ptr + vecStartIdx);
             }
           }
-          for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+          for (const auto remIdx : c10::irange(N - kNonVecRemInLayer, N)) {
             const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
             const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
             auto qXVal = X_ptr[remIdx];
@@ -3094,10 +3095,10 @@ void qmean_inner_dim_kernel(
   size_t num_dims_to_squeeze = is_all_reduce ? self.dim() : opt_dim.value().size();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take average of in each group
-  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(in_dims.size() - num_dims_to_squeeze)) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -3113,14 +3114,14 @@ void qmean_inner_dim_kernel(
       std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
-    scalar_t* X_data = self.data_ptr<scalar_t>();
-    scalar_t* Y_data = result.data_ptr<scalar_t>();
+    const scalar_t* X_data = self.const_data_ptr<scalar_t>();
+    scalar_t* Y_data = result.mutable_data_ptr<scalar_t>();
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
-        scalar_t* X_ptr = X_data + i * N;
+        const scalar_t* X_ptr = X_data + i * N;
         scalar_t* Y_ptr = Y_data + i;
-        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        const scalar_t::underlying* X_ptr_underlying = reinterpret_cast<const scalar_t::underlying*>(X_ptr);
         scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
         auto x_sum = hsum(X_ptr_underlying, N);
         float y_float = static_cast<float>(x_sum) / N;
@@ -3144,10 +3145,10 @@ void qstd_inner_dim_kernel(
                                self.dim();
   int64_t M = 1; // Num of groups
   int64_t N = 1; // Num of elements to take std of in each group
-  for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(in_dims.size() - num_dims_to_squeeze)) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -3167,14 +3168,14 @@ void qstd_inner_dim_kernel(
       std::nullopt);
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
-    scalar_t* X_data = self.data_ptr<scalar_t>();
-    scalar_t* Y_data = result.data_ptr<scalar_t>();
+    const scalar_t* X_data = self.const_data_ptr<scalar_t>();
+    scalar_t* Y_data = result.mutable_data_ptr<scalar_t>();
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
-        scalar_t* X_ptr = X_data + i * N;
+        const scalar_t* X_ptr = X_data + i * N;
         scalar_t* Y_ptr = Y_data + i;
-        scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+        const scalar_t::underlying* X_ptr_underlying = reinterpret_cast<const scalar_t::underlying*>(X_ptr);
         scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
         auto x_sum_shifted = hsum(X_ptr_underlying, N);
         auto x_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
@@ -3228,10 +3229,10 @@ void quantized_groupnorm_nhwc_kernel(
         (affine_per_channel && beta.numel() == C),
         "Unexpected size of beta");
 
-    scalar_t* X_data = X.data_ptr<scalar_t>();
+    const scalar_t* X_data = X.const_data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
-    scalar_t* Y_data = Y->data_ptr<scalar_t>();
+    scalar_t* Y_data = Y->mutable_data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
@@ -3283,8 +3284,8 @@ void quantized_groupnorm_nhwc_kernel(
           int64_t l_sum_shifted = 0;
           int64_t l_sum_sq_shifted = 0;
           for (const auto hw : c10::irange(HxW)) {
-            scalar_t* X_ptr = X_data + n * N * G + g * channels_per_group + hw * C;
-            scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+            const scalar_t* X_ptr = X_data + n * N * G + g * channels_per_group + hw * C;
+            const scalar_t::underlying* X_ptr_underlying = reinterpret_cast<const scalar_t::underlying*>(X_ptr);
             l_sum_shifted += hsum(X_ptr_underlying, channels_per_group);
             l_sum_sq_shifted += hsum_sq(X_ptr_underlying, channels_per_group);
           }
@@ -3320,7 +3321,7 @@ void quantized_groupnorm_nhwc_kernel(
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
-              for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+              for (const auto fvecIdx : c10::irange(dqXVec.size())) {
                 auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3329,9 +3330,7 @@ void quantized_groupnorm_nhwc_kernel(
                   .store(Y_ptr + vecStartIdx);
             }
             // Remaining scalar
-            for (int64_t remIdx = kNumIntVecInHxW * kIntVLen;
-                 remIdx < kNonVecRemInHxW + kNumIntVecInHxW * kIntVLen;
-                 ++remIdx) {
+            for (const auto remIdx : c10::irange(kNumIntVecInHxW * kIntVLen, kNonVecRemInHxW + kNumIntVecInHxW * kIntVLen)) {
               auto qXVal = X_ptr[remIdx];
               float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
               float dqY = dqXVal * scale_ptr[remIdx] + bias_ptr[remIdx];
@@ -3365,8 +3364,8 @@ void quantized_groupnorm_nhwc_kernel(
         for (const auto nhwIdx : c10::irange(begin, end)) {
           float* mean_ptr = buffer_ptr + n * 2 * C;
           float* rstd_ptr = mean_ptr + C;
-          scalar_t* X_ptr = X_data + nhwIdx * C;
-          scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
+          const scalar_t* X_ptr = X_data + nhwIdx * C;
+          const scalar_t::underlying* X_ptr_underlying = reinterpret_cast<const scalar_t::underlying*>(X_ptr);
           for (int chIdx = 0; chIdx < C; ++chIdx) {
             auto x = X_ptr_underlying[chIdx];
             mean_ptr[chIdx] += x;
@@ -3444,7 +3443,7 @@ void quantized_groupnorm_nhwc_kernel(
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
-            for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+            for (const auto fvecIdx : c10::irange(dqXVec.size())) {
               auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3453,9 +3452,7 @@ void quantized_groupnorm_nhwc_kernel(
                 .store(Y_ptr + vecStartIdx);
           }
           // Remaining scalar
-          for (int64_t remIdx = kNumIntVecOnChannel * kIntVLen;
-               remIdx < kNonVecRemOnChannel + kNumIntVecOnChannel * kIntVLen;
-               ++remIdx) {
+          for (const auto remIdx : c10::irange(kNumIntVecOnChannel * kIntVLen, kNonVecRemOnChannel + kNumIntVecOnChannel * kIntVLen)) {
             auto qXVal = X_ptr[remIdx];
             float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
             float dqY = dqXVal * scale_ptr[remIdx] + bias_ptr[remIdx];
@@ -3481,7 +3478,7 @@ void quantize_tensor_per_tensor_affine_cpu(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.const_data_ptr<float>();
-        auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        auto qd = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams{};
         qparams.scale = scale;
         qparams.zero_point = zero_point;
@@ -3515,7 +3512,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
         qparams.scale = scale;
         qparams.zero_point = zero_point;
         qparams.precision = CHAR_BIT * sizeof(underlying_t);
-        float* rd = rtensor.data_ptr<float>();
+        float* rd = rtensor.mutable_data_ptr<float>();
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (const auto task_id : c10::irange(begin, end)) {
@@ -3808,7 +3805,7 @@ void quantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        scalar_t* qdata = qtensor.mutable_data_ptr<scalar_t>();
         auto quantize_range = [&](int64_t begin, int64_t end) {
           quantize_tensor_arm<scalar_t>(
             rdata + begin, qdata + begin, end - begin, scale, zero_point);
@@ -3823,7 +3820,7 @@ void quantize_tensor_per_tensor_affine_cpu(
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        scalar_t* qdata = qtensor.mutable_data_ptr<scalar_t>();
         for (const auto i : c10::irange(numel)) {
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
@@ -3837,7 +3834,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     double scale,
     int64_t zero_point) {
   check_tensor_memory_format(qtensor, rtensor);
-  float* rdata = rtensor.data_ptr<float>();
+  float* rdata = rtensor.mutable_data_ptr<float>();
   int numel = qtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
@@ -3888,7 +3885,7 @@ void quantize_tensor_per_channel_impl(
   auto scales_data = scales.const_data_ptr<double>();
   auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   const float* in = rtensor.const_data_ptr<float>();
-  auto out = qtensor.data_ptr<T>();
+  auto out = qtensor.mutable_data_ptr<T>();
   if (axis == 1 &&
       (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
        rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
@@ -3940,7 +3937,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
   auto scales_data = scales.const_data_ptr<double>();
   auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   const float* in = rtensor.const_data_ptr<float>();
-  auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
+  auto out = reinterpret_cast<uint8_t*>(qtensor.mutable_data_ptr<c10::quint8>());
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
@@ -4158,7 +4155,7 @@ void dequantize_per_channel_affine_kernel(
   auto zero_points_data = zero_points.const_data_ptr<N>();
   check_tensor_memory_format(qtensor, rtensor);
   const auto* qd = qtensor.const_data_ptr<Q>();
-  float* rd = rtensor.data_ptr<float>();
+  float* rd = rtensor.mutable_data_ptr<float>();
   const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
@@ -4234,7 +4231,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         auto zero_points_data = zero_points.const_data_ptr<float>();
         check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.const_data_ptr<float>();
-        auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        auto qdata = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
         const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
         int qvalue = 0;
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -4295,7 +4292,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
     qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
       const float* const rdata = rtensor.const_data_ptr<float>();
-      auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto qdata = reinterpret_cast<underlying_t*>(qtensor.mutable_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
       for (const auto i : c10::irange(numel)) {
@@ -4324,7 +4321,7 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
     qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
-      auto rdata = rtensor.data_ptr<float>();
+      auto rdata = rtensor.mutable_data_ptr<float>();
       const underlying_t* qdata = reinterpret_cast<const underlying_t*>(qtensor.const_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = bit_width < CHAR_BIT ? CHAR_BIT / bit_width : 1;
@@ -4487,7 +4484,7 @@ void qmul_tensor_cpu_kernel(
       "qmul_cpu: Expect qx, qy and out to have the same number of elements");
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_mul_cpu", [&] {
-        auto out_ptr = out.data_ptr<scalar_t>();
+        auto out_ptr = out.mutable_data_ptr<scalar_t>();
         _qmul_tensor_cpu_impl<scalar_t>(
             out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
       });
@@ -4614,7 +4611,7 @@ void qadd_tensor_cpu_kernel(
       "qadd_cpu: Expect qx, qy and out to have the same number of elements");
   AT_DISPATCH_FLOATING_TYPES_AND3(
       at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_add_cpu", [&] {
-        auto out_ptr = out.data_ptr<scalar_t>();
+        auto out_ptr = out.mutable_data_ptr<scalar_t>();
         _qadd_tensor_cpu_impl<scalar_t, ReLUFused>(
             out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
       });

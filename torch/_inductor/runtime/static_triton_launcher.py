@@ -5,9 +5,22 @@ from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
+from torch.utils._triton import get_triton_version
+
 from ..utils import is_rocm
-from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_compat import (
+    ASTSource,
+    CompiledKernel,
+    knobs as triton_knobs,
+    OutOfResources,
+)
 from .triton_helpers import get_constexprs
+
+
+def _max_tmem_columns(arch: int | str | None) -> int:
+    # Mirrors CompiledKernel._init_handles; Triton 3.8 added sm_107's 576 columns:
+    # https://github.com/triton-lang/triton/commit/ab592f012f37f2c2ffc9ceda6c5b49b3c37c9036
+    return 576 if arch == 107 and get_triton_version() >= (3, 8) else 512
 
 
 @functools.lru_cache(None)
@@ -114,6 +127,7 @@ class StaticallyLaunchedTritonKernel:
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
+        self.cubin_filename = os.path.basename(self.cubin_path)
 
         # Used by torch.compile to filter constants in older triton versions
         # pyrefly: ignore [missing-attribute]
@@ -190,9 +204,10 @@ class StaticallyLaunchedTritonKernel:
         # function is bound to a single device, so when device_agnostic is set we keep
         # them per device and resolve the current device at launch time. The cubin
         # (device-agnostic) is retained so it can be loaded onto additional devices.
-        # These per-device dicts assume one thread per device for a given launcher (the
-        # single-process multi-device path is sequential in practice); concurrent
-        # first-launch on two new devices would need external locking.
+        # CooR's intended model uses one current device per rank/process, which
+        # make_launcher loads eagerly. These dicts also support sequential reuse across
+        # devices, but lazy initialization for a previously unseen device is not
+        # thread-safe; callers must serialize its first use.
         self.device_agnostic: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -212,14 +227,16 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path is None:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+                raise AssertionError(
+                    "cubin_raw must be set to restore a missing binary"
+                )
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
+        self.cubin_path = filepath  # pyre-ignore
+        return filepath
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
@@ -519,6 +536,8 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         return _StaticCudaLauncher
 
     def __init__(self, kernel: CompiledKernel) -> None:
+        self.tmem_size: int | None = None
+        self.max_tmem_size = 0
         # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
@@ -528,11 +547,22 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         elif "cubin" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["cubin"]
+            # pyrefly: ignore [missing-attribute]
+            metadata = kernel.metadata
+            self.tmem_size = getattr(metadata, "tmem_size", None)
+            arch = getattr(getattr(metadata, "target", None), "arch", None)
+            self.max_tmem_size = _max_tmem_columns(arch)
         else:
             raise RuntimeError(
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
             )
         super().__init__(kernel)
+
+    def load_kernel(self, device: int) -> None:
+        # Match Triton's load-time check so _make_launchers can retry num_stages=1.
+        if self.tmem_size is not None and self.tmem_size > self.max_tmem_size:
+            raise OutOfResources(self.tmem_size, self.max_tmem_size, "tensor memory")
+        super().load_kernel(device)
 
     def _current_device(self) -> int:
         import torch
@@ -592,14 +622,68 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.modules = {}
 
 
+_STATIC_LAUNCHER_REGISTRY: dict[str, type[StaticallyLaunchedTritonKernel]] = {}
+
+
+def register_statically_launched_kernel(
+    device_type: str,
+    kernel_cls: type[StaticallyLaunchedTritonKernel],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a device-type specific static Triton kernel launcher.
+
+    Backends (e.g. privateuse1 devices such as NPU) that implement a
+    StaticallyLaunchedTritonKernel subclass can register it here instead of
+    patching this dispatch.
+
+    Args:
+        device_type: torch.device.type string (e.g. "cuda", "hip", "xpu").
+        kernel_cls: a StaticallyLaunchedTritonKernel subclass that can launch
+            kernels compiled for device_type.
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
+        raise TypeError(
+            "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
+            "got " + str(kernel_cls)
+        )
+    if not override and device_type in _STATIC_LAUNCHER_REGISTRY:
+        raise ValueError(
+            "Static launcher for device_type '" + device_type + "' already registered"
+        )
+    _STATIC_LAUNCHER_REGISTRY[device_type] = kernel_cls
+
+
+# Register the built-in static launchers explicitly, mirroring the
+# register_benchmarker pattern in benchmarking.py.
+register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("hip", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("xpu", StaticallyLaunchedXpuKernel)
+
+
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type in ("cuda", "hip"):
-        return StaticallyLaunchedCudaKernel(kernel)
-    elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel)
-    else:
+    kernel_cls = _STATIC_LAUNCHER_REGISTRY.get(device_type)
+    if kernel_cls is None:
+        supported = ", ".join(sorted(_STATIC_LAUNCHER_REGISTRY))
         raise NotImplementedError(
-            f"Device type {device_type} is not supported for static launcher"
+            "Device type " + device_type + " is not registered for static launcher. "
+            "Registered device types: " + supported + ". Backends can register one via "
+            "register_statically_launched_kernel()."
         )
+    return kernel_cls(kernel)
+
+
+def is_registered_static_launch_device(device_type: str) -> bool:
+    """Return whether a static Triton kernel launcher is registered for device_type."""
+    return device_type in _STATIC_LAUNCHER_REGISTRY
