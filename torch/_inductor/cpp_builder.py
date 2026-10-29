@@ -2980,13 +2980,27 @@ class CppBuilder:
                     set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
                     set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
 
-                    # --- PTX to FATBIN Command & Target ---
-                    add_custom_command(
-                        OUTPUT ${{FATBIN_FILE}}
-                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                {cuda_gencode_flags}
-                        DEPENDS ${{PTX_FILE}}
-                    )
+                    if(NVCC_GENCODE_FLAGS)
+                        # Explicit consumer architecture overrides still require
+                        # assembling PTX with a compatible consumer toolkit.
+                        add_custom_command(
+                            OUTPUT ${{FATBIN_FILE}}
+                            COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                    {cuda_gencode_flags}
+                            DEPENDS ${{PTX_FILE}}
+                        )
+                    else()
+                        # Packaging already built the requested SASS images and
+                        # PTX fallback with Triton's compatible assembler.
+                        get_filename_component(KERNEL_DIR "${{PTX_FILE}}" DIRECTORY)
+                        get_filename_component(KERNEL_STEM "${{PTX_FILE}}" NAME_WE)
+                        set(FATBIN_INPUT "${{KERNEL_DIR}}/${{KERNEL_STEM}}.fatbin")
+                        add_custom_command(
+                            OUTPUT ${{FATBIN_FILE}}
+                            COMMAND ${{CMAKE_COMMAND}} -E copy_if_different ${{FATBIN_INPUT}} ${{FATBIN_FILE}}
+                            DEPENDS ${{FATBIN_INPUT}}
+                        )
+                    endif()
 
                     # --- FATBIN to Object File (.o) Command ---
                     add_custom_command(

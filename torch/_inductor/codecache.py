@@ -3764,6 +3764,9 @@ end
                 ):
                     so_builder.save_kernel_asm_to_cmake(cmake_path, asm_files)
                     generated_files.extend(asm_files)
+                    # Keep the completed CUDA fatbins for CMake consumers whose
+                    # toolkit cannot assemble Triton's newer PTX version.
+                    generated_files.extend(command[1] for command in fatbin_cmds)
                 else:
                     # ROCm multi-arch + all single-arch: Link pre-compiled objects
                     # Bundle already embedded in .o files - just link into .so
