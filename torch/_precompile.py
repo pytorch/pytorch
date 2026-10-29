@@ -2219,8 +2219,8 @@ def _op_registration(
 class _CustomOpModules(NamedTuple):
     """What registers a capture's custom ops, from ``_custom_op_modules``."""
 
-    # The modules registering the ops, in the order their imports finished, so that
-    # importing them again registers any overriding kernel last.
+    # The modules registering the ops, in the order their imports finished, which
+    # load replays with the modules of overriding kernels last.
     modules: tuple[str, ...]
     # The custom ops no importable module is known to register.
     unrecorded: tuple[tuple[str, str], ...]
@@ -2389,7 +2389,10 @@ def _graph_kernel_keys(
         for leaf in pytree.tree_leaves((vals, list(example_inputs)))
         if isinstance(leaf, torch.Tensor)
     }
-    return (*sorted(backends - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
+    # Many per-backend keys, e.g. QuantizedMeta, have names the dispatcher cannot
+    # parse back, so no kernel can be checked under them.
+    parseable = {k for k in backends if torch._C._parse_dispatch_key(k) is not None}
+    return (*sorted(parseable - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
 
 
 def _device_kernel_keys(device_types: Iterable[str]) -> tuple[str, ...]:
