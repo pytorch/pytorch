@@ -856,7 +856,30 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
   auto tmp6 = t * tmp5;
   auto tmp7 = fmadd(tmp6, r, one_vec);
-  return tmp7 ^ sign_mask;
+  auto rational = tmp7 ^ sign_mask;
+  // The rational approximation has an absolute error of 1.5e-7, so below
+  // |x| = 0.5 it loses relative accuracy and rounds to 0 for |x| <= 1e-7.
+  // There the Taylor series is accurate to about 2 ulp; its next term,
+  // x^15 / 75600, is below 1e-9 of erf(0.5):
+  // erf(x) = 2 / sqrt(pi) * x *
+  //     (1 - x^2 / 3 + x^4 / 10 - x^6 / 42 + x^8 / 216 - x^10 / 1320 +
+  //      x^12 / 9360)
+  const Vectorized<float> half_vec(0.5f);
+  const Vectorized<float> two_over_sqrt_pi(1.1283791670955126f);
+  const Vectorized<float> c1(-0.3333333333333333f);
+  const Vectorized<float> c2(0.1f);
+  const Vectorized<float> c3(-0.023809523809523808f);
+  const Vectorized<float> c4(0.004629629629629629f);
+  const Vectorized<float> c5(-0.0007575757575757576f);
+  const Vectorized<float> c6(0.00010683760683760684f);
+  auto s = fmadd(c6, pow_2, c5);
+  s = fmadd(s, pow_2, c4);
+  s = fmadd(s, pow_2, c3);
+  s = fmadd(s, pow_2, c2);
+  s = fmadd(s, pow_2, c1);
+  s = fmadd(s, pow_2, one_vec);
+  auto series = two_over_sqrt_pi * ((*this) * s);
+  return blendv(rational, series, abs_vec < half_vec);
 }
 #endif
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
