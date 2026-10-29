@@ -40,6 +40,7 @@ jobs:
         python-version: ['3.11', '3.12', '3.13', '3.15']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

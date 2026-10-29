@@ -85,17 +85,22 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
-      # These runners are persistent and the test container bind-mounts the
-      # workspace, so a container-owned file left behind by an earlier job makes
-      # actions/checkout fail for every later job on the same host. Reclaim the
-      # workspace before anything else touches it.
+      # The test container bind-mounts this runner's persistent workspace, so a
+      # container-owned file it leaves behind breaks checkout on this runner's
+      # next job. Each runner has its own workspace; this is not cross-runner.
       - name: Reclaim workspace ownership
         shell: bash
         run: |
           if sudo -n true 2>/dev/null; then
-            sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}" || true
+            # Only rewrite what is wrong; chown -R touches every inode.
+            sudo find "${GITHUB_WORKSPACE}" \
+              \( -not -user "$(id -u)" -o -not -group "$(id -g)" \) -print0 2>/dev/null \
+              | sudo xargs -0 --no-run-if-empty chown -h "$(id -u):$(id -g)" || true
           fi
-          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          # --add would append a duplicate on every job into a shared gitconfig.
+          git config --global --get-all safe.directory \
+            | grep -qxF "${GITHUB_WORKSPACE}" \
+            || git config --global --add safe.directory "${GITHUB_WORKSPACE}"
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -203,7 +208,6 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
-          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
@@ -253,7 +257,6 @@ jobs:
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
-            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e HUGGING_FACE_HUB_TOKEN \
@@ -267,6 +270,7 @@ jobs:
             --tty \
             --detach \
             --name="${container_name}" \
+            --label "pytorch-runner=${RUNNER_NAME}" \
             --user jenkins \
             --privileged \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
@@ -283,7 +287,7 @@ jobs:
         if: ${{ always() && env.CONTAINER_NAME }}
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test && { test ! -d test/torchci-reports || sudo cp -R test/torchci-reports ../workspace/test; }"
 
       - name: Change permissions
         if: ${{ always() && env.CONTAINER_NAME }}
@@ -363,4 +367,5 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown XPU
+        if: always()
         uses: ./.github/actions/teardown-xpu
