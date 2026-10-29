@@ -10,7 +10,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import trace_rules
+from torch._dynamo import graph_bytecode_inputs, trace_rules
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     requires_xpu,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -3004,6 +3005,892 @@ class <lambda>(torch.nn.Module):
 
         graph.lint()
 
+    @torch._dynamo.config.patch(fake_tensor_disable_inference_mode=False)
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_inference_intermediate_version_tracking(self, device, backend):
+        def fn(x):
+            with torch.inference_mode():
+                y = x + 1
+                side = torch.Stream(device=device)
+                side.synchronize()
+                return y
+
+        x = torch.zeros(8, device=device)
+        torch.accelerator.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        torch.accelerator.synchronize()
+        self.assertEqual(result, torch.ones_like(x))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("placement", ("other_branch", "same_branch", "after"))
+    @parametrize("predicate", (False, True))
+    @parametrize("operation", ("cond", "switch"))
+    def test_conditional_input_mutation_barrier_paths(
+        self, device, placement, predicate, operation
+    ):
+        from torch._higher_order_ops.switch import switch
+
+        def mutate(x):
+            x.add_(1)
+            if placement == "same_branch":
+                torch.accelerator.current_stream(device).synchronize()
+            return x.sin()
+
+        def other(x):
+            if placement == "other_branch":
+                torch.accelerator.current_stream(device).synchronize()
+            return x.sin()
+
+        def fn(pred, x):
+            if operation == "cond":
+                out = torch.cond(pred, mutate, other, (x,))
+            else:
+                index = (~pred).to(torch.int64) * 2
+                out = switch(index, (mutate, other, other), (x,))
+            if placement == "after":
+                torch.accelerator.current_stream(device).synchronize()
+            return out
+
+        x = torch.ones(8, device=device)
+        pred = torch.tensor(predicate, device=device)
+        torch.accelerator.synchronize()
+        with torch.no_grad():
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            if placement == "other_branch":
+                result = compiled(pred, x)
+                torch.accelerator.synchronize()
+                expected = torch.full_like(x, 2 if predicate else 1)
+                self.assertEqual(x, expected)
+                self.assertEqual(result, expected.sin())
+            else:
+                with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                    compiled(pred, x)
+                self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("placement", ("condition", "body"))
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("mutation", ("input", "local"))
+    def test_while_loop_input_mutation_barrier_backedge(
+        self, device, placement, barrier, mutation
+    ):
+        event = torch.Event(device=device)
+
+        def synchronize():
+            if barrier == "sync":
+                torch.accelerator.current_stream(device).synchronize()
+            else:
+                event.record()
+
+        def fn(x):
+            def cond(i):
+                if placement == "condition":
+                    synchronize()
+                return i < 2
+
+            def body(i):
+                if placement == "body":
+                    synchronize()
+                dest = x if mutation == "input" else x + 1
+                dest.add_(1)
+                return (i + 1,)
+
+            return torch.while_loop(
+                cond, body, (torch.zeros((), device=device, dtype=torch.int64),)
+            )[0]
+
+        x = torch.ones(8, device=device)
+        torch.accelerator.synchronize()
+        with torch.no_grad():
+            compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            if mutation == "input":
+                error = (
+                    "An event was recorded"
+                    if barrier == "event"
+                    else "input mutation write-back"
+                )
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(x)
+            else:
+                result = compiled(x)
+                torch.accelerator.synchronize()
+                self.assertEqual(result, torch.tensor(2, device=device))
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("operator", ("scalar", "out", "foreach"))
+    @parametrize("local", (False, True))
+    @parametrize("barrier", ("sync", "event"))
+    def test_graph_allowed_independent_version_mutation(
+        self, device, backend, operator, local, barrier
+    ):
+        @torch.compiler.allow_in_graph
+        def wrapped(y):
+            if operator == "out":
+                torch.add(y, 1, out=y.data)
+            elif operator == "foreach":
+                torch._foreach_add_([y.data], 1)
+            else:
+                y.data.add_(1)
+            return y
+
+        def fn(x, side, event):
+            with side:
+                y = x.clone() if local else x
+                result = wrapped(y)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return result
+
+        x = torch.ones(8, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if local:
+            result = compiled(x, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.full_like(x, 2))
+        else:
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, side, event)
+        self.assertEqual(x, torch.ones_like(x))
+
+    @requires_gpu_and_triton
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("mutation", ("input", "view", "local", "read_only"))
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("graph_allowed", (False, True))
+    def test_triton_input_mutation_before_barrier(
+        self, device, backend, mutation, barrier, graph_allowed
+    ):
+        from torch.testing._internal.triton_utils import (
+            mul2_inplace_kernel,
+            mul2_kernel,
+        )
+
+        @torch.compiler.allow_in_graph
+        def launch(x, y):
+            if mutation == "read_only":
+                torch.library.wrap_triton(mul2_kernel)[(1,)](
+                    x, y, x.numel(), BLOCK_SIZE=32
+                )
+            else:
+                torch.library.wrap_triton(mul2_inplace_kernel)[(1,)](
+                    y, y.numel(), BLOCK_SIZE=32
+                )
+
+        def fn(x, side, event):
+            with side:
+                if mutation == "read_only":
+                    y = torch.empty_like(x)
+                    if not graph_allowed:
+                        mul2_kernel[(1,)](x, y, x.numel(), BLOCK_SIZE=32)
+                else:
+                    if mutation == "local":
+                        y = x.clone()
+                    elif mutation == "view":
+                        y = x.view(-1)
+                    else:
+                        y = x
+                    if not graph_allowed:
+                        mul2_inplace_kernel[(1,)](y, y.numel(), BLOCK_SIZE=32)
+                if graph_allowed:
+                    launch(x, y)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return y + 1
+
+        x = torch.ones(8, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if mutation in ("input", "view"):
+            error = (
+                "input mutation write-back"
+                if barrier == "sync"
+                else "An event was recorded"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, side, event)
+        else:
+            result = compiled(x, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.full_like(x, 3))
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("training", (False, True))
+    @parametrize("barrier", ("sync", "wait", "event"))
+    def test_graph_allowed_batch_norm_before_join(
+        self, device, backend, training, barrier
+    ):
+        @torch.compiler.allow_in_graph
+        def wrapped(x, mean, var):
+            return torch.nn.functional.batch_norm(x, mean, var, training=training)
+
+        def fn(x, mean, var, side, event):
+            with side:
+                out = wrapped(x, mean, var)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            elif barrier == "wait":
+                torch.accelerator.current_stream(device).wait_stream(side)
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return out
+
+        x = torch.ones(4, 8, device=device)
+        mean = torch.zeros(8, device=device)
+        var = torch.ones_like(mean)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if training:
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, mean, var, side, event)
+        else:
+            result = compiled(x, mean, var, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.nn.functional.batch_norm(x, mean, var))
+        self.assertEqual(mean, torch.zeros_like(mean))
+        self.assertEqual(var, torch.ones_like(var))
+
+    @parametrize("destination", ("input", "local"))
+    @parametrize("barrier", ("sync", "event"))
+    def test_graph_allowed_batch_norm_output_before_join(
+        self, device, destination, barrier
+    ):
+        @torch.compiler.allow_in_graph
+        def wrapped(x, mean, var, dest):
+            return torch.ops.aten.native_batch_norm.out(
+                x,
+                None,
+                None,
+                mean,
+                var,
+                False,
+                0.1,
+                1e-5,
+                out=dest.data,
+                save_mean=torch.empty(0, device=x.device),
+                save_invstd=torch.empty(0, device=x.device),
+            )[0]
+
+        def fn(x, mean, var, dest, side, event):
+            with side:
+                if destination == "local":
+                    dest = torch.zeros_like(dest)
+                out = wrapped(x, mean, var, dest)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return out
+
+        x = torch.ones(4, 8, device=device)
+        mean = torch.zeros(8, device=device)
+        var = torch.ones_like(mean)
+        dest = torch.zeros_like(x)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        if destination == "input":
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, mean, var, dest, side, event)
+        else:
+            result = compiled(x, mean, var, dest, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.nn.functional.batch_norm(x, mean, var))
+        self.assertEqual(dest, torch.zeros_like(dest))
+        self.assertEqual(mean, torch.zeros_like(mean))
+        self.assertEqual(var, torch.ones_like(var))
+
+    @parametrize("backend", ("aot_eager", "wrapped_aot"))
+    @parametrize("mutation", ("earlier_partition", "same_partition", "lifted_input"))
+    @parametrize("higher_order", (False, True))
+    def test_ddp_partition_input_mutation_before_join(
+        self, device, backend, mutation, higher_order
+    ):
+        from torch._dynamo.backends.distributed import DDPOptimizer
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
+
+        def compile_partition(gm, inputs, **kwargs):
+            if backend == "aot_eager":
+                return lookup_backend(backend)(gm, inputs, **kwargs)
+            return aot_function(
+                lambda *args: gm(*args), fw_compiler=lambda graph, _: graph
+            )
+
+        optimizer = DDPOptimizer(32, compile_partition, first_bucket_cap=32)
+        p = torch.nn.Parameter(torch.ones(8, device=device))
+        q = torch.nn.Parameter(torch.ones_like(p))
+        side = torch.Stream(device=device)
+
+        def body(x):
+            x.add_(1)
+            return x.sin()
+
+        def fn(x):
+            with side:
+                if mutation == "earlier_partition":
+                    if higher_order:
+                        y = wrap_with_set_grad_enabled(False, body, x)
+                    else:
+                        x.add_(1)
+                        y = x
+                else:
+                    y = x
+                y = y * p
+            z = y * q
+            with side:
+                if mutation == "same_partition":
+                    if higher_order:
+                        z = z + wrap_with_set_grad_enabled(False, body, x)
+                    else:
+                        x.add_(1)
+                elif mutation == "lifted_input":
+                    if higher_order:
+                        y = wrap_with_set_grad_enabled(False, body, y)
+                    else:
+                        y.add_(1)
+                side.synchronize()
+            return z + y
+
+        x = torch.zeros(8, device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=optimizer.compile_fn, fullgraph=True)
+        if mutation == "earlier_partition":
+            result = compiled(x)
+            torch.accelerator.synchronize()
+            expected = (
+                torch.ones_like(x).sin() * 2 if higher_order else torch.full_like(x, 2)
+            )
+            self.assertEqual(result, expected)
+            self.assertEqual(x, torch.ones_like(x))
+        else:
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x)
+            self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(len(optimizer.buckets), 2)
+
+    @parametrize("backend", ("aot_eager", "inductor", "copy"))
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("mutation", ("input", "local", "lifted_local"))
+    def test_higher_order_input_mutation_before_join(
+        self, device, backend, barrier, mutation
+    ):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
+
+        def copy_backend(gm, inputs):
+            copied = torch.fx.GraphModule(gm, gm.graph)
+            return lookup_backend("aot_eager")(copied, inputs)
+
+        # This argument name also occurs in the outer graph.
+        def body(l_x_):
+            if mutation == "local":
+                l_x_ = l_x_ + 1
+            l_x_.add_(1)
+            return l_x_.sin()
+
+        def fn(x, side, event):
+            with side:
+                operand = x + 1 if mutation == "lifted_local" else x
+                out = wrap_with_set_grad_enabled(False, body, operand)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return out
+
+        x = torch.ones(8, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(
+            fn, backend=copy_backend if backend == "copy" else backend, fullgraph=True
+        )
+        if mutation == "input":
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, side, event)
+        else:
+            result = compiled(x, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.full_like(x, 3).sin())
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("operation", ("scan", "map"))
+    @parametrize("iterations", (1, 2))
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("local", (False, True))
+    @parametrize("dynamic", (False, True))
+    @parametrize("metadata", ("example_value", "val"))
+    def test_repeated_hop_input_mutation_barrier(
+        self, device, operation, iterations, barrier, local, dynamic, metadata
+    ):
+        from torch._dynamo.backends.registry import lookup_backend
+        from torch._higher_order_ops.map import map
+        from torch._higher_order_ops.scan import scan
+
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        def update(value):
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                event.record()
+            dest = value.clone() if local else value
+            dest.add_(1)
+            return dest.sin()
+
+        def fn(x):
+            with side:
+                if operation == "map":
+                    return map(update, x)
+
+                def combine(carry, value):
+                    return carry + value, update(x)
+
+                return scan(
+                    combine,
+                    torch.zeros((), device=device),
+                    torch.ones(x.shape[0], device=device),
+                )[1]
+
+        x = torch.ones(iterations, 8, device=device)
+        torch.accelerator.synchronize()
+
+        def backend(gm, inputs):
+            if metadata == "val":
+                for child in gm.modules():
+                    if isinstance(child, torch.fx.GraphModule):
+                        for node in child.graph.nodes:
+                            if "example_value" in node.meta:
+                                node.meta["val"] = node.meta.pop("example_value")
+            return lookup_backend("aot_eager")(gm, inputs)
+
+        with torch.no_grad():
+            compiled = torch.compile(
+                fn, backend=backend, fullgraph=True, dynamic=dynamic
+            )
+            if iterations > 1 and not local:
+                error = (
+                    "An event was recorded"
+                    if barrier == "event"
+                    else "input mutation write-back"
+                )
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(x)
+            else:
+                result = compiled(x)
+                torch.accelerator.synchronize()
+                self.assertEqual(result, torch.full_like(result, 2).sin())
+        self.assertEqual(
+            x, torch.full_like(x, 2 if iterations == 1 and not local else 1)
+        )
+
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("dynamic", (False, True))
+    def test_empty_scan_input_mutation_barrier(self, device, barrier, dynamic):
+        from torch._higher_order_ops.scan import scan
+
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        def fn(x):
+            def combine(carry, value):
+                x.add_(1)
+                if barrier == "sync":
+                    side.synchronize()
+                else:
+                    event.record()
+                return carry + value, x.sin()
+
+            with side:
+                return scan(
+                    combine,
+                    torch.zeros((), device=device),
+                    torch.zeros(0, device=device),
+                )[1]
+
+        x = torch.ones(8, device=device)
+        torch.accelerator.synchronize()
+        with torch.no_grad():
+            compiled = torch.compile(
+                fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+            )
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x)
+        self.assertEqual(x, torch.ones_like(x))
+
+    def test_copied_while_loop_input_mutation_outside_backend(self, device):
+        from torch._functorch.aot_autograd import aot_function
+
+        graphs: list[tuple[torch.fx.GraphModule, list[torch.Tensor]]] = []
+
+        def capture(gm, inputs):
+            graphs.append((gm, inputs))
+            return gm
+
+        def fn(x, side):
+            def cond(i):
+                side.synchronize()
+                return i < 2
+
+            def body(i):
+                x.add_(1)
+                return (i + 1,)
+
+            with side:
+                return torch.while_loop(
+                    cond, body, (torch.zeros((), device=device, dtype=torch.int64),)
+                )[0]
+
+        x = torch.ones(8, device=device)
+        side = torch.Stream(device=device)
+        torch.accelerator.synchronize()
+        with torch.no_grad():
+            compiled = torch.compile(fn, backend=capture, fullgraph=True)
+            result = compiled(x, side)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.tensor(2, device=device))
+            self.assertEqual(x, torch.full_like(x, 3))
+            x.fill_(1)
+            gm, _ = graphs[0]
+            copied = torch.fx.GraphModule(gm, gm.graph)
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                aot_function(copied, fw_compiler=lambda graph, _: graph, dynamic=True)(
+                    x
+                )
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("mutation", ("data", "metadata", "local"))
+    def test_graph_allowed_higher_order_mutation_before_barrier(
+        self, device, backend, barrier, mutation
+    ):
+        from torch._higher_order_ops.cond import cond_op
+
+        @torch.compiler.allow_in_graph
+        def wrapped(x, pred):
+            def branch(y):
+                if mutation == "local":
+                    y = y.clone()
+                if mutation == "metadata":
+                    y.data.transpose_(0, 1)
+                else:
+                    y.data.add_(1)
+                return (y.sin(),)
+
+            return cond_op(pred, branch, lambda y: (y.sin(),), (x,))[0]
+
+        def fn(x, pred, side, event):
+            with side:
+                result = wrapped(x, pred)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return result
+
+        x = torch.zeros(2, 2, device=device)
+        pred = torch.tensor(True, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.no_grad():
+            if mutation == "data":
+                error = (
+                    "An event was recorded"
+                    if barrier == "event"
+                    else "input mutation write-back"
+                )
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(x, pred, side, event)
+            else:
+                result = compiled(x, pred, side, event)
+                torch.accelerator.synchronize()
+                expected = torch.ones_like(x).sin() if mutation == "local" else x
+                self.assertEqual(result, expected)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("operator", ("cond", "out_dtype"))
+    def test_graph_allowed_higher_order_op_in_stream_context(self, device, operator):
+        from torch._higher_order_ops.out_dtype import out_dtype
+
+        @torch.compiler.allow_in_graph
+        def wrapped(x):
+            if operator == "out_dtype":
+                return out_dtype(torch.ops.aten.mul.Scalar, torch.float32, x, 2)
+            return torch.cond(x.sum() > 0, lambda y: y + 1, lambda y: y - 1, (x,))
+
+        def fn(x, side):
+            with side:
+                return wrapped(x)
+
+        x = torch.ones(8, device=device)
+        side = torch.Stream(device=device)
+        torch.accelerator.synchronize()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, side)
+        torch.accelerator.synchronize()
+        self.assertEqual(result, torch.full_like(x, 2))
+
+    @parametrize(
+        "backend,local",
+        (("aot_eager", False), ("inductor", False), ("aot_eager", True)),
+    )
+    @parametrize("barrier", ("sync", "event"))
+    def test_graph_allowed_hop_operator_mutation_before_barrier(
+        self, device, backend, barrier, local
+    ):
+        from torch._higher_order_ops.cond import cond_op
+
+        @torch.compiler.allow_in_graph
+        def wrapped(x, mean, var, pred):
+            if local:
+                mean, var = mean.clone(), var.clone()
+            op = torch.ops.aten._native_batch_norm_legit.default
+            args = (
+                x,
+                torch.ones_like(mean),
+                torch.zeros_like(mean),
+                mean.data,
+                var.data,
+                True,
+                1,
+                1,
+            )
+            return cond_op(pred, op, op, args)[0]
+
+        def fn(x, mean, var, pred, side, event):
+            with side:
+                result = wrapped(x, mean, var, pred)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return result
+
+        x = torch.ones(4, 8, device=device)
+        mean = torch.zeros(8, device=device)
+        var = torch.ones(8, device=device)
+        pred = torch.tensor(True, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.no_grad():
+            if local:
+                result = compiled(x, mean, var, pred, side, event)
+                torch.accelerator.synchronize()
+                self.assertEqual(result, torch.zeros_like(x))
+            else:
+                error = (
+                    "An event was recorded"
+                    if barrier == "event"
+                    else "input mutation write-back"
+                )
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(x, mean, var, pred, side, event)
+        self.assertEqual(mean, torch.zeros_like(mean))
+        self.assertEqual(var, torch.ones_like(var))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize(
+        "implementation", ("method", "aten", "wrapped_before", "wrapped_after")
+    )
+    @parametrize("data_mutation", (False, True))
+    def test_metadata_view_mutation_before_join(
+        self, device, backend, implementation, data_mutation
+    ):
+        @torch.compiler.allow_in_graph
+        def wrapped(y):
+            if data_mutation and implementation == "wrapped_before":
+                y.add_(1)
+            y.transpose_(0, 1)
+            if data_mutation and implementation == "wrapped_after":
+                y.add_(1)
+            return y
+
+        def fn(x, side):
+            with side:
+                y = x.view(2, 3)
+                if data_mutation and implementation in ("method", "aten"):
+                    torch.add(x, 1, out=x)
+                if implementation == "method":
+                    y.transpose_(0, 1)
+                elif implementation == "aten":
+                    torch.ops.aten.transpose_.default(y, 0, 1)
+                else:
+                    y = wrapped(y)
+            side.synchronize()
+            return y + 1
+
+        x = torch.zeros(2, 3, device=device)
+        side = torch.Stream(device=device)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if data_mutation:
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x, side)
+        else:
+            result = compiled(x, side)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.ones(3, 2, device=device))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("sync", "event"))
+    def test_custom_callable_named_inplace_view_keeps_data_mutation(
+        self, device, backend, barrier
+    ):
+        def transpose_(x):
+            return x.add_(1)
+
+        torch._dynamo.allow_in_graph(transpose_)
+        self.addCleanup(torch._dynamo.disallow_in_graph, transpose_)
+
+        def fn(x, side, event):
+            with side:
+                transpose_(x)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_event(event)
+            return x + 1
+
+        x = torch.zeros(8, device=device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        error = (
+            "input mutation write-back"
+            if barrier == "sync"
+            else "An event was recorded"
+        )
+        with self.assertRaisesRegex(RuntimeError, error):
+            compiled(x, side, event)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("nested", (False, True))
+    @parametrize("local", (False, True))
+    @parametrize("barrier", ("sync", "event"))
+    def test_subclass_inner_input_mutation(
+        self, device, backend, nested, local, barrier
+    ):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.compiler.allow_in_graph
+        def mutate(value):
+            target = value.a.a if nested else value.a
+            target.add_(1)
+
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        def fn(x):
+            with side:
+                y = x.clone() if local else x
+                mutate(y)
+                if barrier == "event":
+                    event.record()
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                event.synchronize()
+            return y * 2
+
+        a, b, c = [torch.zeros(8, device=device) for _ in range(3)]
+        x = TwoTensor(TwoTensor(a, b), c) if nested else TwoTensor(a, b)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if local:
+            result = compiled(x)
+            torch.accelerator.synchronize()
+            self.assertEqual(result.a.a if nested else result.a, torch.full_like(a, 2))
+        else:
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x)
+        for value in (a, b, c):
+            self.assertEqual(value, torch.zeros_like(value))
+
+    def test_input_mutation_does_not_realize_current_stream(self, device):
+        def fn(x):
+            x.add_(1)
+            return x
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        streams = [torch.Stream(device=device) for _ in range(10)]
+        for stream in streams:
+            x = torch.zeros(8, device=device)
+            torch.accelerator.synchronize()
+            with stream:
+                result = compiled(x)
+            stream.synchronize()
+            self.assertEqual(result, torch.ones_like(x))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
 
 instantiate_device_type_tests(
     TestStreams, globals(), allow_xpu=True, except_for=("cpu",)
@@ -3347,6 +4234,22 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend=backend, fullgraph=True)(x, small)
         self.assertEqual(x, torch.zeros_like(x))
 
+    def test_input_mutation_writeback_errors_without_fullgraph(self) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            torch.cuda.current_stream().wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend="inductor")(x, torch.zeros_like(x))
+        self.assertEqual(x, torch.zeros_like(x))
+
     def test_side_stream_join_without_input_mutation(self) -> None:
         def fn(x):
             side = torch.cuda.Stream()
@@ -3359,6 +4262,534 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         torch.cuda.synchronize()
         result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(result, torch.full_like(x, 2))
+
+    @parametrize(
+        "backend",
+        ("eager", "eager_noexcept", "eager_debug", "callable", "aot_unfunctionalized"),
+    )
+    @parametrize("mutation", ("method", "out"))
+    @parametrize("barrier", ("stream", "event"))
+    def test_eager_backend_allows_input_mutation_stream_join(
+        self, backend, mutation, barrier
+    ) -> None:
+        if backend == "callable":
+
+            def backend(gm, inputs):
+                return gm.forward
+
+        elif backend == "aot_unfunctionalized":
+            from functorch.compile import nop
+            from torch._dynamo.backends.common import aot_autograd
+
+            backend = aot_autograd(fw_compiler=nop, disable_functionalization=True)
+
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                if mutation == "out":
+                    torch.add(x, 1, out=x)
+                else:
+                    x.add_(1)
+                if barrier == "event":
+                    event = side.record_event()
+            if barrier == "event":
+                torch.cuda.current_stream().wait_event(event)
+            else:
+                torch.cuda.current_stream().wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize(
+        "mutation",
+        ("out", "aten_inplace", "functional_inplace", "inplace_positional", "data"),
+    )
+    def test_function_input_mutation_before_join_errors(
+        self, backend, mutation
+    ) -> None:
+        def fn(x, small, side):
+            with torch.cuda.stream(side):
+                if mutation == "out":
+                    torch.add(x, 1, out=x)
+                elif mutation == "data":
+                    x.data.add_(1)
+                elif mutation == "aten_inplace":
+                    torch.ops.aten.add_.Tensor(x, 1)
+                elif mutation == "inplace_positional":
+                    torch.nn.functional.relu(x, True)
+                else:
+                    torch.nn.functional.relu(x, inplace=True)
+            side.synchronize()
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small, side)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_late_graph_input_mutation_before_join_errors(self, backend) -> None:
+        def fn(x, y, first_stream, second_stream):
+            with torch.cuda.stream(first_stream):
+                x.add_(1)
+            with torch.cuda.stream(second_stream):
+                y.add_(1)
+            second_stream.synchronize()
+            return x + y
+
+        x = torch.zeros(8, device="cuda")
+        y = torch.zeros_like(x)
+        first_stream = torch.cuda.Stream()
+        second_stream = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x, y, first_stream, second_stream
+            )
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_graph_attribute_input_mutation_before_join_errors(self, backend):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.zeros(8, device="cuda"))
+
+            def forward(self, side):
+                with side:
+                    self.buffer.add_(1)
+                side.synchronize()
+                return self.buffer + 1
+
+        module = Module()
+        side = torch.cuda.Stream()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(module, backend=backend, fullgraph=True)(side)
+        torch.cuda.synchronize()
+        self.assertEqual(module.buffer, torch.zeros_like(module.buffer))
+
+    @torch._dynamo.config.patch(debug_backend_override=">=0:inductor")
+    def test_overridden_eager_backend_rejects_input_mutation_join(self) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.zero_()
+            torch.cuda.current_stream().wait_stream(side)
+            x.fill_(3)
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot safely place an input mutation write-back"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("first_mutation", ("add", "zero", "fill", "copy"))
+    def test_earlier_input_mutation_before_join_errors(
+        self, backend, first_mutation
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                if first_mutation == "add":
+                    x.add_(1)
+                elif first_mutation == "zero":
+                    x.zero_()
+                elif first_mutation == "fill":
+                    x.fill_(3)
+                else:
+                    x.copy_(small + 1)
+            torch.cuda.current_stream().wait_stream(side)
+            x.add_(2)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("wait_stream", "stream_sync", "device_sync"))
+    @parametrize("last_mutation", ("fill", "copy"))
+    def test_discarded_input_mutation_before_join_errors(
+        self, backend, barrier, last_mutation
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.zero_()
+            if barrier == "wait_stream":
+                torch.cuda.current_stream().wait_stream(side)
+            elif barrier == "stream_sync":
+                side.synchronize()
+            else:
+                torch.cuda.synchronize()
+            if last_mutation == "fill":
+                x.fill_(3)
+            else:
+                x.copy_(small)
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_unrelated_stream_sync_after_current_input_mutation(self, backend) -> None:
+        def fn(x, small, unrelated):
+            x.add_(1)
+            unrelated.synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        unrelated = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small, unrelated)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_self_wait_after_input_mutation_does_not_join(self, backend) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            side.wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_aliased_self_wait_after_input_mutation_does_not_join(
+        self, backend
+    ) -> None:
+        self.addCleanup(reset_user_object_tracking)
+
+        def fn(x, small, side, alias):
+            with side:
+                x.add_(1)
+            alias.wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        alias = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
+        self.assertIsNot(side, alias)
+        self.assertEqual(side.cuda_stream, alias.cuda_stream)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, small, side, alias
+        )
+        if backend == "aot_eager":
+            # Inductor releases this temporary registry after lowering.
+            side_indices = {
+                i
+                for i, stream_ref in enumerate(
+                    graph_bytecode_inputs.index_to_external_object_weakref
+                )
+                if stream_ref() is side
+            }
+            alias_indices = {
+                i
+                for i, stream_ref in enumerate(
+                    graph_bytecode_inputs.index_to_external_object_weakref
+                )
+                if stream_ref() is alias
+            }
+            self.assertTrue(side_indices)
+            self.assertTrue(alias_indices)
+            self.assertTrue(side_indices.isdisjoint(alias_indices))
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("changed", ("observed", "mutated"))
+    def test_aliased_wait_rechecks_stream_arguments(self, backend, changed) -> None:
+        self.addCleanup(reset_user_object_tracking)
+
+        def fn(x, small, side, alias):
+            with side:
+                x.add_(1)
+            alias.wait_stream(side)
+            return small + 1
+
+        side = torch.cuda.Stream()
+        other = torch.cuda.Stream()
+        matching = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
+        different = torch.cuda.ExternalStream(other.cuda_stream, device=other.device)
+        small = torch.zeros(8, device="cuda")
+        torch.cuda.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+
+        first = torch.zeros_like(small)
+        result = compiled(first, small, side, matching)
+        torch.cuda.synchronize()
+        self.assertEqual(first, torch.ones_like(first))
+        self.assertEqual(result, torch.ones_like(result))
+
+        mutated, observed = (
+            (side, different) if changed == "observed" else (other, matching)
+        )
+        x = torch.zeros_like(small)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            compiled(x, small, mutated, observed)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_unrelated_stream_join_after_input_mutation(self, backend) -> None:
+        def fn(x, small):
+            mutated = torch.cuda.Stream()
+            unrelated = torch.cuda.Stream()
+            with mutated:
+                x.add_(1)
+            with unrelated:
+                result = small + 1
+            torch.cuda.current_stream().wait_stream(unrelated)
+            return result
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("stat_views", (False, True))
+    @parametrize(
+        "implementation",
+        (
+            "functional",
+            "native",
+            "aten",
+            "native_builtin",
+            "legit_builtin",
+            "native_aten",
+            "native_aten_legit",
+            "aten_packet",
+            "native_packet",
+            "legit_packet",
+            "cudnn",
+            "cudnn_packet",
+            "impl_index",
+            "impl_index_packet",
+            "with_update",
+            "with_update_zero_momentum",
+        ),
+    )
+    def test_function_updates_running_stats_before_join_errors(
+        self, backend, stat_views, implementation
+    ) -> None:
+        def fn(x, running_mean, running_var, small, side):
+            if stat_views:
+                running_mean = running_mean.view(-1)
+                running_var = running_var.view(-1)
+            with torch.cuda.stream(side):
+                if implementation in ("with_update", "with_update_zero_momentum"):
+                    momentum = (
+                        0.0 if implementation == "with_update_zero_momentum" else 0.1
+                    )
+                    torch.ops.aten._batch_norm_with_update.default(
+                        x,
+                        torch.ones_like(running_mean),
+                        torch.zeros_like(running_mean),
+                        running_mean,
+                        running_var,
+                        momentum,
+                        1e-5,
+                    )
+                elif implementation == "functional":
+                    torch.nn.functional.batch_norm(
+                        x, running_mean, running_var, training=True
+                    )
+                elif implementation == "native":
+                    torch.batch_norm(
+                        x,
+                        None,
+                        None,
+                        running_mean,
+                        running_var,
+                        True,
+                        0.1,
+                        1e-5,
+                        torch.backends.cudnn.enabled,
+                    )
+                elif implementation == "aten":
+                    torch.ops.aten.batch_norm.default(
+                        x, None, None, running_mean, running_var, True, 0.1, 1e-5, True
+                    )
+                elif implementation in ("native_builtin", "legit_builtin"):
+                    op = (
+                        torch.native_batch_norm
+                        if implementation == "native_builtin"
+                        else torch._native_batch_norm_legit
+                    )
+                    op(x, None, None, running_mean, running_var, True, 0.1, 1e-5)
+                elif implementation in ("cudnn", "cudnn_packet"):
+                    op = (
+                        torch.ops.aten.cudnn_batch_norm.default
+                        if implementation == "cudnn"
+                        else torch.ops.aten.cudnn_batch_norm
+                    )
+                    op(
+                        x,
+                        torch.ones_like(running_mean),
+                        None,
+                        running_mean,
+                        running_var,
+                        True,
+                        0.1,
+                        1e-5,
+                    )
+                elif implementation in (
+                    "impl_index",
+                    "impl_index_packet",
+                    "aten_packet",
+                ):
+                    if implementation == "aten_packet":
+                        op = torch.ops.aten.batch_norm
+                    elif implementation == "impl_index":
+                        op = torch.ops.aten._batch_norm_impl_index.default
+                    else:
+                        op = torch.ops.aten._batch_norm_impl_index
+                    op(x, None, None, running_mean, running_var, True, 0.1, 1e-5, True)
+                elif implementation in ("native_packet", "legit_packet"):
+                    op = (
+                        torch.ops.aten.native_batch_norm
+                        if implementation == "native_packet"
+                        else torch.ops.aten._native_batch_norm_legit
+                    )
+                    op(x, None, None, running_mean, running_var, True, 0.1, 1e-5)
+                else:
+                    op = (
+                        torch.ops.aten._native_batch_norm_legit.default
+                        if implementation == "native_aten_legit"
+                        else torch.ops.aten.native_batch_norm.default
+                    )
+                    op(x, None, None, running_mean, running_var, True, 0.1, 1e-5)
+            side.synchronize()
+            return small + 1
+
+        x = torch.ones(4, 8, device="cuda")
+        running_mean = torch.zeros(8, device="cuda")
+        running_var = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x, running_mean, running_var, small, side
+            )
+        torch.cuda.synchronize()
+        self.assertEqual(running_mean, torch.zeros_like(running_mean))
+        self.assertEqual(running_var, torch.ones_like(running_var))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("implementation", ("functional", "native"))
+    def test_batch_norm_inference_before_join_compiles(
+        self, backend, implementation
+    ) -> None:
+        def fn(x, running_mean, running_var, small, side):
+            with torch.cuda.stream(side):
+                if implementation == "functional":
+                    out = torch.nn.functional.batch_norm(
+                        x, running_mean, running_var, training=False
+                    )
+                else:
+                    out = torch.native_batch_norm(
+                        x, None, None, running_mean, running_var, False, 0.1, 1e-5
+                    )[0]
+            side.synchronize()
+            return out + small
+
+        x = torch.ones(4, 8, device="cuda")
+        running_mean = torch.zeros(8, device="cuda")
+        running_var = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        expected = fn(x, running_mean, running_var, small, side)
+        torch.cuda.synchronize()
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, running_mean, running_var, small, side
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(actual, expected)
+        self.assertEqual(running_mean, torch.zeros_like(running_mean))
+        self.assertEqual(running_var, torch.ones_like(running_var))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("record", ("event", "stream"))
+    @parametrize("mutation", ("out", "data"))
+    def test_input_mutation_event_on_stream_alias_errors(
+        self, backend, record, mutation
+    ):
+        def fn(x, side, alias, event):
+            with side:
+                if mutation == "out":
+                    torch.add(x, 1, out=x)
+                else:
+                    x.data.add_(1)
+                if record == "event":
+                    event.record(alias)
+                else:
+                    alias.record_event(event)
+            return x + 1
+
+        side = torch.cuda.Stream()
+        alias = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
+        event = torch.cuda.Event()
+        x = torch.zeros(8, device="cuda")
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, side, alias, event)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
 
 
 instantiate_parametrized_tests(TestStreamsCUDASpecific)
