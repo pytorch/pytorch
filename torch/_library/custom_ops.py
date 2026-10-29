@@ -2,11 +2,12 @@
 import collections
 import inspect
 import logging
+import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, cast, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -246,7 +247,15 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
+        # An explicit schema need not match fn's signature, and Dynamo can't
+        # trace the class creation in _custom_op_def_class. (torch.compiler
+        # doesn't exist yet for custom ops defined while torch is imported.)
+        compiler = getattr(torch, "compiler", None)
+        if schema is not None or (compiler is not None and compiler.is_compiling()):
+            opdef_cls = CustomOpDef
+        else:
+            opdef_cls = _custom_op_def_class(fn)
+        result = opdef_cls(namespace, opname, schema_str, fn, normalized_tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -267,6 +276,35 @@ def custom_op(
     if fn is None:
         return inner
     return inner(fn)
+
+
+def _custom_op_def_class(fn: Callable[..., object]) -> type["CustomOpDef"]:
+    """Returns a CustomOpDef subclass whose __call__ has fn's signature.
+
+    The generic CustomOpDef.__call__ forwards ``*args, **kwargs``, which costs a
+    tuple and a dict per call, and passes kwargs through to the OpOverload,
+    which knocks the call off the PyObject dispatch fast path (see [NOTE:
+    PyObject Dispatcher aka pyobj_dispatcher] in torch/_ops.py). The generated
+    __call__ passes positional parameters positionally, filling in fn's
+    defaults. Python looks up __call__ on the type, so each op needs its own
+    subclass.
+    """
+    code = utils.signature_forwarding_code(inspect.signature(fn), "_opdef_")
+    if code is None:
+        return CustomOpDef
+    params, call_args, env = code
+    src = (
+        f"def __call__(_opdef_self, {params}):\n"
+        f"    return _opdef_self._opoverload({call_args})\n"
+    )
+    # Attribute the generated code to CustomOpDef.__call__ in this file, so
+    # tracebacks point there and Dynamo applies this file's trace rules to it
+    # (code from "<string>" is treated as user code and compiled as its own frame).
+    exec(compile(src, __file__, "exec"), env)
+    call = cast(types.FunctionType, env["__call__"])
+    lineno = CustomOpDef.__call__.__code__.co_firstlineno
+    call.__code__ = call.__code__.replace(co_firstlineno=lineno)
+    return type("CustomOpDef", (CustomOpDef,), {"__call__": call})
 
 
 class CustomOpDef:

@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import inspect
 import io
 import itertools
 import os
@@ -729,6 +730,38 @@ class TestCustomOp(CustomOpTestCaseBase):
             f(torch.randn(3))
         names = {e.name for e in prof.events()}
         self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+
+    def test_custom_op_call_has_fn_signature(self):
+        @torch.library.custom_op(f"{self.test_ns}::call_signature", mutates_args=())
+        def f(x: Tensor, y: Tensor, n: int = 2, *, scale: float = 1.0) -> Tensor:
+            return (x + y) * n * scale
+
+        @f.register_fake
+        def _(x, y, n=2, *, scale=1.0):
+            return torch.empty_like(x)
+
+        self.assertEqual(
+            list(inspect.signature(f).parameters), ["x", "y", "n", "scale"]
+        )
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(f(x, y), (x + y) * 2)
+        self.assertEqual(f(x, y=y, n=3), (x + y) * 3)
+        self.assertEqual(f(y=y, x=x, scale=0.5), (x + y))
+        with self.assertRaisesRegex(
+            TypeError, "missing 1 required positional argument: 'y'"
+        ):
+            f(x)
+
+        # An explicit schema keeps the generic (*args, **kwargs) __call__.
+        @torch.library.custom_op(
+            f"{self.test_ns}::call_explicit_schema",
+            mutates_args=(),
+            schema="(Tensor x, int n) -> Tensor",
+        )
+        def g(*args):
+            return args[0] * args[1]
+
+        self.assertEqual(g(x, 3), x * 3)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
