@@ -4988,14 +4988,18 @@ class TestPrecompileDynamoCapture(TestCase):
     @skipIfCrossRef
     def test_a_frame_of_the_scripts_main_module_is_served_installed(self):
         # Only the entry's frame cannot be __main__: Model.forward's installs onto the
-        # serving script's own __main__.Model.
+        # serving script's own __main__.Model, and section 0 imports that __main__
+        # for the custom op it registers.
         script = os.path.join(self.dir, "app.py")
         with open(script, "w") as f:
             f.write(
                 "import sys, torch\nfrom torch.compiler.precompile import capture, load\n"
                 "sys.path.insert(0, sys.argv[1])\nx, (a, c, save) = torch.ones(2), sys.argv[3:]\n"
-                "single = __import__(sys.argv[2]).single\nclass Model(torch.nn.Module):\n"
-                "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return x.cos()\n"
+                "single = __import__(sys.argv[2]).single\n"
+                "@torch.library.custom_op('precompile_app::cos', mutates_args=())\n"
+                "def cos(x: torch.Tensor) -> torch.Tensor:\n    return x.cos()\n"
+                "cos.register_fake(torch.empty_like)\nclass Model(torch.nn.Module):\n"
+                "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
                 "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
                 "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
                 "    assert f.installed and f(Model(), x).equal(single(Model(), x))\n"
@@ -5005,6 +5009,13 @@ class TestPrecompileDynamoCapture(TestCase):
             cmd = [sys.executable, script, *argv]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
             self.assertEqual(out.returncode, 0, out.stderr)
+            if save:
+                with open(self.artifact) as f:
+                    python_code = f.read()
+                self.assertIn(
+                    "CUSTOM_OPS = (('precompile_app::cos', ''),)", python_code
+                )
+                self.assertRegex(python_code, r"\nSERVED_MODULES = \(.*'__main__'")
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
@@ -10385,7 +10396,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         python_code = self._capture_module(source, tracer=DynamoTracer())
         ops = tuple(sorted([(name, ""), (nested, "")]))
         self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
-        # Recording is best effort: a failure drops the record, not the graph break.
+        # A failing device walk still records the ops, checked on every kernel key.
         devices = mock.patch.object(
             torch._dynamo.symbolic_convert,
             "_tensor_device_types",
@@ -10394,7 +10405,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         with devices as raising:
             python_code = self._capture_module(source, tracer=DynamoTracer())
         self.assertTrue(raising.called)
-        self.assertNotIn("CUSTOM_OPS", python_code)
+        self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
@@ -10488,7 +10499,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             "lib.impl('op', lambda x: x * 3, 'CPU')\n"
         )
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], mode, prelude
             )
@@ -10497,7 +10510,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         for module in (name, ops):
             sys.modules.pop(module).lib._destroy()
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             exec(python_code, {"__name__": "artifact"})
         for module in (name, ops):
             self.addCleanup(sys.modules[module].lib._destroy)
@@ -10554,7 +10569,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         prelude += f"lib = torch.library.Library({ns!r}, 'IMPL')\nlib.impl('op', lambda x: x * 2, 'CPU')\n"
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], prelude=prelude, then=(override,)
             )
@@ -10566,7 +10583,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         served.defs._destroy()
         sys.modules.pop(defs, None)
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             exec(python_code, {"__name__": "artifact"})
         self.addCleanup(sys.modules[name].defs._destroy)
         self.addCleanup(sys.modules[name].lib._destroy)
@@ -10635,6 +10654,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         ):
             code = python_code.replace(served, f"SERVED_MODULES = {modules!r}")
             with self.assertRaisesRegex(PrecompileError, error):
+                exec(code, {"__name__": "artifact"})
+        if mode == "installed":
+            # A __main__ entry is refused before section 0 checks the ops.
+            entry = f"ENTRY_MODULE = {name!r}"
+            self.assertIn(entry, python_code)
+            code = python_code.replace(entry, "ENTRY_MODULE = '__main__'")
+            with self.assertRaisesRegex(PrecompileError, "__main__ module"):
                 exec(code, {"__name__": "artifact"})
         version = f"TORCH_VERSION = {torch.__version__!r}"
         self.assertIn(version, python_code)

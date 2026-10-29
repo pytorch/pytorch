@@ -1907,6 +1907,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "CUSTOM_OP_KERNELS",
         "CUSTOM_OP_OVERRIDE_MODULES",
         "SERVED_MODULES",
+        "ENTRY_MODULE",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2700,6 +2701,8 @@ def _build_multigraph_python_source(
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    if mode == "installed":
+        buf.writeline(f"ENTRY_MODULE = {entry.codes[0].python_module!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
     buf.writeline("# Frame modules: section 0 imports those CUSTOM_OP_MODULES lists,")
