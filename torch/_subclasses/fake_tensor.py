@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import logging
 import math
+import operator
 import os
 import threading
 import traceback
@@ -15,7 +16,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self, TypedDict, Unpack
+from typing_extensions import Self, TypedDict, TypeIs, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -640,6 +641,11 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+# Why the dispatch cache bypasses each op outside the builtin namespaces it has
+# seen (see _cached_dispatch_impl).
+_non_builtin_bypass_reasons: dict[OpOverload, str] = {}
 
 
 @functools.cache
@@ -1675,6 +1681,15 @@ class TensorMetadata:
     ) -> None:
         # Flatten the TensorMetadata out into `result`.  Make sure to call
         # state.convert_sym_int() on any SymInts.
+        if (
+            _all_ints(self.shape)
+            and _all_ints(self.stride)
+            and type(self.storage_offset) is int
+            and not isinstance(self.storage_bytes, SymInt)
+        ):
+            # No SymInts to convert, so every value is hashable as it is.
+            result.extend(_tensor_metadata_values(self))
+            return
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
             if isinstance(value, (tuple, list, torch.Size)):
@@ -1701,6 +1716,18 @@ def _same_int_expr(a: _MetadataIntLike, b: _MetadataIntLike) -> bool:
     if isinstance(b, (_SymIntOutputStub, SymInt)):
         return False
     return a == b
+
+
+_tensor_metadata_values = operator.attrgetter(
+    *(f.name for f in dataclasses.fields(TensorMetadata))
+)
+
+
+def _all_ints(values: tuple[_MetadataIntLike, ...]) -> TypeIs[tuple[int, ...]]:
+    for v in values:
+        if type(v) is not int:
+            return False
+    return True
 
 
 def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
@@ -2129,6 +2156,20 @@ class FakeTensorMode(TorchDispatchMode):
         state = None
         key = None
         try:
+            # Whether a non-builtin op can be cached doesn't depend on its
+            # arguments, so check that before building a key that would only
+            # be thrown away. The reason doesn't depend on them either, so it
+            # is worked out once per op.
+            is_op_overload = isinstance(func, torch._ops.OpOverload)
+            if is_op_overload and not library_utils.is_builtin(func):
+                reason = _non_builtin_bypass_reasons.get(func)
+                if reason is None:
+                    try:
+                        self._validate_cache_key(func, args, kwargs)
+                    except _BypassDispatchCache as e:
+                        reason = _non_builtin_bypass_reasons[func] = e.reason
+                if reason is not None:
+                    raise _BypassDispatchCache(reason)
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
