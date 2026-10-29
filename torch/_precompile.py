@@ -211,7 +211,8 @@ it.
 # calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a Dynamo
 # artifact does so after its version checks; a failed import only warns, unless the
 # module is in CUSTOM_OP_OVERRIDE_MODULES: its kernel the graph ran at capture
-# overrode another for the same key), then refuses to load unless every op in
+# overrode another for the same key, or a Dynamo artifact serves its frames, which
+# SERVED_MODULES lists: then it fails the load), then refuses to load unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same module's
 # file. A Dynamo artifact also imports its served frames' modules, in the order
@@ -2618,7 +2619,8 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
 
 
 def _opens_scope(frame: dict[str, Any]) -> bool:
-    """Whether ``_build_multigraph_forward`` opens ``frame``'s module for its globals."""
+    """Whether ``_build_multigraph_forward`` opens ``frame``'s module for its globals.
+    That driver inlines this test, as it imports nothing from torch._precompile."""
     return bool(frame["variants"] or (frame["trivial"] and frame["resume_names"]))
 
 
@@ -2628,23 +2630,6 @@ def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
     installed driver's ``CompilePackage.install`` also binds the modules of the
     codes this leaves out, which its pre-check does not cover."""
     return {f["python_module"] for f in frames if f["is_entry"] or _opens_scope(f)}
-
-
-def _unimportable_module(modules: Iterable[str]) -> str | None:
-    """The first of ``modules`` another process cannot import, without importing it
-    (``find_spec`` does import a dotted name's parents): ``__main__``, one with no
-    spec, or one whose parent's import raises."""
-    import importlib.util
-
-    for name in modules:
-        try:
-            if name == "__main__" or (
-                name not in sys.modules and importlib.util.find_spec(name) is None
-            ):
-                return name
-        except Exception:
-            return name
-    return None
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:

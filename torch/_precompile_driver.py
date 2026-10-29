@@ -90,6 +90,7 @@ def _import_custom_op_modules(served=(), import_served=None):
     called at exec time. The modules in ``served`` are imported with
     ``import_served``, which fails the load if they do not import."""
     import importlib
+    import importlib.util
     import os
     import re
     import sys
@@ -108,6 +109,17 @@ def _import_custom_op_modules(served=(), import_served=None):
         # Not just ImportError: a module can raise anything while it registers ops.
         except Exception as e:
             import_errors[module] = e
+    # Refused before the op check, which would report such a module's ops missing.
+    # find_spec imports a dotted name's parents, so this follows the ordered imports.
+    for module in served:
+        try:
+            found = module != "__main__" and (
+                module in sys.modules or importlib.util.find_spec(module) is not None
+            )
+        except Exception:
+            found = False
+        if not found and import_served is not None:
+            import_served(module)
     missing = []
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     for name, overload in CUSTOM_OPS:
@@ -553,9 +565,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
-    # After the version checks: a torch without them fails those cleanly first.
+    # After the version checks: a torch without it fails them cleanly first.
     from torch._dynamo.eval_frame import _warn_eager_fallback_miss
-    from torch._precompile import _opens_scope, _unimportable_module
 
     def _import(module_name):
         if module_name == "__main__":
@@ -582,9 +593,6 @@ def _build_multigraph_forward():
             ) from _e
 
     if "_import_custom_op_modules" in globals():
-        # Refused first, or the op check reports such a module's ops missing.
-        if (_module_name := _unimportable_module(SERVED_MODULES)) is not None:
-            _import(_module_name)
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
         _import_custom_op_modules(SERVED_MODULES, _import)
@@ -792,7 +800,8 @@ def _build_multigraph_forward():
     opened = set()
     for _frame in frames:
         module = _frame["python_module"]
-        if _opens_scope(_frame):
+        # torch._precompile._opens_scope: the frames _make_dispatcher opens a scope for.
+        if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
             existing = vars(_import(module)).get(_name)
@@ -875,9 +884,6 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
-    # After the version checks: a torch without it fails those cleanly first.
-    from torch._precompile import _unimportable_module
-
     if "__main__" in SERVED_MODULES:
         raise _PrecompileError(
             "precompile: this installed artifact serves frames of module "
@@ -897,9 +903,6 @@ def _build_installed_forward():
                     f"{module_name!r}, which is not importable here ({_e})."
                 ) from _e
 
-        # Refused first, or the op check reports such a module's ops missing.
-        if (_module_name := _unimportable_module(SERVED_MODULES)) is not None:
-            _import_served(_module_name)
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
         _import_custom_op_modules(SERVED_MODULES, _import_served)
