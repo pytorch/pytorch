@@ -9497,7 +9497,10 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.half, torch.bfloat16)
-    @toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2),
+    # The device computes source coordinates in float, the reference in double,
+    # so fp32 outputs can differ from it by ~1e-5 at non-integer scales.
+    @toleranceOverride({torch.float: tol(atol=1e-4, rtol=1e-5),
+                        torch.half: tol(atol=1e-2, rtol=1e-2),
                         torch.bfloat16: tol(atol=5e-2, rtol=5e-2)})
     @parametrize_test("align_corners", [False, True])
     @parametrize_test("layout", [
