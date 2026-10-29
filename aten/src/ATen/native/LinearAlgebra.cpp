@@ -2660,8 +2660,8 @@ Tensor compute_T18_scale_square(
   std::vector<Tensor> output_pieces;
   output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
-  for (int64_t i = 0; i < section_numel; ++i) {
-    for (int64_t j = 0; j < pts[i]; j++) {
+  for (const auto i : c10::irange(section_numel)) {
+    for ([[maybe_unused]] const auto _ : c10::irange(pts[i])) {
       // To avoid AMP autocasting caused by at::matmul
       auto acc_out = at::empty_like(acc);
       acc = at::matmul_out(acc_out, acc, acc);
@@ -2710,7 +2710,7 @@ Tensor mexp_impl(
       compute_T8<scalar_t>, compute_T12<scalar_t>
     };
 
-    for (int i = 0; i < total_n_degs - 1; ++i) {
+    for (const auto i : c10::irange(total_n_degs - 1)) {
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
