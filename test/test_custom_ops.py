@@ -834,6 +834,135 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(torch.func.functionalize(f)(a), a + 1)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_args(self):
+        # What a Python kernel receives, and any error, must not depend on
+        # whether the op was dispatched through the PyObject fast path.
+        lib = self.lib()
+        seen = []
+
+        def kernel(*args, **kwargs):
+            seen.append((args, kwargs))
+            return torch.zeros(1)
+
+        def strict_kernel(x):  # has no parameter for the defaulted argument
+            seen.append(((x,), {}))
+            return torch.zeros(1)
+
+        def describe(value):
+            if isinstance(value, torch.Tensor):
+                return ("Tensor", id(value))
+            if isinstance(value, (list, tuple)):
+                return (type(value).__name__, [describe(v) for v in value])
+            if isinstance(value, dict):
+                return {k: describe(v) for k, v in value.items()}
+            if isinstance(value, torch.device):
+                return ("device", str(value))
+            return (type(value).__name__, value)
+
+        x, y = torch.randn(2), torch.randn(2)
+        cases = {
+            "a": (
+                "(Tensor x, int n) -> Tensor",
+                [((x, 3), {}), ((x,), {"n": 3}), ((), {"x": x, "n": 3}),
+                 ((x, True), {}), ((x, 3.0), {}), ((x, 2**70), {}), ((x,), {})],
+            ),
+            "b": (
+                "(Tensor x, int n=1, float s=0.5) -> Tensor",
+                [((x,), {}), ((x, 1), {}), ((x, 2), {}), ((x, 1, 0.5), {}),
+                 ((x, 1, 0.25), {}), ((x,), {"s": 0.5}), ((x,), {"s": 0.25}),
+                 ((x, 1, 1), {})],
+            ),
+            "c": (
+                "(Tensor x, *, int k=3, bool flag=False) -> Tensor",
+                [((x,), {}), ((x,), {"k": 3}), ((x,), {"k": 4}),
+                 ((x,), {"flag": True, "k": 3}), ((x, 3), {}), ((x,), {"bogus": 1})],
+            ),
+            "d": (
+                "(Tensor x, Tensor? y=None, str mode='sum') -> Tensor",
+                [((x,), {}), ((x, None), {}), ((x, y), {}), ((x, y, "sum"), {}),
+                 ((x, None, "mean"), {}), ((x,), {"mode": "max"})],
+            ),
+            "e": (
+                "(Tensor[] xs, int[] dims=[0], ScalarType? dtype=None) -> Tensor",
+                [(([x, y],), {}), (((x, y),), {}), (([x], [0]), {}), (([x], (0,)), {}),
+                 (([x], [1, 2], torch.float32), {}), (([x], [0], None), {}),
+                 (([x, 1],), {})],
+            ),
+            "f": (
+                "(Tensor x, Scalar alpha=1, Layout? layout=None, Device? device=None) -> Tensor",
+                [((x,), {}), ((x, 1), {}), ((x, 2.5), {}), ((x, True), {}),
+                 ((x, 1, torch.strided), {}), ((x, 1, None, torch.device("cpu")), {}),
+                 ((x, 1, None, "cpu"), {})],
+            ),
+            "g": (
+                "(Tensor x, SymInt n, float[] fs, Tensor?[] ys) -> Tensor",
+                [((x, 3, [1.0, 2.0], [x, None]), {}), ((x, 3, (1.0,), (None,)), {}),
+                 ((x, 3, [1, 2], [x]), {})],
+            ),
+            "h": ("(Tensor x, int n=1) -> Tensor", [((x,), {}), ((x, 1), {}), ((x, 2), {})]),
+        }  # fmt: skip
+        for name, (schema, calls) in cases.items():
+            opname = f"normalize_args_{name}"
+            lib.define(opname + schema)
+            lib.impl(opname, strict_kernel if name == "h" else kernel, "CPU")
+            lib.impl(opname, torch.library.fallthrough_kernel, "Autograd")
+            op = getattr(self.ns(), opname).default
+            for args, kwargs in calls:
+                results = []
+                for pyobj_dispatch in (False, True):
+                    op._enable_pyobj_dispatch(pyobj_dispatch)
+                    seen.clear()
+                    try:
+                        op(*args, **kwargs)
+                        results.append(describe(seen))
+                    except Exception as e:
+                        results.append((type(e), str(e).splitlines()[0]))
+                self.assertEqual(
+                    results[0], results[1], msg=f"{schema} with {args!r}, {kwargs!r}"
+                )
+
+        # Calls like these take the fast path: the kernel gets the caller's own
+        # float, where the C++ Dispatcher would make a new one.
+        lib.define("normalize_args_fast(Tensor x, float s, *, int k=0) -> Tensor")
+        lib.impl("normalize_args_fast", kernel, "CPU")
+        lib.impl("normalize_args_fast", torch.library.fallthrough_kernel, "Autograd")
+        op = self.ns().normalize_args_fast.default
+        op._enable_pyobj_dispatch(True)
+        s = float("0.75")
+        for args, kwargs in [((x, s), {}), ((x,), {"s": s}), ((x, s), {"k": 1})]:
+            seen.clear()
+            op(*args, **kwargs)
+            self.assertIs(seen[0][0][1], s)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_copies_list_defaults(self):
+        # A kernel may mutate a default it's passed without changing the
+        # default for later calls.
+        lib = self.lib()
+        lib.define(
+            "pyobject_dispatch_list_default(Tensor x, int[] dims=[0], int n=1) -> Tensor"
+        )
+        seen = []
+
+        def kernel(x, dims, n=1):
+            seen.append(list(dims))
+            dims.append(1)
+            return x.clone()
+
+        lib.impl("pyobject_dispatch_list_default", kernel, "CPU")
+        lib.impl(
+            "pyobject_dispatch_list_default",
+            torch.library.fallthrough_kernel,
+            "Autograd",
+        )
+        op = self.ns().pyobject_dispatch_list_default.default
+        op._enable_pyobj_dispatch(True)
+        x = torch.ones(2)
+        for _ in range(2):
+            op(x, n=2)
+        self.assertEqual(seen, [[0], [0]])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_normalizes_results(self):
         # What a caller gets back, and any error, must not depend on whether
         # the op was dispatched through the PyObject fast path.
