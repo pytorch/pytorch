@@ -422,9 +422,6 @@ void setKernelArg(
       Otherwise set_arg(numParams, ...) binds an argument it does not have.
   The kernel argument count check in launchKernel() is what establishes the
   second one today.
-
-  `argTypes` sits between the two counts, and `bindLocal` after the queue, so
-  that swapping either for its neighbour does not compile.
 */
 void submitKernel(
     const LoadedKernel* loadedKernel,
@@ -736,7 +733,6 @@ PyTypeObject StaticXpuLauncherType = {
     nullptr, // tp_alloc
     nullptr, // tp_new
 };
-
 } // anonymous namespace
 // Module initialization: add StaticXpuLauncher to the module with our static
 // methods.
