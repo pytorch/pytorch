@@ -10218,6 +10218,28 @@ class TestPrecompileCustomOpRecording(TestCase):
             dispatch_pystub.return_value = None
             self.assertIsNone(_custom_op_module(name, ""))
 
+    def test_a_cpp_extension_ops_cpp_kernels_are_not_reported(self):
+        from torch._precompile import _custom_op_modules
+
+        # As a C++ extension's op naming its module with m.set_python_module, with a
+        # kernel from one of its C++ sources, or from a script run as __main__.
+        ns = f"precompile_ext_{uuid.uuid4().hex}"
+        lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        lib.impl("op", torch.clone, "CPU")
+        dump, op, at = torch._C._dispatch_dump, f"{ns}::op", "CPU: registered at "
+        pystub, schema = ("unittest", "context"), "/ext/op.cpp"
+        for path, untracked in (("/ext/k.cu", ()), ("/main.py", ((op, "CPU"),))):
+            cpp = lambda q: re.sub(rf"(?m)^{at}\S+:", f"{at}{path}:", dump(q))  # noqa: E731
+            with (
+                mock.patch.object(torch._C, "_dispatch_pystub", return_value=pystub),
+                mock.patch.object(torch._C, "_dispatch_dump", side_effect=cpp),
+                mock.patch("torch._precompile._registration_path", return_value=schema),
+            ):
+                found = _custom_op_modules([(op, "")], ("CPU",))
+            self.assertEqual(found.modules, pystub[:1])
+            self.assertEqual(found.untracked_kernels, untracked)
+
     @parametrize("backend", ("eager", "inductor"))
     def test_a_single_graph_capture_warns_once_about_an_unrecorded_op(self, backend):
         op, qualname = self._op("in_main")
@@ -10465,6 +10487,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             self.assertEqual(found, _CustomOpModules((module,), (), ()))
 
     def test_a_prim_another_module_defines_records_that_module(self):
+        from torch._library.custom_ops import OPDEFS
         from torch._precompile import _custom_op_modules
 
         name = f"precompile_{uuid.uuid4().hex}"
@@ -10495,12 +10518,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.addCleanup(sys.modules.pop, name)
         spec.loader.exec_module(module)
         self.addCleanup(module.lib._destroy)
+        # _make_prim defines a functional prim as a custom_op with its own Library.
+        made = f"prims::{name}_made"
+        self.addCleanup(OPDEFS.pop, made)
+        self.addCleanup(OPDEFS[made]._lib._destroy)
         found = _custom_op_modules([(f"prims::{name}_fragment", "")], ("CPU",))
         self.assertEqual((found.modules, found.unrecorded), ((name,), ()))
         # _make_prim registers it from torch._prims, which does not define it.
-        found = _custom_op_modules([(f"prims::{name}_made", "")], ("CPU",))
-        self.assertEqual(found.unrecorded, ((f"prims::{name}_made", ""),))
-        self.assertNotIn("torch._prims", found.modules)
+        found = _custom_op_modules([(made, "")], ("CPU",))
+        self.assertEqual((found.modules, found.unrecorded), ((), ((made, ""),)))
 
     @unittest.skipIf(IS_WINDOWS or IS_MACOS, "forks")
     def test_no_op_torch_registers_is_reported(self):
