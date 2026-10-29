@@ -49,6 +49,21 @@
   - "module: dynamic shapes"
   then:
   - "oncall: pt2"
+# For documentation only: the rules below are commented out and do nothing. They
+# record which oncall each module label falls under.
+# - any:
+#   - "module: c10d"
+#   - "module: ddp"
+#   - "module: dtensor"
+#   - "module: fsdp"
+#   - "module: tensorpipe"
+#   then:
+#   - "oncall: distributed"
+# - any:
+#   - "module: android"
+#   - "module: vulkan"
+#   then:
+#   - "oncall: mobile"
 - any:
   - "release notes: distributed (c10d)"
   - "release notes: distributed (symm_mem)"
