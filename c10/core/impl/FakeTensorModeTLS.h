@@ -16,14 +16,15 @@ class C10_API FakeTensorModeTLS {
   static std::shared_ptr<FakeTensorMode> get_state();
   static void reset_state();
 
-  // Note [in_kernel_invocation]
+  // Note [C++ fake in_kernel_invocation]
   // A Python FakeTensor reports its fake device, except inside
   // FakeTensorMode's in_kernel_invocation_manager, where a meta kernel is
-  // running on it and must see the meta device. A C++ fake stores its fake
-  // device in ExtraMeta, and TensorImpl::device_custom reports meta while this
-  // thread-local flag is set. Excluding DispatchKey::Fake does not change the
-  // reported device, so code can suspend fake dispatch without fakes changing
-  // device.
+  // running on it and must see the meta device (see [in_kernel_invocation] in
+  // torch/_subclasses/fake_tensor.py). A C++ fake stores its fake device in
+  // ExtraMeta, and TensorImpl::device_custom reports meta while this
+  // thread-local flag is set; in_kernel_invocation_manager sets it too.
+  // Excluding DispatchKey::Fake does not change the reported device, so code
+  // can suspend fake dispatch without fakes changing device.
   static bool in_kernel_invocation();
   static void set_in_kernel_invocation(bool value);
 };
