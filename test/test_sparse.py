@@ -22,7 +22,7 @@ from torch.testing._internal.common_cuda import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, expectedFailureXPU,
-     onlyAccelerator, largeTensorTest)
+     onlyAccelerator, largeTensorTest, onlyCUDA, skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -57,6 +57,37 @@ binary_ufuncs_with_sparse_support = [
     not isinstance(op, ElementwiseBinaryPythonRefInfo)]
 
 like_fns_with_sparse_support = [op for op in op_db if _op_supports_any_sparse(op) and '_like' in op.name]
+
+
+def hub_sparse_mm_inputs(device, dtype, n=10000, k=64, nnz=200000):
+    """Inputs for the sparse @ dense determinism tests (gh-202030).
+
+    Returns a coalesced n x n sparse COO matrix with nnz random entries plus a
+    fully populated row 0 (a "hub" row), and a dense n x k matrix. The
+    cuSPARSE algorithms that CUDA uses by default accumulate long rows with
+    atomic adds, so the hub row makes run-to-run differences show reliably.
+    """
+    rows = torch.cat([torch.randint(0, n, (nnz,)), torch.zeros(n, dtype=torch.long)])
+    cols = torch.cat([torch.randint(0, n, (nnz,)), torch.arange(n)])
+    values = torch.rand(nnz + n, dtype=dtype)
+    a = torch.sparse_coo_tensor(torch.stack([rows, cols]).to(device), values.to(device), (n, n)).coalesce()
+    b = torch.randn(n, k, dtype=dtype, device=device)
+    return a, b
+
+
+def check_sparse_mm_deterministic(test_case, name, fn, expected, atol, rtol):
+    """Runs fn 10 times with deterministic algorithms enabled, requires every
+    result to be bit-wise equal to the first one and the first one to be close
+    to expected, a CPU reference computed in double precision."""
+    with DeterministicGuard(True):
+        first = fn()
+        for _ in range(9):
+            out = fn()
+            test_case.assertTrue(
+                torch.equal(out, first),
+                f"{name}: results differ between runs, max |diff| = {(out - first).abs().max().item()}")
+    test_case.assertEqual(first.cpu().to(expected.dtype), expected, atol=atol, rtol=rtol, msg=name)
+
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -1898,6 +1929,53 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 0)
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64)
+    def test_mm_deterministic(self, device, dtype):
+        # gh-202030: sparse COO @ dense goes through cuSPARSE SpMM, which is
+        # only bit-wise reproducible with the algorithms selected in
+        # deterministic mode.
+        a, b = hub_sparse_mm_inputs(device, dtype)
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        a_ref, b_ref = a.cpu().to(ref_dtype), b.cpu().to(ref_dtype)
+        atol, rtol = 1e-2, 1e-3  # 10000-term float32 sums near zero carry ~1e-3 rounding error
+        b_col = b.t().contiguous().t()  # column-major copy of b
+        b1 = b[:, :1].contiguous()  # n == 1 may take cuSPARSE's SpMV path
+        w = torch.randn_like(b)
+
+        def dense_grad(sparse, dense, weight):
+            dense = dense.detach().requires_grad_()
+            (torch.sparse.mm(sparse, dense) * weight).sum().real.backward()
+            return dense.grad
+
+        for name, fn, expected in (
+            ("mm", lambda: torch.mm(a, b), torch.mm(a_ref, b_ref)),
+            ("sparse.mm column-major", lambda: torch.sparse.mm(a, b_col), torch.sparse.mm(a_ref, b_ref)),
+            ("mm n=1", lambda: torch.mm(a, b1), torch.mm(a_ref, b_ref[:, :1])),
+            ("mm backward", lambda: dense_grad(a, b, w), dense_grad(a_ref, b_ref, w.cpu().to(ref_dtype))),
+        ):
+            check_sparse_mm_deterministic(self, name, fn, expected, atol, rtol)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64)
+    def test_addmm_deterministic(self, device, dtype):
+        # gh-202030, see test_mm_deterministic
+        a, b = hub_sparse_mm_inputs(device, dtype)
+        c = torch.randn(a.shape[0], b.shape[1], dtype=dtype, device=device)
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        a_ref, b_ref, c_ref = a.cpu().to(ref_dtype), b.cpu().to(ref_dtype), c.cpu().to(ref_dtype)
+        atol, rtol = 1e-2, 1e-3  # 10000-term float32 sums near zero carry ~1e-3 rounding error
+        b_col = b.t().contiguous().t()  # column-major copy of b
+        expected = torch.addmm(c_ref, a_ref, b_ref, beta=0.5, alpha=2)
+
+        for name, fn in (
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("sparse.addmm column-major", lambda: torch.sparse.addmm(c, a, b_col, beta=0.5, alpha=2)),
+        ):
+            check_sparse_mm_deterministic(self, name, fn, expected, atol, rtol)
 
     @onlyAccelerator
     def test_bmm_oob(self, device):

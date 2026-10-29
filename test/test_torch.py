@@ -1279,6 +1279,30 @@ class TestTorchDeviceType(TestCase):
                     max_val = torch.iinfo(dtype).max
                 self.assertTrue(res.eq(max_val).all())
 
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_sparse_mm(self, device):
+        # cuSPARSE has deterministic algorithms for these; hipSPARSE does not,
+        # so ROCm alerts instead. See Note [Enabling Deterministic Operations]
+        should_alert = TEST_WITH_ROCM
+        dense = torch.randn(4, 3, device=device)
+        vec = torch.randn(4, device=device)
+        coo = torch.eye(4, device=device).to_sparse_coo()
+        csr = torch.eye(4, device=device).to_sparse_csr()
+
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mv(csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")

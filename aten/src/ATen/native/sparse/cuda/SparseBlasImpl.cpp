@@ -14,12 +14,15 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
+
+#include <optional>
 
 namespace at::native::sparse::impl::cuda {
 
@@ -524,6 +527,62 @@ void block_sparse_mm(
   }
 }
 
+#if !defined(USE_ROCM)
+// Describes a CSR tensor to cuSPARSE as a COO matrix over the same column
+// indices and values, with the row indices expanded from crow_indices. This
+// is the input that CUSPARSE_SPMM_COO_ALG2, the deterministic SpMM algorithm
+// that also supports batched matrices, needs. Batches are laid out as in
+// CuSparseSpMatCsrDescriptor: indices and values are either batched, with
+// batch b starting at b * nnz, or shared by all batches (batch stride 0).
+class CuSparseSpMatCooFromCsrDescriptor
+    : public at::cuda::sparse::CuSparseSpMatDescriptor {
+ public:
+  explicit CuSparseSpMatCooFromCsrDescriptor(const Tensor& input)
+      : col_indices_(input.col_indices().contiguous()),
+        values_(input.values().contiguous()) {
+    auto nnz = col_indices_.size(-1);
+    // Shape (batch_ndim + 2, batch_count * nnz); row -2 holds the row indices.
+    row_indices_ = at::_convert_indices_from_csr_to_coo(
+                       input.crow_indices(),
+                       col_indices_,
+                       /*out_int32=*/col_indices_.scalar_type() == kInt)
+                       .select(0, -2);
+
+    cusparseSpMatDescr_t raw_descriptor = nullptr;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+        &raw_descriptor,
+        input.size(-2),
+        input.size(-1),
+        nnz,
+        row_indices_.data_ptr(),
+        col_indices_.data_ptr(),
+        values_.data_ptr(),
+        at::cuda::sparse::getCuSparseIndexType(col_indices_.scalar_type()),
+        CUSPARSE_INDEX_BASE_ZERO,
+        at::cuda::ScalarTypeToCudaDataType(input.scalar_type())));
+    descriptor_.reset(raw_descriptor);
+
+    if (input.dim() == 3) {
+      int batch_count = at::native::cuda_int_cast(
+          at::native::batchCount(input), "batch_count");
+      bool batched = values_.dim() >= 2;
+      TORCH_CHECK(
+          (input.crow_indices().dim() >= 2) == batched &&
+              (col_indices_.dim() >= 2) == batched,
+          "Expected crow_indices, col_indices and values of a batched CSR "
+          "tensor to be either all batched or all shared across batches");
+      TORCH_CUDASPARSE_CHECK(cusparseCooSetStridedBatch(
+          raw_descriptor, batch_count, batched ? nnz : 0));
+    }
+  }
+
+ private:
+  Tensor col_indices_;
+  Tensor values_;
+  Tensor row_indices_;
+};
+#endif
+
 void spmm(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
@@ -561,6 +620,33 @@ void spmm(
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
+  cusparseSpMatDescr_t spmatA = descA.descriptor();
+
+  // See Note [Enabling Deterministic Operations]
+#if !defined(USE_ROCM)
+  std::optional<CuSparseSpMatCooFromCsrDescriptor> descA_coo;
+#endif
+  if (at::globalContext().deterministicAlgorithms()) {
+#if !defined(USE_ROCM)
+    auto deterministic_alg = at::cuda::sparse::deterministic_spmm_alg(
+        opA,
+        opB,
+        at::cuda::ScalarTypeToCudaDataType(mat1.scalar_type()),
+        /*batched=*/mat1.dim() == 3);
+    if (deterministic_alg.has_value()) {
+      algorithm = *deterministic_alg;
+    } else {
+      at::globalContext().alertNotDeterministic("addmm_out_sparse_compressed_cuda");
+    }
+    if (algorithm == CUSPARSE_SPMM_COO_ALG2) {
+      descA_coo.emplace(mat1);
+      spmatA = descA_coo->descriptor();
+    }
+#else
+    // hipSPARSE does not document a deterministic SpMM algorithm.
+    at::globalContext().alertNotDeterministic("addmm_out_sparse_compressed_cuda");
+#endif
+  }
 
   auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
@@ -584,7 +670,7 @@ void spmm(
             opA,
             opB,
             &alpha_,
-            descA.descriptor(),
+            spmatA,
             descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
@@ -601,7 +687,7 @@ void spmm(
             opA,
             opB,
             &alpha_,
-            descA.descriptor(),
+            spmatA,
             descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
@@ -915,10 +1001,19 @@ void addmv_out_sparse_csr(
   auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
   auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
 
+  // See Note [Enabling Deterministic Operations]
+  // cuSPARSE documents bit-wise reproducible SpMV results only for
+  // CUSPARSE_SPMV_CSR_ALG2 (and COO_ALG2, BSR_ALG1) with opA == NON_TRANSPOSE.
 #ifdef USE_ROCM
   cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+  if (at::globalContext().deterministicAlgorithms()) {
+    // hipSPARSE does not document a deterministic SpMV algorithm.
+    at::globalContext().alertNotDeterministic("addmv_out_sparse_compressed_cuda");
+  }
 #else
-  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+  cusparseSpMVAlg_t alg = at::globalContext().deterministicAlgorithms()
+      ? CUSPARSE_SPMV_CSR_ALG2
+      : CUSPARSE_SPMV_ALG_DEFAULT;
 #endif
 
   // SpMV doesn't support uniform precision computation

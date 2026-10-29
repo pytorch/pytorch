@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/CUDASparse.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
@@ -56,19 +57,67 @@ void _csrmm2(
   int64_t ma = m, ka = k;
   if (transa != 'n') std::swap(ma, ka);
 
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  // ALG1 is broken on SM89 as of CUDA 11.8+
+#if !defined(USE_ROCM)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
+#else
+  auto default_alg = CUSPARSE_SPMM_CSR_ALG1;
+#endif
+
+  // See Note [Enabling Deterministic Operations]
+  c10::DataPtr coo_row_indices;
+  if (at::globalContext().deterministicAlgorithms()) {
+#if !defined(USE_ROCM)
+    auto deterministic_alg = at::cuda::sparse::deterministic_spmm_alg(
+      opa, opb, cusparse_value_type, /*batched=*/false);
+    if (deterministic_alg.has_value()) {
+      default_alg = *deterministic_alg;
+    } else {
+      at::globalContext().alertNotDeterministic("addmm_out_sparse_dense_cuda");
+    }
+    if (default_alg == CUSPARSE_SPMM_COO_ALG2) {
+      // COO_ALG2 needs A in COO format: expand the row offsets into row indices;
+      // the column indices and values are shared with the CSR representation.
+      coo_row_indices = c10::cuda::CUDACachingAllocator::get()->allocate(
+        static_cast<size_t>(nnz) * sizeof(int));
+      TORCH_CUDASPARSE_CHECK(cusparseXcsr2coo(
+        handle, csrrowptra, static_cast<int>(nnz), static_cast<int>(ma),
+        static_cast<int*>(coo_row_indices.get()), CUSPARSE_INDEX_BASE_ZERO));
+    }
+#else
+    // hipSPARSE does not document a deterministic SpMM algorithm.
+    at::globalContext().alertNotDeterministic("addmm_out_sparse_dense_cuda");
+#endif
+  }
+
   // Descriptor creation requires non-const pointers; SpMM only reads A and B.
   cusparseSpMatDescr_t descA;
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
-    &descA,                     /* output */
-    ma, ka, nnz,                /* rows, cols, number of non zero elements */
-    const_cast<int*>(csrrowptra), /* row offsets of the sparse matrix, size = rows +1 */
-    const_cast<int*>(csrcolinda), /* column indices of the sparse matrix, size = nnz */
-    const_cast<T*>(csrvala),    /* values of the sparse matrix, size = nnz */
-    CUSPARSE_INDEX_32I,         /* data type of row offsets index */
-    CUSPARSE_INDEX_32I,         /* data type of col indices */
-    CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col index */
-    cusparse_value_type         /* data type of values */
-  ));
+  if (coo_row_indices) {
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+      &descA,                     /* output */
+      ma, ka, nnz,                /* rows, cols, number of non zero elements */
+      coo_row_indices.get(),      /* row indices of the sparse matrix, size = nnz */
+      const_cast<int*>(csrcolinda), /* column indices of the sparse matrix, size = nnz */
+      const_cast<T*>(csrvala),    /* values of the sparse matrix, size = nnz */
+      CUSPARSE_INDEX_32I,         /* data type of row and col indices */
+      CUSPARSE_INDEX_BASE_ZERO,   /* base index of row and col indices */
+      cusparse_value_type         /* data type of values */
+    ));
+  } else {
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
+      &descA,                     /* output */
+      ma, ka, nnz,                /* rows, cols, number of non zero elements */
+      const_cast<int*>(csrrowptra), /* row offsets of the sparse matrix, size = rows +1 */
+      const_cast<int*>(csrcolinda), /* column indices of the sparse matrix, size = nnz */
+      const_cast<T*>(csrvala),    /* values of the sparse matrix, size = nnz */
+      CUSPARSE_INDEX_32I,         /* data type of row offsets index */
+      CUSPARSE_INDEX_32I,         /* data type of col indices */
+      CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col index */
+      cusparse_value_type         /* data type of values */
+    ));
+  }
 
   int64_t kb = k, nb = n;
   if (transb != 'n') std::swap(kb, nb);
@@ -91,15 +140,6 @@ void _csrmm2(
     CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
   ));
 
-
-  auto handle = at::cuda::getCurrentCUDASparseHandle();
-  // ALG1 is broken on SM89 as of CUDA 11.8+
-#if !defined(USE_ROCM)
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
-#else
-  auto default_alg = CUSPARSE_SPMM_CSR_ALG1;
-#endif
 
   // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
   size_t bufferSize;

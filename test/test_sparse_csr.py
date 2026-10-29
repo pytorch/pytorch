@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     OpDTypes,
     ops,
     precisionOverride,
@@ -77,8 +78,10 @@ from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_lina
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 
 from test_sparse import (
+    check_sparse_mm_deterministic,
     CUSPARSE_SPMM_COMPLEX128_SUPPORTED,
     HIPSPARSE_SPMM_COMPLEX128_SUPPORTED,
+    hub_sparse_mm_inputs,
 )
 
 if TEST_SCIPY:
@@ -2210,6 +2213,82 @@ class TestSparseCSRDevice(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 0))
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64,
+            *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+            *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [])
+    def test_sparse_mm_deterministic(self, device, dtype):
+        # gh-202030: sparse CSR @ dense goes through cuSPARSE SpMM (SpMV for
+        # torch.mv), which is only bit-wise reproducible with the algorithms
+        # selected in deterministic mode. References use the CPU COO kernels
+        # in double precision.
+        a_coo, b = hub_sparse_mm_inputs(device, dtype)
+        a = a_coo.to_sparse_csr()
+        n, k = b.shape
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        a_ref, b_ref = a_coo.cpu().to(ref_dtype), b.cpu().to(ref_dtype)
+        atol, rtol = {torch.half: (1e-1, 2e-2), torch.bfloat16: (5e-1, 5e-2)}.get(dtype, (1e-2, 1e-3))
+        a_int32 = torch.sparse_csr_tensor(a.crow_indices().int(), a.col_indices().int(), a.values(), a.shape)
+        b_col = b.t().contiguous().t()  # column-major copy of b, SpMM sees op(B) = B^T
+        b1 = b[:, :1].contiguous()  # n == 1 may take cuSPARSE's SpMV path
+        v = b[:, 0].contiguous()
+        w = torch.randn_like(b)
+        # Batched CSR: a batch of two different matrices, and the "broadcast"
+        # form from test_bmm that shares one set of indices and values across
+        # the batch dimension.
+        a_batched = torch.sparse_csr_tensor(
+            torch.stack([a.crow_indices()] * 2), torch.stack([a.col_indices()] * 2),
+            torch.stack([a.values(), 2 * a.values()]), (2, n, n))
+        a_bcast = torch.sparse_csr_tensor(a.crow_indices(), a.col_indices(), a.values(), (2, n, n),
+                                          check_invariants=False)
+        b_batched = torch.randn(2, n, k, dtype=dtype, device=device)
+        b_batched_ref = b_batched.cpu().to(ref_dtype)
+
+        def dense_grad(sparse, dense, weight):
+            dense = dense.detach().requires_grad_()
+            (torch.sparse.mm(sparse, dense) * weight).sum().real.backward()
+            return dense.grad
+
+        for name, fn, expected in (
+            ("mm", lambda: torch.mm(a, b), torch.mm(a_ref, b_ref)),
+            ("mm int32 indices", lambda: torch.mm(a_int32, b), torch.mm(a_ref, b_ref)),
+            ("sparse.mm column-major", lambda: torch.sparse.mm(a, b_col), torch.sparse.mm(a_ref, b_ref)),
+            ("mm n=1", lambda: torch.mm(a, b1), torch.mm(a_ref, b_ref[:, :1])),
+            ("mv", lambda: torch.mv(a, v), torch.mv(a_ref, b_ref[:, 0])),
+            ("bmm", lambda: torch.bmm(a_batched, b_batched),
+             torch.stack([torch.mm(a_ref, b_batched_ref[0]), torch.mm(2 * a_ref, b_batched_ref[1])])),
+            ("bmm broadcast", lambda: torch.bmm(a_bcast, b_batched),
+             torch.stack([torch.mm(a_ref, b_batched_ref[i]) for i in range(2)])),
+            ("mm backward", lambda: dense_grad(a, b, w), dense_grad(a_ref, b_ref, w.cpu().to(ref_dtype))),
+        ):
+            check_sparse_mm_deterministic(self, name, fn, expected, atol, rtol)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64,
+            *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+            *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [])
+    def test_sparse_addmm_deterministic(self, device, dtype):
+        # gh-202030, see test_sparse_mm_deterministic
+        a_coo, b = hub_sparse_mm_inputs(device, dtype)
+        a = a_coo.to_sparse_csr()
+        c = torch.randn(a.shape[0], b.shape[1], dtype=dtype, device=device)
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        a_ref, b_ref, c_ref = a_coo.cpu().to(ref_dtype), b.cpu().to(ref_dtype), c.cpu().to(ref_dtype)
+        atol, rtol = {torch.half: (1e-1, 2e-2), torch.bfloat16: (5e-1, 5e-2)}.get(dtype, (1e-2, 1e-3))
+        b_col = b.t().contiguous().t()  # column-major copy of b
+        expected = torch.addmm(c_ref, a_ref, b_ref, beta=0.5, alpha=2)
+        expected_mv = 0.5 * c_ref[:, 0] + 2 * torch.mv(a_ref, b_ref[:, 0])  # no COO addmv on CPU
+
+        for name, fn, ref in (
+            ("sparse.addmm", lambda: torch.sparse.addmm(c, a, b, beta=0.5, alpha=2), expected),
+            ("addmm column-major", lambda: torch.addmm(c, a, b_col, beta=0.5, alpha=2), expected),
+            ("addmv", lambda: torch.addmv(c[:, 0].contiguous(), a, b[:, 0].contiguous(), beta=0.5, alpha=2),
+             expected_mv),
+        ):
+            check_sparse_mm_deterministic(self, name, fn, ref, atol, rtol)
 
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())

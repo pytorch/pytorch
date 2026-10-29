@@ -117,9 +117,13 @@ RuntimeError: index_add_cuda_ does not have a deterministic implementation, but 
 'torch.use_deterministic_algorithms(True)'. ...
 ```
 
-When {meth}`torch.bmm` is called with sparse-dense CUDA tensors it typically uses a
-nondeterministic algorithm, but when the deterministic flag is turned on, its alternate
-deterministic implementation will be used:
+When {meth}`torch.bmm`, {func}`torch.mm`, {func}`torch.addmm`, {func}`torch.sparse.mm` or
+{func}`torch.sparse.addmm` are called with sparse-dense CUDA tensors (sparse COO, CSR or CSC
+operand) they typically use a nondeterministic algorithm, but when the deterministic flag is
+turned on, their alternate deterministic implementation will be used (the same holds for
+{func}`torch.mv` and {func}`torch.addmv` with a sparse CSR or CSC matrix). On ROCm these
+operations have no deterministic implementation and raise an error instead, except for
+{meth}`torch.bmm` with a sparse COO tensor:
 
 ```python
 >>> import torch

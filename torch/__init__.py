@@ -1792,6 +1792,10 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm` and
+          :func:`torch.sparse.addmm` when called on sparse-dense CUDA tensors with a
+          sparse COO, CSR or CSC operand
+        * :func:`torch.mv` and :func:`torch.addmv` when called on a sparse CSR or CSC CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1855,6 +1859,10 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm`, :func:`torch.sparse.addmm`,
+          :func:`torch.mv` and :func:`torch.addmv` when called on sparse-dense CUDA tensors with a
+          sparse COO, CSR or CSC operand on ROCm, and :func:`torch.bmm` when called on sparse
+          CSR-dense CUDA tensors on ROCm
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
