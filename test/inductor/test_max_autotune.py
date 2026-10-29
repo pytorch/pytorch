@@ -3245,8 +3245,8 @@ class TestMaxAutotune(TestCase):
             # Not padded at lowering time
             catted_bf16 = catted_b_add.to(torch.bfloat16)
 
-            # bmm1 as output -> no padding occurs, however after fusion
-            # the buffer is padded, layout constraint violated
+            # bmm1 as output -> no padding occurs when the template is
+            # rendered, and the buffer must not be padded afterwards
             bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
             fused = catted_bf16 - d
             if epilogue:
@@ -3267,6 +3267,10 @@ class TestMaxAutotune(TestCase):
 
         with (
             fresh_cache(),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
             mock.patch.object(
                 AlgorithmSelectorCache,
                 "benchmark_choice",
@@ -3274,11 +3278,211 @@ class TestMaxAutotune(TestCase):
             ),
         ):
             compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
-            _, code = run_and_get_code(compiled, a, b1, b2, d)
+            out, code = run_and_get_code(compiled, a, b1, b2, d)
 
-            # Despite Triton being 10x faster in benchmarks, the layout conflict
-            # should force fallback to extern_kernels.bmm
-            FileCheck().check_not("triton_tem").run(code[0])
+            # The buffer is frozen to the layout the template was rendered
+            # with, so there is no layout conflict forcing a fallback to aten
+            FileCheck().check("triton_tem").run(code[0])
+            self.assertEqual(out, mm_with_cat(a, b1, b2, d))
+
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    @parametrize("output_bmm_first", (False, True))
+    def test_deferred_layout_constraint_consistent_across_consumers(
+        self, output_bmm_first
+    ):
+        # h's batch stride 45 * 112 = 5040 is padded to 5056 unless the FX node
+        # being lowered has dislike_padding set, which the graph-output bmm has.
+        # The first template consumer decides h's layout and the other consumer
+        # and the final freeze must agree with it.
+        batch, m, k, n = 16, 45, 112, 64
+        batch_stride = 5040 if output_bmm_first else 5056
+
+        def fn(x, w1, w2):
+            h = x * 2 + 1
+            outs = (torch.bmm(h, w1) + 1, torch.bmm(h, w2))
+            # The post-grad graph, and so lowering, follows the output order.
+            return outs[::-1] if output_bmm_first else outs
+
+        # Small integers keep the bmms exact under TF32, so results are bitwise.
+        x = torch.randint(-4, 4, (batch, m, k), device=GPU_TYPE).float()
+        w1 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+        w2 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), x, w1, w2)
+
+        # Both templates must be rendered against the strides h is frozen to.
+        FileCheck().check("buf0 = empty_strided").check_same(
+            f"(16, 45, 112), ({batch_stride}, 112, 1)"
+        ).run(code[0])
+        FileCheck().check_count(f"stride_aq = {batch_stride}", 2, exactly=True).run(
+            code[0]
+        )
+        self.assertEqual(out, fn(x, w1, w2), atol=0, rtol=0)
+
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+            "pipeline_max_autotune_gemm": False,
+        }
+    )
+    @parametrize("benchmark_template_fusion", (True, False))
+    def test_deferred_layout_constraint_extern_consumers_no_freeze(
+        self, benchmark_template_fusion
+    ):
+        # Rendering the template choices records a layout constraint for h, but
+        # when only extern kernels are selected h keeps its default padded layout.
+        batch, m, k, n = 16, 45, 112, 64
+
+        def fn(x, w1, w2):
+            h = x * 2 + 1
+            return torch.bmm(h, w2), torch.bmm(h, w1) + 1
+
+        x = torch.randint(-4, 4, (batch, m, k), device=GPU_TYPE).float()
+        w1 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+        w2 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+
+        with (
+            config.patch(benchmark_template_fusion=benchmark_template_fusion),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=0.1, triton_time=1.0),
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), x, w1, w2)
+
+        FileCheck().check("buf0 = empty_strided").check_same(
+            "(16, 45, 112), (5056, 112, 1)"
+        ).run(code[0])
+        FileCheck().check_not("triton_tem").run(code[0])
+        self.assertEqual(out, fn(x, w1, w2), atol=0, rtol=0)
+
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    def test_deferred_layout_constraint_conflict_falls_back_to_aten(self):
+        # The template records h's padded batch stride 5056, then a later
+        # consumer needing exact strides freezes h to the unpadded 5040, so the
+        # scheduler's layout conflict check must fall back to the extern bmm.
+        batch, m, k, n = 16, 45, 112, 64
+
+        @torch.library.custom_op(
+            "test_max_autotune::exact_strides_add_one",
+            mutates_args=(),
+            tags=(torch._C.Tag.needs_exact_strides,),
+        )
+        def exact_strides_add_one(t: torch.Tensor) -> torch.Tensor:
+            return t + 1
+
+        @exact_strides_add_one.register_fake
+        def _(t):
+            return torch.empty_like(t)
+
+        def fn(x, w):
+            h = x * 2 + 1
+            return torch.bmm(h, w) + 1, exact_strides_add_one(h)
+
+        x = torch.randint(-4, 4, (batch, m, k), device=GPU_TYPE).float()
+        w = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), x, w)
+
+        FileCheck().check("buf0 = empty_strided").check_same(
+            "(16, 45, 112), (5040, 112, 1)"
+        ).run(code[0])
+        FileCheck().check("extern_kernels.bmm").run(code[0])
+        FileCheck().check_not("triton_tem").run(code[0])
+        self.assertEqual(out, fn(x, w), atol=0, rtol=0)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("consumer", ("none", "custom_op", "reduction"))
+    def test_deferred_layout_constraint_persistent_tma_operand_order(self, consumer):
+        # z reads x transposed, so a fill-order freeze makes it column-major:
+        # in GraphLowering.finalize, or while lowering a later consumer (a custom
+        # op keeping z's eager strides, a split reduction deciding its input's
+        # layout). The persistent TMA template picked A_ROW_MAJOR from z's
+        # deferred row-major layout, so z must be frozen to that layout.
+        m, k, n = (4096, 2048, 64) if consumer == "reduction" else (256, 128, 64)
+
+        if consumer == "custom_op":
+
+            @torch.library.custom_op("test_max_autotune::col_sum", mutates_args=())
+            def col_sum(t: torch.Tensor) -> torch.Tensor:
+                return t.float().sum(0)
+
+            @col_sum.register_fake
+            def _(t):
+                return t.new_empty(t.shape[1], dtype=torch.float32)
+
+        def fn(bias, x, b):
+            z = (x.t() * 2).to(torch.bfloat16)
+            out = torch.addmm(bias, z, b)
+            if consumer == "custom_op":
+                return out, col_sum(z)
+            if consumer == "reduction":
+                return out, z.float().sum(0)
+            return out
+
+        x = torch.randint(-2, 3, (k, m), device=GPU_TYPE).float()
+        b = torch.randint(-2, 3, (k, n), device=GPU_TYPE).bfloat16()
+        bias = torch.randint(-2, 3, (n,), device=GPU_TYPE).bfloat16()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "benchmark_epilogue_fusion": False,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            out, code = run_and_get_code(torch.compile(fn), bias, x, b)
+
+        FileCheck().check("triton_tem").check("tl.make_tensor_descriptor").run(code[0])
+        self.assertEqual(out, fn(bias, x, b), atol=0, rtol=0)
 
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):
