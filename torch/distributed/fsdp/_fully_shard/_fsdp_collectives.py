@@ -236,6 +236,13 @@ class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
         )
 
 
+# These ops only call other ATen ops, so their impls register once to a
+# composite-explicit alias key instead of once per backend: that covers every
+# backend (Meta included) and, unlike CompositeImplicitAutograd, keeps the ops
+# from being decomposed when traced, so compile still sees them.
+# all_gather_copy_in fills its output by mutating views of it, so it uses the
+# NonFunctional variant, which leaves out functional backends (XLA, Lazy). Its
+# Meta impl, which skips the copy, takes precedence on meta tensors.
 @torch.library.impl(lib, "all_gather_copy_in", "Meta")
 def all_gather_copy_in_meta(
     all_gather_inputs: list[torch.Tensor],
@@ -250,13 +257,8 @@ def all_gather_copy_in_meta(
     return all_gather_input, all_gather_output
 
 
-@torch.library.impl(lib, "all_gather_copy_in", "CUDA")
-@torch.library.impl(lib, "all_gather_copy_in", "XPU")
-@torch.library.impl(lib, "all_gather_copy_in", "HPU")
-@torch.library.impl(lib, "all_gather_copy_in", "CPU")
-@torch.library.impl(lib, "all_gather_copy_in", "MTIA")
-@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
-def all_gather_copy_in_cuda(
+@torch.library.impl(lib, "all_gather_copy_in", "CompositeExplicitAutogradNonFunctional")
+def all_gather_copy_in_default(
     all_gather_inputs: list[torch.Tensor],
     all_gather_output: torch.Tensor,
     inp_split_sizes: list[int],
@@ -277,13 +279,7 @@ lib.define(
 )
 
 
-@torch.library.impl(lib, "split_with_sizes_copy", "Meta")
-@torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
-@torch.library.impl(lib, "split_with_sizes_copy", "XPU")
-@torch.library.impl(lib, "split_with_sizes_copy", "HPU")
-@torch.library.impl(lib, "split_with_sizes_copy", "CPU")
-@torch.library.impl(lib, "split_with_sizes_copy", "MTIA")
-@torch.library.impl(lib, "split_with_sizes_copy", "PrivateUse1")
+@torch.library.impl(lib, "split_with_sizes_copy", "CompositeExplicitAutograd")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
@@ -303,13 +299,7 @@ lib.define(
 )
 
 
-@torch.library.impl(lib, "chunk_cat", "Meta")
-@torch.library.impl(lib, "chunk_cat", "CUDA")
-@torch.library.impl(lib, "chunk_cat", "XPU")
-@torch.library.impl(lib, "chunk_cat", "HPU")
-@torch.library.impl(lib, "chunk_cat", "CPU")
-@torch.library.impl(lib, "chunk_cat", "MTIA")
-@torch.library.impl(lib, "chunk_cat", "PrivateUse1")
+@torch.library.impl(lib, "chunk_cat", "CompositeExplicitAutograd")
 def chunk_cat(
     tensors: list[torch.Tensor],
     dim: int,
