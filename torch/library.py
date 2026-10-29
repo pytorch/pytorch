@@ -439,7 +439,14 @@ class Library:
         self._op_impls.add(key)
 
     def impl(
-        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=True
+        self,
+        op_name,
+        fn,
+        dispatch_key="",
+        *,
+        with_keyset=False,
+        allow_override=True,
+        _skip_if_no_grad=False,
     ):
         r"""Registers the function implementation for an operator defined in the library.
 
@@ -510,6 +517,7 @@ class Library:
             dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd",
             fn,
             with_keyset,
+            _skip_if_no_grad,
         )
 
         _impls.add(key)
