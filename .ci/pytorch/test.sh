@@ -2625,6 +2625,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_s390_verify" ]]; then
   exec python .ci/pytorch/triton_pin_s390_verify.py
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_s390_native_wheel" ]]; then
+  exec python .ci/pytorch/triton_pin_s390_verify.py --native-wheel-only
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_mi350_boundary" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_boundary.py
 fi

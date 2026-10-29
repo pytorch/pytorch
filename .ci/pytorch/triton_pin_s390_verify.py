@@ -68,8 +68,38 @@ def original_test(label, dtype):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--local-repro', type=Path)
+    parser.add_argument('--native-wheel-only', action='store_true')
     args = parser.parse_args()
     native = platform.machine() == 's390x'
+    if args.native_wheel_only:
+        assert native and not torch.cuda.is_available()
+        assert args.local_repro is None
+        assert torch.version.git_version == 'aaa1b73d62015d15004355001092982aa1bf53bf'
+        REPORT.mkdir(parents=True, exist_ok=True)
+        os.chdir(ROOT / 'test')
+        sys.path.insert(0, str(ROOT / 'test'))
+        result32 = original_test('full-native-wheel-original-float32', 'float32')
+        assert result32 == 0, result32
+        torch.manual_seed(1234)
+        double_input = torch.randn(1, 1, 3, 4, dtype=torch.float64, requires_grad=True)
+        double_grid = (torch.rand(1, 2, 2, 2, dtype=torch.float64) * 1.6 - 0.8).requires_grad_()
+        double_gradcheck = torch.autograd.gradcheck(
+            lambda a, b: torch.nn.functional.grid_sample(
+                a, b, mode='bicubic', padding_mode='zeros', align_corners=False),
+            (double_input, double_grid))
+        assert double_gradcheck
+        result = {
+            'mode': 'full-native-wheel', 'machine': platform.machine(),
+            'torch_sha': torch.version.git_version,
+            'source_sha256': hashlib.sha256(
+                (ROOT / 'aten/src/ATen/native/cpu/GridSamplerKernel.cpp').read_bytes()
+            ).hexdigest(),
+            'original_float32_exit': result32, 'float64_gradcheck': double_gradcheck,
+            'configuration': torch.__config__.show(),
+        }
+        (REPORT / 'full-native-wheel-results.json').write_text(json.dumps(result, indent=2))
+        print('FULL_NATIVE_S390_WHEEL_VERIFICATION', json.dumps(result), flush=True)
+        return
     assert torch.version.git_version == '914c15e40b4d5818fb0e85fe7b94d77b5f00c332'
     if native:
         assert not torch.cuda.is_available() and args.local_repro is None

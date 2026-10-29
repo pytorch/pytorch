@@ -18,6 +18,14 @@ on:
       verify-fix:
         type: boolean
         default: false
+      native-wheel-only:
+        type: boolean
+        default: false
+        description: Verify the original case directly on the current full native wheel.
+      artifact-run-id:
+        type: string
+        default: '40852471198'
+        description: Reuse a completed native s390x PyTorch build.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
@@ -89,11 +97,11 @@ jobs:
     with:
       build-environment: linux-s390x-binary-manywheel
       docker-image: pytorch/manylinuxs390x-builder:cpu-s390x
-      artifact-run-id: '40852471198'
+      artifact-run-id: ${{ github.event.inputs.artifact-run-id }}
       use-gha: 'yes'
       timeout-minutes: 90
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.verify-fix == 'true' && 'triton_pin_s390_verify' || 'triton_pin_s390_controls' }}", shard: 1, num_shards: 1, runner: "linux.s390x" },
+          { config: "${{ github.event.inputs.native-wheel-only == 'true' && 'triton_pin_s390_native_wheel' || github.event.inputs.verify-fix == 'true' && 'triton_pin_s390_verify' || 'triton_pin_s390_controls' }}", shard: 1, num_shards: 1, runner: "linux.s390x" },
         ]}
     secrets: inherit
