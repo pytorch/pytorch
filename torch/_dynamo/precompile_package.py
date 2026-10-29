@@ -93,9 +93,11 @@ def _frozen_kernel_config() -> dict[str, object]:
 
     A frozen DynamoTracer artifact replays each kernel with one recorded
     config, so every kernel is tuned before replay and no multi-kernel picks
-    its sub-kernel at first launch. A MakeFxTracer module is inlined into
-    the artifact, which never defines its multi-kernels (NameError on the
-    first call). Warns once for each user value overridden.
+    its sub-kernel at first launch. Under autotune_at_compile_time the
+    Python wrapper emits multi-kernel defs only into the compile-time
+    autotune block (_write_multi_kernel_defs), so a MakeFxTracer module calls
+    an undefined multi_kernel_N (NameError on the first call). Warns once for
+    each user value overridden.
     """
     import torch._inductor.config as inductor_config
 
