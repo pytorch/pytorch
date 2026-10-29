@@ -9482,7 +9482,8 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
 
     @skipIfCrossRef
-    def test_load_imports_the_module_registering_a_library_op_kernel(self):
+    @parametrize("shared", (False, True))
+    def test_load_imports_the_module_registering_a_library_op_kernel(self, shared):
         tag = uuid.uuid4().hex
         defmod, implmod = f"precompile_def_{tag}", f"precompile_impl_{tag}"
         ns = f"precompile_kernel_test_{tag}"
@@ -9491,6 +9492,11 @@ class TestPrecompileCustomOpModules(TestCase):
             defmod: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("triple(Tensor x) -> Tensor")\n',
             implmod: f'import torch, {defmod}\nlib = torch.library.Library("{ns}", "IMPL")\nlib.impl("triple", lambda x: x * 3, "CPU")\n',
         }
+        if shared:
+            # The kernel is attributed to defmod, which built the Library, so the
+            # artifact does not import implmod and only the load check catches it.
+            impl = 'lib.impl("triple", lambda x: x * 3, "CPU")'
+            sources[implmod] = f"import {defmod}\n{defmod}.{impl}\n"
         for name, source in sources.items():
             with open(os.path.join(directory, name + ".py"), "w") as f:
                 f.write(source)
@@ -9519,8 +9525,8 @@ class TestPrecompileCustomOpModules(TestCase):
             """
         )
         paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
-        for phase in ("capture", "load", "broken"):
-            if phase == "broken":
+        for phase in ("capture", "broken") if shared else ("capture", "load", "broken"):
+            if phase == "broken" and not shared:
                 # The schema is still registered by defmod, but not the CPU kernel.
                 with open(os.path.join(directory, implmod + ".py"), "w") as f:
                     f.write("raise ImportError('no kernels here')\n")
@@ -9531,7 +9537,7 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"['{ns}::triple (CPU kernel)']", out.stdout)
         with open(paths[0]) as f:
             source = f.read()
-        modules = tuple(sorted((defmod, implmod)))
+        modules = (defmod,) if shared else tuple(sorted((defmod, implmod)))
         self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", source)
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
