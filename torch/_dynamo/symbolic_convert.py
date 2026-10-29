@@ -1821,7 +1821,7 @@ class InstructionTranslatorBase(
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)
+            fn = LocalGeneratorFunctionVariable.create(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
@@ -3738,7 +3738,7 @@ class InstructionTranslatorBase(
 
         wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
         wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
-        self.stack[callable_idx] = SkipFunctionVariable(
+        self.stack[callable_idx] = VariableBuilder.create_internal_skip_function(
             wrapper, source=GlobalSource(wrapper_name)
         )
 
@@ -4242,7 +4242,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(
+        fn = NestedUserFunctionVariable(  # noqa: RVT001
             fn_name,
             code,
             self.f_globals,
@@ -4820,7 +4820,7 @@ class InstructionTranslatorBase(
                 "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
             )
 
-        self.push(WithExitFunctionVariable(ctx, inst.target))
+        self.push(WithExitFunctionVariable.create(ctx, inst.target))
         self.push(self.enter_ctx(ctx, inst))
 
     def append_prefix_inst(self, inst: Instruction) -> None:
@@ -5091,11 +5091,11 @@ class InstructionTranslatorBase(
                     "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
                 )
             if attr == "__enter__":
-                self.push(WithEnterFunctionVariable(ctx))
+                self.push(WithEnterFunctionVariable(ctx))  # noqa: RVT001
                 self.PUSH_NULL(inst)
             else:
                 # WithExitFunctionVariable doesn't really do anything with target for 3.11+
-                self.push(WithExitFunctionVariable(ctx, None))
+                self.push(WithExitFunctionVariable.create(ctx, None))
                 self.PUSH_NULL(inst)
         else:
             # Implementation is similar to LOAD_METHOD for 3.13+
