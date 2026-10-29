@@ -2887,7 +2887,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
-        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+        if i is not None and i.meta["val"].dtype in [torch.bool, torch.uint8]:
             any_byte_bool_indices = True
 
     val = args_[2].meta["val"]
