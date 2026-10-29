@@ -10237,6 +10237,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         modules = ("torch.distributed._ops.device_mesh",)
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
 
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_unrecorded_op_warns_once_and_imports_the_frame_modules(self):
         op, qualname = self._op("in_main")
         op._init_fn.__module__ = "__main__"
