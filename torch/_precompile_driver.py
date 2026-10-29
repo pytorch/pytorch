@@ -57,6 +57,8 @@ if TYPE_CHECKING:
     SERVED_MODULES: tuple[str, ...] = ()
 
     # Section 0 of a multi-graph artifact that calls custom ops.
+    CUSTOM_OP_MODULES: tuple[str, ...] = ()
+
     def _import_custom_op_modules() -> None: ...
 
     NUM_POSITIONAL_ARGS: int = 0
@@ -451,11 +453,7 @@ def _build_multigraph_forward():
     # The documented contract (Note [precompile programming model]) is that the
     # version/build locks surface as a clean PrecompileError, so an
     # ``except torch.compiler.precompile.PrecompileError`` handler catches them.
-    from torch._precompile import (
-        _opens_scope,
-        _unimportable_module,
-        PrecompileError as _PrecompileError,
-    )
+    from torch._precompile import PrecompileError as _PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
         # SerializedCode.to_code_object feeds the recorded co_* fields to
@@ -479,8 +477,9 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
-    # After the version checks: a torch without it fails them cleanly first.
+    # After the version checks: a torch without them fails those cleanly first.
     from torch._dynamo.eval_frame import _warn_eager_fallback_miss
+    from torch._precompile import _opens_scope, _unimportable_module
 
     def _import(module_name):
         if module_name == "__main__":
@@ -508,6 +507,10 @@ def _build_multigraph_forward():
     if "_import_custom_op_modules" in globals():
         # Refused first, or the op check reports such a module's ops missing.
         if (_module_name := _unimportable_module(SERVED_MODULES)) is not None:
+            _import(_module_name)
+        # Section 0 also lists them in case they register its ops; their failure
+        # fails the load, so it is not warned about as a custom op module's.
+        for _module_name in set(SERVED_MODULES).intersection(CUSTOM_OP_MODULES):
             _import(_module_name)
         _import_custom_op_modules()
     frames = pickle.loads(base64.b64decode(_FRAMES))
@@ -781,10 +784,7 @@ def _build_installed_forward():
         OptimizeContext,
     )
     from torch._dynamo.package import _lookup_code, CompilePackage
-    from torch._precompile import (
-        _unimportable_module,
-        PrecompileError as _PrecompileError,
-    )
+    from torch._precompile import PrecompileError as _PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
         raise _PrecompileError(
@@ -800,11 +800,15 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    # After the version checks: a torch without it fails those cleanly first.
+    from torch._precompile import _unimportable_module
+
     if "__main__" in SERVED_MODULES:
         raise _PrecompileError(
-            "precompile: this artifact was captured from a function defined in the "
-            "capturing script's __main__ module, which no other process can import. "
-            "Regenerate the artifact from a function defined in an importable module."
+            "precompile: this installed artifact serves frames of module "
+            "'__main__', the capturing script's __main__ module, which no other "
+            "process can import. Regenerate the artifact from functions and "
+            "modules defined in an importable module."
         )
     if "_import_custom_op_modules" in globals():
         # Refused first, or the op check reports such a module's ops missing.
@@ -813,6 +817,16 @@ def _build_installed_forward():
                 f"precompile: this installed artifact serves frames of module "
                 f"{_module_name!r}, which is not importable here."
             )
+        # Section 0 also lists them in case they register its ops; their failure
+        # fails the load, so it is not warned about as a custom op module's.
+        for _module_name in set(SERVED_MODULES).intersection(CUSTOM_OP_MODULES):
+            try:
+                importlib.import_module(_module_name)
+            except ImportError as _e:
+                raise _PrecompileError(
+                    f"precompile: this installed artifact serves frames of module "
+                    f"{_module_name!r}, which is not importable here ({_e})."
+                ) from _e
         _import_custom_op_modules()
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
