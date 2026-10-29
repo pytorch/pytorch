@@ -57,7 +57,9 @@ def _reference(input, dim: int, square, swizzled):
         raise ValueError(f"unsupported quantization dim: {dim}")
     dim %= 2
     if dim == 0:
-        qdata, scales = _reference_dim_k(input.t().contiguous(), False, True)
+        if square or not swizzled:
+            raise ValueError("dim-m benchmark reference requires swizzled 1x32 scales")
+        qdata, scales = _reference_dim_k(input.t().contiguous(), square, swizzled)
         return qdata.t(), scales.t()
     return _reference_dim_k(input, square, swizzled)
 
