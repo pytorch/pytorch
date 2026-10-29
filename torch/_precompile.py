@@ -2136,16 +2136,21 @@ def _library_op_module(
 
 
 def _kernel_modules(
-    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+    op_name: str,
+    overload: str,
+    keys: tuple[str, ...],
+    file_modules: Callable[[], dict[str, str]],
 ) -> set[str]:
     """The modules outside torch that constructed a ``torch.library.Library``
-    registering a kernel of ``op_name``, often not the module defining the op. A
-    kernel registered through another module's Library records that module, not
-    the one calling ``impl``."""
+    registering the active kernel of ``op_name`` for one of ``keys``, often not the
+    module defining the op. A kernel registered through another module's Library
+    records that module, not the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
     dump = torch._C._dispatch_dump(qualname)
-    paths = re.findall(r"^[^:\n]+: registered at (.+\.py):\d+ ::", dump, re.MULTILINE)
-    modules = {file_modules().get(os.path.realpath(path)) for path in paths}
+    # An overridden kernel's line reads "CPU (inactive): registered at ...".
+    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+\.py):\d+ ::"
+    found = re.findall(pattern, dump, re.MULTILINE)
+    modules = {file_modules().get(os.path.realpath(p)) for k, p in found if k in keys}
     return {m for m in modules if m and m.partition(".")[0] != "torch"}
 
 
@@ -2180,7 +2185,8 @@ def _op_registration(
 class _CustomOpModules(NamedTuple):
     """What registers a capture's custom ops, from ``_custom_op_modules``."""
 
-    # The modules registering the ops.
+    # The modules registering the ops, in the order their imports finished, so that
+    # importing them again registers any overriding kernel last.
     modules: tuple[str, ...]
     # The custom ops no importable module is known to register.
     unrecorded: tuple[tuple[str, str], ...]
@@ -2188,9 +2194,11 @@ class _CustomOpModules(NamedTuple):
     lazy: dict[str, tuple[str, ...]]
 
 
-def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> _CustomOpModules:
-    """What registers the ops among ``op_names``; pass it to
-    ``_warn_unregistered_ops``."""
+def _custom_op_modules(
+    op_names: Iterable[tuple[str, str]], keys: tuple[str, ...]
+) -> _CustomOpModules:
+    """What registers the ops among ``op_names`` and their active kernels for
+    ``keys``; pass it to ``_warn_unregistered_ops``."""
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
     lazy: dict[str, set[str]] = {}
@@ -2200,13 +2208,14 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> _CustomOpModules:
         if kind == "lazy":
             lazy.setdefault(value, set()).add(op_name)
             continue
-        modules |= _kernel_modules(op_name, overload, file_modules)
+        modules |= _kernel_modules(op_name, overload, keys, file_modules)
         if kind == "module":
             modules.add(value)
         elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
     lazy_ops = {setup: tuple(sorted(ops)) for setup, ops in sorted(lazy.items())}
-    return _CustomOpModules(tuple(sorted(modules)), tuple(sorted(unrecorded)), lazy_ops)
+    ordered = tuple(m for m in sys.modules if m in modules)
+    return _CustomOpModules(ordered, tuple(sorted(unrecorded)), lazy_ops)
 
 
 def _warn_unregistered_ops(
@@ -2236,7 +2245,8 @@ def _warn_unregistered_ops(
     log.warning(
         "torch.compiler.precompile: the captured graphs call %s, which no "
         "importable module is known to register: defined in __main__, defined "
-        "with torch.library.define, or a C++ op without set_python_module. %s "
+        "with torch.library.define or torch._custom_ops.custom_op, or a C++ op "
+        "without set_python_module. %s "
         "Define a Python op with torch.library.custom_op in an importable module, "
         "and give a C++ op m.set_python_module; for a library's ops, import that "
         "library before loading the artifact.",
@@ -2270,14 +2280,19 @@ def _graph_kernel_keys(gm: torch.fx.GraphModule | None) -> tuple[str, ...]:
     keys and the backends of the devices its tensors are on."""
     if gm is None:
         return _KERNEL_KEYS
-    backends = {
-        torch._C._dispatch_key_for_device(leaf.device.type)
+    return _device_kernel_keys(
+        leaf.device.type
         for module in gm.modules()
         if isinstance(graph := getattr(module, "graph", None), torch.fx.Graph)
         for node in graph.nodes
         for leaf in pytree.tree_leaves(node.meta.get("val"))
         if isinstance(leaf, torch.Tensor)
-    }
+    )
+
+
+def _device_kernel_keys(device_types: Iterable[str]) -> tuple[str, ...]:
+    """The composite ``_KERNEL_KEYS`` and the backend keys of ``device_types``."""
+    backends = {torch._C._dispatch_key_for_device(t) for t in device_types}
     return tuple(k for k in _KERNEL_KEYS if k in backends or k.startswith("Composite"))
 
 
@@ -2333,7 +2348,7 @@ def _build_python_source(
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(compiled._gm)
-        found = _custom_op_modules(ops)
+        found = _custom_op_modules(ops, keys)
         _warn_unregistered_ops(found)
         _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
@@ -2392,7 +2407,7 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(gm)
-        found = _custom_op_modules(ops)
+        found = _custom_op_modules(ops, keys)
         _warn_unregistered_ops(found)
         _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
@@ -2735,6 +2750,7 @@ def _build_multigraph_python_source(
     unreachable: list[str],
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
+    custom_op_keys: tuple[str, ...],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2753,7 +2769,9 @@ def _build_multigraph_python_source(
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
     # The driver imports them after its version checks.
-    _write_custom_op_imports(buf, custom_op_modules, custom_ops, call=False)
+    _write_custom_op_imports(
+        buf, custom_op_modules, custom_ops, custom_op_keys, call=False
+    )
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
@@ -2889,6 +2907,7 @@ def _build_multigraph_artifact(
     entry_fn: object,
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
+    custom_op_keys: tuple[str, ...],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2918,6 +2937,7 @@ def _build_multigraph_artifact(
         unreachable,
         custom_op_modules,
         custom_ops,
+        custom_op_keys,
     )
     inductor_bundle = None
     if backend != "eager":
