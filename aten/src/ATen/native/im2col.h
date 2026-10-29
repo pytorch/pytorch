@@ -112,18 +112,18 @@ static void col2im_slice(
   if (exact_tiling) {
     if constexpr (!std::is_same_v<T, c10::Half>) {
       if (kernel_h == 1 && kernel_w == 1) {
-        for (int64_t i = 0; i < channels * height * width; ++i) {
+        for (const auto i : c10::irange(channels * height * width)) {
           data_im[i] = T(0) + data_col[i];
         }
         return;
       }
       if (kernel_h == 2 && kernel_w == 2) {
         const int64_t col_size = output_height * output_width;
-        for (int64_t c = 0; c < channels; ++c) {
-          for (int64_t h = 0; h < output_height; ++h) {
+        for (const auto c : c10::irange(channels)) {
+          for (const auto h : c10::irange(output_height)) {
             const T* src = data_col + c * 4 * col_size + h * output_width;
             T* dst = data_im + c * height * width + h * 2 * width;
-            for (int64_t w = 0; w < output_width; ++w) {
+            for (const auto w : c10::irange(output_width)) {
               // Keep the addition to zero for signed-zero behavior.
               dst[2 * w] = T(0) + src[w];
               dst[2 * w + 1] = T(0) + src[col_size + w];
@@ -135,15 +135,15 @@ static void col2im_slice(
         return;
       }
     }
-    for (int64_t c_col = 0; c_col < channels * kernel_h * kernel_w; ++c_col) {
+    for (const auto c_col : c10::irange(channels * kernel_h * kernel_w)) {
       const int64_t w_offset = c_col % kernel_w;
       const int64_t h_offset = (c_col / kernel_w) % kernel_h;
       const int64_t c_im = c_col / kernel_h / kernel_w;
-      for (int64_t h_col = 0; h_col < output_height; ++h_col) {
+      for (const auto h_col : c10::irange(output_height)) {
         T* dst = data_im +
             (c_im * height + h_col * kernel_h + h_offset) * width + w_offset;
         const T* src = data_col + (c_col * output_height + h_col) * output_width;
-        for (int64_t w_col = 0; w_col < output_width; ++w_col) {
+        for (const auto w_col : c10::irange(output_width)) {
           dst[w_col * kernel_w] = T(0) + src[w_col];
         }
       }
@@ -157,7 +157,7 @@ static void col2im_slice(
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
 
-  for (int64_t c_col = 0; c_col < channels_col; ++c_col) {
+  for (const auto c_col : c10::irange(channels_col)) {
     int64_t w_offset = c_col % kernel_w;
     int64_t h_offset = (c_col / kernel_w) % kernel_h;
     int64_t c_im = c_col / kernel_h / kernel_w;
@@ -177,13 +177,13 @@ static void col2im_slice(
     }
     const int64_t count = std::min(
         width_col - first_col, (width - 1 - start_w) / stride_w + 1);
-    for (int64_t h_col = 0; h_col < height_col; ++h_col) {
+    for (const auto h_col : c10::irange(height_col)) {
       int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       if (h_im >= 0 && h_im < height) {
         T* dst = data_im + (c_im * height + h_im) * width + start_w;
         const T* src = data_col +
             (c_col * height_col + h_col) * width_col + first_col;
-        for (int64_t w = 0; w < count; ++w) {
+        for (const auto w : c10::irange(count)) {
           dst[w * stride_w] += src[w];
         }
       }
