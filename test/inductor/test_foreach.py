@@ -420,7 +420,8 @@ class ForeachTests(TestCase):
 
     @requires_gpu
     @inplace_bin_ops
-    def test_inplace_fallback(self, op):
+    @parametrize("is_list", [False, True])
+    def test_inplace_fallback(self, op, is_list):
         def fn1(a, b):
             op(a, b)
             op(a, b)
@@ -434,7 +435,7 @@ class ForeachTests(TestCase):
         fn2_opt = torch.compile(fn2, backend="inductor", fullgraph=True)
 
         a = [torch.tensor([1 + 2j, 3 + 4j], device=GPU_TYPE, dtype=torch.complex64)]
-        b = 1j
+        b = [t * 1j for t in a] if is_list else 1j
 
         a1 = [t.clone() for t in a]
         a1_expected = [t.clone() for t in a]
@@ -449,6 +450,28 @@ class ForeachTests(TestCase):
         actual2 = fn2_opt(a2, b)
         expected2 = fn2(a2_expected, b)
         self.assertEqual(actual2, expected2)
+
+    @requires_gpu
+    @parametrize("op_name", ["copy", "addcmul", "addcdiv"])
+    def test_inplace_fallback_other_ops(self, op_name):
+        def fn(a, b, c):
+            if op_name == "copy":
+                torch._foreach_copy_(a, b)
+            else:
+                getattr(torch, f"_foreach_{op_name}_")(a, b, c, value=2)
+            return [x * 2 for x in a]
+
+        def make():
+            return [
+                torch.randn(3, device=GPU_TYPE, dtype=torch.complex64) for _ in range(2)
+            ]
+
+        a, b, c = make(), make(), make()
+        a_expected = [t.clone() for t in a]
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(a, b, c)
+        expected = fn(a_expected, b, c)
+        self.assertEqual(actual, expected)
 
     @requires_gpu
     def test_sgd_foreach_fallback(self):
