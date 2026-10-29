@@ -2653,6 +2653,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_mi350_verify" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_controls.py --verify-fix
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_conv_controls" ]]; then
+  exec python .ci/pytorch/triton_pin_conv_controls.py
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_sub_expectations" ]]; then
   exec python .ci/pytorch/triton_pin_sub_expectations.py
 fi
