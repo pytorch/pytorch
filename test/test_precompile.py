@@ -10248,13 +10248,17 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
         self.addCleanup(sys.modules.pop, name, None)
         artifact = os.path.join(directory, "artifact.py")
-        with capture(
-            importlib.import_module(name).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
-            tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
+
+        def dynamo_capture(name):
+            return capture(
+                importlib.import_module(name).fn,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            )
+
+        with dynamo_capture(name) as cap:
             cap(torch.randn(2))
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
@@ -10268,23 +10272,11 @@ class TestPrecompileCustomOpRecording(TestCase):
         with open(os.path.join(directory, name + ".py"), "w") as f:
             f.write(f"import torch\ndef fn(*a): return torch.ops.{ns}.nofake(*a)\n")
         self.addCleanup(sys.modules.pop, name, None)
-        with capture(
-            importlib.import_module(name).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
-            tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
+        with dynamo_capture(name) as cap:
             cap(torch.randn(2))
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::nofake': ('CPU',)}}", f.read())
-        with capture(
-            importlib.import_module(name).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
-            tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
+        with dynamo_capture(name) as cap:
             cap(torch.randn(2))
             # As a frame whose graphs name no device: its tensors come from elsewhere.
             package = cap._session._package
@@ -10294,13 +10286,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         expected = {f"{ns}::nofake": ("CPU", "CUDA")}
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
-        with capture(
-            importlib.import_module(name).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
-            tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
+        with dynamo_capture(name) as cap:
             with torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True):
                 cap(torch.randn(2))
             # As CUDA frames around a non-compliant op called on CPU tensors via *a.
@@ -10317,13 +10303,7 @@ class TestPrecompileCustomOpRecording(TestCase):
                 f"import torch\ndef fn(x, c):\n    return torch.ops.{ns}.op(x), c.nonzero()\n"
             )
         self.addCleanup(sys.modules.pop, name, None)
-        with capture(
-            importlib.import_module(name).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
-            tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
+        with dynamo_capture(name) as cap:
             cap(torch.randn(2), torch.randn(2))
             package = cap._session._package
             self.assertIn(("aten::nonzero", ""), package.graph_break_op_names)
