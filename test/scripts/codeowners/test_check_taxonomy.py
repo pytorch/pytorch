@@ -10,7 +10,11 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/codeowners"))
@@ -69,6 +73,8 @@ LINT_HEADER = """\
 
 
 class TestFindOwnershipErrors(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid_owner_lines(self):
         codeowners = """\
 # Grouped review-surface definitions:
@@ -233,6 +239,8 @@ class TestFindOwnershipErrors(TestCase):
 
 
 class TestLintWiring(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_ownership_errors_fail_the_lint(self):
         codeowners = LINT_HEADER + "# label: module: ci\n/CODEOWNERS @alice\n#\n"
         returncode, stdout = run_lint(codeowners)
