@@ -60,6 +60,7 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    get_type_mro_no_user_code,
     istype,
     odict_items,
     odict_keys,
@@ -89,6 +90,7 @@ from .object_protocol import (
     generic_richcompare_bool,
     generic_setitem,
     generic_str,
+    mro_attr_source,
     mro_lookup,
     pysequence_contains,
     repr_guard,
@@ -434,11 +436,13 @@ class ConstDictVariable(VariableTracker):
                 if (
                     not self.should_reconstruct_all
                     and isinstance(key_var, ConstantVariable)
+                    and isinstance(key_var.source, ConstDictKeySource)
+                    and key_var.source.base == self.source
                     and not _contains_nan(key_var.as_python_constant())
                 ):
                     key_var = key_var.clone(source=None)
-                # Literal-key updates preserve the input's order. Rebuilding the
-                # dictionary or loading keys by storage position depends on it.
+                # Updating an existing literal key retains its identity and order.
+                # External keys and full reconstruction still need their sources.
                 if isinstance(
                     self.mutation_type,
                     (ValueMutationExisting, AttributeMutationExisting),
@@ -531,11 +535,8 @@ class ConstDictVariable(VariableTracker):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        # `ordered` selects linked order for OrderedDict, storage order otherwise;
-        # plain dicts have only storage order. Ordinary mappings always guard keys.
-        # `guard_keys` also specializes hook IDs when keys affect the trace, such as
-        # key iteration or copying. Hook values/items may guard only relative order
-        # until their sourced keys are observed, allowing equivalent modules to share.
+        # Subclasses use `ordered` for linked order and `guard_keys` for hook IDs;
+        # ordinary dictionaries always guard their keys in storage order.
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -892,15 +893,39 @@ class ConstDictVariable(VariableTracker):
         # Mirrors dict_merge(..., override=1): storage when tp_iter is dict_iter,
         # otherwise PyMapping_Keys followed by subscription. The string-only
         # shortcut also avoids tracing OrderedDict's per-key Python operations.
-        if isinstance(other, ConstDictVariable) and (
-            other.python_type().__iter__ is dict.__iter__ or self._can_fast_merge(other)
-        ):
-            other.install_dict_order_guard(tx, guard_keys=True)
-            self.items.update(other.items)
-        else:
-            keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
-            for key in unpack_iterable(tx, keys):
-                self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
+        if isinstance(other, ConstDictVariable):
+            side_effects = tx.output.side_effects
+            if any(
+                cls in side_effects
+                and side_effects.has_pending_mutation_of_attr(
+                    side_effects[cls], "__iter__"
+                )
+                for cls in get_type_mro_no_user_code(other.python_type())
+            ):
+                unimplemented(
+                    gb_type="Dictionary merge after iteration slot mutation",
+                    context=f"dict_merge: {other}",
+                    explanation="Dynamo cannot merge a dictionary after changing its type's __iter__.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if (
+                isinstance(other, variables.UserDefinedObjectVariable)
+                and other.cls_source
+            ):
+                source = mro_attr_source(
+                    tx, other.python_type(), other.cls_source, "__iter__"
+                )
+                if source is not None:
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            if mro_lookup(
+                other.python_type(), "__iter__"
+            ) is dict.__iter__ or self._can_fast_merge(other):
+                other.install_dict_order_guard(tx, guard_keys=True)
+                self.items.update(other.items)
+                return
+        keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
+        for key in unpack_iterable(tx, keys):
+            self.items[HashableTracker(key)] = generic_getitem(tx, other, key)
 
     def dict_setdefault(
         self,
@@ -1500,18 +1525,11 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        ConstDictVariable.install_dict_order_guard(self, tx, ordered=ordered)
         if guard_keys:
             ConstDictVariable.install_dict_keys_match_guard(self)
-        if (
-            self.source
-            and not is_constant_source(self.source)
-            and ordered
-            and len(self.original_items) > 1
-        ):
-            # Hook values use storage-position sources; their order matters, but
-            # equivalent modules have different hook IDs unless keys are observed.
-            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+        super().install_dict_order_guard(
+            tx, ordered=ordered and self._cpython_type is collections.OrderedDict
+        )
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
