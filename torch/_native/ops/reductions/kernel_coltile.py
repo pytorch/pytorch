@@ -69,10 +69,15 @@ def select_col_config(
     """
     explicit = any(v is not None for v in (threads_per_block, npar, vec))
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
+    # Partials are indexed in Int32 up to outputs * npar.
+    outputs = batches * columns
+    max_npar = _INT32_LIMIT // max(1, outputs)
+    if npar is not None and npar > max_npar:
+        raise ValueError(f"npar={npar} overflows Int32 partials for {outputs} outputs")
     cfg = ColConfig(
         "explicit" if explicit else "default",
         threads if threads_per_block is None else threads_per_block,
-        _split_p(rows) if npar is None else npar,
+        min(_split_p(rows), max_npar) if npar is None else npar,
         min(tile.vec_size(columns, itemsize), _VEC_MAX) if vec is None else vec,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
@@ -707,6 +712,8 @@ def _reduce_col_tile(
             raise AssertionError(f"want B * R < 2^31, got B={B}, R={R}")
         rows = x.reshape(B * R, C)
         out_shape = (B, C)
+    if B * C >= _INT32_LIMIT:
+        raise AssertionError(f"want B * C < 2^31 outputs, got B={B}, C={C}")
     align = _L.supported_alignment(rows, tile.align_bytes(C, x.element_size()))
     cfg = select_col_config(
         R,
@@ -722,12 +729,7 @@ def _reduce_col_tile(
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts)
         if ordered is not None:
             return ordered
-    # Partials are indexed in Int32 up to B * C * npar.
-    max_npar = _INT32_LIMIT // max(1, B * C)
-    if npar is not None and npar > max_npar:
-        raise ValueError(f"npar={npar} overflows Int32 partials for {B * C} outputs")
-    threads_per_block, vec = cfg.threads_per_block, cfg.vec
-    npar = min(cfg.npar, max_npar)
+    threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, cfg.vec
     if vec <= 0:
         raise ValueError(f"vec must be positive, got {vec}")
     if C % vec:
