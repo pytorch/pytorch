@@ -1124,11 +1124,9 @@ def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None
     if devices_known:
         try:
             # isinstance(TensorVariable) would realize a lazy item.
-            tensors = [v for v in vts if not isinstance(v, LazyVariableTracker)]
+            vs = [v for v in vts if not isinstance(v, LazyVariableTracker)]
             known = {
-                v.device.type
-                for v in tensors
-                if isinstance(v, TensorVariable) and v.device
+                t.device.type for t in vs if isinstance(t, TensorVariable) and t.device
             }
             devices = _tensor_device_types(leaves) | (known - {"meta"})
         except Exception:
