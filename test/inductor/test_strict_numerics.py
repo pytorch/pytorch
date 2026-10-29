@@ -1456,9 +1456,7 @@ class PointwiseStrictNumericsTest(TestCase):
             # on SM89, matching eager's NaN canonicalization.
             if not getattr(triton.knobs.nvidia, "use_slp_vectorizer", True):
                 xfail = xfail - {("abs", "bfloat16")}
-        self._assert_ledger(
-            mismatches, op, dtype, "forward", xfail, "POINTWISE_XFAIL"
-        )
+        self._assert_ledger(mismatches, op, dtype, "forward", xfail, "POINTWISE_XFAIL")
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
