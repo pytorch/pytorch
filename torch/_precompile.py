@@ -1938,9 +1938,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
 
 def _overload_names(op: object) -> set[tuple[str, str]]:
     """The ``(ns::op, overload)`` names of ``op`` if it is an operator: its own,
-    or every overload's for an ``OpOverloadPacket``."""
+    or every overload's for an ``OpOverloadPacket`` but its TorchScript-only ones."""
     if isinstance(op, torch._ops.OpOverloadPacket):
         ops = [getattr(op, name) for name in op.overloads()]
+        ops = [o for o in ops if torch._C._dispatch_has_kernel(o._name)]
     else:
         ops = [op]
     return {
@@ -2701,7 +2702,9 @@ def _build_multigraph_python_source(
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
-    buf.writeline("# The modules of the frames it serves, which the driver imports.")
+    buf.writeline(
+        "# The modules of its frames, imported by section 0 or the standalone driver."
+    )
     buf.writeline(f"SERVED_MODULES = {tuple(sorted(_served_modules(frames)))!r}")
     buf.writeline("")
     buf.writeline(
@@ -3973,7 +3976,7 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
-    Before anything else runs, the artifact imports the modules in its
+    Before its graphs load, the artifact imports the modules in its
     ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
     and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
     for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
@@ -3982,8 +3985,9 @@ def load(
     graph ran at capture overrode another kernel for the same dispatch key, must
     import, and that kernel must still be the active one, registered from the same
     module's file: otherwise the replaced kernel would run in its place. Any other
-    module only warns when it fails to import and the ops and kernels are
-    registered anyway, e.g. by a module the server imported under another name.
+    module not in ``SERVED_MODULES`` only warns when it fails to import and the ops
+    and kernels are registered anyway, e.g. by a module the server imported under
+    another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
