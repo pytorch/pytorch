@@ -162,16 +162,12 @@ def _quantize_mxfp8_tma(
     return _blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled)
 
 
-def _quantize_mxfp8_tma_dual(
-    input: torch.Tensor,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-):
+def _quantize_mxfp8_tma_dual(input: torch.Tensor):
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
         _blockscaled_tma_impl_dual,
     )
 
-    return _blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled)
+    return _blockscaled_tma_impl_dual(input)
 
 
 _NVIDIA_SM100_OR_LATER = torch.version.rocm is None and bool(SM100OrLater)
@@ -319,9 +315,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         M, K = shape[-2:]
         m_blocks, k_blocks = (M + 127) // 128, (K + 127) // 128
         scale_bytes = m_blocks * k_blocks * 512
@@ -469,9 +463,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
         )
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
         self.assertEqual(scales_k, scales_k_ref)
@@ -539,24 +531,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(scales, scales_ref)
         self.assertEqual(qdata.stride(dim[-1]), 1)
         self.assertEqual(scales.stride(dim[-1]), 1)
-
-    @parametrize(
-        "is_square_scaling,is_scale_swizzled,error",
-        (
-            subtest((False, False, "compact scales require"), name="compact"),
-            subtest((True, True, "square scaling requires"), name="square"),
-        ),
-    )
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_dual_unsupported_recipe(
-        self, is_square_scaling, is_scale_swizzled, error, device
-    ):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device)
-        # Copying cannot make both dual orientations use a dim-k-only recipe.
-        with self.assertRaisesRegex(ValueError, error):
-            _quantize_mxfp8_tma_dual(data_hp, is_square_scaling, is_scale_swizzled)
 
     @parametrize(
         "layout",
@@ -769,7 +743,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp, axes[::-1], False, True
         )
         qdata_k, scales_k, qdata_m, scales_m = _blockscaled_tma_impl_dual(
-            data_hp, False, True, dim=(axes, axes[::-1])
+            data_hp, dim=axes
         )
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(scales_k, scales_k_ref)
@@ -910,9 +884,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape[-2:]
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k.shape, shape)
         self.assertEqual(qdata_m.shape, shape)
         scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
