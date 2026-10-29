@@ -5492,7 +5492,7 @@ class InstructionTranslatorBase(
         # which would error out with an empty stack
         push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
         if f_code.co_flags & (push_types):
-            self.push(BuiltinVariable(None))
+            self.push(VariableTracker.build(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
