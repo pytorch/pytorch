@@ -259,7 +259,7 @@ class StrictNumericsCompileTest(TestCase):
         )
 
     @ops(
-        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp")],
+        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
