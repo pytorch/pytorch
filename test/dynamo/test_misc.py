@@ -10204,11 +10204,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self._join_flags_thread(worker_thread, errors)
             self.assertTrue(worker_read["is_exporting"])
 
+        # Copy-on-enter with exit-reset: an object captured mid-session (what
+        # a ThreadLocalState snapshot would hold, e.g. a deferred GraphTask)
+        # reads False once the session exits, deterministically, regardless
+        # of concurrent sessions elsewhere.
         with torch.compiler._compile_session_context():
             captured = torch.compiler._current_flags()
             self.assertTrue(captured.is_compiling)
         self.assertFalse(torch.compiler.is_compiling())
-        self.assertTrue(captured.is_compiling)
+        self.assertFalse(captured.is_compiling)
+        # Session-count bookkeeping unwinds to zero (a leaked count would
+        # silently keep every read on the slow TLS path).
+        self.assertEqual(torch.compiler._SESSION_COUNT, 0)
 
     def test_tracing_flags_in_session_reads_and_shim(self):
         torch._dynamo.reset()
@@ -10253,10 +10260,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertTrue(torch.compiler._is_exporting_flag)
             self.assertTrue(torch.compiler._is_compiling_flag)
         self.assertFalse(torch.compiler._is_exporting_flag)
-        with self.assertRaisesRegex(AttributeError, "_compile_session_context"):
+        with self.assertRaisesRegex(AttributeError, "_compiling_state_context"):
             torch.compiler._is_exporting_flag = True
         self.assertNotIn("_is_exporting_flag", torch.compiler.__dict__)
         self.assertFalse(torch.compiler._is_exporting_flag)
+        # Unknown module attributes keep the clean AttributeError contract
+        # (hasattr only swallows AttributeError).
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            torch.compiler.definitely_not_a_real_thing
+        self.assertFalse(hasattr(torch.compiler, "definitely_not_a_real_thing"))
+
+        # A raising session body still unwinds the count and the flags.
+        with self.assertRaisesRegex(RuntimeError, "session body boom"):
+            with _compiling_state_context():
+                self.assertTrue(torch.compiler.is_exporting())
+                self.assertTrue(torch.compiler.is_compiling())
+                self.assertGreater(torch.compiler._SESSION_COUNT, 0)
+                raise RuntimeError("session body boom")
+        self.assertEqual(torch.compiler._SESSION_COUNT, 0)
+        self.assertFalse(torch.compiler.is_exporting())
+        self.assertFalse(torch.compiler.is_compiling())
 
         # Nested sessions restore correctly within one thread.
         with torch.compiler._compile_session_context():
