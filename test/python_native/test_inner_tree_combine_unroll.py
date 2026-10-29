@@ -45,25 +45,18 @@ class TestInnerTreeCombineUnroll(TestCase):
         self.assertEqual(plan.combine_unroll, min(unroll, plan.combine_tile))
         self.assertEqual(plan._replace(combine_unroll=0), baseline)
 
-    def test_invalid_unroll(self):
-        """Reject invalid combine unroll values before they produce malformed kernels."""
+    @parametrize(
+        "updates",
+        [{"combine_unroll": -1}, {"combine_rpb": 64}],
+        name_fn=lambda u: next(iter(u)),
+    )
+    def test_invalid_policy(self, updates):
+        """Reject a negative unroll, and async staging with more rows than copying lanes."""
         from torch._native.ops.reductions import kernel_rowtile as rt
 
-        with mock.patch.object(
-            rt,
-            "_itree_arch",
-            return_value=rt._ITREE_ARCH[(10, 0)]._replace(combine_unroll=-1),
-        ):
-            with self.assertRaisesRegex(ValueError, "combine_unroll"):
-                rt.itree_combine_plan(None, 4)
-
-    def test_async_combine_requires_one_warp_of_rows(self):
-        """Reject async staging when a block's rows exceed the lanes that copy them."""
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
-        policy = rt._ITREE_ARCH[(10, 0)]._replace(combine_rpb=64)
+        policy = rt._ITREE_ARCH[(10, 0)]._replace(**updates)
         with mock.patch.object(rt, "_itree_arch", return_value=policy):
-            with self.assertRaisesRegex(ValueError, "combine_rpb"):
+            with self.assertRaisesRegex(ValueError, next(iter(updates))):
                 rt.itree_combine_plan(None, 4)
 
     @parametrize(
@@ -159,8 +152,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         with self.assertRaisesRegex(ValueError, "aligned partial buffers"):
             kg._launch(op, key, [unaligned], [output])
 
+    @parametrize("unroll", [0, 4])
     @parametrize("name", ["sum", "var_mean"])
-    def test_multi_tile_async_combine_matches_default(self, device, name):
+    def test_multi_tile_async_combine_matches_default(self, device, name, unroll):
         """Fold several cp.async tiles, fully and partly unrolled, to the default bits."""
         import cutlass
 
@@ -189,16 +183,13 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             return plan.split[0] // max(combine.combine_tile, 1), combine, outs
 
         _, _, want = run(rt._ITREE_ARCH["default"], f"multitile_default_{name}")
-        hopper = rt._ITREE_ARCH[(9, 0)]
-        for unroll in (0, 4):
-            with self.subTest(unroll=unroll):
-                ntiles, combine, got = run(
-                    hopper._replace(combine_unroll=unroll), f"multitile_{unroll}_{name}"
-                )
-                self.assertGreater(ntiles, 1)
-                self.assertEqual(combine.combine_unroll, unroll)
-                for g, w in zip(got, want):
-                    self.assertEqual(g.view(torch.int32), w.view(torch.int32))
+        # 128-partial tiles still repeat, and keep full unrolling's compile short.
+        arch = rt._ITREE_ARCH[(9, 0)]._replace(combine_unroll=unroll, combine_max=128)
+        ntiles, combine, got = run(arch, f"multitile_{unroll}_{name}")
+        self.assertGreater(ntiles, 1)
+        self.assertEqual(combine.combine_unroll, unroll)
+        for g, w in zip(got, want):
+            self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
     @parametrize("weights", [False, True])
     def test_uniform_count_bits(self, device, weights):
