@@ -577,6 +577,9 @@ def flex_attention(
         )
         if error is not None and len(configs) == 1:
             raise error
+        # Drop the exception: its traceback holds this frame (and, via f_back,
+        # the calling stack) in a reference cycle while it is bound here.
+        del error
 
     # Let the active choices handler append any backend-specific flex-attention
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
