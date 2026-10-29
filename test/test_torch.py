@@ -11995,6 +11995,22 @@ class TestPythonKernelDefaultTrim(TestCase):
         torch.ops.default_trim_repro.f(x)
         self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
 
+        lib_c = torch.library.Library("complex_default_trim_repro", "FRAGMENT")
+        lib_c.define("g(Tensor x, complex v=0j) -> Tensor")
+        received_c = []
+
+        @torch.library.impl(lib_c, "g", "CPU")
+        def _g(x, v=0j):
+            received_c.append(v)
+            return x.clone()
+
+        torch.ops.complex_default_trim_repro.g(x, complex(-0.0, 0.0))
+        self.assertIsInstance(received_c[-1], complex)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), -1.0)
+
+        torch.ops.complex_default_trim_repro.g(x, 0j)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), 1.0)
+
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
