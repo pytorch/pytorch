@@ -7,7 +7,12 @@ import threading
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_MACOS,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary
 
@@ -19,6 +24,8 @@ def C():
 # These tests are ported from cpython/Lib/test/test_weakref.py,
 # but adapted to use tensor rather than object
 class WeakTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     COUNT = 10
 
     def test_make_weak_keyed_dict_from_dict(self):
@@ -239,6 +246,8 @@ class WeakTest(TestCase):
 
 # Adapted from cpython/Lib/test/mapping_tests.py
 class WeakKeyDictionaryTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     __ref = {torch.randn(1): 1, torch.randn(2): 2, torch.randn(3): 3}
     type2test = WeakIdKeyDictionary
 
@@ -561,6 +570,8 @@ class WeakKeyDictionaryTestCase(TestCase):
 
 # Adapted from cpython/Lib/test/mapping_tests.py
 class WeakKeyDictionaryScriptObjectTestCase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _reference(self):
         self.__ref = {
             torch.classes._TorchScriptTesting._Foo(1, 2): 1,
