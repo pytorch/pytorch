@@ -5346,7 +5346,12 @@ class TestPrecompileDynamoCapture(TestCase):
             "torch._precompile._build_multigraph_artifact",
             wraps=torch._precompile._build_multigraph_artifact,
         )
-        with build as built, self._capture(step, backend="eager") as cap:
+        # Installed serving needs Child.forward to remain a separate frame.
+        with (
+            torch._dynamo.config.patch(nested_graph_breaks=not installed),
+            build as built,
+            self._capture(step, backend="eager") as cap,
+        ):
             self.assertEqual(cap(key, x), x.sin().mul(3.0).cos())
             summary = cap.summary()
         self.assertTrue(summary.complete, str(summary))
