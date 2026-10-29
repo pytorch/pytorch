@@ -1395,6 +1395,8 @@ class TestSparseCSRDevice(TestCase):
     @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
+        device_type = torch.device(device).type
+
         def _check_resize_b_as_a(b, a):
             br = b.clone()
             br.resize_as_sparse_(a)
@@ -1474,6 +1476,19 @@ class TestSparseCSRDevice(TestCase):
                                                nnz=nnz * 2,
                                                blocksize=tuple(2 * bi for bi in blocksize))
             _check_resize_b_as_a(b, a)
+
+            # cross-device resize is not supported: the template must be on the same device
+            if device_type != 'cpu':
+                a_cpu = self.genSparseCompressedTensor(shape,
+                                                       layout=layout,
+                                                       device='cpu',
+                                                       index_dtype=index_dtype,
+                                                       dtype=dtype,
+                                                       nnz=nnz,
+                                                       blocksize=blocksize)
+                with self.assertRaisesRegex(
+                        RuntimeError, "Expected all tensors to be on the same device"):
+                    b.clone().resize_as_sparse_(a_cpu)
 
             # error on a strided
             a_strided = a.to_dense()
