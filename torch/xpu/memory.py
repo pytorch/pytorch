@@ -560,27 +560,26 @@ class MemPool(torch._C._XPUMemPool):
             define how memory gets allocated in the pool. If :attr:`allocator`
             is ``None`` (default), memory allocation follows the default/
             current configuration of the XPUCachingAllocator.
-        use_on_oom(bool): a bool that indicates if this pool can be used
-            as a last resort if a memory allocation outside of the pool fails due
-            to Out Of Memory. This is ``False`` by default.
+        use_on_oom(bool, optional): a bool that indicates if this pool may be used as a last
+            resort when an allocation outside the pool fails with OOM.
+            Defaults to ``False``.
+        no_split (bool, optional): if ``True``, cached segments in this pool are
+            never split to serve smaller allocations. Defaults to ``False``.
     """
 
     def __init__(
         self,
         allocator: torch._C._xpu_XPUAllocator | None = None,
         use_on_oom: bool = False,
+        no_split: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        # pyrefly: ignore [bad-argument-count]
+        super().__init__(allocator, True, use_on_oom, no_split)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
-
-    @property
-    def allocator(self) -> torch._C._xpu_XPUAllocator | None:
-        r"""Returns the allocator this MemPool routes allocations to."""
-        return super().allocator
 
     def use_count(self) -> int:
         r"""Returns the reference count of this pool."""
@@ -604,7 +603,7 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     Args:
         pool(torch.xpu.MemPool): a :class:`MemPool` object to be made active so that
             allocations route to this pool.
-        device (torch.device or int, optional): selected device. Uses :class:`MemPool on
+        device (torch.device or int, optional): selected device. Uses :class:`MemPool` on
             the current device, given by :func:`~torch.xpu.current_device`,
             if :attr:`device` is ``None`` (default).
 
@@ -641,13 +640,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
     """
     from ctypes import byref, c_uint32
 
-    from . import (
-        _cached_zes_device_infos,
-        _get_pyzes_version,
-        _import_pyzes,
-        _zes_check,
-        _zes_ensure_device_infos,
-    )
+    from . import _get_pyzes_version, _get_zes_device_info, _import_pyzes, _zes_check
 
     pyzes = _import_pyzes()
     version = _get_pyzes_version()
@@ -656,9 +649,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             f"list_gpu_processes requires pyzes version >= 0.1.2, but found {'.'.join(map(str, version))}"
         )
     device = _get_device_index(device, optional=True)
-    _zes_ensure_device_infos(device)
-
-    info = _cached_zes_device_infos[device]
+    info = _get_zes_device_info(device)
     device_handle = info.device_handle
     proc_count = c_uint32(0)
     _zes_check(

@@ -10,9 +10,12 @@ import transformers
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class DynamoExporterHfModelsTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
             model,
