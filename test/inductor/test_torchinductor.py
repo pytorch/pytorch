@@ -12004,8 +12004,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "foreach_reads_sibling_input": 2,
             "foreach_reads_sibling_across_groups": 4,
         }
+        # foreach_reads_sibling_target compares its two mms against eager's, so
+        # its inputs are integers to keep the mms exact: a backend may vary the
+        # reduction order between calls, which at these shapes moves the result
+        # by more than the default float32 tolerance.
+        exact_mm = case == "foreach_reads_sibling_target"
         xs = [
-            torch.randn(shape, device=self.device)
+            torch.randint(-2, 3, shape, device=self.device).float()
+            if exact_mm
+            else torch.randn(shape, device=self.device)
             for _ in range(num_inputs.get(case, 1))
         ]
         gm = make_fx(fn, decomposition_table=select_decomp_table())(
