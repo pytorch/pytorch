@@ -240,6 +240,7 @@ from .ctx_manager import (
     RecordFunctionVariable,
 )
 from .dicts import (
+    _contains_nan,
     ConstDictVariable,
     DictKeysVariable,
     FrozenDictVariable,
@@ -935,7 +936,8 @@ def _build_dict_items(
         (position, *build_key_value(position, key, item))
         for position, key, item in enumerate_items_with_dict_position(value)
     ]
-    if not isinstance(value, collections.OrderedDict):
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
         return {key: item for _, key, item in entries}
     # Preserve both dict storage order and OrderedDict iteration order.
     items = collections.OrderedDict((key, item) for _, key, item in sorted(entries))
@@ -1212,7 +1214,7 @@ class VariableBuilder:
             install_guard(
                 key_source.make_guard(
                     GuardBuilder.EQUALS_MATCH
-                    if ConstantVariable.is_literal(key)
+                    if ConstantVariable.is_literal(key) and not _contains_nan(key)
                     else GuardBuilder.ID_MATCH
                 )
             )
@@ -1224,7 +1226,7 @@ class VariableBuilder:
             )
             items[key_var] = value_var
         result = FrozenDictVariable(items, source=self.source)
-        return self.tx.output.side_effects.track_object_existing(value, result)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
