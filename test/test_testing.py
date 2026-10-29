@@ -710,24 +710,16 @@ def _count_junit_tags(normalized: str) -> collections.Counter[str]:
 @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "junit XML shape doesn't depend on the device")
 class TestJunitXml(TestCase):
+    proc: subprocess.CompletedProcess[str]
     provenance: str
     raw_xml: str
 
     @classmethod
     def setUpClass(cls) -> None:
-        # The goldens depend on the pytest and pytest-rerunfailures versions they record.
-        cls.provenance = _junit_provenance()
-        header = f"<!-- provenance: {cls.provenance} -->"
-        golden = _JUNIT_TESTDATA / "expected" / "pytest.xml"
-        if not _REGENERATE_JUNIT_GOLDENS and golden.exists() and header not in golden.read_text().splitlines():
-            raise unittest.SkipTest(
-                f"goldens were generated with other versions than {cls.provenance}; "
-                "rerun with REGENERATE_JUNIT_GOLDENS=1"
-            )
         with tempfile.TemporaryDirectory() as tmp:
             xml_path = Path(tmp) / "report.xml"
             # Run in place under test/ so test/conftest.py and pytest.ini apply, as in CI.
-            proc = subprocess.run(
+            cls.proc = subprocess.run(
                 [
                     sys.executable, "-m", "pytest", "junit_xml_testdata/pytest_suite.py",
                     f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", "-q",
@@ -738,13 +730,28 @@ class TestJunitXml(TestCase):
                 text=True,
                 timeout=300,
             )
-            if not xml_path.exists():
-                raise RuntimeError(
-                    f"pytest produced no XML (exit {proc.returncode})\n"
-                    f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}"
-                )
-            cls.raw_xml = xml_path.read_text()
+            cls.raw_xml = xml_path.read_text() if xml_path.exists() else ""
+        cls.provenance = _junit_provenance()
         super().setUpClass()
+
+    def _skip_unless_golden_versions(self) -> None:
+        # The goldens depend on the pytest and pytest-rerunfailures versions they record.
+        header = f"<!-- provenance: {self.provenance} -->"
+        golden = _JUNIT_TESTDATA / "expected" / "pytest.xml"
+        if not _REGENERATE_JUNIT_GOLDENS and golden.exists() and header not in golden.read_text().splitlines():
+            self.skipTest(
+                f"goldens were generated with other versions than {self.provenance}; "
+                "rerun with REGENERATE_JUNIT_GOLDENS=1"
+            )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._skip_unless_golden_versions()
+        if not self.raw_xml:
+            self.fail(
+                f"pytest produced no XML (exit {self.proc.returncode})\n"
+                f"stdout:\n{self.proc.stdout[-3000:]}\nstderr:\n{self.proc.stderr[-3000:]}"
+            )
 
     def _assert_matches_golden(self, name: str, doc: str) -> None:
         golden = _JUNIT_TESTDATA / "expected" / f"{name}.xml"
@@ -760,11 +767,8 @@ class TestJunitXml(TestCase):
         )
         self.assertMultiLineEqual(expected, doc, f"{golden} is stale; rerun with REGENERATE_JUNIT_GOLDENS=1")
 
-    def test_pytest_outcome_shapes(self) -> None:
-        normalized = _normalize_junit_xml(self.raw_xml)
-        self._assert_matches_golden("pytest", normalized)
-
-        counts = _count_junit_tags(normalized)
+    def test_pytest_outcome_counts(self) -> None:
+        counts = _count_junit_tags(_normalize_junit_xml(self.raw_xml))
         # <testsuite tests="14"> counts the teardown error separately, but it merges
         # into its <testcase>
         self.assertEqual(counts["testcase"], 13)
@@ -776,6 +780,9 @@ class TestJunitXml(TestCase):
         self.assertEqual(counts["skipped"], 3)
         # 2 each for rerun_then_pass and rerun_then_fail
         self.assertEqual(counts["rerun"], 4)
+
+    def test_pytest_outcome_shapes(self) -> None:
+        self._assert_matches_golden("pytest", _normalize_junit_xml(self.raw_xml))
 
     def test_sanitize_pytest_xml(self) -> None:
         with TemporaryFileName() as path:
