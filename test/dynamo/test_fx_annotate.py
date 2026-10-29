@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import warnings
 
 import torch
@@ -20,6 +21,10 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 def checkpoint_wrapper(fn):
@@ -29,6 +34,7 @@ def checkpoint_wrapper(fn):
     return inner
 
 
+@instantiate_parametrized_tests
 class AnnotateTests(torch._dynamo.test_case.TestCase):
     def test_annotations(self):
         class Mod(torch.nn.Module):
@@ -389,7 +395,8 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             [{"knob": 0.5}, {"knob": 0.25}, {"knob": 0.75}],
         )
 
-    def test_annotate_guards_on_dictionary_keys(self):
+    @parametrize("annotation_type", [dict, collections.defaultdict])
+    def test_annotate_guards_on_dictionary_keys(self, annotation_type):
         executed_graphs = []
 
         def fn(x, annotation):
@@ -405,18 +412,43 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         x = torch.randn(3)
-        for annotation in ({"stage": 0}, {}, {"stage": 0}, {}, {"stage": 0}):
+        annotations = ({"stage": 0}, {}, {"stage": 0}, {}, {"stage": 0})
+        fresh = {bytearray(b"stage").decode(): 0, "phase": 1}
+        for values in (*annotations, {"stage": 0, "phase": 1}, "stage", "phase", fresh):
+            if isinstance(values, dict):
+                if annotation_type is collections.defaultdict:
+                    annotation = annotation_type(int, values)
+                else:
+                    annotation = annotation_type(values)
+            else:
+                annotation[values] = annotation.pop(values)
             out, alias = opt_fn(x, annotation)
             self.assertEqual(out, x.sin())
             self.assertIs(alias, annotation)
-            metadata = self._custom_meta_by_target(executed_graphs[-1:], (torch.sin,))
-            self.assertEqual(metadata[0] or {}, annotation)
+            meta = self._custom_meta_by_target(executed_graphs[-1:], (torch.sin,))
+            self.assertEqual(list((meta[0] or {}).items()), list(annotation.items()))
             self.assertIsNone(fx_traceback._get_current_annotation())
 
         self.assertIsNot(executed_graphs[0], executed_graphs[1])
         self.assertIs(executed_graphs[0], executed_graphs[2])
         self.assertIs(executed_graphs[1], executed_graphs[3])
         self.assertIs(executed_graphs[0], executed_graphs[4])
+        self.assertIsNot(executed_graphs[5], executed_graphs[6])
+        self.assertIs(executed_graphs[5], executed_graphs[7])
+        self.assertIs(executed_graphs[5], executed_graphs[8])
+
+    def test_annotate_guards_on_empty_dictionary_identity(self):
+        def fn(x, annotation):
+            with fx_traceback.annotate(annotation):
+                return x.sin(), id(annotation)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        annotations = ({}, {})
+        for annotation in annotations:
+            result, identity = opt_fn(x, annotation)
+            self.assertEqual(result, x.sin())
+            self.assertEqual(identity, id(annotation))
 
     def test_annotate_dynamic_int_is_unsupported(self):
         def fn(x):
