@@ -8,11 +8,7 @@ from unittest.mock import patch
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.distributed._transport import (
-    new_transport_rank,
-    register_transport,
-    Transport,
-)
+from torch.distributed._transport import new_transport, register_transport, Transport
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -81,10 +77,10 @@ def _bootstrap_worker(rank, port, path, implicit):
     try:
         register_transport("bootstrap-test", lambda: _Transport(bytes([rank, 0, 255])))
         if rank < 2:
-            transport = new_transport_rank(
-                "bootstrap-test",
+            transport = new_transport("bootstrap-test")
+            transport.connect_rank(
+                1 - rank if implicit else 11 - rank,
                 store=None if implicit else store,
-                peer_rank=1 - rank if implicit else 11 - rank,
                 rank=None if implicit else 10 + rank,
             )
             if transport.peers != [(bytes([1 - rank, 0, 255]), 30.0)]:
@@ -120,30 +116,14 @@ class TestRankBootstrap(TestCase):
 
     def _connect_pair(self, store, attempt, timeout):
         transports = [_Transport(bytes([rank, attempt, 255])) for rank in range(2)]
-        with (
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=lambda backend, device, fixture: fixture,
-            ),
-            ThreadPoolExecutor(2) as pool,
-        ):
+        with ThreadPoolExecutor(2) as pool:
             futures = [
-                pool.submit(
-                    new_transport_rank,
-                    "test",
-                    store=store,
-                    rank=rank,
-                    peer_rank=1 - rank,
-                    bootstrap_timeout=timeout,
-                    fixture=transport,
-                )
-                for rank, transport in enumerate(transports)
+                pool.submit(t.connect_rank, 1 - r, store=store, rank=r, timeout=timeout)
+                for r, t in enumerate(transports)
             ]
-            for future in futures:
-                future.result(timeout=5)
+            self.assertEqual([future.result(timeout=5) for future in futures], [0, 0])
         for rank, transport in enumerate(transports):
-            self.assertEqual(transport.peers[-1], (bytes([1 - rank, attempt, 255]), 2))
-            self.assertEqual(transport.closes, 0)
+            self.assertEqual(transport.peers, [(bytes([1 - rank, attempt, 255]), 2)])
 
     def test_connect_rank_multiple_peers(self):
         # Each thread needs its own client; a TCPStore wait blocks its client.
@@ -234,79 +214,6 @@ class TestRankBootstrap(TestCase):
             transport.connect_rank(1, store=store, rank=0, timeout=1)
         self.assertEqual(transport.closes, 0)
 
-    def test_missing_peer_times_out_and_closes(self):
-        transport = _Transport(b"endpoint")
-        start = time.monotonic()
-        with (
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                return_value=transport,
-            ),
-            self.assertRaises(dist.DistStoreError),
-        ):
-            new_transport_rank(
-                "test",
-                store=_hash_store(),
-                rank=0,
-                peer_rank=1,
-                bootstrap_timeout=0.05,
-            )
-        self.assertLess(time.monotonic() - start, 2)
-        self.assertEqual(transport.peers, [])
-        self.assertEqual(transport.closes, 1)
-
-    def test_cleanup_preserves_error(self):
-        transport = _Transport()
-        with (
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                return_value=transport,
-            ),
-            patch.object(transport, "bind", side_effect=ValueError("bind failed")),
-            patch.object(transport, "close", side_effect=RuntimeError("close failed")),
-            self.assertRaisesRegex(ValueError, "bind failed"),
-            self.assertLogs(
-                "torch.distributed._transport._bootstrap", level="WARNING"
-            ) as logs,
-        ):
-            new_transport_rank(
-                "test",
-                store=_hash_store(),
-                rank=0,
-                peer_rank=1,
-                bootstrap_timeout=1,
-            )
-        self.assertIn("close failed", logs.output[0])
-
-    def test_rank_override_and_attempt_count(self):
-        store = _hash_store()
-        with (
-            patch(
-                "torch.distributed.get_rank", side_effect=AssertionError("unexpected")
-            ),
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=RuntimeError("construction stopped"),
-            ) as factory,
-        ):
-            for _ in range(2):
-                with self.assertRaisesRegex(RuntimeError, "construction stopped"):
-                    new_transport_rank("test", store=store, rank=10, peer_rank=5)
-            # Invalid arguments are rejected before an attempt is taken.
-            keys = store.num_keys()
-            for rank, peer in ((-1, 0), (True, 0), (0, -1), (0, True), (0, 0)):
-                with self.assertRaisesRegex(ValueError, "rank"):
-                    new_transport_rank(
-                        "test",
-                        store=store,
-                        rank=rank,
-                        peer_rank=peer,
-                    )
-            self.assertEqual(store.num_keys(), keys)
-            self.assertEqual(factory.call_count, 2)
-        attempts = "transport/test/5/10/attempts/10"
-        self.assertEqual(store.get(attempts), b"2")
-
     def test_connect_rank_attempt_count(self):
         store = _hash_store()
         transport = _Transport()
@@ -327,11 +234,14 @@ class TestRankBootstrap(TestCase):
                 with self.assertRaisesRegex(ValueError, "rank"):
                     transport.connect_rank(peer, store=store, rank=rank)
             too_long = 2**31 / 1000
-            bad = (0, 0.0005, -1, too_long, float("inf"), float("nan"), True, "1")
+            bad = (0, 0.0005, -1, too_long, float("inf"), float("nan"))
             for timeout in (*bad, timedelta(microseconds=500)):
                 with self.assertRaisesRegex(ValueError, "timeout"):
                     transport.connect_rank(5, store=store, rank=10, timeout=timeout)
-            with self.assertRaisesRegex(ValueError, "tag"):
+            for timeout in (True, "1"):
+                with self.assertRaisesRegex(TypeError, "timeout"):
+                    transport.connect_rank(5, store=store, rank=10, timeout=timeout)
+            with self.assertRaisesRegex(TypeError, "tag"):
                 transport.connect_rank(5, store=store, rank=10, tag=1)
             self.assertEqual(store.num_keys(), keys)
             with self.assertRaisesRegex(RuntimeError, "bind stopped"):
@@ -353,15 +263,6 @@ class TestRankBootstrap(TestCase):
         transport = _Transport()
         with (
             patch("torch.distributed.get_rank", return_value=4) as get_rank,
-            patch(
-                "torch.distributed._transport._bootstrap.new_transport",
-                side_effect=RuntimeError("construction stopped"),
-            ),
-            self.assertRaisesRegex(RuntimeError, "construction stopped"),
-        ):
-            new_transport_rank("test", store=store, peer_rank=8)
-        with (
-            patch("torch.distributed.get_rank", return_value=4),
             patch.object(
                 transport, "bind", side_effect=RuntimeError("bind stopped")
             ) as bind,
@@ -370,7 +271,6 @@ class TestRankBootstrap(TestCase):
             transport.connect_rank(8, store=store)
         bind.assert_called_once_with(timeout=30.0)
         get_rank.assert_called_once_with()
-        self.assertEqual(store.get("transport/test/4/8/attempts/4"), b"1")
         self.assertEqual(store.get(f"{_PREFIX}/4/8/attempts/4"), b"1")
 
 

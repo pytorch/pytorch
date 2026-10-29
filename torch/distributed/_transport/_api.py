@@ -227,21 +227,36 @@ class Transport(ABC):
         call failed.
         """
         if type(tag) is not str:
-            raise ValueError("tag must be a string")
+            raise TypeError("tag must be a string")
         wait = None
         if timeout is not None:
             if isinstance(timeout, timedelta):
                 timeout = timeout.total_seconds()
             if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
-                raise ValueError("timeout must be seconds or a timedelta")
+                raise TypeError("timeout must be seconds or a timedelta")
             timeout = float(timeout)
             if not 0.001 <= timeout <= _MAX_STORE_TIMEOUT:
                 raise ValueError("timeout must be in [1 ms, 2**31 - 1 ms]")
             wait = timedelta(seconds=timeout)
-        # No backend name produces this root, so new_transport_rank never pairs.
-        root = f"transport_connect_rank/{tag}"
-        store, rank = _pair_store(root, store, rank, peer_rank)
-        return _exchange(self, store, rank, peer_rank, wait)
+        rank = dist.get_rank() if rank is None else rank
+        store = dist.distributed_c10d._get_default_store() if store is None else store
+        if type(rank) is not int or rank < 0:
+            raise ValueError("rank must be a nonnegative integer")
+        if type(peer_rank) is not int or peer_rank < 0:
+            raise ValueError("peer_rank must be a nonnegative integer")
+        if peer_rank == rank:
+            raise ValueError("peer_rank must differ from the local rank")
+        pair = f"transport_connect_rank/{tag}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
+        attempt = store.add(f"{pair}/attempts/{rank}", 1)
+        store = dist.PrefixStore(f"{pair}/{attempt}", store)
+        # Store.set accepts bytes; the stub only declares str.
+        # pyrefly: ignore [bad-argument-type]
+        store.set(str(rank), self.bind(timeout=timeout))
+        if wait is None:
+            store.wait([str(peer_rank)])
+        else:
+            store.wait([str(peer_rank)], wait)
+        return self.connect(store.get(str(peer_rank)), timeout=timeout)
 
     @abstractmethod
     def connected(self) -> bool:
@@ -422,38 +437,3 @@ class Transport(ABC):
 
 # TCPStore polls with an int millisecond timeout.
 _MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
-
-
-def _pair_store(
-    root: str, store: dist.Store | None, rank: int | None, peer_rank: int
-) -> tuple[dist.Store, int]:
-    """Validate a rank pair and return the Store scoped to its next attempt."""
-    rank = dist.get_rank() if rank is None else rank
-    store = dist.distributed_c10d._get_default_store() if store is None else store
-    if type(rank) is not int or rank < 0:
-        raise ValueError("rank must be a nonnegative integer")
-    if type(peer_rank) is not int or peer_rank < 0:
-        raise ValueError("peer_rank must be a nonnegative integer")
-    if peer_rank == rank:
-        raise ValueError("peer_rank must differ from the local rank")
-    pair = f"{root}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
-    attempt = store.add(f"{pair}/attempts/{rank}", 1)
-    return dist.PrefixStore(f"{pair}/{attempt}", store), rank
-
-
-def _exchange(
-    transport: Transport,
-    store: dist.Store,
-    rank: int,
-    peer_rank: int,
-    timeout: timedelta | None,
-) -> int:
-    seconds = None if timeout is None else timeout.total_seconds()
-    # Store.set accepts bytes; the stub only declares str.
-    # pyrefly: ignore [bad-argument-type]
-    store.set(str(rank), transport.bind(timeout=seconds))
-    if timeout is None:
-        store.wait([str(peer_rank)])
-    else:
-        store.wait([str(peer_rank)], timeout)
-    return transport.connect(store.get(str(peer_rank)), timeout=seconds)
