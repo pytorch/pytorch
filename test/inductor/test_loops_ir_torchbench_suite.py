@@ -293,6 +293,59 @@ class NativeLossPreparationTest(TestCase):
             suite._cache_native_loss_function(bm)
 
 
+class Fp64OptimizerStateConversionTest(TestCase):
+    def test_populated_adam_moments_cast_without_live_state_mutation(self):
+        bm = FakeBenchmark(test="train")
+        bm.opt = torch.optim.Adam(bm.model.parameters(), lr=0.01)
+        bm.invoke()
+        live_params = [p.detach().clone() for p in bm.model.parameters()]
+        live_states = [
+            {name: value.clone() for name, value in state.items()}
+            for state in bm.opt.state.values()
+        ]
+        before_settings = suite.numerical_settings()
+        clone, record = suite._prepare_fp64_clone(bm)
+        self.assertIsNotNone(clone)
+        self.assertNotIn("fallback", record)
+        self.assertEqual(record["optimizer_parameter_state_dtype"], "float64")
+        for state in clone.opt.state.values():
+            self.assertEqual(state["exp_avg"].dtype, torch.float64)
+            self.assertEqual(state["exp_avg_sq"].dtype, torch.float64)
+            self.assertEqual(state["step"].dtype, torch.float32)
+        # Regression: this used to fail in Adam's lerp_(float, double).
+        clone.invoke()
+        for expected, actual in zip(live_params, bm.model.parameters(), strict=True):
+            self.assertEqual(actual.dtype, torch.float32)
+            self.assertEqual(expected, actual)
+        for expected, actual in zip(live_states, bm.opt.state.values(), strict=True):
+            for name in expected:
+                self.assertEqual(expected[name], actual[name])
+        self.assertEqual(suite.numerical_settings(), before_settings)
+
+    def test_populated_sgd_momentum_cast_to_reference_dtype(self):
+        bm = FakeBenchmark(test="train")
+        bm.opt = torch.optim.SGD(bm.model.parameters(), lr=0.01, momentum=0.9)
+        bm.invoke()
+        clone, record = suite._prepare_fp64_clone(bm)
+        self.assertIsNotNone(clone)
+        self.assertNotIn("fallback", record)
+        for state in clone.opt.state.values():
+            self.assertEqual(state["momentum_buffer"].dtype, torch.float64)
+        clone.invoke()
+        for state in bm.opt.state.values():
+            self.assertEqual(state["momentum_buffer"].dtype, torch.float32)
+
+    def test_eval_reference_does_not_query_optimizer(self):
+        class Benchmark(FakeBenchmark):
+            def get_optimizer(self):
+                raise AssertionError("eval reference has no optimizer")
+
+        clone, record = suite._prepare_fp64_clone(Benchmark())
+        self.assertIsNotNone(clone)
+        self.assertNotIn("fallback", record)
+        self.assertNotIn("optimizer_parameter_state_dtype", record)
+
+
 class ParserTest(TestCase):
     def test_defaults(self):
         args = suite.parse_args([])

@@ -1901,6 +1901,35 @@ def _prepare_fp64_clone(eager_bm: Any) -> tuple[Any | None, dict[str, Any]]:
             f"{str(error)[:200]}); FP64 reference cannot be faithfully obtained"
         )
         return None, record
+    if getattr(clone, "test", None) == "train":
+        try:
+            optimizer = clone.get_optimizer()
+            if optimizer is not None:
+                for parameter, state in optimizer.state.items():
+                    if not isinstance(parameter, _torch.Tensor):
+                        continue
+                    for name, value in state.items():
+                        # Adam's scalar step counter is not a parameter moment.
+                        if name == "step":
+                            continue
+                        state[name] = _tree_map(
+                            lambda x: (
+                                x.to(_torch.float64)
+                                if isinstance(x, _torch.Tensor)
+                                and x.is_floating_point()
+                                else x
+                            ),
+                            value,
+                        )
+            record["optimizer_parameter_state_dtype"] = "float64"
+        except Exception as error:
+            record["fallback"] = "cosine"
+            record["fallback_source"] = STOCK_CHECK_SOURCE
+            record["fallback_reason"] = (
+                f"optimizer state cast to float64 failed ({type(error).__name__}: "
+                f"{str(error)[:200]}); FP64 reference cannot be faithfully obtained"
+            )
+            return None, record
     # Same original inputs, double (clone only; live inputs never touched).
     for holder in (clone, getattr(clone, "model", None)):
         if holder is None:
