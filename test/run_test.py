@@ -298,6 +298,8 @@ S390X_BLOCKLIST = [
 XPU_BLOCKLIST = [
     "test_autograd",
     "profiler/test_memory_profiler",
+    "distributed/fsdp/test_fsdp_hybrid_shard",  # hangs in oneCCL subgroup init
+    "distributed/rpc/",  # RPC is not supported on XPU
 ]
 
 XPU_TEST = [
