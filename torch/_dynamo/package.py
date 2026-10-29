@@ -1162,6 +1162,8 @@ class CompilePackage:
         updates with compiled functions and resume functions.
     """
 
+    records_graph_break_ops = False
+
     def __init__(
         self,
         fn: Callable[..., Any] | None,
