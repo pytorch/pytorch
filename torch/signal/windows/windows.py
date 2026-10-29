@@ -432,7 +432,7 @@ Computes the Hamming window.
 The Hamming window is defined as follows:
 
 .. math::
-    w_n = \alpha - \beta\ \cos \left( \frac{2 \pi n}{M - 1} \right)
+    w_n = 0.54 - 0.46\ \cos \left( \frac{2 \pi n}{M - 1} \right)
     """,
     r"""
 
@@ -443,8 +443,6 @@ Arguments:
 
 Keyword args:
     {sym}
-    alpha (float, optional): The coefficient :math:`\alpha` in the equation above.
-    beta (float, optional): The coefficient :math:`\beta` in the equation above.
     {dtype}
     {layout}
     {device}

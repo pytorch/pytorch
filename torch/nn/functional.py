@@ -6008,7 +6008,7 @@ Example::
 one_hot = _add_docstr(
     torch._C._nn.one_hot,
     r"""
-one_hot(tensor, num_classes=-1) -> LongTensor
+one_hot(input, num_classes=-1) -> LongTensor
 
 Takes LongTensor with index values of shape ``(*)`` and returns a tensor
 of shape ``(*, num_classes)`` that have zeros everywhere except where the
@@ -6021,7 +6021,7 @@ See also `One-hot on Wikipedia`_ .
     https://en.wikipedia.org/wiki/One-hot
 
 Arguments:
-    tensor (LongTensor): class values of any shape.
+    input (LongTensor): class values of any shape.
     num_classes (int, optional):  Total number of classes. If set to -1, the number
         of classes will be inferred as one greater than the largest class
         value in the input tensor. Default: -1
