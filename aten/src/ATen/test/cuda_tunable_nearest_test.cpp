@@ -7,6 +7,7 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/util/env.h>
 #include <c10/util/tempfile.h>
 
 // Manager-level coverage for LookupNearest / RecordBorrowed. Unlike
@@ -125,8 +126,8 @@ class TunableNearestTest : public ::testing::Test {
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
   // Calling LookupNearest is itself the opt-in: dispatch never reaches it, so
   // it answers the question asked rather than re-deciding from the pass's
-  // mutable policy flags. The env kill switch IS still honoured here; covering
-  // that needs a subprocess, since it is read once at startup.
+  // mutable policy flags. The env kill switch IS still honoured here -- see
+  // EnvKillSwitchVetoesLookupAndRecord below.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TuningResultsManager mgr;
@@ -206,8 +207,8 @@ TEST_F(TunableNearestTest, RecordBorrowedBecomesExactHit) {
 TEST_F(TunableNearestTest, RecordBorrowedIgnoresPolicyFlags) {
   // Same opt-in-by-calling contract as LookupNearest: the reuse pass decides
   // whether to record, and RecordBorrowed records what it is handed. As
-  // above, this covers the mutable policy flag only --
-  // PYTORCH_TUNABLEOP_RECORD_BORROWED=0 does suppress the write.
+  // above, this covers the mutable policy flag only -- the env kill switch
+  // does suppress the write.
   FlagGuard g;
   auto* ctx = getTuningContext();
   TempResultsFile results("tunableop-flags-");
@@ -309,6 +310,34 @@ TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
     }
     EXPECT_TRUE(results.Contents().empty());
   }
+}
+
+TEST_F(TunableNearestTest, EnvKillSwitchVetoesLookupAndRecord) {
+  // The env is read once into a function-local static, so one process only
+  // ever sees one value and the rest of this binary needs it unset. run_tests.sh
+  // starts a second invocation with both set to 0 and filters to this case.
+  using c10::utils::check_env;
+  if (check_env("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED") != false ||
+      check_env("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED") != false) {
+    GTEST_SKIP() << "needs both kill switches set to 0 in the environment";
+  }
+
+  // Policy on, so only the env can be suppressing anything below.
+  FlagGuard g;
+  auto* ctx = getTuningContext();
+  TempResultsFile results("tunableop-killswitch-");
+  ctx->EnableNearestMatch(true);
+  ctx->EnableRecordBorrowed(true);
+
+  TuningResultsManager mgr;
+  SeedDonor(mgr);
+  // BorrowsClosestDonor covers this donor being returned when the env is unset.
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(ResultEntry::Null()));
+
+  // Dropped outright, map as well as file -- see RecordBorrowed's contract.
+  mgr.RecordBorrowed(kOp, kQSig, Validated("k64", /*measured_ms=*/2.5));
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()));
+  EXPECT_EQ(results.Contents().find(kQSig), std::string::npos);
 }
 
 // --- The parser against the real signature builders ---
