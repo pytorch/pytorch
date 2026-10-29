@@ -11,7 +11,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <algorithm>
 #include <array>
-#include <vector>
+#include <functional>
 
 namespace at::native {
 namespace {
@@ -677,29 +677,24 @@ void cascade_sum(TensorIterator &iter) {
     };
 
   if constexpr (!is_identity) {
-    // parallel_reduce splits a reduction to a single element across threads
-    // and then adds up the per-thread results with this same loop, which would
-    // apply Map to them a second time (and read them as scalar_t). Add them up
-    // here instead.
-    if (iter.output_base(0).numel() == 1 &&
-        iter.numel() >= at::internal::GRAIN_SIZE &&
-        at::get_num_threads() > 1 && !at::in_parallel_region()) {
-      std::vector<out_t> partials(at::get_num_threads(), out_t(0));
-      at::parallel_for(
-          0, iter.numel(), at::internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-            char* partial = reinterpret_cast<char*>(&partials[at::get_thread_num()]);
+    // TensorIterator::parallel_reduce would add up the per-thread results of a
+    // reduction to one element with this same loop, applying Map to them again
+    // (and reading them as scalar_t).
+    if (iter.output_base(0).numel() == 1) {
+      using acc_t = at::acc_type<scalar_t, true>;
+      const acc_t total = at::parallel_reduce(
+          0, iter.numel(), at::internal::GRAIN_SIZE, acc_t(0),
+          [&](int64_t begin, int64_t end, acc_t /*ident*/) {
+            out_t partial(0);
             iter.serial_for_each(
                 [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
-                  char* ptrs[] = {partial, data[1]};
+                  char* ptrs[] = {reinterpret_cast<char*>(&partial), data[1]};
                   loop(ptrs, strides, size0, size1);
                 },
                 {begin, end});
-          });
-      using acc_t = at::acc_type<scalar_t, true>;
-      acc_t total(0);
-      for (const auto& partial : partials) {
-        total += acc_t(partial);
-      }
+            return acc_t(partial);
+          },
+          std::plus<acc_t>());
       *static_cast<out_t*>(iter.data_ptr(0)) = out_t(total);
       return;
     }

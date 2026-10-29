@@ -174,17 +174,6 @@ void prod_kernel_impl(TensorIterator& iter) {
   }
 }
 
-// Whether sum(|x|^val) can go through the cascade summation in SumKernel.cpp,
-// which keeps its precision on large inputs; see #65815. The kernel adds its
-// partial sums into the output, so half and bfloat16 inputs need a float one.
-bool use_cascade_powsum(const TensorIterator& iter, double val) {
-  const auto in = iter.input_dtype();
-  const auto out = iter.dtype(0);
-  return (val == 0.0 || val == 1.0 || val == 2.0) &&
-      (((in == kFloat || in == kDouble) && out == in) ||
-       ((in == kHalf || in == kBFloat16) && out == kFloat));
-}
-
 template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   // This reduction accumulates results as the type `acc_t`.
@@ -220,7 +209,7 @@ void norm_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (use_cascade_powsum(iter, val)) {
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/true)) {
     cascade_powsum_kernel(iter, val);
     if (val == 2.0) {
       iter.output().sqrt_();
@@ -460,7 +449,7 @@ void powsum_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (val != 0.0 && use_cascade_powsum(iter, val)) {
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/false)) {
     cascade_powsum_kernel(iter, val);
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
