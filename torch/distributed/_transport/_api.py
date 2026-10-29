@@ -46,6 +46,16 @@ class RemoteBuffer(Protocol):
     @classmethod
     def deserialize(cls, data: bytes) -> Self: ...
 
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a descriptor for a byte range of this one.
+
+        ``offset`` is relative to this descriptor and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this descriptor. The
+        result shares this descriptor's registration and lifetime, and does not
+        restrict access to the rest of the registration.
+        """
+        ...
+
 
 @runtime_checkable
 class Memory(Protocol):
