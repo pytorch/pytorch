@@ -6,6 +6,7 @@ import os
 import unittest
 
 import torch
+import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import (
@@ -129,6 +130,29 @@ def _multi_peer_worker(rank, connections):
         connection.close()
 
 
+def _connect_rank_worker(rank, port):
+    # Rank 0 connects to ranks 1 and 2 with connect_rank and reads from both.
+    store = dist.TCPStore("127.0.0.1", port, is_master=False)
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        memory = transport.register_memory(torch.full((1024,), float(rank)))
+        if rank == 0:
+            for peer in (1, 2):
+                transport.connect_rank(peer, store=store, rank=0, timeout=10)
+            for peer in (1, 2):
+                remote = NIXLRemoteBuffer.deserialize(store.get(f"remote/{peer}"))
+                target = torch.zeros(1024)
+                view = transport.register_memory(target).to_mutable_view()
+                transport.read(view, remote)
+                torch.testing.assert_close(target, torch.full_like(target, peer))
+            store.set("done", "1")
+        else:
+            transport.connect_rank(0, store=store, rank=rank, timeout=10)
+            # pyrefly: ignore [bad-argument-type]
+            store.set(f"remote/{rank}", memory.to_remote_buffer().serialize())
+            store.wait(["done"])
+        asyncio.run(transport.close_async(timeout=5))
+
+
 def _exit_after(worker, *args):
     worker(*args)
     # NIXL 1.5 can segfault during interpreter teardown after a clean close.
@@ -157,6 +181,10 @@ class TestNIXLNative(TestCase):
             [([first for first, _ in pipes],), ([pipes[0][1]],), ([pipes[1][1]],)],
             [connection for pipe in pipes for connection in pipe],
         )
+
+    def test_three_process_cpu_connect_rank(self):
+        store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
+        self._spawn(_connect_rank_worker, [(store.port,)] * 3, [])
 
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")

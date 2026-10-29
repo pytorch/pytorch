@@ -5,6 +5,7 @@ import gc
 import json
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
+import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
@@ -873,6 +875,38 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         agent = first._agent
         first.close()
         self.assertFalse(agent.remote_metadata)
+
+    def test_connect_rank_multiple_peers(self):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            transports = [
+                new_transport("nixl", agent_name=f"rank{rank}", plugin=self.plugin)
+                for rank in range(3)
+            ]
+        for transport in transports:
+            self.addCleanup(transport.close)
+        store = dist.HashStore()
+        calls = [(0, 1), (0, 2), (1, 0), (2, 0)]
+        with ThreadPoolExecutor(len(calls)) as pool:
+            futures = [
+                pool.submit(
+                    transports[rank].connect_rank,
+                    peer,
+                    store=store,
+                    rank=rank,
+                    timeout=5,
+                )
+                for rank, peer in calls
+            ]
+            for future in futures:
+                future.result(timeout=10)
+        self.assertEqual(transports[0]._peers, {"rank1", "rank2"})
+        source = transports[0].register_memory(torch.arange(8, dtype=torch.uint8))
+        for transport in transports[1:]:
+            target = torch.zeros(8, dtype=torch.uint8)
+            remote = transport.register_memory(target).to_remote_buffer()
+            transports[0].write(source.to_view(), remote)
+            self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
+            self.assertEqual(transport._peers, {"rank0"})
 
     def test_mismatched_metadata_keeps_other_peer(self):
         first, source, targets, remotes = self.connect_peers()
