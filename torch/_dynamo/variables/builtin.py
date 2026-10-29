@@ -540,7 +540,7 @@ class BaseBuiltinVariable(VariableTracker):
         if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
-            from .functions import MethodDescriptorVariable
+            from .descriptors import MethodDescriptorVariable
 
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
