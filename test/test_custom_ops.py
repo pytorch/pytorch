@@ -782,6 +782,58 @@ class TestCustomOp(CustomOpTestCaseBase):
             self.assertFalse(f(torch.randn(3)).requires_grad)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_calls_cpp_kernels(self):
+        # aten ops with only Tensor arguments, whose kernel for the dispatch
+        # key set is a C++ kernel.
+        a, b = torch.randn(3, 3), torch.randn(3, 3)
+        cases = [
+            (torch.ops.aten.mul.Tensor, (a, b)),
+            (torch.ops.aten.neg.default, (a,)),
+            (torch.ops.aten.mm.default, (a, b)),
+            (torch.ops.aten.where.self, (a > 0, a, b)),
+            (torch.ops.aten.mm.default, (a, torch.randn(2, 2))),
+        ]
+        ops = {op for op, _ in cases} | {torch.ops.aten.mul_.Tensor}
+
+        def call(op, args):
+            try:
+                return op(*args)
+            except RuntimeError as e:
+                return str(e).splitlines()[0]
+
+        try:
+            for op, args in cases:
+                op._enable_pyobj_dispatch(False)
+                expected = call(op, args)
+                op._enable_pyobj_dispatch(True)
+                self.assertEqual(call(op, args), expected)
+
+            x = torch.randn(3, requires_grad=True)
+            torch.ops.aten.mul.Tensor(x, b[0]).sum().backward()
+            self.assertEqual(x.grad, b[0])
+
+            mul_ = torch.ops.aten.mul_.Tensor
+            mul_._enable_pyobj_dispatch(True)
+            c = a.clone()
+            version = c._version
+            self.assertIs(mul_(c, b), c)
+            self.assertGreater(c._version, version)
+            self.assertEqual(c, a * b)
+        finally:
+            for op in ops:
+                op._enable_pyobj_dispatch(False)
+
+        # Below Autograd, a custom op under functionalization reaches the C++
+        # Functionalize kernel.
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_functionalized", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        self.assertEqual(torch.func.functionalize(f)(a), a + 1)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_normalizes_results(self):
         # What a caller gets back, and any error, must not depend on whether
         # the op was dispatched through the PyObject fast path.
