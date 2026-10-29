@@ -1,12 +1,11 @@
 # Owner(s): ["module: cuda"]
 
-# Collects LLVM BOLT profiles for the torch libraries on GB300. The build
-# produces BOLT-compatible but unoptimized libraries (USE_LLVM_BOLT=1 with an
-# empty LLVM_BOLT_PROFILES_DIR, see the *-bolt branch in .ci/pytorch/build.sh).
-# tools/bolt/collect_profiles.sh then instruments them on a CPU runner, runs
-# tools/bolt/synthetic_workload.py on them on GB300, and merges, converts and
-# validates the profiles on a CPU runner. The uploaded profiles include a
-# torch.tar.zst that can replace cmake/bolt_profiles/torch.tar.zst.
+# Collects LLVM BOLT profiles on GB300 from the unoptimized libraries and the
+# wheels of an aarch64 CUDA nightly build (linux-aarch64-binary-manywheel) with
+# tools/bolt/collect_profiles.sh: instrument on a CPU runner, run the workload
+# with every Python version on GB300, merge and validate on a CPU runner. The
+# jobs use the nightly's manylinux image, which has every Python version and
+# its llvm-bolt. The result includes a torch.tar.zst for cmake/bolt_profiles.
 
 name: BOLT profile collection (GB300)
 
@@ -17,37 +16,43 @@ on:
       - tools/bolt/**
   workflow_dispatch:
     inputs:
+      nightly-run-id:
+        description: linux-aarch64-binary-manywheel run to take the libraries and wheels from (default the latest nightly that has them)
+        required: false
+        type: string
+      cuda:
+        description: CUDA variant of that build (13_0, 13_2 or 13_4)
+        required: false
+        type: string
+        default: "13_4"
       workload-variant:
         description: synthetic_workload.py --variant
         required: false
         type: string
         default: all
       workload-steps:
-        description: synthetic_workload.py --steps
+        description: synthetic_workload.py --steps for each Python version
         required: false
         type: string
-        default: "320000"
-      llvm-bolt-version:
-        description: LLVM release that provides llvm-bolt and merge-fdata
-        required: false
-        type: string
-        default: "21.1.8"
+        default: "45000"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 permissions:
-  id-token: write
   contents: read
   actions: read
 
 env:
-  LLVM_BOLT_VERSION: ${{ inputs.llvm-bolt-version || '21.1.8' }}
+  # TODO(janbernloehr): drop the default once #202470 is in a nightly. Until
+  # then only its ciflow/binaries run has the prebolt artifacts.
+  NIGHTLY_RUN_ID: ${{ inputs.nightly-run-id || '40903868087' }}
+  BOLT_CUDA: ${{ inputs.cuda || '13_4' }}
   BOLT_WORKLOAD_VARIANT: ${{ inputs.workload-variant || 'all' }}
-  BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '320000' }}
-  # Caps the workload well below the profile job's timeout.
-  BOLT_WORKLOAD_MAX_SECONDS: "7200"
+  BOLT_WORKLOAD_STEPS: ${{ inputs.workload-steps || '45000' }}
+  # Caps the workload of each Python version.
+  BOLT_WORKLOAD_MAX_SECONDS: "1200"
 
 jobs:
   get-label-type:
@@ -61,182 +66,171 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf
 
-  build:
-    name: linux-jammy-aarch64-cuda13.4-py3.12-gcc13-bolt
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-arm64g4-16-62
-      build-environment: linux-jammy-aarch64-cuda13.4-py3.12-gcc13-bolt
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13
-      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      cuda-arch-list: '10.0'
-      test-matrix: |
-        { include: [
-          { config: "bolt_profile", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300" },
-        ]}
-      python-version: "3.12"
-      compiler: gcc13
-      cuda-version: "13.4"
-    secrets: inherit
-
   instrument:
     name: instrument
-    needs: [get-label-type, build]
-    if: github.repository_owner == 'pytorch'
+    needs: get-label-type
     runs-on: ${{ needs.get-label-type.outputs.label-type }}l-arm64g4-16-62
     container:
-      image: ${{ needs.build.outputs.docker-image }}
-    timeout-minutes: 120
+      image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64
+    timeout-minutes: 60
+    outputs:
+      nightly-run-id: ${{ steps.nightly.outputs.run-id }}
     steps:
-      - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Find the nightly build
+        id: nightly
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -z "${NIGHTLY_RUN_ID}" ]]; then
+            NIGHTLY_RUN_ID="$(/opt/python/cp312-cp312/bin/python3 - << 'EOF'
+          import json, os, sys, urllib.request
+
+          def get(path):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/{path}",
+                  headers={"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"},
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          name = f"prebolt-cuda-aarch64-{os.environ['BOLT_CUDA']}"
+          workflow = "generated-linux-aarch64-binary-manywheel-nightly.yml"
+          for run in get(f"workflows/{workflow}/runs?branch=nightly&per_page=20")["workflow_runs"]:
+              artifacts = get(f"runs/{run['id']}/artifacts?name={name}")["artifacts"]
+              if any(not artifact["expired"] for artifact in artifacts):
+                  print(run["id"])
+                  break
+          else:
+              sys.exit(f"no recent nightly has the {name} artifact")
+          EOF
+            )"
+          fi
+          echo "Libraries and wheels of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${NIGHTLY_RUN_ID}"
+          echo "run-id=${NIGHTLY_RUN_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download the unoptimized libraries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          use-arc: true
-          python-version: "3.12"
-          submodules: 'false'
+          name: prebolt-cuda-aarch64-${{ env.BOLT_CUDA }}
+          path: prebolt
+          run-id: ${{ steps.nightly.outputs.run-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure AWS credentials
-        id: aws-creds
-        continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/arc
-          aws-region: us-east-1
-          role-duration-seconds: 18000
-
-      - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
-        with:
-          name: ${{ needs.build.outputs.build-environment }}
-          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
 
       - name: Instrument the torch libraries
         shell: bash
-        run: tools/bolt/collect_profiles.sh instrument dist/*.whl bolt-instrumented
+        run: tools/bolt/collect_profiles.sh instrument prebolt bolt-instrumented
 
       - name: Upload instrumented libraries
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: bolt-instrumented-${{ needs.build.outputs.build-environment }}
+          name: bolt-instrumented
           path: bolt-instrumented/
           if-no-files-found: error
           retention-days: 3
 
   profile:
-    name: profile (${{ matrix.config }}, ${{ matrix.runner }})
-    needs: [get-label-type, build, instrument]
-    # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(needs.build.outputs.test-matrix).include) != '[]'
-    strategy:
-      matrix: ${{ fromJSON(needs.build.outputs.test-matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
+    name: profile (nv-l-arm64grace-16-200-gb300)
+    needs: instrument
+    runs-on: nv-l-arm64grace-16-200-gb300
     container:
-      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
-      options: "--gpus all"
+      image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64
+      options: --gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility
     timeout-minutes: 240
     steps:
-      - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
-        with:
-          use-arc: true
-          python-version: "3.12"
-          compiler: gcc13
-          cuda-version: "13.4"
-          submodules: 'false'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure AWS credentials
-        id: aws-creds
-        continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/arc
-          aws-region: us-east-1
-          role-duration-seconds: 18000
-
-      - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
-        with:
-          name: ${{ needs.build.outputs.build-environment }}
-          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Download instrumented libraries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: bolt-instrumented-${{ needs.build.outputs.build-environment }}
+          name: bolt-instrumented
           path: bolt-instrumented
 
-      - name: Run the workload on the instrumented libraries
+      - name: Download the wheels
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: manywheel-py3_*-cuda-aarch64-${{ env.BOLT_CUDA }}
+          merge-multiple: true
+          path: wheels
+          run-id: ${{ needs.instrument.outputs.nightly-run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run the workload with each Python version
         id: run
-        timeout-minutes: 180
+        timeout-minutes: 200
         shell: bash
         run: |
-          set -x
-          # shellcheck disable=SC2046
-          python3 -m pip install $(echo dist/*.whl)
-          tools/bolt/collect_profiles.sh run bolt-instrumented bolt-run
+          failed=()
+          for wheel in wheels/*.whl; do
+            # torch-<version>-<python tag>-<abi tag>-<platform>.whl
+            tag="$(basename "${wheel}" | cut -d- -f3,4)"
+            venv="${RUNNER_TEMP}/venv"
+            rm -rf "${venv}"
+            echo "::group::${tag}"
+            if "/opt/python/${tag}/bin/python3" -m venv "${venv}" \
+                && "${venv}/bin/pip" install --quiet "${wheel}" --index-url "https://download.pytorch.org/whl/nightly/cu${BOLT_CUDA/_/}" \
+                && "${venv}/bin/pip" install --quiet numpy \
+                && PATH="${venv}/bin:${PATH}" tools/bolt/collect_profiles.sh run bolt-instrumented bolt-run; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error::the workload failed with ${tag}"
+              failed+=("${tag}")
+            fi
+          done
+          rm -rf "${venv}"
+          [[ ${#failed[@]} -eq 0 ]]
 
       - name: Upload raw profiles
         if: always() && steps.run.conclusion && steps.run.conclusion != 'skipped'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: bolt-run-${{ needs.build.outputs.build-environment }}
+          name: bolt-run
           path: bolt-run/
           if-no-files-found: warn
           retention-days: 3
 
   finalize:
     name: finalize
-    needs: [get-label-type, build, profile]
-    if: github.repository_owner == 'pytorch'
+    needs: [get-label-type, instrument, profile]
+    # Also package the profiles of the Python versions that ran when others failed.
+    if: ${{ !cancelled() && needs.profile.result != 'skipped' }}
     runs-on: ${{ needs.get-label-type.outputs.label-type }}l-arm64g4-16-62
     container:
-      image: ${{ needs.build.outputs.docker-image }}
-    timeout-minutes: 120
+      image: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64
+    timeout-minutes: 60
     steps:
-      - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download the unoptimized libraries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          use-arc: true
-          python-version: "3.12"
-          submodules: 'false'
+          name: prebolt-cuda-aarch64-${{ env.BOLT_CUDA }}
+          path: prebolt
+          run-id: ${{ needs.instrument.outputs.nightly-run-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure AWS credentials
-        id: aws-creds
-        continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/arc
-          aws-region: us-east-1
-          role-duration-seconds: 18000
-
-      - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
-        with:
-          name: ${{ needs.build.outputs.build-environment }}
-          use-gha: ${{ steps.aws-creds.outcome != 'success' }}
 
       - name: Download raw profiles
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: bolt-run-${{ needs.build.outputs.build-environment }}
+          name: bolt-run
           path: bolt-run
 
       - name: Merge, convert and validate the profiles
         id: finalize
         shell: bash
-        run: tools/bolt/collect_profiles.sh finalize dist/*.whl bolt-run bolt-profiles
+        run: tools/bolt/collect_profiles.sh finalize prebolt bolt-run bolt-profiles
 
       - name: Upload BOLT profiles
         if: always() && steps.finalize.conclusion && steps.finalize.conclusion != 'skipped'
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: bolt-profiles-${{ needs.build.outputs.build-environment }}
+          name: bolt-profiles-cuda${{ env.BOLT_CUDA }}
           path: bolt-profiles/
           if-no-files-found: warn
           retention-days: 14

@@ -97,16 +97,6 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export ACL_ROOT_DIR=/acl
 fi
 
-# BOLT profile collection builds: compile and link with the flags BOLT needs,
-# but skip the build-time optimization by pointing LLVM_BOLT_PROFILES_DIR at
-# an empty directory (see cmake/bolt_profiles/README.md). The resulting
-# libraries are instrumented by tools/bolt/collect_profiles.sh.
-if [[ "$BUILD_ENVIRONMENT" == *-bolt ]]; then
-  export USE_LLVM_BOLT=1
-  LLVM_BOLT_PROFILES_DIR="$(mktemp -d)"
-  export LLVM_BOLT_PROFILES_DIR
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
     # shellcheck disable=SC1091
@@ -237,8 +227,7 @@ fi
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 # Limit this ARM64 CUDA build's parallelism to avoid compiler OOMs.
 if [[ "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.2-py3.12-gcc13" ||
-      "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.4-py3.12-gcc13" ||
-      "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.4-py3.12-gcc13-bolt" ]]; then
+      "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.4-py3.12-gcc13" ]]; then
   export MAX_JOBS=8
 fi
 if [ -z "$MAX_JOBS" ]; then
