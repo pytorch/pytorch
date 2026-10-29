@@ -1419,10 +1419,10 @@ class CompilePackage:
         compiles it."""
 
     def add_graph_break_op(self, op: object) -> None:
-        """Called with an op fake tensors cannot run (no fake kernel, or a data-dependent
-        output value or shape) and with the target of the node that called it (an op
-        whose kernel or fake kernel called it, or not an op), as Dynamo graph-breaks
-        on the node and runs it eagerly between graphs."""
+        """Called with the target of a node fake tensors failed to run (an op, or
+        not an op), and with the op that failed when it has no fake kernel or a
+        data-dependent output value or shape, as Dynamo graph-breaks on the node
+        and runs it eagerly between graphs."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
