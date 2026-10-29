@@ -1418,11 +1418,16 @@ class CompilePackage:
         """Called with each graph registered under ``backend_id``, before its backend
         compiles it."""
 
-    def add_graph_break_op(self, op: object) -> None:
+    def add_graph_break_op(
+        self,
+        op: object,
+        failed_op: object = None,
+        device_types: frozenset[str] = frozenset(),
+    ) -> None:
         """Called with the target of a node fake tensors failed to run (an op, or
-        not an op), and with the op that failed when it has no fake kernel or a
-        data-dependent output value or shape, as Dynamo graph-breaks on the node
-        and runs it eagerly between graphs."""
+        not an op) on ``device_types``, as Dynamo graph-breaks on the node and runs
+        it eagerly between graphs; and with the op that failed when it has no fake
+        kernel or a data-dependent output value or shape."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.

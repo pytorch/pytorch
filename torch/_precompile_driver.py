@@ -82,18 +82,23 @@ if TYPE_CHECKING:
     def call(flat_inputs: list[object]) -> list[object]: ...
 
 
-def _import_custom_op_modules():
+def _import_custom_op_modules(served=(), import_served=None):
     """Import the modules registering the custom ops the graphs call, then check
     that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
     registered, and that every module in CUSTOM_OP_KERNEL_MODULES imported.
-    Emitted as section 0 and called at exec time."""
+    Emitted as section 0 and called at exec time. The modules in ``served`` are
+    imported with ``import_served``, which fails the load if they do not import."""
     import importlib
     import warnings
 
     import torch
 
     import_errors = {}
+    # In order, so a module overriding another's kernel registers it last.
     for module in CUSTOM_OP_MODULES:
+        if import_served is not None and module in served:
+            import_served(module)
+            continue
         try:
             importlib.import_module(module)
         # Not just ImportError: a module can raise anything while it registers ops.
@@ -545,7 +550,8 @@ def _build_multigraph_forward():
             )
         try:
             return importlib.import_module(module_name)
-        except ImportError as _e:
+        # Not just ImportError, as in section 0.
+        except Exception as _e:
             # The torch-build / environment lock, surfaced per the documented
             # contract rather than as a raw ModuleNotFoundError.
             raise _PrecompileError(
@@ -561,9 +567,7 @@ def _build_multigraph_forward():
             _import(_module_name)
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
-        for _module_name in [m for m in CUSTOM_OP_MODULES if m in SERVED_MODULES]:
-            _import(_module_name)
-        _import_custom_op_modules()
+        _import_custom_op_modules(SERVED_MODULES, _import)
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
@@ -862,23 +866,23 @@ def _build_installed_forward():
             "modules defined in an importable module."
         )
     if "_import_custom_op_modules" in globals():
-        # Refused first, or the op check reports such a module's ops missing.
-        if (_module_name := _unimportable_module(SERVED_MODULES)) is not None:
-            raise _PrecompileError(
-                f"precompile: this installed artifact serves frames of module "
-                f"{_module_name!r}, which is not importable here."
-            )
-        # Section 0 also lists them in case they register its ops; their failure
-        # fails the load, so it is not warned about as a custom op module's.
-        for _module_name in [m for m in CUSTOM_OP_MODULES if m in SERVED_MODULES]:
+
+        def _import_served(module_name):
             try:
-                importlib.import_module(_module_name)
-            except ImportError as _e:
+                importlib.import_module(module_name)
+            # Not just ImportError, as in section 0.
+            except Exception as _e:
                 raise _PrecompileError(
                     f"precompile: this installed artifact serves frames of module "
-                    f"{_module_name!r}, which is not importable here ({_e})."
+                    f"{module_name!r}, which is not importable here ({_e})."
                 ) from _e
-        _import_custom_op_modules()
+
+        # Refused first, or the op check reports such a module's ops missing.
+        if (_module_name := _unimportable_module(SERVED_MODULES)) is not None:
+            _import_served(_module_name)
+        # Section 0 also lists them in case they register its ops; their failure
+        # fails the load, so it is not warned about as a custom op module's.
+        _import_custom_op_modules(SERVED_MODULES, _import_served)
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
