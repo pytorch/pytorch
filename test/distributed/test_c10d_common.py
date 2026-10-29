@@ -367,20 +367,37 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "needs installed entry points")
-    def test_fake_backend_entrypoint(self):
+    def test_fake_backend_registration(self):
         from torch.distributed._backends import fake
+        from torch.testing._internal.distributed import fake_pg
 
-        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
-        self.assertEqual(
-            [ep.value for ep in eps if ep.name == "fake"],
-            ["torch.distributed._backends.fake:_register_fake_backend"],
-        )
-        with unittest.mock.patch.dict(dist.Backend._plugins):
-            dist.Backend._plugins.pop("FAKE", None)
+        def ensure_registered():
             dist.Backend._ensure_backend_registered("fake")
-            creator = dist.Backend._plugins["FAKE"].creator_fn
-        self.assertIs(creator, fake._create_fake_pg)
+
+        def ensure_registered_without_entrypoint():
+            with unittest.mock.patch(
+                "importlib.metadata.entry_points", return_value=[]
+            ):
+                ensure_registered()
+
+        cases = {
+            "fallback": ensure_registered_without_entrypoint,
+            "testing_shim": lambda: importlib.reload(fake_pg),
+        }
+        # fbcode/sandcastle builds have no installed entry points.
+        if not (IS_FBCODE or IS_SANDCASTLE):
+            eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+            self.assertEqual(
+                [ep.value for ep in eps if ep.name == "fake"],
+                ["torch.distributed._backends.fake:_register_fake_backend"],
+            )
+            cases["entrypoint"] = ensure_registered
+        for name, register in cases.items():
+            with self.subTest(name), unittest.mock.patch.dict(dist.Backend._plugins):
+                dist.Backend._plugins.pop("FAKE", None)
+                register()
+                creator = dist.Backend._plugins["FAKE"].creator_fn
+                self.assertIs(creator, fake._create_fake_pg)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "needs installed entry points")
     def test_fake_backend_without_import(self):
@@ -398,28 +415,6 @@ class BackendEntryPointTest(TestCase):
         self.assertEqual(
             out.split(), ["False", "False", "torch.distributed._backends.fake"]
         )
-
-    def test_fake_backend_without_entrypoint(self):
-        from torch.distributed._backends import fake
-
-        with (
-            unittest.mock.patch.dict(dist.Backend._plugins),
-            unittest.mock.patch("importlib.metadata.entry_points", return_value=[]),
-        ):
-            dist.Backend._plugins.pop("FAKE", None)
-            dist.Backend._ensure_backend_registered("fake")
-            creator = dist.Backend._plugins["FAKE"].creator_fn
-        self.assertIs(creator, fake._create_fake_pg)
-
-    def test_fake_backend_testing_shim_registers(self):
-        from torch.distributed._backends import fake
-        from torch.testing._internal.distributed import fake_pg
-
-        with unittest.mock.patch.dict(dist.Backend._plugins):
-            dist.Backend._plugins.pop("FAKE", None)
-            importlib.reload(fake_pg)
-            creator = dist.Backend._plugins["FAKE"].creator_fn
-        self.assertIs(creator, fake._create_fake_pg)
 
     @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
