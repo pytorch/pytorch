@@ -82,12 +82,8 @@ Tensor& _woq_scaled_rowwise(
       "), got ",
       scale_b.sizes());
   TORCH_CHECK_VALUE(
-      scale_b.numel() == N && scale_b.scalar_type() == kFloat,
-      "woq_scaled_mm: RowWise scale_b must have ",
-      N,
-      " Float elements, got ",
-      scale_b.numel(),
-      " of dtype ",
+      scale_b.scalar_type() == kFloat,
+      "woq_scaled_mm: RowWise scale_b must be Float, got ",
       scale_b.scalar_type());
   TORCH_CHECK_VALUE(
       scale_b.stride(1) == 1,
@@ -112,7 +108,7 @@ Tensor& _woq_scaled_block128x128(
       "Float8_e4m3fn, got ",
       mat_b.scalar_type());
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == ceil_div<int64_t>(N, 128) &&
+      scale_b.dim() == 2 && scale_b.size(0) == ceil_div<int64_t>(N, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
           (scale_b.scalar_type() == kFloat ||
            scale_b.scalar_type() == kFloat8_e8m0fnu),
@@ -149,7 +145,8 @@ Tensor& _woq_scaled_mxfp8(
       "Float8_e4m3fn, got ",
       mat_b.scalar_type());
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
+      scale_b.dim() == 2 && scale_b.size(0) == N &&
+          scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
           scale_b.scalar_type() == kFloat8_e8m0fnu,
       "woq_scaled_mm: BlockWise1x32 scale_b must be float8_e8m0fnu with "
       "shape ",
@@ -184,7 +181,8 @@ Tensor& _woq_scaled_mxfp4(
       "Float4_e2m1fn_x2, got ",
       mat_b.scalar_type());
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
+      scale_b.dim() == 2 && scale_b.size(0) == N &&
+          scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
           scale_b.scalar_type() == kFloat8_e8m0fnu,
       "woq_scaled_mm: BlockWise1x32 scale_b must be float8_e8m0fnu with "
       "shape ",
@@ -479,34 +477,21 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
     const at::ITensorListRef& scale_b_list,
     at::IntArrayRef scale_recipe_b,
     const std::optional<Tensor>& bias) {
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       mat_a.dim() == 2,
       "woq_scaled_mm: mat_a must be 2D [M, K], got dim ",
       mat_a.dim());
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       mat_b.dim() == 2,
       "woq_scaled_mm: mat_b must be 2D [K, N], got dim ",
       mat_b.dim());
-
-  const int64_t M = mat_a.size(0);
-  const int64_t K = mat_a.size(1);
-  const int64_t N = mat_b.size(1);
-  Tensor out = at::empty({M, N}, mat_a.options());
-
-  if (M == 0 || K == 0 || N == 0) {
-    if (K == 0) {
-      out.zero_();
-    }
-    return out;
-  }
-
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       mat_a.scalar_type() == at::kBFloat16 ||
           mat_a.scalar_type() == at::kHalf || mat_a.scalar_type() == at::kFloat,
       "woq_scaled_mm: mat_a must be bfloat16, half or float, got ",
       mat_a.scalar_type());
   const bool is_fp4 = mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2;
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       is_fp4 || mat_b.scalar_type() == at::kFloat8_e4m3fn ||
           mat_b.scalar_type() == at::kFloat8_e5m2,
       "woq_scaled_mm: mat_b must be Float8_e4m3fn, Float8_e5m2 or "
@@ -514,10 +499,19 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
       mat_b.scalar_type());
 
   std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
-  ArrayRef<Tensor> scale_b_ref(scale_b);
+  TORCH_CHECK_VALUE(
+      !scale_b.empty() && scale_b.size() == scale_recipe_b.size(),
+      "woq_scaled_mm: scale_b_list and scale_recipe_b must be non-empty "
+      "and have the same number of elements, got ",
+      scale_b.size(),
+      " and ",
+      scale_recipe_b.size());
 
+  const int64_t M = mat_a.size(0);
+  const int64_t K = mat_a.size(1);
+  const int64_t N = mat_b.size(1);
   const int64_t K_multiplier = is_fp4 ? 2 : 1;
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       mat_b.size(0) * K_multiplier == K,
       "woq_scaled_mm: mat_b's contraction dim (",
       mat_b.size(0) * K_multiplier,
@@ -532,9 +526,17 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
             bias->scalar_type() == c10::ScalarType::Half,
         "Bias must be Float32 or BFloat16 or Half, but got ",
         bias->scalar_type());
+    TORCH_CHECK_VALUE(
+        bias->numel() == N,
+        "Bias must be size ",
+        N,
+        " but got ",
+        bias->numel());
   }
+
+  Tensor out = at::empty({M, N}, mat_a.options());
   {
-    auto bias_ = bias.has_value() ? *bias : Tensor();
+    auto bias_ = bias.value_or(Tensor());
     std::vector<TensorArg> targs{
         {out, "out", 0},
         {mat_a, "mat_a", 1},
@@ -544,32 +546,35 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
     checkAllSameGPU(__func__, targs);
   }
 
-  std::optional<Tensor> bias_opt = bias.has_value()
-      ? std::optional<Tensor>{*bias}
-      : std::optional<Tensor>{std::nullopt};
+  if (M == 0 || K == 0 || N == 0) {
+    if (K == 0) {
+      if (bias.has_value()) {
+        out.copy_(bias->expand({M, N}));
+      } else {
+        out.zero_();
+      }
+    }
+    return out;
+  }
 
-  std::vector<int64_t> scale_recipe_b_vec(
-      scale_recipe_b.begin(), scale_recipe_b.end());
-  auto scale_recipe_b_enum =
-      convert_int_to_enum<ScalingType>(scale_recipe_b_vec);
-
+  auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
   ScalingType scaling_choice_b = scale_recipe_b_enum[0];
 
   switch (scaling_choice_b) {
     case ScalingType::TensorWise:
-      _woq_scaled_tensorwise(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_tensorwise(mat_a, mat_b, scale_b[0], bias, out);
       break;
     case ScalingType::RowWise:
-      _woq_scaled_rowwise(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_rowwise(mat_a, mat_b, scale_b[0], bias, out);
       break;
     case ScalingType::BlockWise128x128:
-      _woq_scaled_block128x128(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
+      _woq_scaled_block128x128(mat_a, mat_b, scale_b[0], bias, out);
       break;
     case ScalingType::BlockWise1x32:
       if (mat_b.scalar_type() == at::kFloat8_e4m3fn) {
-        _woq_scaled_mxfp8(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
+        _woq_scaled_mxfp8(mat_a, mat_b, scale_b[0], bias, out);
       } else if (mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2) {
-        _woq_scaled_mxfp4(mat_a, mat_b, scale_b_ref[0], bias_opt, out);
+        _woq_scaled_mxfp4(mat_a, mat_b, scale_b[0], bias, out);
       } else {
         TORCH_CHECK_VALUE(
             false,
