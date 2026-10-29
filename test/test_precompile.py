@@ -10266,7 +10266,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             lib.impl("nofake", lambda x: x.clone(), key)
         name = f"precompile_devices_nofake_{uuid.uuid4().hex}"
         with open(os.path.join(directory, name + ".py"), "w") as f:
-            f.write(f"import torch\ndef fn(x):\n    return torch.ops.{ns}.nofake(x)\n")
+            f.write(f"import torch\ndef fn(*a): return torch.ops.{ns}.nofake(*a)\n")
         self.addCleanup(sys.modules.pop, name, None)
         with capture(
             importlib.import_module(name).fn,
@@ -10301,8 +10301,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             tracer=DynamoTracer(),
             backend="eager",
         ) as cap:
-            cap(torch.randn(2))
-            # As frames compiled for CUDA around a graph-break op on CPU tensors.
+            with torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True):
+                cap(torch.randn(2))
+            # As CUDA frames around a non-compliant op called on CPU tensors via *a.
             package = cap._session._package
             package._device_types = frozenset({"cuda"})
             for backend_id in package.device_types:
