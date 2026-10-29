@@ -74,6 +74,7 @@ _REPORT_CHILD_ENV = {
 _RUN_TYPES = {
     "type": str,
     "schema_version": str,
+    "id": str,
     "file": str,
     "suite": str,
     "case_name": str,
@@ -103,8 +104,9 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
+    test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
     test.assertIn(run["outcome"], _RUN_OUTCOMES)
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
@@ -247,7 +249,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
@@ -267,6 +269,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+        # A new uuid per line, not one per report or per test.
+        self.assertEqual(len({run["id"] for run in runs}), len(runs))
 
     def test_identities(self) -> None:
         rendered = {}
@@ -396,6 +400,40 @@ TestUnittest    | test_unittest            | test_unittest""",
                 ("test_fail_last", "failed", 1),
             ],
         )
+
+    def test_session_without_tests_leaves_no_report(self) -> None:
+        # Like run_test.py's serial pass over a file without serial tests. A session
+        # interrupted after its test started keeps its report for run_test.py
+        # (TestReportCrashes.test_interrupt_leaves_the_run_in_flight).
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in ([], ["-n", "1"]):
+                prefix = Path(tmp) / f"empty{len(args)}"
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "xdist_report.py",
+                        "-k",
+                        "no_such_test",
+                        *args,
+                        "-p",
+                        "torch.testing._internal.torchci.plugin",
+                        f"--torchci-report-prefix={prefix}",
+                        "-p",
+                        "no:cacheprovider",
+                        "-q",
+                    ],
+                    cwd=_REPORT_TESTDATA,
+                    env=_REPORT_CHILD_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                # 5: no tests ran.
+                self.assertEqual(proc.returncode, 5, proc.stdout + proc.stderr)
+                self.assertNotIn("torchci:", proc.stderr)
+                self.assertEqual(_report_files(prefix), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -541,6 +579,25 @@ class TestReportEnablement(TestCase):
             self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
             self.assertEqual(args("test_type_info", False, "/reports"), [])
+
+    def test_run_test_default_reports_dir(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default = run_test_module._torchci_reports_default
+        ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        for is_ci, repo, xpu, expected in (
+            (False, "pytorch/pytorch", None, None),
+            # Other repos' CI, such as forks' and out-of-tree backends', writes none.
+            (True, "someone/pytorch", None, None),
+            (True, "pytorch/pytorch", None, ci_dir),
+            # XPU builds write none.
+            (True, "pytorch/pytorch", "20250101", None),
+        ):
+            with (
+                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repo}),
+                unittest.mock.patch.object(torch.version, "xpu", xpu),
+            ):
+                self.assertEqual(default(), expected)
 
 
 # gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
