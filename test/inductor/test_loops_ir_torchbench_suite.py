@@ -1219,6 +1219,230 @@ def pytest_importorskip_numpy(testcase):
     return np
 
 
+class StockComparatorPolicyTest(TestCase):
+    """Bounded comparator correction: existing stock APIs/policy only.
+
+    Covers: stock-approved FP64 error envelope, existing model policy
+    (evalFP32 1e-4/trainCUDA 1e-3 with model metadata), bad CPP still
+    rejected, strict gate unchanged, reference-failure fallback documented,
+    and no input/global mutation by the FP64 reference builders.
+    """
+
+    def test_stock_tolerance_eval_fp32_is_1e4(self):
+        tol, cosine, record = suite._stock_tolerance_and_flags("resnet18", "eval")
+        self.assertEqual(tol, 1e-4)
+        self.assertFalse(cosine)
+        self.assertEqual(
+            record["source"],
+            "benchmark/torchbenchmark/util/env_check.py:get_tolerance_and_cosine_flag",
+        )
+
+    def test_stock_tolerance_train_cuda_is_1e3(self):
+        tol, _, record = suite._stock_tolerance_and_flags("resnet18", "train")
+        # Existing model policy for train/CUDA (stock metadata; no override).
+        self.assertEqual(tol, 1e-3)
+        self.assertEqual(record["test"], "train")
+
+    def test_stock_same_fp64_envelope_passes_within_2x(self):
+        # Stock-approved FP64 error envelope: res_error <= 2*ref_error+tol/10.
+        fp64 = torch.zeros(8, dtype=torch.float64)
+        ref = torch.zeros(8, dtype=torch.float32)
+        res = torch.full((8,), 1e-6, dtype=torch.float32)
+        ok, _ = suite._stock_same(ref, res, fp64, tol=1e-4, cos_similarity=False)
+        self.assertTrue(ok)
+
+    def test_stock_same_rejects_far_output(self):
+        fp64 = torch.zeros(8, dtype=torch.float64)
+        ref = torch.zeros(8, dtype=torch.float32)
+        res = torch.ones(8, dtype=torch.float32)
+        ok, _ = suite._stock_same(ref, res, fp64, tol=1e-4, cos_similarity=False)
+        self.assertFalse(ok)
+
+    def test_layout_metadata_blocks_dtype_change_but_values_go_to_stock(self):
+        a = suite._tensor_fingerprint(torch.zeros(4, dtype=torch.float32))
+        b = suite._tensor_fingerprint(torch.zeros(4, dtype=torch.float16))
+        ok, reason = suite._layout_metadata_equal(a, b)
+        self.assertFalse(ok)
+        self.assertIn("dtype", reason)
+        # Same layout, tiny value change: metadata passes (values judged by
+        # the stock comparator, not here).
+        c = suite._tensor_fingerprint(torch.zeros(4, dtype=torch.float32))
+        ok, _ = suite._layout_metadata_equal(a, c)
+        self.assertTrue(ok)
+
+    def test_bad_cpp_still_rejected_by_stock_gate(self):
+        fp64 = torch.zeros(8, dtype=torch.float64)
+        ref = {"loss": suite._tensor_fingerprint(torch.zeros(8))}
+        bad = {"loss": suite._tensor_fingerprint(torch.ones(8))}
+        fp64_sec = {
+            "loss": {
+                "__tensor__": True,
+                "dtype": "torch.float64",
+                "shape": [8],
+                "strides": [1],
+                "numel": 8,
+                "device": "cpu",
+                "bytes": fp64.contiguous().numpy().tobytes(),
+            }
+        }
+        ok, _ = suite._stock_section_pass(
+            ref["loss"], bad["loss"], fp64_sec["loss"], tol=1e-4, cos_similarity=False
+        )
+        self.assertFalse(ok)
+
+    def test_strict_gate_unchanged_eval_and_train(self):
+        base = {
+            "cpp_compile": {},
+            "cpp_coverage": {"num_generated_kernels": 3},
+            "cpp_graphs": {"num_seam_graphs_ok": 2, "backward_cpp_evidence": True},
+        }
+        # Eval strict still bytewise-gated (stock keys never leak in).
+        strict_ok = dict(
+            base,
+            accuracy={
+                "eager_repeat_bytewise": True,
+                "cpp_vs_eager": {"bytewise_equal": True},
+            },
+        )
+        self.assertEqual(suite._verdict(strict_ok, "eval", "strict_eager"), "pass")
+        strict_bad = dict(
+            base,
+            accuracy={
+                "eager_repeat_bytewise": True,
+                "cpp_vs_eager": {"bytewise_equal": False},
+                "cpp_vs_eager_stock_pass": True,
+            },
+        )
+        self.assertEqual(suite._verdict(strict_bad, "eval", "strict_eager"), "fail")
+
+    def test_normal_verdict_requires_valid_stock_reference(self):
+        base = {
+            "cpp_compile": {},
+            "cpp_coverage": {"num_generated_kernels": 3},
+            "cpp_graphs": {"num_seam_graphs_ok": 2, "backward_cpp_evidence": True},
+        }
+        masked = dict(
+            base,
+            accuracy={
+                "cpp_vs_eager_stock_pass": True,
+                "stock_reference_valid": False,
+            },
+        )
+        self.assertEqual(suite._verdict(masked, "eval", "inductor"), "fail")
+        ok = dict(
+            base,
+            accuracy={
+                "cpp_vs_eager_stock_pass": True,
+                "stock_reference_valid": True,
+            },
+        )
+        self.assertEqual(suite._verdict(ok, "eval", "inductor"), "pass")
+        train_masked = dict(
+            base,
+            accuracy={
+                "cpp_normal_full_state_pass": True,
+                "stock_reference_valid": False,
+            },
+        )
+        self.assertEqual(suite._verdict(train_masked, "train", "inductor"), "fail")
+
+    def test_fp64_eval_reference_failure_uses_cosine_fallback_only(self):
+        # FP64 execution failure (mid-build: clone.invoke raises) must follow
+        # ONLY the established stock cosine fallback and record it.
+        bm = FakeBenchmark(test="eval")
+        bm.eval = lambda: (_ for _ in ()).throw(RuntimeError("fp64 boom"))
+        fp64_out, record = suite._fp64_reference_outputs(bm, "eval", [])
+        self.assertIsNone(fp64_out)
+        self.assertEqual(record.get("fallback"), "cosine")
+        self.assertIn("cosine", record.get("fallback_reason", ""))
+        self.assertEqual(
+            record.get("fallback_source"),
+            "benchmark/torchbenchmark/util/env_check.py:check_accuracy",
+        )
+
+    def test_fp64_train_reference_failure_documented(self):
+        bm = FakeBenchmark(test="train")
+        snap = suite.snapshot_state(bm)
+        fp64_fp, record = suite._fp64_train_post_state(
+            bm, snap, lambda _b: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+        self.assertIsNone(fp64_fp)
+        self.assertEqual(record.get("fallback"), "cosine")
+        self.assertEqual(
+            record.get("fallback_source"),
+            "benchmark/torchbenchmark/util/env_check.py:check_accuracy",
+        )
+
+    def test_fp64_eval_reference_restores_inputs_and_globals(self):
+        torch.manual_seed(0)
+        random.seed(0)
+        bm = FakeBenchmark(test="eval")
+        before_inputs = bm.example_inputs[0].clone()
+        before_settings = suite.numerical_settings()
+        fp64_out, record = suite._fp64_reference_outputs(bm, "eval", [])
+        # Genuine FP64 reference built for eval; inputs + globals restored.
+        self.assertTrue(record.get("built"))
+        self.assertTrue(torch.equal(bm.example_inputs[0], before_inputs))
+        self.assertEqual(suite.numerical_settings(), before_settings)
+        self.assertIsNotNone(fp64_out)
+        # Workload dtype untouched (reference-only double).
+        mod, _ = bm.get_module()
+        self.assertEqual(next(mod.parameters()).dtype, torch.float32)
+
+    def test_fp64_train_reference_leaves_live_workload_untouched(self):
+        # Regression: the FP64 train reference must NEVER mutate the live
+        # workload dtype (in-place float64 cast + values-only restore_state
+        # left params/inputs at float64, breaking downstream restores).
+        torch.manual_seed(0)
+        bm = FakeBenchmark(test="train")
+        snap = suite.snapshot_state(bm)
+        before_settings = suite.numerical_settings()
+        fp64_fp, record = suite._fp64_train_post_state(
+            bm, snap, lambda b: (None, suite._post_state_fingerprint(b, None))
+        )
+        self.assertTrue(record.get("built"))
+        self.assertIsNotNone(fp64_fp)
+        mod, _ = bm.get_module()
+        for p in mod.parameters():
+            self.assertEqual(p.dtype, torch.float32)
+        self.assertEqual(bm.example_inputs[0].dtype, torch.float32)
+        # Live values still equal the snapshot (restore still works).
+        for key, frozen in snap["model_state"].items():
+            live = mod.state_dict()[key]
+            self.assertTrue(
+                suite._frozen_equal(suite._tensor_fingerprint(live), frozen),
+                f"param {key} diverged",
+            )
+        self.assertEqual(suite.numerical_settings(), before_settings)
+
+    def test_train_accuracy_cpp_unavailable_records_audit_keys(self):
+        bm = FakeBenchmark(test="train")
+        out = suite.train_accuracy(bm, None, None)
+        self.assertFalse(out["cpp_normal_full_state_pass"])
+        self.assertIn("cpp-unavailable", out["cpp_normal_full_state_diffs"])
+        self.assertFalse(out["fp64_reference"].get("built"))
+        self.assertIn("not attempted", out["fp64_reference"].get("note", ""))
+        self.assertIsNone(out["stock_reference_valid"])
+        self.assertIn("error", out["cpp_vs_eager"])
+
+    def test_eval_accuracy_records_policy_and_reference(self):
+        torch.manual_seed(0)
+        bm = FakeBenchmark(test="eval")
+        bm.name = "resnet18"
+        out = suite.eval_accuracy(bm, None, None)
+        self.assertEqual(
+            out["normal_policy"]["source"],
+            "benchmark/torchbenchmark/util/env_check.py:get_tolerance_and_cosine_flag",
+        )
+        self.assertEqual(
+            out["normal_comparator"]["source"], "torch/_dynamo/utils.py:same"
+        )
+        self.assertIn("source", out["fp64_reference"])
+        # Failed CPP is never compared against itself.
+        self.assertFalse(out["cpp_vs_eager_stock_pass"])
+        self.assertIn("error", out["cpp_vs_eager"])
+
+
 class InventorySchemaTest(TestCase):
     def test_inventory_records_required_fields(self):
         bm = FakeBenchmark(test="eval")

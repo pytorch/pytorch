@@ -218,10 +218,27 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
 }
 MODEL_CHOICES = sorted(MODEL_MANIFEST)
 
-# Stock-compatible tolerances for the non-strict lane (same as the vetted
-# BERT harness); recorded separately, never mixed into the strict gate.
+# Legacy audit tolerances (NOT acceptance; kept for audit continuity only).
+# Normal acceptance uses the stock-effective comparator
+# (benchmark/torchbenchmark/util/env_check.py:get_tolerance_and_cosine_flag
+# + check_accuracy via torch/_dynamo/utils.py:same with a genuine FP64
+# reference). The assert_close fields below stay as diagnostics.
 NORMAL_RTOL = 1e-4
 NORMAL_ATOL = 1e-5
+
+# Explicit recorded sources for the stock-effective normal lane (no
+# handwritten per-model overrides; policy comes from these APIs).
+STOCK_TOLICY_SOURCE = (
+    "benchmark/torchbenchmark/util/env_check.py:get_tolerance_and_cosine_flag"
+)
+STOCK_CHECK_SOURCE = "benchmark/torchbenchmark/util/env_check.py:check_accuracy"
+STOCK_COMPARATOR_SOURCE = "torch/_dynamo/utils.py:same"
+STOCK_FP64_SOURCE = (
+    "benchmark/torchbenchmark/util/env_check.py:check_accuracy fp64 golden ref "
+    "mirrored: separate deep-copied benchmark cast to float64 + same original "
+    "driver; reference-only double, live workload never touched, RNG/global "
+    "numerics restored"
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1546,6 +1563,611 @@ def _clone_output(obj: Any) -> Any:
         return None
 
 
+def _stock_tolerance_and_flags(
+    model_name: str, test: str, precision: str = "fp32"
+) -> tuple[float, bool, dict[str, Any]]:
+    """Existing model policy from get_tolerance_and_cosine_flag (no overrides).
+
+    Uses ONLY the established stock API: env_check.get_tolerance_and_cosine_flag
+    (authoritative source; only evalFP32 tol=1e-4 with both atol and rtol and
+    trainCUDA tol=1e-3 with existing model metadata are exercised here; nothing
+    is bumped or handwritten). Returns (tol, cos_similarity, record) where the
+    record names the exact API for the report.
+    """
+    from torchbenchmark.util.env_check import (  # type: ignore[import]
+        get_tolerance_and_cosine_flag,
+    )
+
+    import types as _types
+
+    is_training = test == "train"
+    current_device = DEVICE
+    probe = _types.SimpleNamespace(
+        dargs=_types.SimpleNamespace(precision=precision, use_cosine_similarity=False)
+    )
+    tolerance, cosine = get_tolerance_and_cosine_flag(
+        probe, is_training, current_device, model_name
+    )
+    record = {
+        "source": STOCK_TOLICY_SOURCE,
+        "model": model_name,
+        "test": test,
+        "device": current_device,
+        "precision": precision,
+        "tol": float(tolerance),
+        "cosine": bool(cosine),
+    }
+    return float(tolerance), bool(cosine), record
+
+
+def _stock_same(
+    correct_result: Any,
+    new_result: Any,
+    fp64_outputs: Any,
+    *,
+    tol: float,
+    cos_similarity: bool,
+    equal_nan: bool = False,
+) -> tuple[bool, str]:
+    """Established stock-effective comparator: torch._dynamo.utils.same.
+
+    Policy (allclose first, then the FP64 RMSE 2x reference-error envelope,
+    cosine only when the stock policy sets it) is the existing implementation
+    -- never reimplemented here. Returns (pass, detail).
+    """
+    from torch._dynamo.utils import same as _stock_same_fn
+
+    import io as _io
+    import logging as _logging
+
+    records: list[str] = []
+
+    def _capture(msg: Any, *args: Any) -> None:
+        try:
+            records.append(str(msg) % tuple(args) if args else str(msg))
+        except Exception:
+            try:
+                records.append(str(msg))
+            except Exception:
+                pass
+
+    try:
+        ok = bool(
+            _stock_same_fn(
+                correct_result,
+                new_result,
+                fp64_outputs,
+                cos_similarity=cos_similarity,
+                tol=tol,
+                equal_nan=equal_nan,
+                log_error=_capture,
+            )
+        )
+    except Exception as error:
+        return False, f"{type(error).__name__}: {str(error)[:500]}"
+    _ = _io, _logging
+    return ok, "; ".join(records[-3:])[:1000]
+
+
+def _save_fp32_precision() -> tuple[Any, Any]:
+    """Save raw fp32-precision backends (lossless).
+
+    ``torch.get_float32_matmul_precision()`` returns a lossy string:
+    ``set(get())`` flips cuda/mkldnn backends ('none','none')->('ieee','ieee').
+    Save the raw backend tuples so restore is exact (no global leak).
+    """
+    import torch as _torch
+
+    cuda_val: Any = None
+    mkldnn_val: Any = None
+    try:
+        cuda_val = _torch.backends.cuda.matmul.fp32_precision
+    except Exception:
+        pass
+    try:
+        mkldnn_val = _torch.backends.mkldnn.matmul.fp32_precision
+    except Exception:
+        pass
+    return cuda_val, mkldnn_val
+
+
+def _restore_fp32_precision(saved: tuple[Any, Any]) -> None:
+    """Restore raw fp32-precision backends exactly (never the lossy string)."""
+    import torch as _torch
+
+    cuda_val, mkldnn_val = saved
+    try:
+        if cuda_val is not None:
+            _torch.backends.cuda.matmul.fp32_precision = cuda_val
+    except Exception:
+        pass
+    try:
+        if mkldnn_val is not None:
+            _torch.backends.mkldnn.matmul.fp32_precision = mkldnn_val
+    except Exception:
+        pass
+
+
+def _restore_global_settings(saved: dict[str, Any]) -> None:
+    """Restore torch/CUDA global numerics recorded by numerical_settings().
+
+    Never touches ``float32_matmul_precision`` here: the string form is a
+    lossy round-trip (set(get()) flips cuda/mkldnn 'none'->'ieee'). Callers
+    save/restore the raw backends via _save/_restore_fp32_precision.
+    """
+    import torch as _torch
+
+    from torch._inductor import config as _cfg
+
+    try:
+        if "deterministic_algorithms" in saved:
+            _torch.use_deterministic_algorithms(bool(saved["deterministic_algorithms"]))
+    except Exception:
+        pass
+    try:
+        if "cudnn_deterministic" in saved:
+            _torch.backends.cudnn.deterministic = bool(saved["cudnn_deterministic"])
+    except Exception:
+        pass
+    try:
+        if "cudnn_benchmark" in saved:
+            _torch.backends.cudnn.benchmark = bool(saved["cudnn_benchmark"])
+    except Exception:
+        pass
+    try:
+        if "cudnn_allow_tf32" in saved:
+            _torch.backends.cudnn.allow_tf32 = bool(saved["cudnn_allow_tf32"])
+    except Exception:
+        pass
+    try:
+        if "matmul_allow_tf32" in saved:
+            _torch.backends.cuda.matmul.allow_tf32 = bool(saved["matmul_allow_tf32"])
+    except Exception:
+        pass
+    # NOTE: float32_matmul_precision intentionally NOT restored from the
+    # lossy string -- see _save/_restore_fp32_precision.
+    try:
+        if saved.get("emulate_precision_casts") is not None:
+            _cfg.emulate_precision_casts = bool(saved["emulate_precision_casts"])
+    except Exception:
+        pass
+
+
+def _snapshot_rng_state() -> dict[str, Any]:
+    """Save torch/CUDA/Python/NumPy RNG states (FP64-reference save side)."""
+    import random as _random
+
+    import torch as _torch
+
+    saved: dict[str, Any] = {
+        "torch": None,
+        "cuda": None,
+        "python": None,
+        "numpy": None,
+        "numpy_used": False,
+    }
+    try:
+        saved["torch"] = _torch.get_rng_state()
+    except Exception:
+        pass
+    try:
+        if _torch.cuda.is_available():
+            saved["cuda"] = _torch.cuda.get_rng_state_all()
+    except Exception:
+        pass
+    try:
+        saved["python"] = _random.getstate()
+    except Exception:
+        pass
+    try:
+        import numpy as _np
+
+        saved["numpy"] = _np.random.get_state()
+        saved["numpy_used"] = True
+    except Exception:
+        pass
+    return saved
+
+
+def _restore_rng_state(saved: dict[str, Any]) -> None:
+    """Restore RNG states (never raises; FP64-reference restore side)."""
+    import random as _random
+
+    import torch as _torch
+
+    try:
+        if saved.get("torch") is not None:
+            _torch.set_rng_state(saved["torch"])
+    except Exception:
+        pass
+    try:
+        if saved.get("cuda") is not None and _torch.cuda.is_available():
+            _torch.cuda.set_rng_state_all(saved["cuda"])
+    except Exception:
+        pass
+    try:
+        if saved.get("python") is not None:
+            _random.setstate(saved["python"])
+    except Exception:
+        pass
+    try:
+        if saved.get("numpy_used") and saved.get("numpy") is not None:
+            import numpy as _np
+
+            _np.random.set_state(saved["numpy"])
+    except Exception:
+        pass
+
+
+def _prepare_fp64_clone(eager_bm: Any) -> tuple[Any | None, dict[str, Any]]:
+    """Separate genuine FP64 reference owner (reference-only double).
+
+    Deep-copies the whole benchmark (same original module/input/loss/
+    optimizer-step semantics -- stock deep-copies for its fp64 golden ref)
+    and casts the CLONE's module + floating inputs/aux to float64. The live
+    workload benchmark is NEVER touched (the clone is discarded after use);
+    only the reference gets double. Callers still save/restore RNG + global
+    numerics around the clone's execution. On any failure returns
+    (None, fallback-record) following ONLY the established stock cosine
+    fallback, explicitly recorded.
+    """
+    import copy as _copy
+
+    import torch as _torch
+
+    from torch.utils._pytree import tree_map as _tree_map
+
+    record: dict[str, Any] = {}
+    try:
+        clone = _copy.deepcopy(eager_bm)
+    except Exception as error:
+        record["fallback"] = "cosine"
+        record["fallback_source"] = STOCK_CHECK_SOURCE
+        record["fallback_reason"] = (
+            f"benchmark deepcopy unsupported ({type(error).__name__}: "
+            f"{str(error)[:200]}); FP64 reference cannot be faithfully "
+            "obtained -- stock deep-copies for its fp64 golden ref"
+        )
+        return None, record
+    try:
+        mod, _ = clone.get_module()
+    except Exception as error:
+        record["fallback"] = "cosine"
+        record["fallback_source"] = STOCK_CHECK_SOURCE
+        record["fallback_reason"] = (
+            f"clone get_module failed ({type(error).__name__}: "
+            f"{str(error)[:200]}); FP64 reference cannot be faithfully obtained"
+        )
+        return None, record
+    try:
+        _unwrap_for_state(mod).to(_torch.float64)
+    except Exception as error:
+        record["fallback"] = "cosine"
+        record["fallback_source"] = STOCK_CHECK_SOURCE
+        record["fallback_reason"] = (
+            f"model cast to float64 unsupported ({type(error).__name__}: "
+            f"{str(error)[:200]}); FP64 reference cannot be faithfully obtained"
+        )
+        return None, record
+    # Same original inputs, double (clone only; live inputs never touched).
+    for holder in (clone, getattr(clone, "model", None)):
+        if holder is None:
+            continue
+        for attr in ("example_inputs", *_AUX_ATTRS):
+            try:
+                val = getattr(holder, attr, None)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            try:
+                setattr(
+                    holder,
+                    attr,
+                    _tree_map(
+                        lambda x: (
+                            x.to(_torch.float64)
+                            if isinstance(x, _torch.Tensor) and x.is_floating_point()
+                            else x
+                        ),
+                        val,
+                    ),
+                )
+            except Exception:
+                continue
+    record["dtype"] = "float64"
+    return clone, record
+
+
+def _fp64_reference_outputs(
+    eager_bm: Any, test: str, contexts: Any
+) -> tuple[Any | None, dict[str, Any]]:
+    """Genuine FP64 diagnostic reference (reference-only double).
+
+    Mirrors env_check.check_accuracy's fp64 golden ref: a SEPARATE deep-copied
+    benchmark (same original module/input/driver semantics) cast to float64,
+    run through the SAME original driver (eval: benchmark.invoke()), then
+    float tensors mapped to float64 exactly like stock. Only the reference
+    gets double; the live workload benchmark is NEVER touched (the clone is
+    discarded). RNG + global numerics are saved/restored robustly
+    (try/finally). If unsupported, follow ONLY the established stock cosine
+    fallback (dargs.use_cosine_similarity=True) and record it.
+    """
+    import torch as _torch
+
+    from torch.utils._pytree import tree_map as _tree_map
+
+    _ = contexts
+    record: dict[str, Any] = {"source": STOCK_FP64_SOURCE}
+    try:
+        incoming = numerical_settings()
+    except Exception:
+        incoming = {}
+    fp32_precision_saved = _save_fp32_precision()
+    rng_saved = _snapshot_rng_state()
+    try:
+        clone, prep = _prepare_fp64_clone(eager_bm)
+        record.update(prep)
+        if clone is None:
+            return None, record
+        if test != "eval":
+            record["fallback"] = "cosine"
+            record["fallback_source"] = STOCK_CHECK_SOURCE
+            record["fallback_reason"] = (
+                "non-eval reference requested from the eval FP64 helper; "
+                "train uses _fp64_train_post_state with the same step callable"
+            )
+            return None, record
+        with _torch.inference_mode():
+            fp64_out = clone.invoke()
+        fp64_out = _tree_map(
+            lambda x: (
+                x.to(_torch.float64)
+                if isinstance(x, _torch.Tensor) and x.is_floating_point()
+                else x
+            ),
+            fp64_out,
+        )
+        record["built"] = True
+        record["semantics"] = (
+            "same-original-driver via separate deep-copied benchmark; "
+            "reference-only double"
+        )
+        return fp64_out, record
+    except Exception as error:
+        record["fallback"] = "cosine"
+        record["fallback_source"] = STOCK_CHECK_SOURCE
+        record["fallback_reason"] = (
+            f"fp64 execution failed ({type(error).__name__}: {str(error)[:300]}); "
+            "stock sets cosine=True"
+        )
+        return None, record
+    finally:
+        try:
+            _restore_rng_state(rng_saved)
+        except Exception:
+            pass
+        try:
+            _restore_global_settings(incoming)
+        except Exception:
+            pass
+        try:
+            _restore_fp32_precision(fp32_precision_saved)
+        except Exception:
+            pass
+
+
+def _layout_metadata_equal(ref_f: Any, cmp_f: Any) -> tuple[bool, str]:
+    """Fail-closed layout/ABI metadata check (no value comparison).
+
+    Verifies dtype/shape/strides/device/sparse/numel for tensor fingerprints,
+    dtype/shape for NumPy arrays, key structure for mappings/sequences, and
+    exact equality for non-float scalars. Value bytes and float bits are
+    SKIPPED here (compared by the stock comparator); anything else failing
+    closed. Preserves the existing ABI checks while letting ``same`` judge
+    values with the FP64 envelope.
+    """
+    if isinstance(ref_f, FrozenMapping) or isinstance(cmp_f, FrozenMapping):
+        if not isinstance(ref_f, FrozenMapping) or not isinstance(cmp_f, FrozenMapping):
+            return False, "mapping-vs-nontensor"
+        ref_keys = [k for k, _ in ref_f.pairs]
+        cmp_keys = [k for k, _ in cmp_f.pairs]
+        if ref_keys != cmp_keys:
+            return False, "keys mismatch"
+        for (_, rv), (_, cv) in zip(ref_f.pairs, cmp_f.pairs):
+            ok, reason = _layout_metadata_equal(rv, cv)
+            if not ok:
+                return False, reason
+        return True, ""
+    if isinstance(ref_f, dict) and isinstance(cmp_f, dict):
+        ref_is_t = ref_f.get("__tensor__") is True
+        cmp_is_t = cmp_f.get("__tensor__") is True
+        if ref_is_t or cmp_is_t:
+            if not (ref_is_t and cmp_is_t):
+                return False, "tensor-vs-nontensor"
+            for key in ("dtype", "shape", "strides", "numel", "device", "sparse"):
+                if ref_f.get(key) != cmp_f.get(key):
+                    return False, f"{key} mismatch (no implicit cast)"
+            return True, ""
+        if set(ref_f.keys()) == {"__float_bits__"} or set(cmp_f.keys()) == {
+            "__float_bits__"
+        }:
+            if set(ref_f.keys()) != set(cmp_f.keys()):
+                return False, "float-vs-nontensor"
+            return True, ""
+        if "__ndarray__" in ref_f or "__ndarray__" in cmp_f:
+            if "__ndarray__" not in ref_f or "__ndarray__" not in cmp_f:
+                return False, "ndarray-vs-nontensor"
+            rs, cs = ref_f["__ndarray__"], cmp_f["__ndarray__"]
+            if rs.get("dtype") != cs.get("dtype") or rs.get("shape") != cs.get("shape"):
+                return False, "ndarray dtype/shape mismatch"
+            return True, ""
+        if "__npscalar__" in ref_f or "__npscalar__" in cmp_f:
+            if "__npscalar__" not in ref_f or "__npscalar__" not in cmp_f:
+                return False, "npscalar-vs-nontensor"
+            if ref_f["__npscalar__"].get("dtype") != cmp_f["__npscalar__"].get("dtype"):
+                return False, "npscalar dtype mismatch"
+            return True, ""
+        if "__seq__" in ref_f or "__seq__" in cmp_f:
+            if "__seq__" not in ref_f or "__seq__" not in cmp_f:
+                return False, "seq-vs-nontensor"
+            if ref_f.get("__tuple__") != cmp_f.get("__tuple__"):
+                return False, "tuple-vs-list mismatch"
+            rs, cs = ref_f["__seq__"], cmp_f["__seq__"]
+            if len(rs) != len(cs):
+                return False, "seq length mismatch"
+            for rv, cv in zip(rs, cs):
+                ok, reason = _layout_metadata_equal(rv, cv)
+                if not ok:
+                    return False, reason
+            return True, ""
+        if "__error__" in ref_f or "__error__" in cmp_f:
+            return False, "fingerprint_error"
+        if set(ref_f.keys()) != set(cmp_f.keys()):
+            return False, "keys mismatch"
+        for k in sorted(ref_f, key=str):
+            ok, reason = _layout_metadata_equal(ref_f[k], cmp_f[k])
+            if not ok:
+                return False, f"{k}: {reason}"
+        return True, ""
+    if isinstance(ref_f, (list, tuple)) and isinstance(cmp_f, (list, tuple)):
+        if len(ref_f) != len(cmp_f):
+            return False, "seq length mismatch"
+        for rv, cv in zip(ref_f, cmp_f):
+            ok, reason = _layout_metadata_equal(rv, cv)
+            if not ok:
+                return False, reason
+        return True, ""
+    if isinstance(ref_f, bytes) or isinstance(cmp_f, bytes):
+        # Raw bytes outside tensor payloads: exact (fail closed).
+        return (True, "") if ref_f == cmp_f else (False, "bytes differ")
+    if isinstance(ref_f, float) or isinstance(cmp_f, float):
+        # Live floats reach here only post-thaw edge cases; values are the
+        # comparator's job -- metadata passes.
+        return True, ""
+    # Non-float scalars / None / bools: exact type+value (ABI).
+    if type(ref_f) is not type(cmp_f):
+        return False, f"type {type(ref_f).__name__} vs {type(cmp_f).__name__}"
+    try:
+        return (True, "") if bool(ref_f == cmp_f) else (False, "scalar differ")
+    except Exception as error:
+        return False, type(error).__name__
+
+
+def _stock_section_pass(
+    ref_section: Any,
+    cmp_section: Any,
+    fp64_section: Any | None,
+    *,
+    tol: float,
+    cos_similarity: bool,
+) -> tuple[bool, str]:
+    """One section via layout checks + established stock comparator.
+
+    Layout/ABI metadata (dtype/shape/strides/device/keys) fails closed
+    without value comparison; values use ``torch._dynamo.utils.same`` with
+    the genuine FP64 reference (allclose then FP64 RMSE envelope, cosine
+    only per stock policy). Fingerprint-error markers fail closed.
+    """
+    if _contains_error_marker(ref_section) or _contains_error_marker(cmp_section):
+        return False, "fingerprint_error"
+    if fp64_section is not None and _contains_error_marker(fp64_section):
+        return False, "fp64 fingerprint_error"
+    ok_meta, reason_meta = _layout_metadata_equal(ref_section, cmp_section)
+    if not ok_meta:
+        return False, reason_meta
+    try:
+        ref_live = _thaw_value(ref_section)
+        cmp_live = _thaw_value(cmp_section)
+        fp64_live = _thaw_value(fp64_section) if fp64_section is not None else None
+    except RestorationError as error:
+        return False, f"thaw: {error}"
+    except Exception as error:
+        return False, f"{type(error).__name__}: {error}"
+    ok, detail = _stock_same(
+        ref_live, cmp_live, fp64_live, tol=tol, cos_similarity=cos_similarity
+    )
+    return ok, detail
+
+
+def _fp64_train_post_state(
+    eager_bm: Any, snap_clean: dict[str, Any], step_fn: Any
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Genuine FP64 train post-state (reference-only double, robust restore).
+
+    Same original module/input/loss/optimizer-step semantics via the same
+    step callable run on a SEPARATE deep-copied benchmark cast to double;
+    the live workload is NEVER touched (no in-place dtype cast, so no
+    restore_state dtype-mismatch possible) and stays FP32. RNG + global
+    numerics restored in finally. On any failure, follow ONLY the
+    established stock cosine fallback and record it.
+    """
+    record: dict[str, Any] = {"source": STOCK_FP64_SOURCE}
+    _ = snap_clean
+    try:
+        incoming = numerical_settings()
+    except Exception:
+        incoming = {}
+    fp32_precision_saved = _save_fp32_precision()
+    rng_saved = _snapshot_rng_state()
+    try:
+        clone, prep = _prepare_fp64_clone(eager_bm)
+        record.update(prep)
+        if clone is None:
+            return None, record
+        _, fp64_fp = step_fn(clone)
+        record["built"] = True
+        record["semantics"] = (
+            "same-original-step via separate deep-copied benchmark; "
+            "reference-only double"
+        )
+        return fp64_fp, record
+    except Exception as error:
+        record["fallback"] = "cosine"
+        record["fallback_source"] = STOCK_CHECK_SOURCE
+        record["fallback_reason"] = (
+            f"fp64 train step failed ({type(error).__name__}: {str(error)[:300]}); "
+            "stock sets cosine=True"
+        )
+        return None, record
+    finally:
+        try:
+            _restore_rng_state(rng_saved)
+        except Exception:
+            pass
+        try:
+            _restore_global_settings(incoming)
+        except Exception:
+            pass
+        try:
+            _restore_fp32_precision(fp32_precision_saved)
+        except Exception:
+            pass
+
+
+def model_name_of(benchmark: Any) -> str:
+    """Best-effort TorchBench model name for stock policy lookup."""
+    for attr in ("name", "model_name"):
+        try:
+            val = getattr(benchmark, attr, None)
+        except Exception:
+            val = None
+        if isinstance(val, str) and val:
+            return val
+    try:
+        inner = getattr(benchmark, "model", None)
+        for attr in ("name", "model_name"):
+            try:
+                val = getattr(inner, attr, None)
+            except Exception:
+                val = None
+            if isinstance(val, str) and val:
+                return val
+    except Exception:
+        pass
+    return "unknown"
+
+
 def eval_accuracy(
     eager_bm: Any, cpp_bm: Any | None, stock_bm: Any | None
 ) -> dict[str, Any]:
@@ -1559,18 +2181,46 @@ def eval_accuracy(
     cmp_self = _compare_outputs(rep, ref, "eager-repeat")
     out["eager_repeat"] = dataclasses.asdict(cmp_self)
     out["eager_repeat_bytewise"] = bool(cmp_self.bytewise_equal)
+    # Stock-effective normal acceptance: existing model policy
+    # (get_tolerance_and_cosine_flag) + established comparator (same with the
+    # genuine FP64 reference). Both CPP and stock compare vs the SAME eager
+    # + FP64 reference; stock must be a real valid reference (never masked).
+    tb_name = model_name_of(eager_bm)
+    try:
+        tol, cosine_flag, policy_record = _stock_tolerance_and_flags(tb_name, "eval")
+    except Exception as error:
+        tol, cosine_flag, policy_record = (
+            1e-4,
+            False,
+            {
+                "source": STOCK_TOLICY_SOURCE,
+                "error": f"{type(error).__name__}: {error}",
+            },
+        )
+    out["normal_policy"] = policy_record
+    out["normal_comparator"] = {"source": STOCK_COMPARATOR_SOURCE}
+    fp64_ref, fp64_record = _fp64_reference_outputs(eager_bm, "eval", [])
+    out["fp64_reference"] = fp64_record
+    effective_cosine = bool(cosine_flag) or fp64_record.get("fallback") == "cosine"
+    if effective_cosine and fp64_record.get("fallback") == "cosine":
+        out["normal_policy"]["cosine_fallback"] = fp64_record.get("fallback_reason")
+        out["normal_policy"]["cosine_fallback_source"] = fp64_record.get(
+            "fallback_source"
+        )
+    out["normal_tolerance"] = {"tol": tol, "cosine": effective_cosine}
     if cpp_bm is None:
         out["cpp_vs_eager"] = {
             "error": "cpp variant unavailable (compile failed); never compared against eager itself"
         }
         out["cpp_vs_eager_normal_tol_pass"] = False
+        out["cpp_vs_eager_stock_pass"] = False
+        out["cpp_vs_stock"] = {"error": "cpp variant unavailable"}
     else:
         with torch.inference_mode():
             cpp_out = cpp_bm.invoke()
         cmp_cpp = _compare_outputs(cpp_out, ref_clone, "cpp-vs-eager")
         out["cpp_vs_eager"] = dataclasses.asdict(cmp_cpp)
-    # Normal lane: justified stock-compatible tolerances, recorded separately.
-    # Skipped (not passed) when the CPP variant is unavailable.
+    # Legacy assert_close diagnostic kept for audit (NOT acceptance).
     if cpp_bm is None:
         pass
     else:
@@ -1589,6 +2239,13 @@ def eval_accuracy(
             out["cpp_vs_eager_normal_tol_error"] = (
                 f"{type(error).__name__}: {str(error)[:1000]}"
             )
+        ok, detail = _stock_same(
+            ref_clone, cpp_out, fp64_ref, tol=tol, cos_similarity=effective_cosine
+        )
+        out["cpp_vs_eager_stock_pass"] = bool(ok)
+        out["cpp_vs_eager_stock_detail"] = detail
+    stock_out: Any = None
+    stock_ok: bool | None = None
     if stock_bm is not None:
         try:
             with torch.inference_mode():
@@ -1609,8 +2266,34 @@ def eval_accuracy(
                 out["stock_vs_eager_normal_tol_error"] = (
                     f"{type(error).__name__}: {str(error)[:1000]}"
                 )
+            ok_s, detail_s = _stock_same(
+                ref_clone,
+                stock_out,
+                fp64_ref,
+                tol=tol,
+                cos_similarity=effective_cosine,
+            )
+            stock_ok = bool(ok_s)
+            out["stock_vs_eager_stock_pass"] = stock_ok
+            out["stock_vs_eager_stock_detail"] = detail_s
         except Exception as error:
             out["stock_vs_eager"] = {"error": f"{type(error).__name__}: {error}"}
+            out["stock_vs_eager_stock_pass"] = False
+    else:
+        out["stock_vs_eager_stock_pass"] = None
+    # CPP-vs-stock diagnostic (never acceptance): same stock comparator
+    # between the two compiled variants with the identical FP64 reference.
+    if cpp_bm is not None and stock_out is not None:
+        try:
+            ok_cs, detail_cs = _stock_same(
+                stock_out, cpp_out, fp64_ref, tol=tol, cos_similarity=effective_cosine
+            )
+            out["cpp_vs_stock"] = {"stock_pass": bool(ok_cs), "detail": detail_cs}
+        except Exception as error:
+            out["cpp_vs_stock"] = {"error": f"{type(error).__name__}: {error}"}
+    # Require a real valid stock reference: never mask a stock failure and
+    # never claim performance on an unproven reference.
+    out["stock_reference_valid"] = stock_ok if stock_ok is not None else None
     return out
 
 
@@ -2489,7 +3172,14 @@ def train_accuracy(
         out["cpp_vs_eager_strict_equal"] = False
         out["cpp_vs_eager_diffs"] = ["cpp-unavailable"]
         out["cpp_normal_full_state_pass"] = False
+        out["cpp_normal_full_state_diffs"] = ["cpp-unavailable"]
         out["cpp_loss_normal_tol_pass"] = False
+        out["fp64_reference"] = {
+            "source": STOCK_FP64_SOURCE,
+            "built": False,
+            "note": "not attempted: cpp unavailable",
+        }
+        out["stock_reference_valid"] = None
         return out
     # CPP post-state from the same clean state.
     try:
@@ -2503,13 +3193,27 @@ def train_accuracy(
         }
         out["cpp_vs_eager_strict_equal"] = False
         out["cpp_normal_full_state_pass"] = False
+        out["cpp_normal_full_state_diffs"] = ["cpp-align-restore-veto"]
         out["cpp_loss_normal_tol_pass"] = False
+        out["fp64_reference"] = {
+            "source": STOCK_FP64_SOURCE,
+            "built": False,
+            "note": "not attempted: cpp align restore veto",
+        }
+        out["stock_reference_valid"] = None
         return out
     except Exception as error:
         out["cpp_vs_eager"] = {"error": f"{type(error).__name__}: {error}"}
         out["cpp_vs_eager_strict_equal"] = False
         out["cpp_normal_full_state_pass"] = False
+        out["cpp_normal_full_state_diffs"] = ["cpp-align-restore-veto"]
         out["cpp_loss_normal_tol_pass"] = False
+        out["fp64_reference"] = {
+            "source": STOCK_FP64_SOURCE,
+            "built": False,
+            "note": "not attempted: cpp align restore veto",
+        }
+        out["stock_reference_valid"] = None
         return out
     try:
         cpp_loss, cpp_fp = _one_step(cpp_bm)
@@ -2518,7 +3222,14 @@ def train_accuracy(
         out["cpp_vs_eager"] = {"error": f"{type(error).__name__}: {error}"}
         out["cpp_vs_eager_strict_equal"] = False
         out["cpp_normal_full_state_pass"] = False
+        out["cpp_normal_full_state_diffs"] = ["cpp-step-failed"]
         out["cpp_loss_normal_tol_pass"] = False
+        out["fp64_reference"] = {
+            "source": STOCK_FP64_SOURCE,
+            "built": False,
+            "note": "not attempted: cpp step failed",
+        }
+        out["stock_reference_valid"] = None
         return out
     finally:
         _ = snap_cpp
@@ -2539,15 +3250,42 @@ def train_accuracy(
     out["cpp_vs_eager"] = {"bytewise_equal": bool(strict_eq), "diffs": diffs[:100]}
     out["rng_continuation_equal"] = bool(draws_eq)
     out["rng_continuation_diffs"] = draws_ddiffs[:20]
-    # Normal lane: quantitative full post-state closeness (loss AND grads,
-    # updated params, mutable buffers, optimizer state and schedulers --
-    # loss-only would miss wrong gradients/updates, and buffers carry
-    # BatchNorm running state. Buffers compare with exact metadata plus
-    # numerical tolerance on values. Stock-compatible tolerances, recorded
-    # publicly and separately from the strict gate; RNG is excluded here
-    # (matched separately, exact integer comparison -- never tensor
-    # allclose on RNG bytes) so unrelated stochastic masks are never
-    # assert_close-compared. Dtype/shape/stride mismatches fail closed.
+    # Normal lane: stock-effective full post-state acceptance (loss AND
+    # grads, updated params, mutable buffers, optimizer state and
+    # schedulers -- loss-only would miss wrong gradients/updates, and
+    # buffers carry BatchNorm running state). Layout/ABI metadata fails
+    # closed; values use the established stock comparator
+    # (torch._dynamo.utils.same: allclose then FP64 RMSE 2x reference-error
+    # envelope, cosine only per stock policy) with the genuine FP64
+    # reference. RNG stays bytewise-strict (never allclose on RNG bytes).
+    # Existing per-section assert_close-style checks remain as diagnostics.
+    tb_name_t = model_name_of(eager_bm)
+    try:
+        tol_t, cosine_t, policy_t = _stock_tolerance_and_flags(tb_name_t, "train")
+    except Exception as error:
+        tol_t, cosine_t, policy_t = (
+            1e-3,
+            False,
+            {
+                "source": STOCK_TOLICY_SOURCE,
+                "error": f"{type(error).__name__}: {error}",
+            },
+        )
+    out["normal_policy"] = policy_t
+    out["normal_comparator"] = {"source": STOCK_COMPARATOR_SOURCE}
+    fp64_train_fp, fp64_train_record = _fp64_train_post_state(
+        eager_bm, snap_clean, _one_step
+    )
+    out["fp64_reference"] = fp64_train_record
+    eff_cosine_t = bool(cosine_t) or fp64_train_record.get("fallback") == "cosine"
+    if eff_cosine_t and fp64_train_record.get("fallback") == "cosine":
+        out["normal_policy"]["cosine_fallback"] = fp64_train_record.get(
+            "fallback_reason"
+        )
+        out["normal_policy"]["cosine_fallback_source"] = fp64_train_record.get(
+            "fallback_source"
+        )
+    out["normal_tolerance"] = {"tol": tol_t, "cosine": eff_cosine_t}
     out["normal_tolerances"] = {"rtol": NORMAL_RTOL, "atol": NORMAL_ATOL}
     normal_sections = (
         "loss",
@@ -2562,17 +3300,26 @@ def train_accuracy(
     for section in normal_sections:
         ref_s = ref_fp.get(section, "__missing__")
         cmp_s = cpp_fp.get(section, "__missing__")
+        fp64_s = (
+            fp64_train_fp.get(section, "__missing__")
+            if isinstance(fp64_train_fp, dict)
+            else "__missing__"
+        )
         if ref_s == "__missing__" or cmp_s == "__missing__":
             if ref_s != cmp_s:
                 normal_ok = False
                 normal_diffs.append(f"{section}.missing")
             continue
-        ok, sdiffs = _normal_section_close(
-            ref_s, cmp_s, rtol=NORMAL_RTOL, atol=NORMAL_ATOL
+        if fp64_s == "__missing__":
+            fp64_arg: Any | None = None
+        else:
+            fp64_arg = fp64_s
+        ok, reason = _stock_section_pass(
+            ref_s, cmp_s, fp64_arg, tol=tol_t, cos_similarity=eff_cosine_t
         )
         if not ok:
             normal_ok = False
-            normal_diffs.extend(f"{section}.{d}" for d in sdiffs[:20])
+            normal_diffs.append(f"{section}: {reason}"[:300])
     out["cpp_normal_full_state_pass"] = bool(normal_ok)
     out["cpp_normal_full_state_diffs"] = normal_diffs[:100]
     # Normal-lane RNG: quantitative closeness on continuation draws only
@@ -2631,13 +3378,78 @@ def train_accuracy(
             seq, sdiffs = _fingerprints_equal(stock_fp, ref_fp)
             out["stock_vs_eager_strict_equal"] = bool(seq)
             out["stock_vs_eager_diffs"] = sdiffs[:50]
+            # Stock vs same eager + FP64 reference via the stock comparator.
+            stock_sections_ok = True
+            stock_sections_diffs: list[str] = []
+            for section in normal_sections:
+                ref_s = ref_fp.get(section, "__missing__")
+                stk_s = stock_fp.get(section, "__missing__")
+                fp64_s = (
+                    fp64_train_fp.get(section, "__missing__")
+                    if isinstance(fp64_train_fp, dict)
+                    else "__missing__"
+                )
+                if ref_s == "__missing__" or stk_s == "__missing__":
+                    if ref_s != stk_s:
+                        stock_sections_ok = False
+                        stock_sections_diffs.append(f"{section}.missing")
+                    continue
+                ok, reason = _stock_section_pass(
+                    ref_s,
+                    stk_s,
+                    None if fp64_s == "__missing__" else fp64_s,
+                    tol=tol_t,
+                    cos_similarity=eff_cosine_t,
+                )
+                if not ok:
+                    stock_sections_ok = False
+                    stock_sections_diffs.append(f"{section}: {reason}"[:300])
+            out["stock_vs_eager_stock_pass"] = bool(stock_sections_ok)
+            out["stock_vs_eager_stock_diffs"] = stock_sections_diffs[:50]
+            # CPP-vs-stock diagnostic (never acceptance).
+            cpp_stock_ok = True
+            cpp_stock_diffs: list[str] = []
+            for section in normal_sections:
+                stk_s = stock_fp.get(section, "__missing__")
+                cmp_s = cpp_fp.get(section, "__missing__")
+                fp64_s = (
+                    fp64_train_fp.get(section, "__missing__")
+                    if isinstance(fp64_train_fp, dict)
+                    else "__missing__"
+                )
+                if stk_s == "__missing__" or cmp_s == "__missing__":
+                    if stk_s != cmp_s:
+                        cpp_stock_ok = False
+                        cpp_stock_diffs.append(f"{section}.missing")
+                    continue
+                ok, reason = _stock_section_pass(
+                    stk_s,
+                    cmp_s,
+                    None if fp64_s == "__missing__" else fp64_s,
+                    tol=tol_t,
+                    cos_similarity=eff_cosine_t,
+                )
+                if not ok:
+                    cpp_stock_ok = False
+                    cpp_stock_diffs.append(f"{section}: {reason}"[:300])
+            out["cpp_vs_stock"] = {
+                "stock_pass": bool(cpp_stock_ok),
+                "diffs": cpp_stock_diffs[:50],
+            }
+            _ = stock_loss
         except RestorationError as error:
             out["stock_vs_eager"] = {
                 "error_type": "RestorationError",
                 "error": f"stock restore: {error}",
             }
+            out["stock_vs_eager_stock_pass"] = False
         except Exception as error:
             out["stock_vs_eager"] = {"error": f"{type(error).__name__}: {error}"}
+            out["stock_vs_eager_stock_pass"] = False
+    else:
+        out["stock_vs_eager_stock_pass"] = None
+    stock_ok_t = out.get("stock_vs_eager_stock_pass")
+    out["stock_reference_valid"] = stock_ok_t if stock_ok_t is not None else None
     return out
 
 
@@ -3122,7 +3934,14 @@ def _verdict(case: dict[str, Any], test: str, mode: str) -> str:
                 return "fail"
             return "pass"
         else:
-            if acc.get("cpp_vs_eager_normal_tol_pass") is True:
+            # Normal acceptance: established stock-effective comparator
+            # (same eager + FP64 reference). Legacy assert_close fields stay
+            # as diagnostics only. A real valid stock reference is required:
+            # never mask a stock failure or claim performance on an
+            # unproven reference.
+            if acc.get("stock_reference_valid") is False:
+                return "fail"
+            if acc.get("cpp_vs_eager_stock_pass") is True:
                 return "pass"
             return "fail"
     # train: both modes require compiled-backward evidence (forward-only
@@ -3140,6 +3959,12 @@ def _verdict(case: dict[str, Any], test: str, mode: str) -> str:
             return "fail"
         return "pass"
     else:
+        # Normal acceptance: stock-effective full-state gate (loss AND
+        # grads/params/buffers/optimizer/schedulers via layout + same with
+        # the FP64 reference). Legacy assert_close-style sections stay as
+        # diagnostics. Stock must be a real valid reference.
+        if acc.get("stock_reference_valid") is False:
+            return "fail"
         if (
             acc.get("cpp_normal_full_state_pass") is True
             and graphs.get("num_seam_graphs_ok", 0) >= 1
@@ -3186,6 +4011,12 @@ def main(argv: list[str] | None = None) -> int:
         "accuracy_only": bool(args.accuracy_only),
         "load_only": bool(args.load_only),
         "normal_tolerances": {"rtol": NORMAL_RTOL, "atol": NORMAL_ATOL},
+        "normal_policy_sources": {
+            "tolerance": STOCK_TOLICY_SOURCE,
+            "check": STOCK_CHECK_SOURCE,
+            "comparator": STOCK_COMPARATOR_SOURCE,
+            "fp64_reference": STOCK_FP64_SOURCE,
+        },
         "settings_before_any_construction": settings_before_any,
         "cases": [],
         "errors": [],
