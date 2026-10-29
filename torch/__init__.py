@@ -228,7 +228,12 @@ if sys.platform == "win32":
                     "cupti",
                     "cudnn",
                 ):
-                    load_nvidia_dynamic_lib(lib)
+                    try:
+                        load_nvidia_dynamic_lib(lib)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to load {lib}", stacklevel=2
+                        )
             except Exception:
                 warnings.warn(
                     "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
