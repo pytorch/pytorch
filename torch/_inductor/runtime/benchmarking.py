@@ -601,7 +601,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 # event timing. A larger flush buffer keeps the device busy longer.
                 # See https://github.com/pytorch/pytorch/issues/189144
                 if device_type == "xpu":
-                    return max(cache_size, 128 * 1024 * 1024)
+                    return max(cache_size, 64 * 1024 * 1024)
                 return cache_size
         return 256 * 1024 * 1024
 
