@@ -1052,27 +1052,28 @@ def allow_non_fake_inputs_temporarily(
         fake_mode.allow_non_fake_inputs = previous
 
 
-@contextlib.contextmanager
-def in_kernel_invocation_manager(
-    fake_mode: FakeTensorMode,
-) -> Generator[None, None, None]:
-    # See: note [Fake Tensor Dispatch Keys]
-    prev_in_kernel = fake_mode.in_kernel_invocation
-    meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    if meta_in_tls != prev_in_kernel:
-        raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+class in_kernel_invocation_manager:
+    # A class with a single C++ guard, rather than a @contextmanager around
+    # two: it's entered on every FakeTensorMode cache hit.
+    __slots__ = ("fake_mode", "prev_in_kernel", "guard")
 
-    with torch._C._DisableTorchDispatch():
-        fake_mode.in_kernel_invocation = True
-        # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
-        # `Dense` turned on (because it's implied by `Meta`)
-        with torch._C._PreserveDispatchKeyGuard():
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                yield
-            finally:
-                fake_mode.in_kernel_invocation = prev_in_kernel
-                # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
+        self.fake_mode = fake_mode
+
+    def __enter__(self) -> None:
+        # See: note [Fake Tensor Dispatch Keys]
+        prev_in_kernel = self.prev_in_kernel = self.fake_mode.in_kernel_invocation
+        meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+        if meta_in_tls != prev_in_kernel:
+            raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
+        # Disables __torch_dispatch__ and adds Meta to the TLS include set.
+        self.guard = torch._C._MetaKernelInvocationGuard()
+        self.guard.__enter__()
+        self.fake_mode.in_kernel_invocation = True
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.fake_mode.in_kernel_invocation = self.prev_in_kernel
+        self.guard.__exit__(*exc_info)
 
 
 # Return if the function allows Python numbers to bind to Tensors
