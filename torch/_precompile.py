@@ -1999,7 +1999,8 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     names with ``m.set_python_module``."""
     from torch._library.custom_ops import OPDEFS
 
-    if (opdef := OPDEFS.get(op_name)) is not None:
+    qualname = f"{op_name}.{overload}" if overload else op_name
+    if (opdef := OPDEFS.get(qualname)) is not None:
         name = getattr(opdef._init_fn, "__module__", None)
     else:
         pystub = torch._C._dispatch_pystub(op_name, overload)
@@ -2092,8 +2093,6 @@ _TORCH_HELPER_OP_MODULES = MappingProxyType(
         "coor::current_device_index": "torch.fx.experimental.proxy_tensor",
         "debugprims::load_tensor": "torch._prims",
         "device_mesh::_runtime_compute_coordinate_on_dim": "torch.distributed._ops.device_mesh",
-        "onnx::Attention": "torch.onnx.ops._impl",
-        "onnx::RotaryEmbedding": "torch.onnx.ops._impl",
         "pippy::_pipe_split": "torch.distributed.pipelining._IR",
     }
 )
@@ -2225,28 +2224,9 @@ class _CustomOpModules(NamedTuple):
     # register (a torch helper's, a C++ extension's or __main__'s).
     unrecorded_kernels: tuple[tuple[str, str], ...] = ()
     # The ``(op, key)`` of those kernels registered from __main__, by a C++
-    # extension, or by a custom_op's register_kernel called from __main__ or a
-    # module that is not importable. Other kernels registered through a torch
-    # helper may be the op's module's own.
+    # extension, or by a torch.library helper (register_kernel, impl) called from
+    # __main__ or a module that is not importable.
     untracked_kernels: tuple[tuple[str, str], ...] = ()
-
-
-def _custom_op_kernel_modules(op_name: str) -> dict[str, str]:
-    """The modules that called a ``torch.library.custom_op`` op's
-    ``register_kernel``, by key."""
-    from torch._library.custom_ops import OPDEFS
-
-    if (opdef := OPDEFS.get(op_name)) is None:
-        return {}
-    modules: dict[str, str] = {}
-    for device_type, module in opdef._backend_fn_modules.items():
-        if module is None:
-            continue
-        key = "CompositeExplicitAutograd"
-        if device_type is not None:
-            key = torch._C._dispatch_key_for_device(device_type)
-        modules[key] = module
-    return modules
 
 
 def _custom_op_modules(
@@ -2254,6 +2234,8 @@ def _custom_op_modules(
 ) -> _CustomOpModules:
     """What registers the ops among ``op_names`` and their active kernels for
     ``keys``; pass it to ``_warn_unregistered_ops``."""
+    from torch._library.utils import kernel_callers
+
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
@@ -2282,12 +2264,12 @@ def _custom_op_modules(
             continue
         unrecorded_kernels.add((op_name, overload))
         paths = _kernel_paths(qualname)
-        callers = _custom_op_kernel_modules(op_name)
+        callers = kernel_callers.get(qualname, {})
         for k in (k for k in missing if k in paths):
             # Taken as registered by the C++ extension the op's module loads.
             if kind == "module" and not paths[k].endswith(".py"):
                 continue
-            caller = callers.get(k, value)
+            caller = callers.get(k) or value
             if not os.path.realpath(paths[k]).startswith(torch_dir):
                 untracked_kernels.add((op_name, k))
             elif caller == value or caller.partition(".")[0] == "torch":
