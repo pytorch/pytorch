@@ -2487,7 +2487,7 @@ test_torchtitan() {
 
   if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_controls" || "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_controls" || "${TEST_CONFIG}" == "torchtitan_triton_pin_boundary_controls" || "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_reuse_controls" ]]; then
     local pin_control_args=()
-    if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_controls" || "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_reuse_controls" ]]; then
+    if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_controls" ]]; then
       pin_control_args+=(--fusion-only)
     fi
     if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_boundary_controls" ]]; then

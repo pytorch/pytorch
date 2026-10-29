@@ -1,13 +1,13 @@
 """Run the original strict two-A10G TorchTitan SFT comparison with full native pins."""
 
-import json
 import hashlib
+import json
 import os
-from pathlib import Path
 import shutil
 import sys
-import zipfile
 import urllib.request
+import zipfile
+from pathlib import Path
 
 import triton_pin_mi350_controls as controls
 
@@ -22,20 +22,23 @@ def reuse_candidate_wheel():
     )
     archive_path = phase / "native-wheel-artifact.zip"
     urllib.request.urlretrieve(url, archive_path)
-    assert (
+    if (
         hashlib.sha256(archive_path.read_bytes()).hexdigest()
-        == "c6256c2e043818464e1fb0676bd39d24e72d17b0a7782dab813bbd48ea2e3d53"
-    )
+        != "c6256c2e043818464e1fb0676bd39d24e72d17b0a7782dab813bbd48ea2e3d53"
+    ):
+        raise AssertionError("Native candidate archive hash changed")
     with zipfile.ZipFile(archive_path) as archive:
         members = [name for name in archive.namelist() if name.endswith(".whl")]
-        assert len(members) == 1
+        if len(members) != 1:
+            raise AssertionError(f"Expected one whole native wheel, got {members}")
         wheel = phase / Path(members[0]).name
         with archive.open(members[0]) as source, wheel.open("wb") as target:
             shutil.copyfileobj(source, target)
-    assert (
+    if (
         hashlib.sha256(wheel.read_bytes()).hexdigest()
-        == "17583b66d96d0158a00458c22baefd5a563fa25f9878ed0aef0e1138806eb08b"
-    )
+        != "17583b66d96d0158a00458c22baefd5a563fa25f9878ed0aef0e1138806eb08b"
+    ):
+        raise AssertionError("Native candidate wheel hash changed")
     site = phase / "site"
     controls.run(
         [
@@ -88,7 +91,10 @@ def main():
     selected_pins = (
         {"candidate": controls.PINS["candidate"]}
         if "--fusion-only" in sys.argv
-        else controls.PINS
+        else {
+            "candidate": controls.PINS["candidate"],
+            "old": controls.PINS["old"],
+        }
     )
     if "--boundary" in sys.argv:
         selected_pins = {
@@ -102,8 +108,7 @@ def main():
             ),
         }
     for label, (repository, sha) in selected_pins.items():
-        if "--reuse-candidate-wheel" in sys.argv:
-            assert "--fusion-only" in sys.argv and label == "candidate"
+        if "--reuse-candidate-wheel" in sys.argv and label == "candidate":
             site = reuse_candidate_wheel()
         else:
             site = controls.build_pin(label, repository, sha)
@@ -112,7 +117,7 @@ def main():
             if label in {"candidate", "child"}
             else []
         )
-        if "--reuse-candidate-wheel" in sys.argv:
+        if "--reuse-candidate-wheel" in sys.argv and label in {"candidate", "child"}:
             phases.insert(1, (label + "-explicit-fusion-only", "0"))
         for phase, fma in phases:
             env = os.environ.copy()
@@ -124,12 +129,16 @@ def main():
                 controls.WORK / phase / "inductor-cache"
             )
             controls.configure_fusion(env, fma)
-            if "--reuse-candidate-wheel" in sys.argv:
-                trace_site = controls.ROOT / ".ci/pytorch/triton_pin_titan_trace_site"
-                env["PYTHONPATH"] = str(trace_site) + os.pathsep + env["PYTHONPATH"]
-                env["PIN_TRITON_TRACE_DIR"] = str(
-                    controls.ROOT / "test/debug/triton-pin-titan-controls" / (phase + "-compile-trace")
-                )
+            trace_site = controls.ROOT / ".ci/pytorch/triton_pin_titan_trace_site"
+            env["PYTHONPATH"] = str(trace_site) + os.pathsep + env["PYTHONPATH"]
+            # python_subprocess_env otherwise puts Torch's installed package root
+            # ahead of the selected native Triton site in compiler workers.
+            env["TORCH_CUSTOM_PYTHONPATH"] = env["PYTHONPATH"]
+            env["PIN_TRITON_TRACE_DIR"] = str(
+                controls.ROOT
+                / "test/debug/triton-pin-titan-controls"
+                / (phase + "-compile-trace")
+            )
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
             env["CUDA_VISIBLE_DEVICES"] = "0,1"
             probe = (
@@ -167,16 +176,19 @@ def main():
             log = (controls.REPORT / (phase + "-original-sft.log")).read_text(
                 errors="replace"
             )
-            assert results[phase] in (0, 1) and (
-                "LOSS_COMPARE" in log or "All tests passed" in log
-            ), phase
+            if not (
+                results[phase] in (0, 1)
+                and ("LOSS_COMPARE" in log or "All tests passed" in log)
+            ):
+                raise AssertionError(f"Original SFT did not complete: {phase}")
             from tensorboard.backend.event_processing.event_accumulator import (
                 EventAccumulator,
             )
 
             event_root = controls.REPORT / phase / "sft/tb_baseline"
             events = list(event_root.rglob("events.out.tfevents.*"))
-            assert events, str(event_root)
+            if not events:
+                raise AssertionError(str(event_root))
             values = {}
             for path in events:
                 accumulator = EventAccumulator(str(path))
@@ -185,10 +197,11 @@ def main():
                     if tag in accumulator.Tags()["scalars"]:
                         for value in accumulator.Scalars(tag):
                             values.setdefault(tag, {})[value.step] = value.value
-            assert all(
+            if not all(
                 len(values.get(tag, {})) == 10
                 for tag in ["loss_metrics/global_avg_loss", "grad_norm"]
-            ), values
+            ):
+                raise AssertionError(values)
             metrics[phase] = values
             (controls.REPORT / "metrics.json").write_text(json.dumps(metrics, indent=2))
             (controls.REPORT / "results.json").write_text(json.dumps(results, indent=2))
@@ -203,12 +216,14 @@ def main():
                 (controls.REPORT / (phase + "-compile-trace-summary.json")).write_text(
                     json.dumps({"imports": imports, "compiled": compiled}, indent=2)
                 )
-                assert imports and compiled
-                assert all(
+                if not imports or not compiled:
+                    raise AssertionError(f"Missing import/compile provenance: {phase}")
+                if not all(
                     sha[:8] in r["triton_version"]
                     and Path(r["triton_file"]).resolve().is_relative_to(site)
                     for r in imports
-                ), imports
+                ):
+                    raise AssertionError(imports)
             kernel_archive = controls.REPORT / f"{phase}-generated-kernels.zip"
             with zipfile.ZipFile(
                 kernel_archive, "w", compression=zipfile.ZIP_DEFLATED
