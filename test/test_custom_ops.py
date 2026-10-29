@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._library.custom_ops import OPDEFS
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -6299,6 +6300,10 @@ def _(x):
         finally:
             while len(torch.library._keep_alive) > keep_alive:
                 torch.library._keep_alive.pop()._destroy()
+            for n in ("f", "g"):
+                if n in ops:
+                    ops[n]._lib._destroy()
+                OPDEFS.pop(f"{ns}::{n}", None)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
