@@ -173,6 +173,9 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                             * (static_cast<opmath_t>(num_bin_edges[dim]) - 1)
                             / (static_cast<opmath_t>(rightmost_edge[dim]) - static_cast<opmath_t>(leftmost_edge[dim])));
 
+                    /* limit position if it still overflows. it should not */
+                    pos = std::clamp<int64_t>(pos, 0, num_bin_edges[dim] - 1);
+
                     /* Ensures consistency with bin_edges by checking the bins to the left and right
                      * of the selected position. Necessary for cases in which an element very close
                      * to a bin edge may be misclassified by simple division.
