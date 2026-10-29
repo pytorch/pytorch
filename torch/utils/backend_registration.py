@@ -157,14 +157,16 @@ def _normalization_device(
     custom_backend_name: str, device: int | str | torch.device | None = None
 ) -> int:
     def _get_current_device_index():
-        _get_device_index = "current_device"
-        if hasattr(torch, custom_backend_name) and hasattr(
-            getattr(torch, custom_backend_name), _get_device_index
+        if (
+            torch.accelerator.is_available()
+            and (acc := torch.accelerator.current_accelerator()) is not None
+            and acc.type == custom_backend_name
         ):
-            return getattr(getattr(torch, custom_backend_name), _get_device_index)()
-        else:
-            # The default device index is 0.
-            return 0
+            return torch.accelerator.current_device_index()
+        mod = getattr(torch, custom_backend_name, None)
+        if mod is not None and hasattr(mod, "current_device"):
+            return mod.current_device()
+        return 0
 
     if device is None:
         return _get_current_device_index()
