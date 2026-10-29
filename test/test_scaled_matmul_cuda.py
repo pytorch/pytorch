@@ -769,7 +769,7 @@ class _TestFP8MatmulMixin:
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
 
-class TestFP8Matmul(TestCase):
+class TestFP8MatmulGeneric(TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -1414,31 +1414,34 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
-        padded_out = input.new_empty_strided(input.shape, (48, 1))
-        with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
-            torch.ops.aten._scaled_addmm.out(
-                input,
-                mat1,
-                mat2,
-                [scale_a],
-                [ScalingType.TensorWise.value],
-                [],
-                [scale_b],
-                [ScalingType.TensorWise.value],
-                [],
-                out=padded_out,
-            )
+        if torch.device(device).type == "cuda":
+            padded_out = input.new_empty_strided(input.shape, (48, 1))
+            with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
+                torch.ops.aten._scaled_addmm.out(
+                    input,
+                    mat1,
+                    mat2,
+                    [scale_a],
+                    [ScalingType.TensorWise.value],
+                    [],
+                    [scale_b],
+                    [ScalingType.TensorWise.value],
+                    [],
+                    out=padded_out,
+                )
 
         expected = scaled_addmm(input, *args)
-        misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
-        with self.assertRaisesRegex(ValueError, "16-byte aligned"):
-            scaled_addmm_(misaligned, *args)
+        if torch.device(device).type == "cuda":
+            misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
+            with self.assertRaisesRegex(ValueError, "16-byte aligned"):
+                scaled_addmm_(misaligned, *args)
 
         alignment_offset = 16 // input.element_size()
         aligned_16 = input.new_empty(input.numel() + alignment_offset)[
             alignment_offset:
         ].view_as(input)
-        self.assertEqual(aligned_16.data_ptr() % 32, 16)
+        if torch.device(device).type == "cuda":
+            self.assertEqual(aligned_16.data_ptr() % 32, 16)
         aligned_16.copy_(input)
         self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
         self.assertEqual(aligned_16, expected, atol=5e-2, rtol=5e-2)
@@ -1455,7 +1458,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         with self.assertRaisesRegex(ValueError, "canonical contiguous"):
             scaled_addmm_(invalid_ld, mat1[:1], *args[1:])
 
-        if not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
+        if torch.device(device).type == "cuda" and not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
             row_scale_a = torch.ones(32, 1, device=device)
             row_scale_b = torch.ones(1, 32, device=device)
             with self.assertRaisesRegex(

@@ -779,7 +779,6 @@
   "test/test_reductions.py",
   "test/test_rename_privateuse1_to_existing_device.py",
   "test/test_reuse_old_whl.py",
-  "test/test_scaled_matmul_cuda.py",
   "test/test_scatter_gather_ops.py",
   "test/test_serialization.py",
   "test/test_set_default_mobile_cpu_allocator.py",
