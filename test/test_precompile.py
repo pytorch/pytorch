@@ -9295,6 +9295,7 @@ class TestPrecompileRuntimeCache(TestCase):
             module = f"precompile_runtime_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:
                 f.write(module_source)
+            outs = {}
             for phase in ("capture", "replay"):
                 cmd = [sys.executable, "-c", driver, phase, directory, module]
                 out = subprocess.run(
@@ -9302,6 +9303,8 @@ class TestPrecompileRuntimeCache(TestCase):
                 )
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertIn(f"{marker}: {phase}", out.stdout)
+                outs[phase] = out
+            return outs
 
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
@@ -9402,9 +9405,11 @@ class TestPrecompileRuntimeCache(TestCase):
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("tracer", ["dynamo", "make_fx"])
     def test_strict_replay_with_multi_kernel(self, tracer):
-        self._capture_and_replay(
+        outs = self._capture_and_replay(
             _MULTI_KERNEL_MODULE, _MULTI_KERNEL_DRIVER, "multi-kernel phase ok", tracer
         )
+        warning = "overrides triton.multi_kernel=1 to 0"
+        self.assertIn(warning, outs["capture"].stderr)
 
 
 _CUSTOM_OP_MODULE = """
