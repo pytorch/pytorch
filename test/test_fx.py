@@ -1861,10 +1861,12 @@ class TestFX(JitTestCase):
         # Same scenario as test_lazy_import_body_scripts_a_function_calling_a_wrapped_helper
         # with real lazy imports: lazy_body resolves from the root forward's globals,
         # lazy_body2 from the globals of a child forward defined in another file.
+        # Each body scripts a fresh function so torch.jit.script's per-function
+        # cache cannot reuse lazy_body's compilation for lazy_body2.
         from fx import lazy_wrap_helper
 
         helper_src = inspect.getsource(lazy_wrap_helper)
-        body_src = "import torch\nimport lazy_wrap_helper\nSCALE = torch.jit.script(lazy_wrap_helper.double)(torch.ones(1)).item()\n"
+        body_src = "import torch, types\nimport lazy_wrap_helper\nd = lazy_wrap_helper.double\nSCALE = torch.jit.script(types.FunctionType(d.__code__, d.__globals__))(torch.ones(1)).item()\n"
         files = {
             "lazy_wrap_helper.py": helper_src,
             "lazy_body.py": body_src,
