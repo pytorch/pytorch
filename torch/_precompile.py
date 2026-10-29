@@ -2034,7 +2034,8 @@ def _torch_cpp_op(op_name: str, overload: str) -> bool:
     path = _registration_path(op_name, overload)
     if root is None or not path or path.endswith(".py"):
         return True
-    return path.startswith(os.path.join(root, ""))
+    path = os.path.normcase(os.path.normpath(path))
+    return path.startswith(os.path.normcase(os.path.join(root, "")))
 
 
 # Torch's namespaces defined from C++.
@@ -2068,6 +2069,7 @@ _TORCH_OP_NAMESPACES = frozenset(
         "metal_prepack",
         "vulkan_quantized",
         "_nnapi",
+        "_native_aot",
     }
 )
 _TORCH_DIR = os.path.dirname(torch.__file__)
