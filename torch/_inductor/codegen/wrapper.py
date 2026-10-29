@@ -57,6 +57,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.hints import KERNEL_CONFIGS_NAME
 from ..runtime.namedtuple_helpers import namedtuple_type
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
@@ -1028,6 +1029,38 @@ class _OmittedFromScan(DeferredLineBase):
         if line != self.line:
             raise AssertionError("a block omitted from the scan must stay at indent 0")
         return _OmittedFromScan(line, self.wrapper)
+
+
+class _KernelConfigs(DeferredLineBase):
+    """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each module-level
+    kernel, which the kernel launches with when the module is run on its own (see
+    cached_autotune).
+
+    It is written ahead of the kernels, which read it when they are defined, but is only
+    known once the autotune block has run, after every kernel, subgraphs' included, has
+    been emitted.
+    """
+
+    def __init__(self, wrapper: PythonWrapperCodegen) -> None:
+        super().__init__("")
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        configs = self.wrapper.kernel_configs
+        if self.wrapper.scanning_for_uses or not configs:
+            return None
+        pinned = {name: cfg for name, cfg in configs.items() if cfg is not None}
+        rows = "".join(f"    {name!r}: {cfg!r},\n" for name, cfg in pinned.items())
+        return (
+            "# The config each kernel below launches with when this file is run on its own,\n"
+            "# chosen by autotuning at compile time. A kernel missing here autotunes on its\n"
+            "# first launch, as does one whose config does not fit the GPU (after a retry\n"
+            "# with pipelining off).\n"
+            f"{KERNEL_CONFIGS_NAME} = {{\n{rows}}}"
+        )
+
+    def _new_line(self, line: str) -> _KernelConfigs:
+        return _KernelConfigs(self.wrapper)
 
 
 @dataclasses.dataclass
@@ -2316,6 +2349,12 @@ class PythonWrapperCodegen(CodeGen):
         # The names each subgraph uses, which the subgraph's own scan adds, since the
         # root splices its code in unscanned.
         self.names_used_unscanned: OrderedSet[str] = OrderedSet()
+        # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
+        # that config, which generate_and_run_autotune_block fills in.
+        self.kernel_configs: dict[str, dict[str, Any] | None] = {}
+        # kernel_autotune_names across the root and its subgraphs: the kernels the
+        # autotune block launches.
+        self.kernel_autotune_names_all_graphs: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -3418,7 +3457,9 @@ class PythonWrapperCodegen(CodeGen):
         call = f"{fn}({args})"
         return call
 
-    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_stable(
+        self, desc, apply_size_hints=False, tensor_ref: str | None = None
+    ):
         block_shape = desc.block_shape
         if apply_size_hints:
             block_shape = V.graph.sizevars.optimization_hints(block_shape)
@@ -3430,7 +3471,8 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(import_line)
         prefix = f"{desc.descriptor_module}.{desc.descriptor_class}"
         fn = f"{prefix}.from_tensor"
-        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        if tensor_ref is None:
+            tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
         args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
@@ -3676,6 +3718,8 @@ class PythonWrapperCodegen(CodeGen):
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
         code and execute it to trigger Triton kernel compilation and auto-tuning
         """
+        from ..runtime.triton_heuristics import CachingAutotuner, config_to_dict
+
         self.kernel_autotune_defs.splice(
             """
             async_compile.wait(globals())
@@ -3719,6 +3763,23 @@ class PythonWrapperCodegen(CodeGen):
                 exec(tuning_code, scope)
             except Exception as e:
                 raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        # Only the kernels the block launched: async_compile precompiles every kernel,
+        # so one launcher alone does not show that it was tuned.
+        for name in self.kernel_configs.keys() & self.kernel_autotune_names_all_graphs:
+            kernel = scope.get(name)
+            if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
+                launched = kernel.launchers[0].config
+                row = config_to_dict(launched)
+                # A third-party backend's options, which config_from_dict restores.
+                if extra_options := getattr(launched, "extra_options", None):
+                    row["extra_options"] = extra_options
+                # A row the module could not read back, such as one holding an enum, is
+                # left out, so that its kernel tunes on first launch. So is a config with
+                # fields a row does not carry.
+                carried = launched.num_ctas == 1 and launched.pre_hook is None
+                with contextlib.suppress(ValueError, SyntaxError, TypeError):
+                    if carried and ast.literal_eval(repr(row)) == row:
+                        self.kernel_configs[name] = row
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -4529,11 +4590,15 @@ class PythonWrapperCodegen(CodeGen):
         src_code: str,
         device_type: str,
         metadata: str | None = None,
+        pin_config: bool = False,
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
         The python wrapper defines the kernel as code. Wrappers that consume a kernel's
         ``async_compile.triton(...)`` source themselves get that string form instead.
+        With ``pin_config``, set for an inductor-generated kernel, the module run on its
+        own launches the kernel with the config compile-time autotuning chose
+        (KERNEL_CONFIGS).
         """
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
@@ -4593,6 +4658,16 @@ class PythonWrapperCodegen(CodeGen):
         # defs and constants. In one shared namespace the later binding would win for
         # all of them, so _rename_kernel_module_globals makes each kernel-unique.
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
+        if pin_config and config.triton.autotune_at_compile_time:
+            # The autotune block below chooses this kernel's config, and the module
+            # launches it with that one rather than tuning again on first launch:
+            # cached_autotune looks the kernel up in its module's KERNEL_CONFIGS.
+            if not self.kernel_configs:
+                # Here rather than in write_header, which a subclass may replace. The
+                # root's header comes before every kernel, subgraphs' included.
+                root = self.get_root_graph()
+                root.header.writeline(_KernelConfigs(root))
+            self.kernel_configs[kernel_name] = None
         self.define_kernel(
             kernel_name,
             src_code,
@@ -4617,6 +4692,16 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.splice(src_code, strip=True)
         compile_wrapper.writeline(f"''', device_str='{device_type}')")
         return compile_wrapper.getvalue()
+
+    @cache_on_self
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        if not isinstance(root, PythonWrapperCodegen):
+            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
+        return root
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.write_omitted_from_scan(self.subgraph_definitions, subgraph_code.value)
@@ -5668,6 +5753,21 @@ class PythonWrapperCodegen(CodeGen):
                         autotune_args[raw_key]
                     )
 
+                # The captured sample input of a TMA argument is the descriptor's
+                # underlying tensor, not the descriptor the kernel expects.
+                if triton_input and isinstance(raw_arg, ir.TMADescriptor):
+                    if isinstance(raw_arg, ir.TMADescriptorStable):
+                        desc_call = self._generate_tma_descriptor_call_stable(
+                            raw_arg, apply_size_hints=True, tensor_ref=triton_input
+                        )
+                        self.kernel_autotune_calls.writeline(f"{arg} = {desc_call}")
+                        triton_input = arg
+                    else:
+                        # Experimental descriptors take explicit dims, which are
+                        # size hints here and may not match the sample tensor, so
+                        # fall back to a synthetic tensor and descriptor.
+                        triton_input = None
+
                 if triton_input:
                     arg_str = triton_input
                     if not isinstance(arg_type, torch_dtype) and (
@@ -5782,6 +5882,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 )
             self.kernel_autotune_names.add(kernel_name)
+            self.kernel_autotune_names_all_graphs.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return
@@ -6686,6 +6787,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # the root rather than through each parent; a name reported for code the root
         # does not splice in can only keep a preamble line, never drop one.
         self.names_used_unscanned = root.names_used_unscanned
+        self.kernel_configs = root.kernel_configs
+        self.kernel_autotune_names_all_graphs = root.kernel_autotune_names_all_graphs
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -6818,16 +6921,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
-
-    @cache_on_self
-    def get_root_graph(self) -> PythonWrapperCodegen:
-        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
-        while isinstance(root, SubgraphPythonWrapperCodegen):
-            root = root.parent_wrapper
-
-        if not isinstance(root, PythonWrapperCodegen):
-            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
-        return root
 
     def generate_and_run_autotune_block(self):
         # Only execute auto-tuning block in the main graph
