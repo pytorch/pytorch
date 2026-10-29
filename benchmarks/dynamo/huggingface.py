@@ -139,6 +139,7 @@ try:
         TextGenerationBenchmark,
         TextGenerationPrefillModel,
         TP_MODELS,
+        WhisperBenchmark,
     )
 except ImportError:
     from huggingface_llm_models import (
@@ -148,6 +149,7 @@ except ImportError:
         TextGenerationBenchmark,
         TextGenerationPrefillModel,
         TP_MODELS,
+        WhisperBenchmark,
     )
 
 
@@ -654,6 +656,10 @@ class HuggingfaceRunner(BenchmarkRunner):
                     **tp_kwargs,
                 )
                 self.model_iter_fn = self.prefill if mode == "prefill" else self.decode
+            elif benchmark_cls is WhisperBenchmark:
+                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
+                    model_name, device, training=is_training
+                )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name, device
@@ -662,7 +668,8 @@ class HuggingfaceRunner(BenchmarkRunner):
                 model.model if isinstance(model, TextGenerationPrefillModel) else model
             )
             generation_model.generation_config.disable_compile = True
-            self.hf_llm = True
+            # Training times forward and backward as for other models, not generate().
+            self.hf_llm = not is_training
 
         else:
             self.hf_llm = False
