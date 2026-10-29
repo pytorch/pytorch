@@ -112,6 +112,8 @@ def main():
             if label in {"candidate", "child"}
             else []
         )
+        if "--reuse-candidate-wheel" in sys.argv:
+            phases.insert(1, (label + "-explicit-fusion-only", "0"))
         for phase, fma in phases:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(site) + (
@@ -122,6 +124,12 @@ def main():
                 controls.WORK / phase / "inductor-cache"
             )
             controls.configure_fusion(env, fma)
+            if "--reuse-candidate-wheel" in sys.argv:
+                trace_site = controls.ROOT / ".ci/pytorch/triton_pin_titan_trace_site"
+                env["PYTHONPATH"] = str(trace_site) + os.pathsep + env["PYTHONPATH"]
+                env["PIN_TRITON_TRACE_DIR"] = str(
+                    controls.ROOT / "test/debug/triton-pin-titan-controls" / (phase + "-compile-trace")
+                )
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
             env["CUDA_VISIBLE_DEVICES"] = "0,1"
             probe = (
@@ -184,6 +192,23 @@ def main():
             metrics[phase] = values
             (controls.REPORT / "metrics.json").write_text(json.dumps(metrics, indent=2))
             (controls.REPORT / "results.json").write_text(json.dumps(results, indent=2))
+            if env.get("PIN_TRITON_TRACE_DIR"):
+                records = [
+                    json.loads(line)
+                    for path in Path(env["PIN_TRITON_TRACE_DIR"]).glob("*.jsonl")
+                    for line in path.read_text().splitlines()
+                ]
+                imports = [r for r in records if r["event"] == "import"]
+                compiled = [r for r in records if r["event"] == "compiled"]
+                (controls.REPORT / (phase + "-compile-trace-summary.json")).write_text(
+                    json.dumps({"imports": imports, "compiled": compiled}, indent=2)
+                )
+                assert imports and compiled
+                assert all(
+                    sha[:8] in r["triton_version"]
+                    and Path(r["triton_file"]).resolve().is_relative_to(site)
+                    for r in imports
+                ), imports
             kernel_archive = controls.REPORT / f"{phase}-generated-kernels.zip"
             with zipfile.ZipFile(
                 kernel_archive, "w", compression=zipfile.ZIP_DEFLATED
