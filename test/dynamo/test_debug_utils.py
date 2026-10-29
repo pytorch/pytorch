@@ -2,6 +2,7 @@
 
 import ast
 import itertools
+import json
 import math
 import os
 from unittest.mock import patch
@@ -14,12 +15,23 @@ from torch._dynamo.debug_utils import (
     _serialize_sym_expr,
     aot_graph_input_parser,
     generate_env_vars_string,
+    InputReader,
+    InputWriter,
     NNModuleToString,
 )
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    TemporaryDirectoryName,
+)
+from torch.utils._content_store import (
+    ContentStoreReader,
+    ContentStoreWriter,
+    zstd_available,
+)
 
 
 f32 = torch.float32
@@ -1132,6 +1144,398 @@ class TestDynamoConfigOverrideIntegration(TestCase):
             UserWarning, "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS"
         ):
             _create_dynamo_config_router("0:specialize_float=True")
+
+
+class TestStorageManifest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("stable_hash", [None, False, True])
+    def test_shared_store_requires_stable_hash(self, stable_hash):
+        with TemporaryDirectoryName() as root:
+            store = ContentStoreWriter(root)
+            with self.assertRaisesRegex(ValueError, "stable_hash"):
+                InputWriter(None, content_store=store, stable_hash=stable_hash)
+            self.assertFalse(store.stable_hash)
+            self.assertEqual(store.storage_metadata, {})
+            store = ContentStoreWriter(root, stable_hash=True)
+            if stable_hash is False:
+                with self.assertRaisesRegex(ValueError, "stable_hash must match"):
+                    InputWriter(None, content_store=store, stable_hash=stable_hash)
+            else:
+                writer = InputWriter(None, content_store=store, stable_hash=stable_hash)
+                self.assertIs(writer.store, store)
+
+    @parametrize("stable_hash", [None, False, True])
+    def test_private_store_hash_setting_is_preserved(self, stable_hash):
+        with TemporaryDirectoryName() as root:
+            writer = InputWriter(root, stable_hash=stable_hash)
+            self.assertEqual(writer.store.stable_hash, bool(stable_hash))
+
+    @parametrize("field", ["logical_nbytes", "stored_nbytes"])
+    @parametrize("value", [None, -1, 1.5, "4", True])
+    def test_manifest_byte_sizes_must_be_nonnegative_integers(self, field, value):
+        with TemporaryDirectoryName() as root:
+            bundle, _, _ = self.write_bundle(root, [torch.ones(2)])
+            path = os.path.join(bundle, "storage_manifest.json")
+            with open(path) as f:
+                manifest = json.load(f)
+            (entry,) = manifest["storages"].values()
+            if value is None:
+                del entry[field]
+            else:
+                entry[field] = value
+            with open(path, "w") as f:
+                json.dump(manifest, f)
+            with self.assertRaisesRegex(ValueError, f"'{field}' must be"):
+                InputReader(bundle)
+
+    @parametrize("manifest", [False, True])
+    def test_loaded_size_must_match_generated_storage_size(self, manifest):
+        with TemporaryDirectoryName() as root:
+            if manifest:
+                bundle, _, writer = self.write_bundle(root, [torch.ones(2)])
+            else:
+                bundle = root
+                writer = InputWriter(root, stable_hash=True)
+                writer.tensor("arg0", torch.ones(2))
+            (h,) = writer.storage_hashes
+            reader = InputReader(bundle)
+            self.assertEqual(reader.storage(h, 8).nbytes(), 8)
+            with self.assertRaisesRegex(ValueError, "expected 12, got 8"):
+                reader.storage(h, 12)
+            self.assertEqual(reader.args, [])
+
+    @parametrize("compression", [None, "zstd"])
+    def test_empty_storage_round_trip(self, compression):
+        if compression == "zstd" and not zstd_available():
+            self.skipTest("zstandard is not available")
+        with TemporaryDirectoryName() as root:
+            bundle, source, _ = self.write_bundle(
+                root, [torch.empty(0)], compression=compression
+            )
+            self.assertEqual(self.load(bundle, source), [torch.empty(0)])
+
+    def write_bundle(
+        self, root: str, args: list[torch.Tensor], *, compression=None
+    ) -> tuple[str, str, InputWriter]:
+        bundle = os.path.join(root, "bundle")
+        os.makedirs(bundle)
+        store = ContentStoreWriter(
+            os.path.join(root, "store"), stable_hash=True, compression=compression
+        )
+        writer = InputWriter(bundle, content_store=store)
+        for i, arg in enumerate(args):
+            writer.tensor(f"arg{i}", arg)
+        writer.write_storage_manifest()
+        return bundle, "\n".join(writer.lines()), writer
+
+    def load(self, bundle: str, source: str) -> list[object]:
+        namespace: dict[str, object] = {"torch": torch, "device": torch.device}
+        exec(source, namespace)
+        reader = InputReader(save_dir=bundle)
+        namespace["load_args"](reader)
+        return reader.args
+
+    def test_round_trip_through_shared_store(self):
+        x = torch.arange(8.0)
+        args = [x, x[2:], torch.ones(3)]
+        with TemporaryDirectoryName() as root:
+            bundle, source, writer = self.write_bundle(root, args)
+            with open(os.path.join(bundle, "storage_manifest.json")) as f:
+                manifest = json.load(f)
+            self.assertEqual(manifest["store"], os.path.join("..", "store"))
+            self.assertEqual(set(manifest["storages"]), writer.storage_hashes)
+            self.assertEqual(len(writer.storage_hashes), 2)
+            loaded = self.load(bundle, source)
+        self.assertEqual(loaded, args)
+
+    @parametrize(
+        "case,message",
+        [
+            ("not_object", "must be a JSON object"),
+            ("schema_version", "unsupported storage manifest schema"),
+            ("missing_store", "'store' must be a non-empty string"),
+            ("empty_store", "'store' must be a non-empty string"),
+            ("storages_list", "'storages' must be an object"),
+            ("store_escapes", "escapes the capture root"),
+            ("entry_list", "entries must be objects"),
+            ("missing_path", "'path' must be a non-empty string"),
+            ("empty_path", "'path' must be a non-empty string"),
+            ("path_number", "'path' must be a non-empty string"),
+            ("missing_codec", "unknown content-store codec"),
+            ("unknown_codec", "unknown content-store codec"),
+        ],
+    )
+    def test_malformed_manifest_is_rejected(self, case, message):
+        with TemporaryDirectoryName() as root:
+            bundle, _, _ = self.write_bundle(root, [torch.ones(2)])
+            path = os.path.join(bundle, "storage_manifest.json")
+            with open(path) as f:
+                manifest = json.load(f)
+            if case == "not_object":
+                manifest = [manifest]
+            elif case == "schema_version":
+                manifest["schema_version"] = 2
+            elif case == "missing_store":
+                del manifest["store"]
+            elif case == "empty_store":
+                manifest["store"] = ""
+            elif case == "storages_list":
+                manifest["storages"] = []
+            elif case == "store_escapes":
+                manifest["store"] = os.path.join("..", "..", "elsewhere")
+            else:
+                (h,) = manifest["storages"]
+                entry = manifest["storages"][h]
+                if case == "entry_list":
+                    manifest["storages"][h] = []
+                elif case == "missing_path":
+                    del entry["path"]
+                elif case == "empty_path":
+                    entry["path"] = ""
+                elif case == "path_number":
+                    entry["path"] = 1
+                elif case == "missing_codec":
+                    del entry["codec"]
+                else:
+                    entry["codec"] = "unknown"
+            with open(path, "w") as f:
+                json.dump(manifest, f)
+            with self.assertRaisesRegex(ValueError, message):
+                InputReader(save_dir=bundle)
+
+    @parametrize("finalize", [False, True])
+    def test_shared_store_requires_manifest(self, finalize):
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "bundle")
+            writer = InputWriter(
+                bundle,
+                content_store=ContentStoreWriter(
+                    os.path.join(root, "store"), stable_hash=True
+                ),
+            )
+            writer.tensor("arg0", torch.ones(2))
+            if finalize:
+                writer.write_storage_manifest()
+                os.unlink(os.path.join(bundle, "storage_manifest.json"))
+            with self.assertRaisesRegex(FileNotFoundError, "storage manifest"):
+                InputReader(save_dir=bundle)
+
+    def test_required_marker_precedes_storage_and_preserves_metadata(self):
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "bundle")
+            os.makedirs(bundle)
+            path = os.path.join(bundle, "capture_metadata.json")
+            with open(path, "w") as f:
+                json.dump(
+                    {"graph_name": "forward", "storage_manifest_required": False}, f
+                )
+            store = ContentStoreWriter(os.path.join(root, "store"), stable_hash=True)
+            writer = InputWriter(bundle, content_store=store)
+            write_storage = store.write_storage
+
+            def checked_write(storage):
+                with open(path) as f:
+                    self.assertEqual(
+                        json.load(f),
+                        {"graph_name": "forward", "storage_manifest_required": True},
+                    )
+                return write_storage(storage)
+
+            with patch.object(store, "write_storage", side_effect=checked_write):
+                writer.tensor("arg0", torch.ones(2))
+                writer.tensor("arg1", torch.zeros(3))
+            writer.write_storage_manifest()
+            with open(path) as f:
+                self.assertEqual(
+                    json.load(f),
+                    {"graph_name": "forward", "storage_manifest_required": True},
+                )
+
+    def test_invalid_store_layout_fails_before_storage_write(self):
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "capture", "bundle")
+            store = ContentStoreWriter(os.path.join(root, "outside"), stable_hash=True)
+            writer = InputWriter(bundle, content_store=store)
+            with patch.object(store, "write_storage") as write_storage:
+                with self.assertRaisesRegex(ValueError, "escapes the capture root"):
+                    writer.tensor("arg0", torch.ones(2))
+                write_storage.assert_not_called()
+            self.assertFalse(os.path.exists(bundle))
+            with self.assertRaisesRegex(ValueError, "escapes the capture root"):
+                writer.write_storage_manifest()
+
+    @parametrize("metadata", [None, [], 1, "invalid"])
+    def test_malformed_capture_metadata_is_rejected(self, metadata):
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "bundle")
+            os.makedirs(bundle)
+            with open(os.path.join(bundle, "capture_metadata.json"), "w") as f:
+                json.dump(metadata, f)
+            writer = InputWriter(
+                bundle,
+                content_store=ContentStoreWriter(
+                    os.path.join(root, "store"), stable_hash=True
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "capture metadata must be"):
+                writer.tensor("arg0", torch.ones(2))
+            with self.assertRaisesRegex(ValueError, "capture metadata must be"):
+                InputReader(bundle)
+            self.assertFalse(os.path.exists(os.path.join(root, "store", "storages")))
+
+    @parametrize("compression", ["none", "zstd"])
+    def test_two_bundles_deduplicate_and_replay_views(self, compression):
+        if compression == "zstd" and not zstd_available():
+            self.skipTest("zstandard is not available")
+        x = torch.zeros(4096)
+        args = [x, x[2::2]]
+        with TemporaryDirectoryName() as root:
+            store = ContentStoreWriter(
+                os.path.join(root, "store"),
+                stable_hash=True,
+                compression="zstd" if compression == "zstd" else None,
+            )
+            for name in ("first", "second"):
+                base = x.clone()
+                args = [base, base[2::2]]
+                writer = InputWriter(os.path.join(root, name), content_store=store)
+                for i, arg in enumerate(args):
+                    writer.tensor(f"arg{i}", arg)
+                writer.write_storage_manifest()
+                loaded = self.load(writer.save_dir, "\n".join(writer.lines()))
+                self.assertEqual(loaded, args)
+                self.assertEqual(loaded[1].stride(), args[1].stride())
+                self.assertEqual(loaded[1].storage_offset(), args[1].storage_offset())
+                self.assertEqual(
+                    loaded[0].untyped_storage()._cdata,
+                    loaded[1].untyped_storage()._cdata,
+                )
+                (h,) = writer.storage_hashes
+                self.assertEqual(store.storage_metadata[h]["codec"], compression)
+            storage_dir = os.path.join(root, "store", "storages")
+            self.assertEqual(len(os.listdir(storage_dir)), 1)
+
+    @parametrize("external_store", [False, True])
+    def test_writer_without_save_dir_preserves_existing_behavior(self, external_store):
+        x = torch.ones(4)
+        with TemporaryDirectoryName() as root:
+            store = (
+                ContentStoreWriter(root, stable_hash=True) if external_store else None
+            )
+            writer = InputWriter(None, content_store=store)
+            writer.tensor("arg0", x)
+            namespace = {"torch": torch}
+            exec("\n".join(writer.lines()), namespace)
+            reader = InputReader(None)
+            if store is not None:
+                reader.store = ContentStoreReader(root)
+            namespace["load_args"](reader)
+            (loaded,) = reader.args
+            if external_store:
+                self.assertEqual(loaded, x)
+            else:
+                self.assertEqual(loaded.shape, x.shape)
+            metadata_path = os.path.join(root, "capture_metadata.json")
+            self.assertFalse(os.path.exists(metadata_path))
+
+    def test_meta_storage_does_not_require_manifest(self):
+        with TemporaryDirectoryName() as root:
+            bundle = os.path.join(root, "bundle")
+            writer = InputWriter(
+                bundle,
+                content_store=ContentStoreWriter(
+                    os.path.join(root, "store"), stable_hash=True
+                ),
+            )
+            writer.tensor("arg0", torch.empty(4, device="meta"))
+            self.assertEqual(writer.storage_hashes, set())
+            self.assertFalse(os.path.exists(bundle))
+
+    @parametrize("marker", [None, False])
+    def test_legacy_metadata_allows_random_fallback(self, marker):
+        x = torch.ones(4)
+        with TemporaryDirectoryName() as root:
+            writer = InputWriter(root)
+            writer.tensor("arg0", x)
+            metadata = {} if marker is None else {"storage_manifest_required": marker}
+            with open(os.path.join(root, "capture_metadata.json"), "w") as f:
+                json.dump(metadata, f)
+            (h,) = writer.storage_hashes
+            os.unlink(os.path.join(root, "storages", h))
+            (loaded,) = self.load(root, "\n".join(writer.lines()))
+            self.assertEqual(loaded.shape, x.shape)
+
+    def test_missing_storage_is_an_error_only_with_a_manifest(self):
+        x = torch.ones(4)
+        with TemporaryDirectoryName() as root:
+            bundle, source, writer = self.write_bundle(root, [x])
+            (h,) = writer.storage_hashes
+            path = writer.store.storage_metadata[h]["path"]
+            os.unlink(os.path.join(root, "store", path))
+            with self.assertRaises(FileNotFoundError):
+                self.load(bundle, source)
+
+            legacy = os.path.join(root, "legacy")
+            legacy_writer = InputWriter(legacy)
+            legacy_writer.tensor("arg0", x)
+            (legacy_h,) = legacy_writer.storage_hashes
+            os.unlink(os.path.join(legacy, "storages", legacy_h))
+            (loaded,) = self.load(legacy, "\n".join(legacy_writer.lines()))
+        self.assertEqual(loaded.shape, x.shape)
+
+    @parametrize("compression", [None, "zstd"])
+    @parametrize("manifest", [False, True])
+    def test_deduplicated_storages_stay_independent(self, compression, manifest):
+        if compression == "zstd" and not zstd_available():
+            self.skipTest("zstandard is not available")
+        first, second = torch.zeros(4096), torch.zeros(4096)
+        view = first[2::2]
+        with TemporaryDirectoryName() as root:
+            if manifest:
+                bundle, source, writer = self.write_bundle(
+                    root, [first, second, view], compression=compression
+                )
+            else:
+                bundle = root
+                writer = InputWriter(root, stable_hash=True)
+                writer.store.compression = compression
+                for i, arg in enumerate((first, second, view)):
+                    writer.tensor(f"arg{i}", arg)
+                source = "\n".join(writer.lines())
+            self.assertEqual(len(writer.storage_hashes), 1)
+            (h,) = writer.storage_hashes
+            self.assertEqual(
+                writer.store.storage_metadata[h]["codec"], compression or "none"
+            )
+            loaded_first, loaded_second, loaded_view = self.load(bundle, source)
+        self.assertEqual(
+            [loaded_first, loaded_second, loaded_view], [first, second, view]
+        )
+        first_ptr = loaded_first.untyped_storage().data_ptr()
+        self.assertNotEqual(first_ptr, loaded_second.untyped_storage().data_ptr())
+        self.assertEqual(first_ptr, loaded_view.untyped_storage().data_ptr())
+        self.assertEqual(loaded_view.storage_offset(), 2)
+        self.assertEqual(loaded_view.stride(), view.stride())
+        loaded_view.add_(3)
+        expected = torch.zeros_like(first)
+        expected[2::2] = 3
+        self.assertEqual(loaded_first, expected)
+        self.assertEqual(loaded_second, second)
+        self.assertEqual(loaded_view, torch.full_like(view, 3))
+
+    def test_load_args_without_inputs(self):
+        writer = InputWriter(None)
+        namespace: dict[str, object] = {}
+        exec("\n".join(writer.lines()), namespace)
+        reader = InputReader()
+        namespace["load_args"](reader)
+        self.assertEqual(reader.args, [])
+        with self.assertRaisesRegex(RuntimeError, "needs a save_dir"):
+            writer.write_storage_manifest()
+
+
+instantiate_parametrized_tests(TestStorageManifest)
 
 
 if __name__ == "__main__":
