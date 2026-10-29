@@ -541,7 +541,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #else
       TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
-    } break;
+    }
     case TypeKind::PyObjectType: {
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }

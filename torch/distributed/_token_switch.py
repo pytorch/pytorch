@@ -151,7 +151,6 @@ class _DispatchAutograd(torch.autograd.Function):
         )
         ctx.ts = ts
         ctx.routing = routing
-        ctx.tokens_shape = tokens.shape
         return out_tokens, out_topk_weights, out_topk_idx
 
     @staticmethod
@@ -161,10 +160,23 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor | None,
         grad_out_topk_idx: torch.Tensor | None,
-    ) -> tuple[None, None, torch.Tensor, None, None]:
-        grad_tokens = grad_out_tokens.new_zeros(ctx.tokens_shape)
-        ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
-        return None, None, grad_tokens, None, None
+    ) -> tuple[None, None, torch.Tensor, torch.Tensor, None]:
+        if grad_out_topk_weights is None:
+            raise NotImplementedError(
+                "TokenSwitch dispatch backward requires received topk_weights"
+            )
+        grad_tokens = grad_out_tokens.new_zeros(
+            ctx.routing.topk_idx.shape[0], grad_out_tokens.shape[-1]
+        )
+        grad_weights = grad_out_topk_weights.new_zeros(ctx.routing.topk_idx.shape)
+        ctx.ts._dispatch_backward(
+            ctx.routing,
+            grad_out_tokens.contiguous(),
+            grad_out_topk_weights.contiguous(),
+            grad_tokens,
+            grad_weights,
+        )
+        return None, None, grad_tokens, grad_weights, None
 
 
 class _CombineAutograd(torch.autograd.Function):
@@ -183,7 +195,6 @@ class _CombineAutograd(torch.autograd.Function):
         ctx.routing = routing
         ctx.expert_shape = expert_tokens.shape
         ctx.expert_dtype = expert_tokens.dtype
-        ctx.top_k = routing.topk_idx.shape[1]
         return out_tokens
 
     @staticmethod
@@ -193,35 +204,15 @@ class _CombineAutograd(torch.autograd.Function):
     ) -> tuple[None, None, torch.Tensor]:
         ts = ctx.ts
         H = ctx.expert_shape[-1]
-        N = grad_out_tokens.shape[0]
-        K = ctx.top_k
-        dtype = ctx.expert_dtype
-        # Allocate the full-size dispatch output buffer matching the layout's
-        # expected shape, dispatch the gradient into it, then slice back to
-        # ctx.expert_shape so the returned grad matches the combine input.
-        max_recv = ts.max_recv_tokens_per_rank
-        grad_expert_full, dummy_out_weights, dummy_out_idx = ts._alloc_dispatch_outputs(
-            ctx.routing,
-            grad_out_tokens,
-            grad_out_tokens.new_zeros(N, K, dtype=torch.float32),
-            max_recv,
-            H,
-            K,
+        grad_expert_full = grad_out_tokens.new_zeros(
+            ts.max_recv_tokens_per_rank, H, dtype=ctx.expert_dtype
         )
-        grad_expert_full = grad_expert_full.to(dtype)
-        dummy_weights = grad_out_tokens.new_zeros(N, K, dtype=torch.float32)
-        ctx.ts._dispatch(
+        ts._combine_backward(
             ctx.routing,
-            grad_out_tokens.to(dtype).contiguous(),
-            dummy_weights,
+            grad_out_tokens.to(ctx.expert_dtype).contiguous(),
             grad_expert_full,
-            dummy_out_weights,
-            dummy_out_idx,
         )
-        # Slice the leading dim back to expert_shape[0] (no-op for LL+EM where
-        # the full buffer was already the right size).
-        M = ctx.expert_shape[0]
-        return None, None, grad_expert_full[:M].contiguous()
+        return None, None, grad_expert_full[: ctx.expert_shape[0]].contiguous()
 
 
 class TokenSwitch(abc.ABC):
@@ -309,6 +300,27 @@ class TokenSwitch(abc.ABC):
     ) -> None:
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def _combine_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        out_expert_grads: torch.Tensor,
+    ) -> None:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_recv_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_token_grads: torch.Tensor,
+        out_topk_weight_grads: torch.Tensor,
+    ) -> None:
+        r"""Reverse dispatch into both source-shaped token and routing-weight buffers."""
+        raise NotImplementedError
+
     def dispatch(
         self,
         routing: Routing,
@@ -319,7 +331,7 @@ class TokenSwitch(abc.ABC):
         out: tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]
         | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        """Route tokens to experts.
+        r"""Route tokens to experts.
 
         Returns ``(out_tokens, out_topk_weights, out_topk_idx)``.  For
         expert-major layouts ``out_topk_idx`` is ``None``; for LL+expert-major
@@ -329,7 +341,8 @@ class TokenSwitch(abc.ABC):
         provided buffers and returns them; no autograd support.
         Without ``out``: allocates output buffers and returns the tuple with
         autograd support.  ``max_recv_tokens`` is required when ``out`` is not
-        provided.  ``topk_weights`` receives no gradient (routing metadata).
+        provided. Backends must implement gradients for both tokens and routing
+        weights. NCCL supports first-order gradients for FP32 ``topk_weights``.
         """
         if out is not None:
             self._dispatch(routing, tokens, topk_weights, *out)
@@ -426,8 +439,10 @@ class TokenSwitchNCCL(TokenSwitch):
         *,
         layout: str,
     ) -> Routing:
-        """Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
+        r"""Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
 
+        ``topk_idx`` must have dtype ``torch.int32`` or ``torch.int64``.
+        The NCCL EP handle retains an int64 copy of int32 indices.
         ``layout`` (required) controls the dispatch output memory layout:
         ``"flat"`` or ``"expert_major"``.
         """
@@ -471,6 +486,32 @@ class TokenSwitchNCCL(TokenSwitch):
             routing.handle,
             expert_tokens,
             out_tokens,
+        )
+
+    def _combine_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        out_expert_grads: torch.Tensor,
+    ) -> None:
+        self._ep._nccl_ep_dispatch_backward(
+            routing.handle, grad_tokens, out_expert_grads
+        )
+
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_recv_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_token_grads: torch.Tensor,
+        out_topk_weight_grads: torch.Tensor,
+    ) -> None:
+        self._ep._nccl_ep_combine_backward(
+            routing.handle,
+            grad_recv_tokens,
+            grad_recv_topk_weights,
+            out_token_grads,
+            out_topk_weight_grads,
         )
 
 
@@ -519,6 +560,7 @@ class TokenSwitchMoRI(TokenSwitch):
             )
         self._num_experts = num_experts
         self._experts_per_rank = num_experts // world_size
+        self._world_size = world_size
         self._top_k = top_k
 
         uid = [cco.Communicator.get_unique_id() if self._rank == 0 else None]
@@ -727,3 +769,56 @@ class TokenSwitchMoRI(TokenSwitch):
             staged.copy_(acc[:cap])
             out, _ = self._op.combine(staged, routing=mori_handle)
         out_tokens.copy_(out)
+
+    def _combine_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        out_expert_grads: torch.Tensor,
+    ) -> None:
+        rows, K = out_expert_grads.shape[0], self._top_k
+        weights = grad_tokens.new_zeros(grad_tokens.shape[0], K, dtype=torch.float32)
+        if routing.layout == "flat":
+            out_w = weights.new_zeros(rows, K)
+            out_idx = weights.new_zeros(rows, K, dtype=torch.int64)
+        else:
+            out_w, out_idx = weights.new_zeros(rows), None
+        self._dispatch(routing, grad_tokens, weights, out_expert_grads, out_w, out_idx)
+
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_recv_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_token_grads: torch.Tensor,
+        out_topk_weight_grads: torch.Tensor,
+    ) -> None:
+        self._combine(routing, grad_recv_tokens, out_token_grads)
+        # Received weights are copies, so source weight (t, k) gets the gradient at
+        # its receive slot on expert k's rank. Gather every rank's slot gradients in
+        # fp32 (a MoRI combine would round them to the token dtype) and index them.
+        state = self._state(routing)
+        K, cap = self._top_k, self._recv_cap
+        g = grad_recv_topk_weights
+        grads = g.new_zeros(cap * K, dtype=torch.float32)
+        if routing.layout == "flat":
+            n = min(cap, g.shape[0])
+            grads[: n * K].copy_(g[:n].reshape(-1))
+        else:
+            n = min(g.shape[0], self._em_slots)
+            used = state.slot_dest_row[:n] < cap
+            grads.index_add_(0, state.slot_src[:n], torch.where(used, g[:n], 0).float())
+        all_grads = grads.new_empty(self._world_size * cap * K)
+        dist.all_gather_into_tensor(all_grads, grads, group=self._pg)
+        # MoRI's dest map holds dest_rank * cap + row per (t, k). A token goes to a
+        # rank once, so its other k on that rank hold a dropped marker instead; take
+        # the slot from the k that was sent.
+        m = out_topk_weight_grads.shape[0]
+        enc = state.mori_handle.disp_dest_tok_id_map[: m * K].view(m, K).long()
+        dest = state.topk_idx[:m].long().div(self._experts_per_rank, rounding_mode="floor")
+        sent = enc < self._world_size * cap
+        same = (dest[:, :, None] == dest[:, None, :]) & sent[:, None, :]
+        slot = torch.where(same, enc[:, None, :], -1).amax(dim=2)
+        k = torch.arange(K, device=slot.device)
+        picked = all_grads[slot.clamp(min=0) * K + k]
+        out_topk_weight_grads.copy_(torch.where(slot >= 0, picked, 0))

@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import gc
 import hashlib
 import importlib
 import inspect
@@ -32,6 +33,7 @@ import io
 import itertools
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import traceback
@@ -119,6 +121,8 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -169,6 +173,7 @@ from .source import (
     ListGetItemSource,
     ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -336,6 +341,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -357,10 +367,11 @@ dunder_attrs_assumed_constants = (
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
-    # NOTE: we need to find the LAST matching index because <= 3.10 contains
-    # duplicate names in the case of cells: a name can be both local and cell
-    # and will take up 2 slots of the frame's localsplus. The correct behavior
-    # is to refer to the cell, which has a higher index.
+    # NOTE: we need to find the LAST matching index because localsplus can
+    # contain duplicate names in the case of cells (e.g. in Dynamo's resume
+    # functions): a name can be both local and cell and will take up 2 slots of
+    # the frame's localsplus. The correct behavior is to refer to the cell,
+    # which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
@@ -2244,6 +2255,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, AttrProxySource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2969,18 +2990,20 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
-
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
-                get_hooks()
+                hooks
             )
 
         code = [
@@ -3043,12 +3066,25 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
+            reason = (
+                f"{class_name}.__metadata_guard__() rejected the metadata "
+                f"for {ref}. Keep the metadata stable or change the check "
+                "if this difference is safe."
+            )
         else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
+            _validate_default_subclass_metadata_guard(metadata, cls)
+            reason = (
+                f"Metadata from {class_name}.__tensor_flatten__() for "
+                f"{ref} no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe."
+            )
 
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
@@ -3073,7 +3109,7 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker,
-            get_verbose_code_parts(global_name, guard),
+            get_verbose_code_parts(global_name, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -4152,14 +4188,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -5105,7 +5141,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                getattr(code, "co_qualname", code.co_name),
+                code.co_qualname,
                 code.co_filename,
                 code.co_firstlineno,
                 e,
@@ -5205,22 +5241,22 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
             # For FakeTensors, use pytype if set, otherwise default to
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
@@ -5267,7 +5303,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
@@ -5605,7 +5651,46 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return _is_registered_custom_op_def(value)
+    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
+
+
+def _pickles_as_its_own_global(value: object) -> bool:
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
+    if isinstance(value, (torch.Tensor, torch.nn.Module)):
+        return False
+    try:
+        cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
+            return False
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        module_name = getattr(value, "__module__", None)
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        # The reduction is user code, possibly O(size), and this runs per guard:
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(_GUARDS_PROTOCOL)
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
+    except Exception:
+        return False
 
 
 def is_portable_identity_guard(
@@ -5704,6 +5789,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_PROTOCOL = pickle.DEFAULT_PROTOCOL
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5740,6 +5830,7 @@ def pickle_guards_state(
             missing_values,
             builder.value_guarded_containers,
             buf,
+            protocol=_GUARDS_PROTOCOL,
         )
 
         if all(

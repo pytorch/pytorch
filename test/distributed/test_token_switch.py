@@ -15,6 +15,10 @@ from torch.distributed._token_switch import (
     TokenSwitchMoRI,
     TokenSwitchNCCL,
 )
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -193,6 +197,31 @@ class _ReferenceTokenSwitch(TokenSwitch):
         padded[: expert_tokens.shape[0]].copy_(expert_tokens)
         rows = self._all_gather(padded).flatten(0, 1)[h.send_flat_slot]
         out_tokens.zero_().index_add_(0, h.send_token, rows)
+
+    def _combine_backward(self, routing, grad_tokens, out_expert_grads):
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        out_expert_grads[: len(r)].copy_(self._all_gather(grad_tokens)[r, t])
+
+    def _dispatch_backward(
+        self,
+        routing,
+        grad_recv_tokens,
+        grad_recv_topk_weights,
+        out_token_grads,
+        out_topk_weight_grads,
+    ):
+        self._combine(routing, grad_recv_tokens, out_token_grads)
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        epr = self._experts_per_rank
+        _, weights = _to_local(
+            h.topk_idx_all[r, t],
+            grad_recv_topk_weights[: len(r)],
+            self._rank * epr,
+            epr,
+        )
+        self._combine(routing, weights, out_topk_weight_grads)
 
 
 class _TokenSwitchContractTests:
@@ -414,13 +443,181 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
     def _init(self):
         dist.barrier()
 
+    def test_backend_requires_dispatch_backward(self):
+        class IncompleteTokenSwitch(_ReferenceTokenSwitch):
+            _dispatch_backward = TokenSwitch._dispatch_backward
+
+        with self.assertRaisesRegex(TypeError, "_dispatch_backward"):
+            IncompleteTokenSwitch(
+                None, self.world_size * CONTRACT_EXPERTS_PER_RANK, NUM_TOKENS
+            )
+
+    @parametrize("loss_target", ["tokens", "weights", "both", "tokens_frozen"])
+    def test_dispatch_weight_gradients(self, loss_target):
+        self._init()
+        ts = self.get_contract_token_switch()
+        ids, weights, tokens, copies, _, _ = self._contract_inputs(seed=15)
+        tokens.requires_grad_(loss_target != "tokens_frozen")
+        weights.requires_grad_()
+        routing = ts.create_routing(ids, layout="flat")
+        received, scores, _ = ts.dispatch(
+            routing, tokens, weights, ts.max_recv_tokens_per_rank
+        )
+        score_grads = scores.new_empty(scores.numel() * 2)[::2].view_as(scores)
+        score_grads.copy_(
+            2 * scores.detach()
+            + received[:, :1].detach() / 8
+            + received[:, 1:2].detach() / 16
+            + self.rank
+            + 1
+        )
+        self.assertFalse(score_grads.is_contiguous())
+        loss = received.new_zeros(())
+        if loss_target in ("tokens", "both"):
+            loss = loss + received.sum()
+        if loss_target != "tokens":
+            loss = loss + (scores * score_grads).sum()
+        loss.backward()
+        expected = (
+            torch.zeros_like(tokens)
+            if loss_target == "weights"
+            else copies.expand_as(tokens)
+        )
+        if loss_target == "tokens_frozen":
+            self.assertIsNone(tokens.grad)
+        else:
+            self.assertEqual(tokens.grad, expected)
+        expected_weights = (
+            2 * weights.detach()
+            + tokens[:, :1] / 8
+            + tokens[:, 1:2] / 16
+            + ids // CONTRACT_EXPERTS_PER_RANK
+            + 1
+        )
+        if loss_target == "tokens":
+            expected_weights.zero_()
+        self.assertEqual(weights.grad, expected_weights)
+
+
+instantiate_parametrized_tests(TokenSwitchReferenceTest)
+
 
 class _TokenSwitchFlatTests:
     """Flat-layout tests with TOP_K=1 and one expert per rank.
 
-    The host class provides ``device``, ``_init()`` and ``get_token_switch()``
-    (world_size experts, top-k TOP_K).
+    The host class provides ``device``, ``_init()``, ``get_token_switch()``
+    (world_size experts, top-k TOP_K) and ``get_weight_grad_token_switch(capacity)``
+    (two experts per rank, top-k 3).
     """
+
+    def _weight_grad_inputs(self):
+        token = torch.arange(NUM_TOKENS, device=self.device)
+        destination = (token + self.rank) % self.world_size
+        ids = torch.stack(
+            (
+                destination * 2,
+                destination * 2 + 1,
+                (destination + 1) % self.world_size * 2,
+            ),
+            dim=1,
+        )
+        ids = torch.where(token[:, None] % 2 == 0, ids, ids.flip(1))
+        tokens = (
+            torch.arange(HIDDEN, device=self.device).expand(NUM_TOKENS, -1).float() / 8
+        )
+        tokens = tokens.contiguous()
+        tokens[:, 0] = self.rank + 1
+        tokens[:, 1] = token + 1
+        weights = (
+            torch.arange(NUM_TOKENS * 3, device=self.device)
+            .reshape(NUM_TOKENS, 3)
+            .float()
+        )
+        weights = weights / 32 + 0.125 + self.rank / 16
+        return ids, tokens.to(torch.bfloat16), weights
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", ["flat", "expert_major"])
+    @parametrize("loss_target", ["tokens", "weights", "both", "tokens_frozen"])
+    def test_dispatch_weight_gradients(self, layout, loss_target):
+        self._init()
+        ids, tokens, weights = self._weight_grad_inputs()
+        capacity = NUM_TOKENS * self.world_size * 3
+        ts = self.get_weight_grad_token_switch(capacity)
+        routing = ts.create_routing(ids, layout=layout)
+        tokens.requires_grad_(loss_target != "tokens_frozen")
+        weights.requires_grad_()
+        received, scores, _ = ts.dispatch(routing, tokens, weights, capacity)
+        token_grads = received.new_empty(received.numel() * 2)[::2].view_as(received)
+        token_grads.copy_(received.detach() / 16)
+        score_grads = scores.new_empty(scores.numel() * 2)[::2].view_as(scores)
+        coefficient = received[:, 0].detach() / 8 + received[:, 1].detach() / 16 + 1
+        coefficient = coefficient[:, None] if layout == "flat" else coefficient
+        # Nonzero gradients in invalid flat slots must not reach source weights.
+        score_grads.copy_(2 * scores.detach() + coefficient)
+        self.assertFalse(token_grads.is_contiguous())
+        self.assertFalse(score_grads.is_contiguous())
+        outputs, gradients = [], []
+        if loss_target in ("tokens", "both"):
+            outputs.append(received)
+            gradients.append(token_grads)
+        if loss_target != "tokens":
+            outputs.append(scores)
+            gradients.append(score_grads)
+        torch.autograd.backward(outputs, gradients)
+        if loss_target == "tokens_frozen":
+            self.assertIsNone(tokens.grad)
+        else:
+            copies = 2 if layout == "flat" else 3
+            expected_tokens = tokens.detach() * (copies / 16)
+            if loss_target == "weights":
+                expected_tokens.zero_()
+            self.assertEqual(tokens.grad, expected_tokens, rtol=0, atol=0)
+        expected_weights = (
+            2 * weights.detach() + tokens[:, :1] / 8 + tokens[:, 1:2] / 16 + 1
+        )
+        if loss_target == "tokens":
+            expected_weights.zero_()
+        self.assertEqual(weights.grad, expected_weights, rtol=0, atol=0)
+        torch.cuda.synchronize()
+        dist.barrier()
+        del received, scores, outputs, gradients
+        routing = None
+        ts = None
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_data_dependent_weights(self, layout):
+        self._init()
+        ids, tokens, _ = self._weight_grad_inputs()
+        tokens.requires_grad_()
+        weights = tokens[:, :3].float().softmax(dim=1)
+        weights.retain_grad()
+        capacity = NUM_TOKENS * self.world_size * 3
+        ts = self.get_weight_grad_token_switch(capacity)
+        routing = ts.create_routing(ids, layout=layout)
+        received, scores, _ = ts.dispatch(routing, tokens, weights, capacity)
+        routed_weights = scores.sum(dim=1) if layout == "flat" else scores
+        expert_tokens = received.float() * (self.rank + 1)
+        expert_tokens = (expert_tokens * routed_weights[:, None]).to(received.dtype)
+        result = ts.combine(routing, expert_tokens)
+        loss = result.float().sum()
+        loss.backward()
+        reference = tokens.detach().clone().requires_grad_()
+        reference_weights = reference[:, :3].float().softmax(dim=1)
+        reference_weights.retain_grad()
+        rank_scale = ids // 2 + 1
+        coefficient = (reference_weights * rank_scale).sum(dim=1, keepdim=True)
+        expected = reference.float() * coefficient
+        expected.sum().backward()
+        self.assertEqual(result.float(), expected, rtol=0.02, atol=0.004)
+        self.assertEqual(weights.grad, reference_weights.grad, rtol=0, atol=0)
+        self.assertEqual(tokens.grad, reference.grad, rtol=0.02, atol=0.004)
+        torch.cuda.synchronize()
+        dist.barrier()
+        del received, scores, expert_tokens, result, loss
+        routing = None
+        ts = None
 
     @skip_if_lt_x_gpu(2)
     def test_create_routing(self):
@@ -434,11 +631,23 @@ class _TokenSwitchFlatTests:
         per_expert_counts = torch.zeros(
             num_local_experts, dtype=torch.int32, device=self.device
         )
-        ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        self.assertEqual(routing.handle.get_num_recv_tokens(), NUM_TOKENS)
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
         self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
         torch.cuda.synchronize()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("dtype", [torch.float32, torch.int16, torch.bool])
+    def test_create_routing_invalid_dtype(self, dtype):
+        self._init()
+        ts = self.get_token_switch()
+        topk_idx = torch.zeros(NUM_TOKENS, TOP_K, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(
+            TypeError, "topk_idx must have dtype int32 or int64"
+        ):
+            ts.create_routing(topk_idx, layout="flat")
 
     @skip_if_lt_x_gpu(2)
     def test_dispatch(self):
@@ -901,6 +1110,13 @@ class TokenSwitchNCCLTest(
         return cls._cached_token_switch
 
     @classmethod
+    def get_weight_grad_token_switch(cls, capacity: int) -> TokenSwitchNCCL:
+        pg = dist.distributed_c10d._get_default_group()
+        return TokenSwitchNCCL(
+            pg, dist.get_world_size(pg) * 2, NUM_TOKENS, capacity, TOKEN_SIZE_BYTES
+        )
+
+    @classmethod
     def get_contract_token_switch(cls) -> TokenSwitchNCCL:
         if cls._cached_contract_token_switch is None:
             pg = dist.distributed_c10d._get_default_group()
@@ -1113,6 +1329,55 @@ class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
         return "nccl2"
 
 
+@requires_nccl_ep()
+class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @skip_if_lt_x_gpu(2)
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_combine_roundtrip(self, device, dtype, layout):
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.cuda.set_device(device)
+        max_recv_tokens = self.world_size * NUM_TOKENS
+        cls = type(self)
+        if cls._cached_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            dist.barrier(pg)
+            cls._cached_token_switch = TokenSwitchNCCL(
+                pg, self.world_size, NUM_TOKENS, max_recv_tokens, TOKEN_SIZE_BYTES
+            )
+        ts = cls._cached_token_switch
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, device
+        )
+        topk_idx = topk_idx.to(dtype)
+        routing = ts.create_routing(topk_idx, layout=layout)
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN), self.rank + 1, dtype=torch.bfloat16, device=device
+        )
+        dispatched, weights, indices = ts.dispatch(
+            routing, tokens, topk_weights, max_recv_tokens
+        )
+        src_rank = (self.rank - 1) % self.world_size
+        self.assertEqual(dispatched[:NUM_TOKENS], torch.full_like(tokens, src_rank + 1))
+        self.assertEqual(weights[:NUM_TOKENS], torch.ones_like(weights[:NUM_TOKENS]))
+        if layout == "flat":
+            self.assertEqual(indices.dtype, torch.int64)
+        else:
+            self.assertIsNone(indices)
+        combined = ts.combine(routing, dispatched[:NUM_TOKENS].contiguous())
+        self.assertEqual(combined, tokens)
+        self.assertEqual(topk_idx.dtype, dtype)
+
+
+instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="cuda")
+
+
 @requires_mori()
 class TokenSwitchMoRITest(
     _TokenSwitchFlatTests,
@@ -1122,6 +1387,7 @@ class TokenSwitchMoRITest(
 ):
     _cached_token_switch: TokenSwitchMoRI | None = None
     _cached_contract_token_switch: TokenSwitchMoRI | None = None
+    _cached_weight_grad_token_switch: TokenSwitchMoRI | None = None
     contract_dtype = torch.bfloat16
 
     @classmethod
@@ -1140,6 +1406,15 @@ class TokenSwitchMoRITest(
                 pg, dist.get_world_size(pg), NUM_TOKENS, HIDDEN, TOP_K
             )
         return cls._cached_token_switch
+
+    @classmethod
+    def get_weight_grad_token_switch(cls, capacity: int) -> TokenSwitchMoRI:
+        if cls._cached_weight_grad_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            cls._cached_weight_grad_token_switch = TokenSwitchMoRI(
+                pg, dist.get_world_size(pg) * 2, NUM_TOKENS, HIDDEN, 3
+            )
+        return cls._cached_weight_grad_token_switch
 
     @classmethod
     def get_contract_token_switch(cls) -> TokenSwitchMoRI:

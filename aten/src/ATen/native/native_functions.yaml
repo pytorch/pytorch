@@ -546,6 +546,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
+    Meta: add_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_add_Tensor
   tags: [core, pointwise]
 
@@ -557,6 +558,7 @@
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta, SparseXPU: add_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
+    Meta: add__Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_add__Tensor
   tags: pointwise
 
@@ -2106,6 +2108,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: div_sparse
     ZeroTensor: div_zerotensor
+    Meta: div_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_div_Tensor
   tags: [core, pointwise]
 
@@ -2757,8 +2760,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: frac_out
-    MPS: frac_out_mps
+    CPU, CUDA, MPS, XPU: frac_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: frac_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: frac_sparse_csr_out
   tags: pointwise
@@ -3061,7 +3063,8 @@
   precomputed:
   - dim -> int dim
   dispatch:
-    CPU, CUDA, XPU: index_copy_out
+    CPU, XPU: index_copy_out
+    CUDA: index_copy_cuda_out
     MPS: index_copy_out_mps
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
@@ -4251,6 +4254,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
+    Meta: mul_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_mul_Tensor
   tags: [core, pointwise]
 
@@ -5130,9 +5134,8 @@
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel_backward
+    CPU, CUDA, MPS, XPU: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5365,20 +5368,18 @@
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA, MTIA, XPU: logit
-    MPS: logit_mps
+    CPU, CUDA, MPS, MTIA, XPU: logit
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: logit_
+    CPU, CUDA, MPS, XPU: logit_
   tags: pointwise
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: logit_out
-    MPS: logit_out_mps
+    CPU, CUDA, MPS, XPU: logit_out
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
@@ -5947,8 +5948,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: std_mean
-    MPS: std_mean_mps
+    CPU, CUDA, MPS, XPU: std_mean
   autogen: std_mean.correction_out
   tags: reduction
 
@@ -6489,8 +6489,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: var_mean
-    MPS: var_mean_mps
+    CPU, CUDA, MPS, XPU: var_mean
   autogen: var_mean.correction_out
   tags: reduction
 
@@ -6944,6 +6943,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_sparse
     ZeroTensor: sub_zerotensor
+    Meta: sub_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_sub_Tensor
   tags: [core, pointwise]
 
@@ -8429,6 +8429,8 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   structured_delegate: bitwise_and.Tensor_out
+  dispatch:
+    Meta: bitwise_and_Tensor_meta
   tags: [core, pointwise]
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -8946,6 +8948,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+    Meta: ne_Scalar_meta
   tags: [core, pointwise]
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -9025,6 +9028,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    Meta: eq_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: eq_tensor_nested
   tags: [core, pointwise]
 
@@ -9105,6 +9109,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+    Meta: le_Scalar_meta
   tags: [core, pointwise]
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -9122,6 +9127,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+    Meta: le_Tensor_meta
   tags: [core, pointwise]
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -9725,8 +9731,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: signbit_out
-    MPS: signbit_out_mps
+    CPU, CUDA, MPS, XPU: signbit_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: signbit_sparse_csr_out
   tags: pointwise
@@ -11798,8 +11803,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_out
-    MPS: mse_loss_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -11809,8 +11813,7 @@
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_backward_out
-    MPS: mse_loss_backward_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_backward_out
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
@@ -15833,7 +15836,7 @@
 - func: special_legendre_polynomial_p.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, XPU: special_legendre_polynomial_p_out
+    CPU, CUDA, MPS, XPU: special_legendre_polynomial_p_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

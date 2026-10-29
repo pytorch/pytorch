@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
     dtypes,
@@ -414,6 +415,43 @@ class TestScatterGatherDevice(TestCase):
             with DeterministicGuard(deterministic):
                 self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                         is_scalar=False, reduction=None)
+
+    @dtypes(torch.float32, torch.bfloat16, torch.int8)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("rows,row_bytes", [(64, 240), (64, 256), (64, 272), (16384, 256), (8, 65536)])
+    def test_scatter_copy_slices(self, device, dtype, index_dtype, rows, row_bytes):
+        width = row_bytes // dtype.itemsize
+        src = make_tensor((rows, 2, width // 2), device=device, dtype=dtype)
+        dst = torch.zeros((2 * rows, 2, width // 2), device=device, dtype=dtype)
+        index = torch.randperm(2 * rows, device=device, dtype=index_dtype)[:rows]
+        expected = dst.cpu().index_copy_(0, index.cpu().long(), src.cpu())
+        dst.scatter_(0, index[:, None, None].expand_as(src), src)
+        self.assertEqual(dst.cpu(), expected, atol=0, rtol=0)
+
+    @parametrize("op", ["scatter", "index_copy"])
+    def test_copy_misaligned_out(self, device, op):
+        dst = torch.zeros((64, 128), device=device)
+        src = torch.ones((32, 128), device=device)
+        index = torch.arange(32, device=device)
+        expected = dst.cpu().index_copy_(0, index.cpu(), src.cpu())
+        out = torch.empty(dst.numel() + 1, device=device)[1:].view_as(dst)
+        if op == "scatter":
+            index = index[:, None].expand_as(src)
+        result = getattr(torch, op)(dst, 0, index, src, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @serialTest()
+    @largeTensorTest("5GB")
+    def test_scatter_copy_large_slice(self, device):
+        # The last valid vector fits int32, but the final loop increment does not.
+        width = 2**29
+        src = torch.ones((1, width), device=device).expand(2, width)
+        dst = torch.zeros((1, width), device=device)
+        index = torch.zeros((2, 1), device=device, dtype=torch.int64).expand_as(src)
+        dst.scatter_(0, index, src)
+        self.assertEqual(dst[0, [0, width // 2, width - 1]], torch.ones(3, device=device))
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):

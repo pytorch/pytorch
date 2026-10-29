@@ -171,13 +171,6 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang21)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=21
-    GCC_VERSION=11
-    KATEX=yes
-    DOCS=yes
-    ;;
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
@@ -232,7 +225,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     XPU_VERSION=2026.1
-    OMIX_VERSION=0.4.0
+    OMIX_VERSION=0.4.1
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -285,8 +278,8 @@ case "$tag" in
     PYTHON_VERSION=3.11
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-linter)
-    PYTHON_VERSION=3.10
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.11-linter)
+    PYTHON_VERSION=3.11
     CUDA_VERSION=13.2.2
     CLANG_VERSION=18
     ;;

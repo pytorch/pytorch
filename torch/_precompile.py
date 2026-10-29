@@ -245,8 +245,10 @@ it.
 # installed (see load()); either way it is locked to the producing Python version and
 # torch build, since it inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
 # are the make_fx contract; under Dynamo a call outside the captured variants is
-# REFUSED by the guards rather than silently served, and the guards that could not be
-# serialized are reported (PrecompileSummary.dropped_guards) rather than checked.
+# REFUSED by the guards rather than silently served, except in a frame Dynamo gave up
+# on during the capture (PrecompileSummary.eager_fallbacks), which runs that call
+# eagerly as the capture did; and the guards that could not be serialized are
+# reported (PrecompileSummary.dropped_guards) rather than checked.
 
 from __future__ import annotations
 
@@ -1682,8 +1684,8 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
@@ -1881,6 +1883,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     optional = {
         "TRACER",
         "SERVING_MODE",
+        "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -1946,8 +1949,8 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be structurally identical to the traced one (only weight
@@ -2045,8 +2048,8 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant (how it serves them is said below):
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state,
@@ -2065,7 +2068,8 @@ _SERVING_NOTES = {
 # minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
 # under their backend ids) are re-seeded and stay. The flip side is that there is no
 # compiler behind it: a call no captured variant covers RAISES rather than compiling a
-# new one.
+# new one, except in a frame Dynamo gave up on during capture (marked "eager
+# fallback" in FRAMES below), which runs it eagerly.
 """,
     "installed": """\
 # This artifact SERVES BY INSTALLING the Dynamo package in _PACKAGE onto the live code
@@ -2075,7 +2079,9 @@ _SERVING_NOTES = {
 # as under the fail_on_recompile stance (but without setting that process-wide
 # stance), so a call no captured variant covers raises rather than compiling a new
 # graph, under every process-wide stance that would compile it (force_backend,
-# "eager_then_compile", ...) too. Two stances you set yourself do change serving:
+# "eager_then_compile", ...) too; a frame Dynamo gave up on during capture (marked
+# "eager fallback" in FRAMES below) runs such a call eagerly instead. Two stances you set
+# yourself do change serving:
 # "force_eager" runs every call eagerly, bypassing the installed entries, and
 # "eager_on_recompile" serves the captured variants and runs any other call eagerly.
 """,
@@ -2114,6 +2120,9 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
             # trailing .backward(). Either way it ran eager during capture, so
             # the driver runs it eager too.
             "trivial": not code.guarded_codes and not code.bypassed,
+            # Dynamo gave up on the frame during capture and skipped it from
+            # then on; a load still serves its variants and runs a miss eager.
+            "eager_fallback": code.eager_fallback and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -2195,9 +2204,12 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     capture-time fact and is refused here rather than at load on the serving
     machine. (Defaults, which the code object does not carry either, are
     recorded into the artifact rather than refused.) An entry with no
-    dispatchable variant is refused too, naming which of its two causes applies.
+    dispatchable variant is refused too, naming which of its causes applies:
+    Dynamo bypassed it, Dynamo gave up on it at its first call, or it produced
+    no guarded code (a thin wrapper).
     """
     from torch._dynamo.package import SerializedCode
+    from torch._dynamo.precompile_package import _variantless_entry_fallback_message
 
     entry_frame = next((f for f in frames if f["is_entry"]), None)
     if entry_frame is None:
@@ -2215,6 +2227,9 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
             f"restructuring the captured callable."
         )
+    if entry_frame["eager_fallback"] and not entry_frame["variants"]:
+        name = entry_frame["code"].co_name
+        raise PrecompileError(_variantless_entry_fallback_message(name))
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -2293,6 +2308,9 @@ def _build_multigraph_python_source(
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
     buf.writeline(f'SERVING_MODE = "{mode}"')
+    if mode == "installed":
+        # load(allow_serve_time_compiles=True) flips this to True before exec.
+        buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
@@ -2300,10 +2318,12 @@ def _build_multigraph_python_source(
     buf.writeline(
         "# frame name -> number of captured variants. A frame with one variant"
     )
-    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("# serves one specialization; the artifact covers no other, except")
+    buf.writeline("# that an eager fallback runs a call its variants miss eagerly.")
     buf.writeline("FRAMES = [")
     for frame in frames:
-        buf.writeline(f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),")
+        row = f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),"
+        buf.writeline(row + ("  # eager fallback" if frame["eager_fallback"] else ""))
     buf.writeline("]")
     buf.writeline("")
     buf.writeline(
@@ -2772,7 +2792,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, *, warn: bool = True
+    python_code: str, *, warn: bool = True, allow_serve_time_compiles: bool = False
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2792,8 +2812,20 @@ def _make_inlined_forward(
             "exec python_code you produced or otherwise trust (Note [precompile "
             "programming model], invariant 7)."
         )
-    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
-    exec(compile(python_code, "<precompile>", "exec"), module_ns)
+    if allow_serve_time_compiles:
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        if default not in python_code:
+            raise PrecompileError(
+                "allow_serve_time_compiles=True: the artifact's "
+                "_ALLOW_SERVE_TIME_COMPILES line is not in the form capture() writes, "
+                "so the flag cannot be applied. Recapture it under this torch."
+            )
+        python_code = python_code.replace(
+            default, "\n_ALLOW_SERVE_TIME_COMPILES = True\n", 1
+        )
+    from torch._inductor.codecache import exec_from_cache_file
+
+    module_ns = exec_from_cache_file(python_code, "_precompiled_artifact")
     return cast("Callable[..., object]", module_ns["forward"])
 
 
@@ -3167,7 +3199,11 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
 
 def _runnable_from_pair(
-    python_code: str, cache: bytes, *, _trusted: bool = False
+    python_code: str,
+    cache: bytes,
+    *,
+    allow_serve_time_compiles: bool = False,
+    _trusted: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
@@ -3191,6 +3227,26 @@ def _runnable_from_pair(
     # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
     # defaults the same way, so an older pair still matches.
     tracer = cast(str, meta.get("TRACER", "make_fx"))
+    installed = meta["SERVING_MODE"] == "installed"
+    if allow_serve_time_compiles and not installed:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True applies only to an installed artifact "
+            '(SERVING_MODE = "installed"), which serves through Dynamo; this '
+            "artifact is standalone and has no compiler behind it. Load it without "
+            "the flag, or recapture to cover the calls it misses."
+        )
+    if allow_serve_time_compiles and "_ALLOW_SERVE_TIME_COMPILES" not in meta:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True: this installed artifact predates the "
+            "flag and would still refuse every uncovered call. Recapture it under "
+            "this torch."
+        )
+    if meta.get("_ALLOW_SERVE_TIME_COMPILES", False) is not False:
+        raise PrecompileError(
+            "this artifact sets _ALLOW_SERVE_TIME_COMPILES to something other than "
+            "False; capture() always writes False, and serve-time compiles are "
+            "enabled only by load(..., allow_serve_time_compiles=True)."
+        )
 
     from torch.compiler._no_compile import is_compilation_forbidden
 
@@ -3244,9 +3300,11 @@ def _runnable_from_pair(
     # input/model validation) and JITs the kernels -- which hit the primed cache when
     # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
     # a separate runtime.
-    forward = _make_inlined_forward(python_code, warn=not _trusted)
-
-    installed = meta["SERVING_MODE"] == "installed"
+    forward = _make_inlined_forward(
+        python_code,
+        warn=not _trusted,
+        allow_serve_time_compiles=allow_serve_time_compiles,
+    )
     return PrecompiledModule._from_loaded(forward, backend=backend, installed=installed)
 
 
@@ -3291,25 +3349,45 @@ def capture(
     needs there, since one compiled or launched only before the block is not in
     the cache. Each write also freezes the compiled kernels the serving process
     needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
-    freeze.
+    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
+    directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
+    you set is not used inside the block, and a JIT kernel or autotuner already
+    used before the block compiles and tunes again on its first launch inside
+    it. That retune benchmarks on the block's real inputs, and the config it
+    picks, which is what ships and what the process keeps using afterwards, may
+    differ from the one picked before the block. Compiled JIT kernel
+    specializations and autotuning decisions the block does not produce again
+    are kept afterwards.
+    Triton does not cache the decision of an autotuner with ``pre_hook``
+    configs, so one that does not prune its configs keeps its earlier decision
+    in the block and is benchmarked again on first use in the serving process.
+    No other thread should launch Triton kernels while the block opens or
+    closes: the in-memory caches are dropped and restored then without
+    synchronizing with launches, so a concurrent autotuner launch can fail.
+    Triton kernels another thread compiles or tunes while the block is open
+    go into the block's cache directory and ship with it.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
     multi-graph capture: it analyzes the Python rather than tracing one path,
     records every graph-break continuation and guarded recompilation the calls
     exercise, takes as many calls as you make (keyword arguments included), and
-    the artifact dispatches among the captured variants by their guards -- a call
-    no variant covers RAISES rather than silently serving, since there is no
-    compiler behind a source artifact. :class:`MakeFxTracer` is one non-strict
-    ATen trace: the capture takes exactly ONE positional call, refuses a second,
-    and specializes control flow and shapes to that call, with the contract of
-    Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. a module-level ``def step(model, x): return
-    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
-    ``nn.Module`` arguments have their params/buffers lifted to graph inputs (no
-    weights are baked in) and the rest are the runtime inputs; the reloaded
-    callable is invoked with the same argument structure, and the runtime model
-    must match the captured model's parameter/buffer structure.
+    the artifact dispatches among the captured variants by their guards -- a
+    call no variant covers RAISES rather than silently serving, since there is
+    no compiler behind a source artifact, unless Dynamo gave up on that frame
+    during the capture (``PrecompileSummary.eager_fallbacks``): the capture ran
+    that frame eagerly, so the call runs eagerly too. :class:`MakeFxTracer` is
+    one non-strict ATen trace: the capture takes exactly ONE positional call,
+    refuses a second, and specializes control flow and shapes to that call, with
+    the contract of Note [precompile programming model] in
+    ``torch/_precompile.py``. ``fn`` is the whole computation, e.g. a
+    module-level ``def step(model, x): return model(x)`` (only a
+    :class:`MakeFxTracer` capture also takes a lambda): the ``nn.Module``
+    arguments have their params/buffers lifted to graph inputs (no weights are
+    baked in) and the rest are the runtime inputs; the reloaded callable is
+    invoked with the same argument structure, and the runtime model must match
+    the captured model's parameter/buffer structure.
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
@@ -3394,7 +3472,10 @@ def capture(
 
 
 def load(
-    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    *,
+    allow_serve_time_compiles: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from the two files a precompile capture wrote.
 
@@ -3446,11 +3527,45 @@ def load(
     frames after load adds live entries that serve the calls the installed
     ones miss.
 
-    Frozen C++ kernels are keyed by their full build command, which includes
-    the producer's absolute PyTorch include and library paths, so they serve
-    only a host whose PyTorch install and toolchain paths match the producer's.
-    Any other host rebuilds them, which needs a C++ compiler there:
-    :func:`no_compilation` does not gate C++ builds.
+    Either kind of artifact runs a call eagerly instead of refusing it when the
+    missed frame is one Dynamo gave up on during the capture (listed in
+    ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in the
+    artifact's ``FRAMES``), since the capture ran that frame eagerly too. A
+    frame that kept variants logs a warning the first time a call misses them;
+    one that compiled none is served as plain Python from the start, as a
+    trivial frame is, with no warning, since there is no compiled code to lose.
+    Under an installed artifact only that frame runs eagerly: the frames it
+    calls still dispatch to their own variants. A standalone artifact installs
+    nothing, so the rest of the call from that frame on, its callees included,
+    runs as plain Python; whatever ran before it, such as the entry's variant
+    up to a graph break whose continuation fell back, still ran compiled.
+
+    Frozen C++ kernels are keyed by their build command with the PyTorch install
+    taken out, so they serve a host that installed the same PyTorch build
+    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
+    producer's. The key also covers each kernel's source, so a kernel whose source
+    or command names a path in the Inductor cache dir (a linked Halide runtime,
+    CUTLASS or CK library, or a GPU ``cpp_wrapper`` wrapper's cubin path) keeps
+    that path: a host whose cache dir is at the producer's path restores the frozen
+    binary, which needs those files at the same path, and any other host rebuilds
+    it. Rebuilding needs a C++ compiler on the serving host: :func:`no_compilation`
+    does not gate C++ builds.
+
+    ``allow_serve_time_compiles=True`` opts an installed artifact out of the
+    refusal: a call no captured variant covers compiles with the artifact's
+    backend, as ``torch.compile`` would, under the process-wide stance like any
+    other compile. The captured variants are still served first and do not
+    count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
+    that many serve-time compiles on top of them; a missed call past the limit
+    runs eagerly instead of compiling.
+    Serve-time compiles are recorded nowhere, but they are built under the
+    process's Dynamo config: with ``torch._dynamo.config.caching_precompile`` on
+    they drop identity guards (``ID_MATCH``, ``CLOSURE_MATCH``, ...) exactly as
+    any other compile in that process does.
+    The flag does not lift the ``compiled_autograd`` refusal above. A standalone
+    artifact has no compiler behind it, and an installed artifact captured
+    before the flag existed cannot honor it, so passing the flag for either
+    raises ``PrecompileError``.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
@@ -3462,4 +3577,6 @@ def load(
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache)
+    return _runnable_from_pair(
+        python_code, cache, allow_serve_time_compiles=allow_serve_time_compiles
+    )

@@ -88,17 +88,6 @@
   - Lint
   - pull
 
-- name: OSS CI / pytorchbot / XLA
-  patterns:
-  - .github/ci_commit_pins/xla.txt
-  approved_by:
-  - pytorchbot
-  ignore_flaky_failures: false
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: Documentation
   patterns:
   - docs/**
@@ -196,8 +185,7 @@
 
 - name: MPS
   patterns:
-  - test/test_mps.py
-  - test/inductor/test_mps_basic.py
+  - test/**
   - torch/testing/_internal/common_mps.py
   - torch/testing/_internal/common_methods_invocations.py
   - torch/testing/_internal/opinfo/**
@@ -434,7 +422,6 @@
   - torchgen/dest/lazy_ts_lowering.py
   - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
-  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
@@ -484,7 +471,6 @@
   patterns:
   - test/cpp/profiler/**
   - test/profiler/**
-  - third_party/kineto
   - torch/_C/_profiler.pyi
   - torch/autograd/profiler*
   - torch/csrc/autograd/profiler*
@@ -519,6 +505,7 @@
   - trichmo
   - hameerabbasi
   - riccardofelluga
+  - amjames
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -527,9 +514,34 @@
 - name: ROCm
   patterns:
   - '**rocm**'
+  - '**ROCm**'
+  - '**Rocm**'
   - '**hip**'
+  - '**HIP**'
+  - '**Hip**'
+  - '-**ship**'
+  - '**miopen**'
+  - '**MIOpen**'
+  - '**aotriton**'
+  - '**flydsl**'
+  - '**rccl**'
+  - '**rocshmem**'
+  - '**Rocprof**'
+  - '**Rocblas**'
+  - '**amdsmi**'
+  - '**Gfx9**'
+  - '**_ck_**'
+  - tools/amd_build/**
+  - .github/scripts/amd/**
+  - aten/src/ATen/cuda/tunable/**
+  - aten/src/ATen/native/TunableOp.h
+  - torch/cuda/tunable.py
+  - docs/source/cuda.tunable.md
+  - test/**
+  - torch/testing/**
   approved_by:
   - jeffdaily
+  - jithunnair-amd
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -606,6 +618,17 @@
   - pull
   - inductor
 
+- name: c10 utilities
+  patterns:
+  - c10/util/**
+  - c10/test/util/**
+  approved_by:
+  - r-barnes
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -638,7 +661,6 @@
   - fegin
   - frgossen
   - georgehong
-  - han3101
   - htyu
   - huydhn
   - IvanKobzarev
@@ -667,11 +689,13 @@
   - sanrise
   - scotts
   - sevenEng
+  - shawnxu26
   - SherlockNoMad
   - slayton58
   - soulitzer
   - tianyu-l
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
