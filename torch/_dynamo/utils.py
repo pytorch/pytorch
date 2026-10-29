@@ -4218,7 +4218,7 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
 def _tensor_device_types(tree: Any) -> frozenset[str]:
     return frozenset(
         t.device.type for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)
-    )
+    ) - {"meta"}
 
 
 def _graph_break_op_package(tx: InstructionTranslatorBase) -> Any:

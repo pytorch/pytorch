@@ -5636,6 +5636,15 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
+            if config.triton.autotune_at_compile_time:
+                autotune_idx = (
+                    V.graph.device_ops.current_device_idx_expr()
+                    if _coor_enabled()
+                    else device.index
+                )
+                self.kernel_autotune_calls.writeline(
+                    f"{stream_name} = get_raw_stream({autotune_idx})"
+                )
             self.writeline(
                 f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
             )
