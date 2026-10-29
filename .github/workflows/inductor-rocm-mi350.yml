@@ -114,7 +114,7 @@ jobs:
     needs: get-label-type
     with:
       build-environment: linux-noble-rocm-py3.11-mi350
-      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-noble-rocm-n-py3.11-aac29703b520a9906ec6f0b4d3a07872b2601a25
+      docker-image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-noble-rocm-n-py3.11-${{ github.event.inputs.hardware == 'mi350-conv' && 'dd9a93173d4d1a807a8b870967150c47d21c681d' || 'aac29703b520a9906ec6f0b4d3a07872b2601a25' }}"
       artifact-run-id: "${{ (github.event.inputs.hardware == 'mi350-sub-verify' || github.event.inputs.hardware == 'mi350-conv') && '40915231984' || '40865583043' }}"
       timeout-minutes: 120
       test-matrix: |
