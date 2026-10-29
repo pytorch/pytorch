@@ -28,8 +28,6 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 
-from torch.utils._ordered_set import OrderedSet
-
 from . import config, ir
 from .virtualized import V
 
