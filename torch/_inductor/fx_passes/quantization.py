@@ -7,6 +7,7 @@ import math
 import operator
 
 import torch
+from torch._dynamo.convert_frame import compile_lock
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
 from torch.utils._ordered_set import OrderedSet
@@ -1177,18 +1178,18 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
     entries instead of reusing stale ones.
 
     The allowlist is only mutated while holding
-    ``torch._dynamo.convert_frame.compile_lock``: compilation already
-    holds that lock from cache-key hashing through pattern matching
-    (dynamo acquires it around backend invocation, and
-    ``compile_fx_backward`` acquires it explicitly), so a registration
+    ``torch._dynamo.convert_frame.compile_lock``, so a registration
     racing an in-flight compile waits for the compile to finish instead
-    of changing the allowlist between the key and the matcher.
+    of changing the allowlist between the cache key and the matcher.
+    The lock is held across that interval by the standard torch.compile
+    path (dynamo acquires it around backend invocation) and, explicitly,
+    by ``compile_fx_backward``; compiles invoked directly through
+    ``compile_fx`` without dynamo do not take it. NB: calling this from
+    a package's ``__init__`` while another thread compiles can deadlock
+    if that compile's backend initialization imports the same package;
+    register from a post-import initialization step instead.
     """
     _validate_woq_device_type(device_type)
-    # Lazy import, as in compile_fx.py: torch._dynamo is heavyweight and
-    # this module must not pull it in at import time.
-    from torch._dynamo.convert_frame import compile_lock
-
     with compile_lock:
         _woq_int8pack_fusion_devices.add(device_type)
 
@@ -1199,8 +1200,6 @@ def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
     Serialized against in-flight compilations like the register function.
     """
     _validate_woq_device_type(device_type)
-    from torch._dynamo.convert_frame import compile_lock
-
     with compile_lock:
         _woq_int8pack_fusion_devices.discard(device_type)
 
