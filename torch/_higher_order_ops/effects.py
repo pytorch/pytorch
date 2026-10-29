@@ -61,6 +61,7 @@ def _get_effect(op: _op_identifier) -> _EffectType | None:
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
+_register_effectful_op("aten::_async_error", _EffectType.ORDERED)
 # _linalg_check_errors has no tensor output, but it raises on invalid linalg
 # results and must be preserved by functionalization/DCE.
 _register_effectful_op("aten::_linalg_check_errors", _EffectType.ORDERED)
