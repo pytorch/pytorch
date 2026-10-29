@@ -348,6 +348,21 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/!{{ config['build_name'] }}/*
   {%- endfor %}
+  {%- if arch_type == 'cuda-aarch64' %}
+      # LLVM BOLT keeps the unoptimized libraries in build/lib/prebolt, with a
+      # libtorch_python.so per interpreter under prebolt/<SOABI>/ (see
+      # build_all.sh). Publish them with a short retention for profiling
+      # (#199067). Optional, so it must not fail the build.
+      - uses: !{{ common.upload_artifact_action }}
+        if: ${{ github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/tags/ciflow/binaries') }}
+        continue-on-error: true
+        with:
+          name: prebolt!{{ build_name_suffix }}
+          path: build/lib/prebolt/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 1
+  {%- endif %}
 {%- endfor %}
 
 {%- if matrix_build_configs %}
