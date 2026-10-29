@@ -68,6 +68,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -85,12 +86,14 @@ from ..utils import (
     dict_methods,
     frozenset_methods,
     get_custom_getattr,
+    get_type_mro_no_user_code,
     has_torch_function,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_pybind11_enum_member,
     is_torch_class,
     istype,
+    iter_mro_static_attrs,
     list_methods,
     namedtuple_fields,
     no_keywords,
@@ -3848,6 +3851,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if result is not None:
             if (
                 self.source
+                and self._object_has_getattribute
                 and isinstance(self, variables.UnspecializedNNModuleVariable)
                 and hasattr(self.value, "__dict__")
                 and name not in self.value.__dict__
@@ -4176,6 +4180,42 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker | None:
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
+            if (
+                not self._object_has_getattribute
+                and self.cls_source is not None
+                and not is_constant_source(self.cls_source)
+            ):
+                # Metadata sources evaluate metaclass accessors during guard building.
+                mro = get_type_mro_no_user_code(self.value_type)
+                for classes, attrs in (
+                    ((self.value_type,), ("__getattribute__", "__mro__")),
+                    (mro, ("__getattribute__", "__dict__")),
+                ):
+                    for cls in classes:
+                        metacls = type(cls)
+                        if metacls is type:
+                            continue
+                        for attr in attrs:
+                            accessor = next(iter_mro_static_attrs(metacls, attr), None)
+                            if accessor is not type.__dict__[attr]:
+                                unimplemented(
+                                    gb_type="Custom metaclass metadata in __getattr__",
+                                    context=f"metadata={attr}, name={name}",
+                                    explanation="Dynamo cannot safely guard __getattr__ "
+                                    "fallback through custom metaclass metadata accessors.",
+                                    hints=[*graph_break_hints.SUPPORTABLE],
+                                )
+                mro_attr_source(tx, self.value_type, self.cls_source, name)
+            # Install before inlining so nested graph breaks preserve the guard.
+            # A traced deletion may leave the name present in the live dict.
+            if (
+                not self._object_has_getattribute
+                and self.source
+                and not is_constant_source(self.source)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                install_not_in_instance_dict_guard(self.source, name)
             if (
                 getattr_fn is unpatched_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)

@@ -2728,6 +2728,16 @@
       ]
     }
   ],
+  "GB9713": [
+    {
+      "Gb_type": "Custom metaclass metadata in __getattr__",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely guard __getattr__ fallback through custom metaclass metadata accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0161": [
     {
       "Gb_type": "Unsupported nn.Module attribute type",
