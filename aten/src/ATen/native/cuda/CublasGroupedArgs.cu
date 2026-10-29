@@ -98,10 +98,10 @@ __global__ void populate_cublas_grouped_args_kernel(
   betaPtr_out[i] = reinterpret_cast<int64_t>(beta_ptr);
 
   // Per-batch scalar scales use one float32 value per group.
-  if (scalePtrA_out != nullptr && scale_a_stride_bytes != 0) {
+  if (scalePtrA_out != nullptr) {
     scalePtrA_out[i] = base_scale_a + i * scale_a_stride_bytes;
   }
-  if (scalePtrB_out != nullptr && scale_b_stride_bytes != 0) {
+  if (scalePtrB_out != nullptr) {
     scalePtrB_out[i] = base_scale_b + i * scale_b_stride_bytes;
   }
 }
