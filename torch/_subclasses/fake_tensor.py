@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import logging
 import math
+import operator
 import os
 import threading
 import traceback
@@ -15,7 +16,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self, TypedDict, Unpack
+from typing_extensions import Self, TypedDict, TypeIs, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -1680,6 +1681,15 @@ class TensorMetadata:
     ) -> None:
         # Flatten the TensorMetadata out into `result`.  Make sure to call
         # state.convert_sym_int() on any SymInts.
+        if (
+            _all_ints(self.shape)
+            and _all_ints(self.stride)
+            and type(self.storage_offset) is int
+            and not isinstance(self.storage_bytes, SymInt)
+        ):
+            # No SymInts to convert, so every value is hashable as it is.
+            result.extend(_tensor_metadata_values(self))
+            return
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
             if isinstance(value, (tuple, list, torch.Size)):
@@ -1706,6 +1716,18 @@ def _same_int_expr(a: _MetadataIntLike, b: _MetadataIntLike) -> bool:
     if isinstance(b, (_SymIntOutputStub, SymInt)):
         return False
     return a == b
+
+
+_tensor_metadata_values = operator.attrgetter(
+    *(f.name for f in dataclasses.fields(TensorMetadata))
+)
+
+
+def _all_ints(values: tuple[_MetadataIntLike, ...]) -> TypeIs[tuple[int, ...]]:
+    for v in values:
+        if type(v) is not int:
+            return False
+    return True
 
 
 def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
