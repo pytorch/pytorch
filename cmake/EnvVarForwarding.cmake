@@ -59,6 +59,9 @@
 #   USE_MKLDNN=0              disables MKLDNN
 #   USE_MKLDNN_ACL           enables Compute Library backend for MKLDNN on Arm
 #                            (USE_MKLDNN must be explicitly enabled)
+#   USE_MKLDNN_ZENDNN        enables ZenDNN in MKLDNN on Linux x86_64 (downloads
+#                            ZenDNN and its dependencies unless ZENDNNROOT or
+#                            zendnnl_DIR points at a prebuilt ZenDNN)
 #   USE_STATIC_MKL           prefer to link MKL statically (Unix only)
 #   USE_FLASH_ATTENTION=0    disables flash attention for scaled dot product attn
 #   USE_MEM_EFF_ATTENTION=0  disables memory efficient attention for SDPA
@@ -108,6 +111,9 @@
 #                            cmake/Modules/FindNCCL.cmake)
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
+#   ZENDNNROOT / zendnnl_DIR  prebuilt ZenDNN install root / its lib/cmake dir;
+#                            skips downloading ZenDNN and its dependencies (read
+#                            from env in third_party/ideep/mkl-dnn/cmake/ZenDNN.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
 #   CAFFE2_CUSTOM_PROTOC_EXECUTABLE  host protoc to use instead of the one built
 #                            from third_party/protobuf. Required when cross-compiling,
