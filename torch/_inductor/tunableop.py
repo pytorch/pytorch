@@ -69,18 +69,21 @@ def _mode() -> str:
 
 # Read through static env checks that win over the setters (Tunable.cpp), and
 # the worker inherits the parent's environment, so neither pass can undo them.
-# Tune: either one stops AddAndMaybePersist writing a row.
+# An empty FILENAME blocks both: nothing to append to or read back, and the
+# only hint is a TORCH_WARN on the worker's stderr.
+# Tune: any one of these stops AddAndMaybePersist writing a row.
 _TUNE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_TUNING", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
+    ("PYTORCH_TUNABLEOP_FILENAME", ""),
 )
-# Reuse: TUNING=0 is harmless, it never tunes. These each break it --
-# RECORD_UNTUNED skips ReadFile, NEAREST_MATCH_ENABLED=0 stops borrowing, and
-# RECORD_BORROWED_ENABLED=0 keeps the validated winner out of the results file.
+# Reuse: TUNING=0 is harmless, it never tunes. The rest each break it --
+# RECORD_UNTUNED skips ReadFile, and the other two drop the borrow or its record.
 _REUSE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
     ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0"),
+    ("PYTORCH_TUNABLEOP_FILENAME", ""),
 )
 _env_warned: OrderedSet[str] = OrderedSet()
 _warned_faults: OrderedSet[str] = OrderedSet()
@@ -99,13 +102,12 @@ def _warn_if_env_blocks(
 ) -> None:
     blocking = [name for name, bad in blocking_env if os.environ.get(name) == bad]
     # Keyed per mode as well as per variable: one mode's warning must not
-    # silence the other's, and a variable that blocks both says something
-    # different about each.
+    # silence the other's, and a shared variable means something different in each.
     kind = f"{consequence}:{','.join(blocking)}"
     if blocking and kind not in _env_warned:
         _env_warned.add(kind)
         log.warning(
-            "TunableOp %s: %s overrides the flags the worker sets. Unset it.",
+            "TunableOp %s: %s is set in the environment and defeats it. Unset it.",
             consequence,
             " and ".join(blocking),
         )
@@ -593,11 +595,11 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 # child wedged in teardown never acts on the sentinel.
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
-            except BaseException:  # noqa: B036
+            except BaseException:
                 # Ordinary failures are handled above, so this is
-                # KeyboardInterrupt and friends. The child keeps running and
-                # writes its result into the pipe unread, so reusing the worker
-                # would hand that result to the next GEMM, and every one after.
+                # KeyboardInterrupt and friends. The child keeps running and its
+                # result sits unread in the pipe: a reused worker would hand that
+                # to the next GEMM, and every one after.
                 _shutdown_locked(graceful=False)
                 raise
     except Exception:  # lock/restart machinery itself failed
