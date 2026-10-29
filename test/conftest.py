@@ -288,6 +288,14 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if reports and config.option.tbstyle != "no":
         terminalreporter.write_sep("=", "RERUNS")
         for rep in reports:
+            if config.option.tbstyle == "line":
+                # As in pytest's own --tb=line: an xdist worker crash's rerun report has a
+                # plain-string longrepr, and pytest 7.3.2 leaves reprcrash None for pytrace=False.
+                crash = getattr(rep.longrepr, "reprcrash", None)
+                terminalreporter.write_line(
+                    str(crash) if crash is not None else str(rep.longrepr)[:50]
+                )
+                continue
             title = rep.head_line or rep.nodeid
             terminalreporter.write_sep("_", title, red=True, bold=True)
             rep.toterminal(config.get_terminal_writer())
