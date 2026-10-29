@@ -4341,7 +4341,9 @@ def _get_fake_value_impl(
             torch._subclasses.fake_tensor.UnsupportedOperatorException,
         )
         package = tx.output.package
-        device_types = _tensor_device_types((args, kwargs))
+        device_types = frozenset()
+        if package is not None:
+            device_types = _tensor_device_types((args, kwargs))
         if package is not None and isinstance(cause, graph_break_causes):
             # These graph-break below, and the op then runs eagerly on its inputs'
             # devices; so do the TypeError and pending fake impl branches.
