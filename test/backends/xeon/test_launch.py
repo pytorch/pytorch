@@ -1,14 +1,23 @@
 # Owner(s): ["module: intel"]
 
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 
-from torch.testing._internal.common_utils import IS_LINUX, IS_S390X, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_S390X,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_S390X or not IS_LINUX, "Only works on linux")
+@instantiate_parametrized_tests
 class TestTorchrun(TestCase):
     def setUp(self):
         super().setUp()
@@ -87,6 +96,61 @@ class TestTorchrun(TestCase):
             raise AssertionError(
                 f"Expected [0, 1], got {cpuinfo.numa_aware_check([2, 3, 4, 5])}"
             )
+
+    @parametrize(
+        "core_list,expected",
+        [
+            ("0", [0]),
+            ("0,1,2,3", [0, 1, 2, 3]),
+            ("0, 1, 2, 3", [0, 1, 2, 3]),
+            ("0-3", [0, 1, 2, 3]),
+            ("5-5", [5]),
+            ("0-31,65,92-94", list(range(32)) + [65, 92, 93, 94]),
+            (" 0-2 , 8 ", [0, 1, 2, 8]),
+            ("8,0-2", [0, 1, 2, 8]),
+            ("0-2,1-3", [0, 1, 2, 3]),
+            ("0,0,1", [0, 1]),
+            ("0-3,", [0, 1, 2, 3]),
+        ],
+    )
+    def test_parse_core_list(self, core_list, expected):
+        from torch.backends.xeon.run_cpu import _parse_core_list
+
+        self.assertEqual(_parse_core_list(core_list), expected)
+
+    @parametrize(
+        "core_list", ["", " ", ",", "3-0", "0-", "-3", "a", "0-a", "0--3", "1.5", "0 1"]
+    )
+    def test_parse_core_list_invalid(self, core_list):
+        from torch.backends.xeon.run_cpu import _parse_core_list
+
+        with self.assertRaises(ValueError):
+            _parse_core_list(core_list)
+
+    def test_core_list_ranges(self):
+        # Select the CPU owned by the CI containers
+        cpus = os.sched_getaffinity(0)
+        start = min((c for c in cpus if {c + 1, c + 3} <= cpus), default=None)
+        if start is None:
+            self.skipTest("needs CPUs n, n+1 and n+3 in the affinity mask")
+        core_list = f"{start}-{start + 1},{start + 3}"
+        cmds = []
+        with subprocess.Popen(
+            f"python -m torch.backends.xeon.run_cpu --core-list {core_list} --ncores-per-instance 2 \
+            --use-default-allocator --disable-iomp --disable-numactl \
+            --log-path {self._test_dir} --no-python pwd",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        ) as p:
+            for line in p.stdout.readlines():
+                line = str(line, "utf-8").strip()
+                if "taskset" in line:
+                    cmds.append(line[line.index("taskset") :])
+        # 3 cores with 2 cores per instance yields a single instance; the
+        # contiguous pair collapses back into a range for taskset.
+        self.assertEqual(len(cmds), 1)
+        self.assertTrue(cmds[0].startswith(f"taskset -c {start}-{start + 1} "), cmds[0])
 
     def test_multi_threads(self):
         num = 0
