@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef, set_warn_always_context
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
@@ -4393,52 +4394,52 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
-    @onlyAccelerator
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_sparse_from_cpu(self, device):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4),
                                     [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4, 0),
                                     [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.empty(1, 0, device=device).long(),
+            torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
 
-    @onlyAccelerator
-    def test_sparse_cpu_dense_add(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_cuda_sparse_cpu_dense_add(self):
         x = torch.zeros(3, 4, 4)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
-                                           torch.randn(4, 4, 4, device=device),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+                                           torch.randn(4, 4, 4).cuda(),
                                            [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
-                                           torch.randn(4, 4, 4, 0, device=device),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+                                           torch.randn(4, 4, 4, 0).cuda(),
                                            [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0, device=device).long(),
-                                           torch.randn(0, 4, 4, 0, device=device),
+        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
+                                           torch.randn(0, 4, 4, 0).cuda(),
                                            [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
 
