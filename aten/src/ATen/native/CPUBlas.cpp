@@ -1183,7 +1183,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     }
     static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
     static bool fp32_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2;
-    static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
+    static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_bf16;
     static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
     static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
 #ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
@@ -1514,14 +1514,7 @@ bool could_pack(ScalarType dt_in) {
 
 bool can_use_brgemm(ScalarType dt_in) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  if (!at::globalContext().userEnabledMkldnn()) {
-    return false;
-  }
-  // Not delegated to Brgemm::device_check: its BFloat16 floor is avx512_core,
-  // but oneDNN set_isa_impl() has no bf16:bf16 kernel below avx512_core_bf16
-  // and throws on construction. Do not replace this with device_check.
-  static bool bf16_ok = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_bf16;
-  return dt_in == ScalarType::BFloat16 && bf16_ok;
+  return dt_in == ScalarType::BFloat16 && Brgemm::device_check(dt_in);
 #else
   return false;
 #endif
