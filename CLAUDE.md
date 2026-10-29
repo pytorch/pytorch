@@ -33,6 +33,14 @@ Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch fi
 
 When asked to review a PR, always use the /pr-review skill.
 
+# Agent Guidance
+
+When you add or rewrite instructions for agents (this file, skills, `REVIEW.md`
+files and the like), keep them short and state the intent. Spell out an edge
+case only when it is a known pitfall a reader would otherwise get wrong. Don't
+try to settle every edge case with lists of paths, exemptions or hard limits:
+each is a claim that can be wrong or go stale, and agents apply it literally.
+
 # Deprecations
 
 When deprecating, freezing, or removing a public API or component, use the

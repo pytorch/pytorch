@@ -155,7 +155,6 @@ Provide a simple example to get started immediately.
 Step-by-step guidance for Claude:
 1. First step with clear action
 2. Second step with expected outcome
-3. Handle edge cases
 
 ## Examples
 
@@ -216,7 +215,7 @@ Check these requirements:
 ✅ **Content quality**:
 - [ ] Clear instructions for Claude
 - [ ] Concrete examples provided
-- [ ] Edge cases handled
+- [ ] Instructions state their intent; edge cases only for known pitfalls
 - [ ] Dependencies listed (if any)
 
 ✅ **Testing**:
@@ -339,6 +338,7 @@ Before finalizing a Skill, verify:
 - [ ] Description includes "what" and "when"
 - [ ] YAML frontmatter is valid
 - [ ] Instructions are step-by-step
+- [ ] Instructions state their intent; edge cases only for known pitfalls
 - [ ] Examples are concrete and realistic
 - [ ] Dependencies are documented
 - [ ] File paths use forward slashes
