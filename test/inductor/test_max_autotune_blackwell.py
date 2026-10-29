@@ -142,9 +142,10 @@ class TestMaxAutotuneMI450(TestCase):
         if b_transposed:
             b = b.T
 
+        expected = torch.mm(a.cpu().float(), b.cpu().float()).half()
         actual, code = self._compile_and_get_code(torch.mm, a, b)
 
-        torch.testing.assert_close(actual, torch.mm(a, b), atol=2e-2, rtol=2e-2)
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
         FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
             "\n".join(code)
         )
@@ -171,11 +172,12 @@ class TestMaxAutotuneMI450(TestCase):
             b = b.T
         bias = torch.randn(N, dtype=torch.float16, device=GPU_TYPE)
 
+        expected = torch.addmm(
+            bias.cpu().float(), a.cpu().float(), b.cpu().float()
+        ).half()
         actual, code = self._compile_and_get_code(torch.addmm, bias, a, b)
 
-        torch.testing.assert_close(
-            actual, torch.addmm(bias, a, b), atol=2e-2, rtol=2e-2
-        )
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
         FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
             "\n".join(code)
         )
