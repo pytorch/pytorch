@@ -1678,10 +1678,27 @@ class TestFX(JitTestCase):
         lazy = self._LAZY
 
         class Globals(dict):
+            def _resolve(self):
+                if dict.__getitem__(self, name) is lazy:
+                    dict.__setitem__(self, name, resolve(self))
+
             def __getitem__(self, key):
-                if key == name and dict.__getitem__(self, key) is lazy:
-                    dict.__setitem__(self, key, resolve(self))
+                if key == name:
+                    self._resolve()
                 return super().__getitem__(key)
+
+            def get(self, key, default=None):
+                if key == name:
+                    self._resolve()
+                return super().get(key, default)
+
+            def items(self):
+                self._resolve()
+                return super().items()
+
+            def values(self):
+                self._resolve()
+                return super().values()
 
         return Globals({name: lazy, "__builtins__": builtins, **values})
 
