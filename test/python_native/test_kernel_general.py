@@ -28,10 +28,15 @@ from torch._native.cutedsl import launch as _L
 from torch._native.ops import reductions
 from torch._native.ops.reductions import (
     kernel_general as kg,
+    kernel_rowtile as rt,
     kernel_xcta as xc,
     tile,
     traits as T,
 )
+
+
+def _plan_tags(trait_key):
+    return {key[0][1] for key in kg._PLAN if len(key[0]) > 2 and key[0][2] == trait_key}
 
 
 class _DecodeProbe:
@@ -139,6 +144,114 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_general_split_layouts_and_welford(self):
+        """Split strided, offset, multi-run, and two-output reductions correctly."""
+        base = torch.randn(4097, 9, 17, device="cuda")
+        x = base[1::2]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected_var, expected_mean = torch.var_mean(x, dim=0)
+            expected_total = x.sum(dim=(0, 2))
+        var, mean = kg.reduce_dim2(
+            T.VarMeanOps(correction=1, acc=cutlass.Float32),
+            "split_var_mean",
+            x,
+            [0],
+            [torch.float32, torch.float32],
+        )
+        total = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32),
+            "split_multi_run",
+            x,
+            [0, 2],
+            torch.float32,
+        )
+
+        self.assertEqual(_plan_tags("split_var_mean"), {"gensplit1", "gensplit2"})
+        self.assertEqual(_plan_tags("split_multi_run"), {"gensplit1", "gensplit2"})
+        self.assertEqual(var, expected_var, atol=1e-5, rtol=1e-4)
+        self.assertEqual(mean, expected_mean, atol=1e-5, rtol=1e-4)
+        self.assertEqual(total, expected_total, atol=1e-3, rtol=1e-4)
+
+        red, kept = kg._ti_pairs(x, kg._probe(x, {0, 2}))
+        declined = kg._two_stage_general(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "split_index_decline",
+            x,
+            red,
+            kept,
+            num_o=x.shape[1],
+            count=x.shape[0] * x.shape[2],
+            out_dtypes=[torch.int32],
+            nouts=1,
+        )
+        self.assertIsNone(declined)
+
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
+    def test_reduce_all2_route(self):
+        """Route one-element two-output reductions through reduce_all2."""
+        x = torch.randn(1, 65537, device="cuda")
+        lo, hi = kg.reduce_dim2(
+            T.AMinMaxOps(acc=cutlass.Float32),
+            "reduce_all2",
+            x,
+            [1],
+            [torch.float32, torch.float32],
+        )
+        self.assertEqual(_plan_tags("reduce_all2"), {"all1", "all2"})
+        with torch.backends.python_native.cutedsl.disabled():
+            expected_lo, expected_hi = torch.aminmax(x, dim=1)
+        self.assertEqual(lo, expected_lo)
+        self.assertEqual(hi, expected_hi)
+
+    def test_reduce_all_grid_stride_index_and_cache_key(self):
+        """Carry global indices and separate fp32/fp64 stage-2 kernels."""
+        n = (1 << 20) + 3
+        winner = 700000
+        for dtype, acc in (
+            (torch.float32, cutlass.Float32),
+            (torch.float64, cutlass.Float64),
+        ):
+            x = torch.zeros(n, device="cuda", dtype=dtype)
+            x[winner] = 1
+            x[winner + 100000] = 1
+            out = kg.reduce_all(
+                T.ArgMaxOps(acc=acc),
+                "index_cache_key",
+                x,
+                torch.int32,
+            )
+            with self.subTest(dtype=dtype):
+                self.assertEqual(out, winner)
+
+    def test_noncontiguous_reduce_all_index_is_logical(self):
+        """Report row-major logical indices for non-contiguous inputs."""
+        x = torch.zeros(64, 128, device="cuda").t()
+        x[0, 1] = 1
+        out = kg.reduce_all(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            "noncontiguous_index",
+            x,
+            torch.int32,
+        )
+        self.assertEqual(out, 1)
+
+    def test_empty_inner_tree_reduce_all(self):
+        """Use the reduction identity when an empty input has no tree order."""
+        x = torch.empty(0, device="cuda")
+        with mock.patch.object(rt, "inner_tree_order_enabled", return_value=True):
+            out = kg.reduce_all(
+                T.SumOps(acc=cutlass.Float32),
+                "empty_inner_tree",
+                x,
+                torch.float32,
+            )
+        self.assertEqual(out, torch.zeros((), device="cuda"))
+
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""
         cases = (
@@ -188,10 +301,12 @@ class TestKernelGeneral(TestCase):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
         # check on its documented invalid input.
         trait = T.SumOps(acc=cutlass.Float32)
-        # reduce-all needs a flat view, so a transposed input has to be refused, not reshaped.
+        # reduce-all has no flat view of a transposed input, so it ROUTES that through the general
+        # path (which addresses via the TI decode) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
-        with self.assertRaisesRegex(AssertionError, "contiguous CUDA input"):
-            kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(flat, xt.double().sum().float(), atol=1e-5, rtol=1e-5)
         # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
         with self.assertRaisesRegex(AssertionError, "need a CUDA input"):
             kg._reduce(trait, "inv", torch.randn(8, 8), [1], [torch.float32], 1)
@@ -216,6 +331,20 @@ class TestKernelGeneral(TestCase):
                 red_pairs=((2**31 + 1, 1),),
                 kept_pairs=(),
             )
+        # Storage bounds are absolute, while an index trait reports view-relative positions.
+        offset = 2**31
+        offset_op = kg.ReduceBlock(
+            T.ArgMaxOps(acc=cutlass.Float32),
+            count=1024,
+            num_o=1,
+            red_pairs=((1024, 1),),
+            kept_pairs=(),
+            in_base=offset,
+            limit=offset + 1024,
+            flat_tail=True,
+            gidx_from="chunk",
+        )
+        self.assertEqual(offset_op.limit, offset + 1024)
         # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
         # here because the arm that allows it is one line in tile._decode_offset, and a crash.
         self.assertEqual(
