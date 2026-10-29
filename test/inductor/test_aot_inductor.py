@@ -947,17 +947,18 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(new_weights, True, False)
 
         # Leave too little memory for the 32 MB folded constant.
+        original_fraction = torch.cuda.get_per_process_memory_fraction()
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         total = torch.cuda.get_device_properties(self.device).total_memory
-        torch.cuda.set_per_process_memory_fraction(
-            (torch.cuda.memory_reserved() + (8 << 20)) / total
-        )
+        fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
+        torch.cuda.set_per_process_memory_fraction(fraction)
         try:
             with self.assertRaises(RuntimeError):
                 runner.run_const_fold(True)
         finally:
-            torch.cuda.set_per_process_memory_fraction(1.0)
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(original_fraction)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):

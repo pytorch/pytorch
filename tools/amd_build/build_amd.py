@@ -111,7 +111,6 @@ includes = [
     "torch/csrc/stable/*",
     "test/cpp/c10d/*",
     "test/cpp/shim/test_cuda_graph.cpp",
-    "test/cpp/shim/test_cudagraph_manager.cpp",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
