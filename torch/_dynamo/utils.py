@@ -4322,11 +4322,10 @@ def _get_fake_value_impl(
         if e.__cause__ is not None:
             cause = e.__cause__
 
-        fake_tensor = torch._subclasses.fake_tensor
         graph_break_causes = (
-            fake_tensor.DataDependentOutputException,
-            fake_tensor.DynamicOutputShapeException,
-            fake_tensor.UnsupportedOperatorException,
+            torch._subclasses.fake_tensor.DataDependentOutputException,
+            torch._subclasses.fake_tensor.DynamicOutputShapeException,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
         )
         if tx.output.package is not None:
             # Most branches below graph-break, and the op then runs eagerly.
