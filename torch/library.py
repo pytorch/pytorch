@@ -747,7 +747,8 @@ def define(qualname, schema, *, lib=None, tags=()):
         )
     namespace, name = torch._library.utils.parse_namespace(qualname)
     if lib is None:
-        lib = Library(namespace, "FRAGMENT")
+        caller = torch._library.utils.caller_frame()
+        lib = Library(namespace, "FRAGMENT", _caller_frame=caller)
         _keep_alive.append(lib)
     if not NAMELESS_SCHEMA.fullmatch(schema):
         raise ValueError(

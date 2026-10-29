@@ -296,8 +296,8 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
-        # The module registering each kernel, by dispatch key, as the dispatcher
-        # records only this file.
+        # The module whose body registered each kernel (__main__ if none did), by
+        # dispatch key, as the dispatcher records only this file.
         self._backend_fn_callers: dict[str, str | None] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
@@ -500,8 +500,9 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-                caller = utils.caller_frame().f_globals.get("__name__")
-                self._backend_fn_callers[key] = caller
+                caller = utils.caller_frame()
+                name = caller.f_globals.get("__name__") if caller else "__main__"
+                self._backend_fn_callers[key] = name
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
