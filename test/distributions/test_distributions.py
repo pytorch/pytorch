@@ -7409,7 +7409,12 @@ for _cls in (
     TestJitDevice,
 ):
     instantiate_device_type_tests(
-        _cls, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+        # CUDA is excluded rather than allow-listing devices, per the ACCELERATOR
+        # lint rule; these fail on CUDA under pytorch/pytorch#200652.
+        _cls,
+        globals(),
+        except_for=("cuda",),
+        allow_xpu=True,
     )
 
 # Otherwise the generic class stays reachable via `_cls` and gets collected again.
