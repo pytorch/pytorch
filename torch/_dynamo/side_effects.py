@@ -211,6 +211,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     collections.defaultdict.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
+    property.__getattribute__,
 )
 if sys.version_info < (3, 13):
     # SimpleNamespace names tp_getattro in its static struct before 3.13, so
@@ -547,6 +548,15 @@ class SideEffects:
         mutated_source: Source | None = None,
     ) -> None:
         if not self.is_attribute_mutation(item):
+            if isinstance(item, variables.UserDefinedPropertyVariable):
+                unimplemented(
+                    gb_type="Untracked property subclass mutation",
+                    context=f"property subclass attribute mutation: {name}",
+                    explanation="Dynamo cannot replay attribute mutations on this property subclass because its side effects are not tracked.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"
             )
@@ -565,6 +575,24 @@ class SideEffects:
             deferred = self.snapshot_attr_mutation(item, name, value)
         if not deferred:
             self.check_allowed_side_effect(item)
+        if (
+            sys.version_info >= (3, 13)
+            and name == "__name__"
+            and isinstance(item, variables.UserDefinedPropertyVariable)
+            and item.lookup_class_mro_attr(name) is property.__dict__[name]
+            and name in self.store_attr_mutations.get(item, {})
+            and self.get_attr_mutation_kind(item, name) is not mutation_kind
+        ):
+            unimplemented(
+                gb_type="Mixed property name and instance dictionary mutations",
+                context="property.__name__ and instance __dict__ share a pending mutation key",
+                explanation="Dynamo cannot track both the property name field and an instance dictionary entry with the same name in one frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                # A partial graph can reconstruct a pending __dict__ on the
+                # stack as a copy, losing the dictionary store after resuming.
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -591,13 +619,28 @@ class SideEffects:
         # re-inserts at the end.
         if not isinstance(value, variables.DeletedVariable):
             existing = self.store_attr_mutations.get(item, {}).get(name)
-            if isinstance(existing, variables.DeletedVariable):
+            if isinstance(existing, variables.DeletedVariable) and (
+                self.has_pending_mutation_of_attr(
+                    item, name, AttrMutationKind.INSTANCE_DICT
+                )
+                or not (
+                    sys.version_info >= (3, 13)
+                    and name == "__name__"
+                    and isinstance(item, variables.UserDefinedPropertyVariable)
+                    and item.lookup_class_mro_attr(name) is property.__dict__[name]
+                )
+            ):
                 # store_attr always writes both maps together, so the
                 # attr_mutation_kinds entry is guaranteed present here; use del
                 # for both to surface any invariant violation.
                 del self.store_attr_mutations[item][name]
                 del self.attr_mutation_kinds[item][name]
         self.store_attr(item, name, value, AttrMutationKind.INSTANCE_DICT)
+
+    def remove_attr_mutation(self, item: VariableTracker, name: str) -> None:
+        if name in self.store_attr_mutations.get(item, ()):
+            del self.store_attr_mutations[item][name]
+            del self.attr_mutation_kinds[item][name]
 
     def get_attr_mutation_kind(
         self, item: VariableTracker, name: str
@@ -855,6 +898,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, collections.deque):
             variable_cls = variables.UserDefinedDequeVariable
+        elif issubclass(user_cls, property):
+            variable_cls = variables.UserDefinedPropertyVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -1166,6 +1211,7 @@ class SideEffects:
         # Since newly constructed objects don't have a source, we manually
         # codegen their construction and store them to a newly assigned local
         # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
+        properties = []
         for var in self._get_modified_vars():
             if not isinstance(var.mutation_type, AttributeMutationNew):
                 if var.source is None:
@@ -1305,6 +1351,9 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
 
+                if isinstance(var, variables.UserDefinedPropertyVariable):
+                    properties.append(var)
+
                 # For frozen dataclasses, we must emit object.__setattr__
                 # immediately after __new__ — before any other code can
                 # access the object.  The suffix-based codegen in
@@ -1324,6 +1373,10 @@ class SideEffects:
                         cg.extend_output(
                             [*create_call_method(3), create_instruction("POP_TOP")]
                         )
+
+        # Initialize C fields after every new object has a reconstruction source.
+        for var in properties:
+            var.codegen_init(cg)
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)

@@ -7697,6 +7697,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        if sys.version_info < (3, 13):
+            self.assertRaisesRegex(
+                Unsupported, "legacy property error message", opt_fn, x
+            )
+            opt_fn = torch.compile(fn, backend="eager")
         self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):

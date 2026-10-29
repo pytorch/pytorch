@@ -61,6 +61,8 @@ from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
+from .object_protocol import mro_attr_source
+from .properties import PropertyVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -712,12 +714,15 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
                 elif isinstance(attr, property):
-                    getter_source = AttrSource(attr_source, "fget")
-                    getter = attr.fget
-                    getter_var = VariableTracker.build(
-                        tx, getter, source=getter_source, realize=True
+                    descriptor_source = mro_attr_source(
+                        tx, self.class_type, cls_source, name
                     )
-                    return getter_var.call_function(tx, [self], {})
+                    descriptor = PropertyVariable.from_descriptor(
+                        tx, attr, source=descriptor_source
+                    )
+                    return descriptor.tp_descr_get_impl(
+                        tx, self, self.class_type_var(tx)
+                    )
 
                 elif isinstance(attr, classmethod):
                     return UserMethodVariable(

@@ -3233,6 +3233,7 @@ tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
+property_methods = {method for method in property.__dict__.values() if callable(method)}
 
 deque_methods = {
     method for method in collections.deque.__dict__.values() if callable(method)
@@ -4693,6 +4694,29 @@ def import_submodule(mod: types.ModuleType) -> None:
     for filename in sorted(os.listdir(os.path.dirname(cast(str, mod.__file__)))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def get_property_accessor(obj: property, name: str) -> Any:
+    return property.__dict__[name].__get__(obj)
+
+
+def get_property_name(obj: property) -> tuple[Any, ...]:
+    # Distinguish a missing name from a name explicitly set to None.
+    try:
+        return (property.__dict__["__name__"].__get__(obj),)
+    except AttributeError:
+        return ()
+
+
+def initialize_property(obj: property, fget: Any, fset: Any, fdel: Any) -> None:
+    # A non-None doc avoids reading a getter whose mutations have not replayed.
+    # Only plain attribute setters/doc slots are supported by the tracing model.
+    property.__init__(obj, fget, fset, fdel, "")
+    # Leave __doc__ to traced attribute replay, including deletion.
+    try:
+        object.__delattr__(obj, "__doc__")
+    except AttributeError:
+        pass
 
 
 def object_has_getattribute(value: object) -> bool:

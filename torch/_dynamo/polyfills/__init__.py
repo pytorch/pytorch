@@ -708,8 +708,8 @@ def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
         py_sys.modules.update(orig_modules)
 
 
-def property_isabstractmethod(prop: property) -> bool:
-    for accessor in (prop.fget, prop.fset, prop.fdel):
+def property_isabstractmethod(accessors: tuple[object, ...]) -> bool:
+    for accessor in accessors:
         if getattr(accessor, "__isabstractmethod__", False):
             return True
     return False

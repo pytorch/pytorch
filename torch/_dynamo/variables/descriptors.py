@@ -44,11 +44,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import (
-    BaseUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
@@ -1079,7 +1075,12 @@ class MemberDescriptorVariable(DescriptorVariable):
         attr_name = self.descriptor.__name__
         # Prefer the VT's declarative table when it models this attribute, so a
         # VT with no concrete Python object behind it still resolves.
-        entry = obj.lookup_tp_getset_member(attr_name)
+        entry = (
+            obj.raw_descriptor_entry(attr_name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(attr_name)
+        )
         if entry is not None and entry.getter is not None:
             result = entry.getter(obj, tx)
             if result is not None:
@@ -1114,7 +1115,12 @@ class MemberDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
-        entry = obj.lookup_tp_getset_member(name)
+        entry = (
+            obj.raw_descriptor_entry(name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(name)
+        )
         if entry is not None:
             # A READONLY PyMemberDef is modeled by readonly_setter, which raises
             # what PyMember_SetOne raises.
@@ -1200,7 +1206,12 @@ class GetSetDescriptorVariable(DescriptorVariable):
     ) -> VariableTracker:
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
-        entry = obj.lookup_tp_getset_member(name)
+        entry = (
+            obj.raw_descriptor_entry(name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(name)
+        )
         if entry is None:
             # No model for this getset. Dynamo cannot see whether the C setter
             # accepts the write, rejects it as read-only, or type-checks the
@@ -1237,7 +1248,12 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # proxy-based VTs like TensorVariable.
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
-        entry = obj.lookup_tp_getset_member(attr_name)
+        entry = (
+            obj.raw_descriptor_entry(attr_name)
+            if self.descriptor.__objclass__ is property
+            and isinstance(obj, variables.PropertyVariable)
+            else obj.lookup_tp_getset_member(attr_name)
+        )
         if entry is not None and entry.getter is not None:
             result = entry.getter(obj, tx)
             if result is not None:
@@ -1276,152 +1292,6 @@ class GetSetDescriptorVariable(DescriptorVariable):
             elif attr_name == "__mro__":
                 result_source = TypeMROSource(obj.source)
         return VariableTracker.build(tx, resolved, result_source)
-
-
-class PropertyVariable(VariableTracker):
-    """Python property descriptor.
-
-    The property type is a data descriptor with tp_descr_get =
-    property_descr_get which calls fget(obj) to compute the value.
-    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L2073
-    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
-    """
-
-    _nonvar_fields = {
-        "descriptor",
-        *VariableTracker._nonvar_fields,
-    }
-
-    tp_members = {
-        "fget": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fget,
-                "fget",
-                lambda s: s.source and AttrSource(s.source, "fget"),
-            ),
-            readonly_setter,
-        ),
-        "fset": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fset,
-                "fset",
-                lambda s: s.source and AttrSource(s.source, "fset"),
-            ),
-            readonly_setter,
-        ),
-        "fdel": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fdel,
-                "fdel",
-                lambda s: s.source and AttrSource(s.source, "fdel"),
-            ),
-            readonly_setter,
-        ),
-        "__doc__": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.__doc__,
-                "__doc__",
-                lambda s: s.source and AttrSource(s.source, "__doc__"),
-            ),
-            getset_set("__doc__"),
-        ),
-    }
-
-    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # property.__name__ only exists from 3.13
-        if sys.version_info >= (3, 13):
-            name = getattr(self.descriptor, "__name__", None)
-            if name is not None:
-                source = self.source and AttrSource(self.source, "__name__")
-                return VariableTracker.build(tx, name, source)
-        raise_attribute_error(
-            tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
-        )
-
-    def _isabstractmethod_getter(
-        self, tx: "InstructionTranslatorBase"
-    ) -> VariableTracker:
-        from ..polyfills import property_isabstractmethod
-
-        # Trace truth testing so user-defined __bool__ methods and their
-        # exceptions are handled within the traced program.
-        return UserFunctionVariable(property_isabstractmethod).call_function(
-            tx, [self], {}
-        )
-
-    tp_getset = {
-        "__name__": GetSet(_name_getter, getset_set("__name__")),
-        "__isabstractmethod__": GetSet(
-            _isabstractmethod_getter,
-            readonly_setter,
-        ),
-    }
-
-    def __init__(
-        self,
-        descriptor: property,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.descriptor = descriptor
-
-    def __repr__(self) -> str:
-        fget_name = getattr(self.descriptor.fget, "__name__", "?")
-        return f"PropertyVariable({fget_name})"
-
-    def python_type(self) -> type:
-        return property
-
-    def as_python_constant(self) -> property:
-        return self.descriptor
-
-    def tp_descr_set_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        attr = "fset" if value is not None else "fdel"
-        fn = getattr(self.descriptor, attr)
-
-        if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
-            kind = "setter" if value is not None else "deleter"
-            # property_descr_set formats %R of the owner's *type*, whose
-            # repr is its bare __qualname__ (no module prefix) -- unlike
-            # python_qualified_name(), which mirrors the module-qualified
-            # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
-            try:
-                cls_name = obj.python_type().__qualname__
-            except NotImplementedError:
-                cls_name = obj.python_type_name()
-            if display_name is not None:
-                msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
-            else:
-                msg = f"property of '{cls_name}' object has no {kind}"
-            raise_attribute_error(tx, msg)
-
-        args = [obj] if value is None else [obj, value]
-        VariableTracker.build(
-            tx, fn, source=self.source and AttrSource(self.source, attr)
-        ).call_function(tx, args, {})
-        return ConstantVariable.create(None)
-
-    def tp_descr_get_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker | None,
-        owner: VariableTracker,
-    ) -> VariableTracker:
-        # Mirrors property_descr_get: if obj is NULL or None, return self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
-        if obj is None:
-            return self
-        fget_source = AttrSource(self.source, "fget") if self.source else None
-        fget_vt = VariableTracker.build(
-            tx, self.descriptor.fget, source=fget_source, realize=True
-        )
-        return fget_vt.call_function(tx, [obj], {})
 
 
 class TupleGetterVariable(VariableTracker):

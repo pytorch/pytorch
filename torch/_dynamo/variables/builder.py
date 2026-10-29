@@ -243,7 +243,6 @@ from .descriptors import (
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
-    PropertyVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -319,6 +318,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
+from .properties import PropertyVariable
 from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
@@ -369,6 +369,7 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
+    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
@@ -2608,6 +2609,8 @@ class VariableBuilder:
             result = GenericContextWrappingVariable(value, source=self.source)
         elif SimpleNamespaceVariable.is_matching_cls(type(value)):
             result = SimpleNamespaceVariable(value, source=self.source)
+        elif isinstance(value, property):
+            result = UserDefinedPropertyVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):

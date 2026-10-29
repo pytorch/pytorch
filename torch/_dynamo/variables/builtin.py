@@ -2030,6 +2030,22 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
+        if self.fn is property and name == "__init__":
+            if not args:
+                raise_type_error(
+                    tx, "descriptor '__init__' of 'property' object needs an argument"
+                )
+            obj, *rest = args
+            obj_type = obj.python_type()
+            if not issubclass(obj_type, property):
+                raise_type_error(
+                    tx,
+                    "descriptor '__init__' requires a 'property' object "
+                    f"but received a '{obj_type.__name__}'",
+                )
+            if isinstance(obj, variables.UserDefinedPropertyVariable):
+                return obj.tp_init_impl(tx, rest, kwargs)
+            return variables.PropertyVariable.tp_init_impl(obj, tx, rest, kwargs)
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
