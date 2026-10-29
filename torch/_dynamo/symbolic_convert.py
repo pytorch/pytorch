@@ -3318,17 +3318,15 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         else:
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
