@@ -6771,6 +6771,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "foreign_group",
             "group_outside_entry",
             "group_without_binary",
+            "group_duplicate_member",
+            "group_invalid_member",
             "unrecognized_file",
             "foreign_native",
             "invalid_key",
@@ -6784,6 +6786,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             entry = pathlib.Path(tmp, key)
             group = entry / "__grp__kernel.json"
             children = json.loads(group.read_text())["child_paths"]
+            if isinstance(children, list):
+                children = {name: str(entry / name) for name in children}
             if damage == "missing_binary":
                 (entry / "kernel.cubin").unlink()
                 error = "Incomplete Triton runtime-cache entry"
@@ -6811,6 +6815,13 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 del children["kernel.cubin"]
                 group.write_text(json.dumps({"child_paths": children}))
                 error = "no compiled binary"
+            elif damage in ("group_duplicate_member", "group_invalid_member"):
+                members = list(children)
+                members.append(
+                    members[0] if damage == "group_duplicate_member" else None
+                )
+                group.write_text(json.dumps({"child_paths": members}))
+                error = "Incomplete Triton runtime-cache group"
             elif damage == "unrecognized_file":
                 (entry / "kernel.new_format").write_bytes(b"")
                 error = "Unrecognized Triton runtime-cache files"
@@ -6840,14 +6851,26 @@ class TestTritonRuntimeCacheTransport(TestCase):
             header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
             self.assertEqual(header, expected)
 
-    def test_export_accepts_an_unnormalized_cache_dir(self):
+    @parametrize("group_format", ("native", "paths", "filenames"))
+    def test_export_accepts_an_unnormalized_cache_dir(self, group_format):
         import triton
 
         from torch.compiler._triton_runtime_cache import export_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
             triton.knobs.cache.dir = os.path.join(tmp, "..", os.path.basename(tmp))
-            _write_triton_runtime_entries()
+            key, _ = _write_triton_runtime_entries()
+            if group_format != "native":
+                entry = pathlib.Path(tmp, key)
+                children = ("kernel.json", "kernel.cubin")
+                manifest = (
+                    {name: str(entry / name) for name in children}
+                    if group_format == "paths"
+                    else list(children)
+                )
+                (entry / "__grp__kernel.json").write_text(
+                    json.dumps({"child_paths": manifest})
+                )
             header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
             self.assertEqual(len(header["records"]), 3)
 
