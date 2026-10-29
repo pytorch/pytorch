@@ -38,9 +38,9 @@ std::shared_ptr<torch::ParamCommsDebugInfo> TracingGuard::getDebugInfo(
 
   // If both input and output tensor lists are empty, use a default data type.
   auto data_type = at::kByte;
-  if (input_tensor_list.size() > 0) {
+  if (!input_tensor_list.empty()) {
     data_type = input_tensor_list.front().scalar_type();
-  } else if (output_tensor_list.size() > 0) {
+  } else if (!output_tensor_list.empty()) {
     data_type = output_tensor_list.front().scalar_type();
   }
 
@@ -92,9 +92,12 @@ void TracingGuard::initializeTracingCommon(
   // per-PG sequence_number_, so there is no separate p2p sequence space.
   debug_info->setSequenceInfo(static_cast<int64_t>(sequence_number), false);
   debug_info_guard_ = std::make_unique<c10::DebugInfoGuard>(
-  c10::DebugInfoKind::PARAM_COMMS_INFO, std::move(debug_info));
+      c10::DebugInfoKind::PARAM_COMMS_INFO, std::move(debug_info));
 
-  if (record_function_guard_->needsInputs()) {
+  // Every constructor emplaces the guard before calling in here.
+  TORCH_INTERNAL_ASSERT(record_function_guard_.has_value());
+  at::RecordFunction& record_function = record_function_guard_.value();
+  if (record_function.needsInputs()) {
     std::initializer_list<const c10::IValue> paramList = {
         c10::IValue(input_tensor_list),
         std::make_tuple(static_cast<int64_t>(sequence_number), false),
@@ -107,13 +110,12 @@ void TracingGuard::initializeTracingCommon(
         -1, // globalRankStride: not tracked in TorchComm (unused by consumers)
         comm_size};
     c10::ArrayRef<const c10::IValue> paramInputs(paramList);
-    record_function_guard_->before(
-        at::kParamCommsCallName, std::move(paramInputs));
+    record_function.before(at::kParamCommsCallName, paramInputs);
   } else {
-    record_function_guard_->before(at::kParamCommsCallName);
+    record_function.before(at::kParamCommsCallName);
   }
-  if (record_function_guard_->needsOutputs()) {
-    record_function_guard_->setOutputs(
+  if (record_function.needsOutputs()) {
+    record_function.setOutputs(
         std::vector<c10::IValue>(1, c10::IValue(output_tensor_list)));
   }
 }

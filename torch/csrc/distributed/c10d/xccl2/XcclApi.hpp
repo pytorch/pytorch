@@ -191,10 +191,10 @@ class XcclApi {
 
   // Communicator introspection
   [[nodiscard]] virtual onecclResult_t commUserRank(
-      const onecclComm_t comm,
+      onecclComm_t comm,
       int* userRank) = 0;
   [[nodiscard]] virtual onecclResult_t commCount(
-      const onecclComm_t comm,
+      onecclComm_t comm,
       int* count) = 0;
 
   // Custom reduction operations
@@ -452,10 +452,9 @@ class DefaultXcclApi : public XcclApi {
   [[nodiscard]] onecclResult_t groupEnd() override;
 
   // Communicator introspection
-  [[nodiscard]] onecclResult_t commUserRank(
-      const onecclComm_t comm,
-      int* userRank) override;
-  [[nodiscard]] onecclResult_t commCount(const onecclComm_t comm, int* count)
+  [[nodiscard]] onecclResult_t commUserRank(onecclComm_t comm, int* userRank)
+      override;
+  [[nodiscard]] onecclResult_t commCount(onecclComm_t comm, int* count)
       override;
 
   // Custom reduction operations

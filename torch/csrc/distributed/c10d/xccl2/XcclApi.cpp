@@ -143,13 +143,7 @@ onecclResult_t DefaultXcclApi::broadcast(
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclBroadcast(
-      const_cast<void*>(sendbuff),
-      recvbuff,
-      count,
-      datatype,
-      root,
-      comm,
-      stream);
+      sendbuff, recvbuff, count, datatype, root, comm, stream);
 }
 
 onecclResult_t DefaultXcclApi::bcast(
@@ -173,7 +167,15 @@ onecclResult_t DefaultXcclApi::allReduce(
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclAllReduce(
-      const_cast<void*>(sendbuff), recvbuff, count, datatype, op, comm, stream);
+      // onecclAllReduce alone takes a non-const sendbuff; it does not write it.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<void*>(sendbuff),
+      recvbuff,
+      count,
+      datatype,
+      op,
+      comm,
+      stream);
 }
 
 onecclResult_t DefaultXcclApi::reduce(
@@ -187,14 +189,7 @@ onecclResult_t DefaultXcclApi::reduce(
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclReduce(
-      const_cast<void*>(sendbuff),
-      recvbuff,
-      count,
-      datatype,
-      op,
-      root,
-      comm,
-      stream);
+      sendbuff, recvbuff, count, datatype, op, root, comm, stream);
 }
 
 onecclResult_t DefaultXcclApi::allGather(
@@ -205,8 +200,7 @@ onecclResult_t DefaultXcclApi::allGather(
     onecclComm_t comm,
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  return onecclAllGather(
-      const_cast<void*>(sendbuff), recvbuff, sendcount, datatype, comm, stream);
+  return onecclAllGather(sendbuff, recvbuff, sendcount, datatype, comm, stream);
 }
 
 onecclResult_t DefaultXcclApi::reduceScatter(
@@ -219,13 +213,7 @@ onecclResult_t DefaultXcclApi::reduceScatter(
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclReduceScatter(
-      const_cast<void*>(sendbuff),
-      recvbuff,
-      recvcount,
-      datatype,
-      op,
-      comm,
-      stream);
+      sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
 }
 
 onecclResult_t DefaultXcclApi::allToAll(
@@ -236,8 +224,7 @@ onecclResult_t DefaultXcclApi::allToAll(
     onecclComm_t comm,
     c10::xpu::XPUStream stream) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  return onecclAllToAll(
-      const_cast<void*>(sendbuff), recvbuff, count, datatype, comm, stream);
+  return onecclAllToAll(sendbuff, recvbuff, count, datatype, comm, stream);
 }
 
 onecclResult_t DefaultXcclApi::groupStart() {
@@ -250,14 +237,12 @@ onecclResult_t DefaultXcclApi::groupEnd() {
   return onecclGroupEnd();
 }
 
-onecclResult_t DefaultXcclApi::commUserRank(
-    const onecclComm_t comm,
-    int* userRank) {
+onecclResult_t DefaultXcclApi::commUserRank(onecclComm_t comm, int* userRank) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclCommUserRank(comm, userRank);
 }
 
-onecclResult_t DefaultXcclApi::commCount(const onecclComm_t comm, int* count) {
+onecclResult_t DefaultXcclApi::commCount(onecclComm_t comm, int* count) {
   std::lock_guard<std::mutex> lock(api_mutex_);
   return onecclCommCount(comm, count);
 }
