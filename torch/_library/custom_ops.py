@@ -287,7 +287,8 @@ def _custom_op_def_class(fn: Callable[..., object]) -> type["CustomOpDef"]:
     PyObject Dispatcher aka pyobj_dispatcher] in torch/_ops.py). The generated
     __call__ passes positional parameters positionally, filling in fn's
     defaults. Python looks up __call__ on the type, so each op needs its own
-    subclass.
+    subclass. Like the generic one, it calls the OpOverload's _op, skipping
+    OpOverload.__call__, which only does that.
     """
     code = utils.signature_forwarding_code(inspect.signature(fn), "_opdef_")
     if code is None:
@@ -295,7 +296,7 @@ def _custom_op_def_class(fn: Callable[..., object]) -> type["CustomOpDef"]:
     params, call_args, env = code
     src = (
         f"def __call__(_opdef_self, {params}):\n"
-        f"    return _opdef_self._opoverload({call_args})\n"
+        f"    return _opdef_self._opoverload._op({call_args})\n"
     )
     # Attribute the generated code to CustomOpDef.__call__ in this file, so
     # tracebacks point there and Dynamo applies this file's trace rules to it
@@ -945,7 +946,7 @@ class CustomOpDef:
         self._lib.impl(self._name, backend_select, "BackendSelect", with_keyset=True)
 
     def __call__(self, *args, **kwargs):
-        return self._opoverload(*args, **kwargs)
+        return self._opoverload._op(*args, **kwargs)
 
     def register_vmap(
         self,
