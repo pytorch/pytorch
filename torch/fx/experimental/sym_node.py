@@ -1180,9 +1180,12 @@ def _sympy_max(a: sympy.Basic, b: sympy.Basic) -> sympy.Basic:
 
 
 def _sympy_ite(a: sympy.Basic, t: sympy.Basic, f: sympy.Basic) -> sympy.Basic:
-    import sympy
+    # Use torch's Where (not sympy.Piecewise): Inductor size math calls
+    # as_poly/gcd-style helpers that raise PolynomialError on Piecewise
+    # ("Piecewise generators do not make sense"), e.g. torch.ones(sym_ite(...)).
+    from torch.utils._sympy.functions import Where
 
-    return sympy.Piecewise((t, a), (f, True))
+    return Where(a, t, f)
 
 
 current_module = sys.modules[__name__]
