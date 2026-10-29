@@ -2387,6 +2387,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     # pyrefly: ignore [bad-override]
     def signbit(x):
         # x < 0 is wrong for -0.0 in floating point, so use libdevice for supported floating
