@@ -2,6 +2,7 @@
 """CPU-specific implementations for flex attention"""
 
 import copy
+import logging
 import os
 import sys
 from typing import Any
@@ -10,6 +11,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -27,6 +29,9 @@ from .common import (
     infer_dense_strides,
     maybe_realize,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 def check_cpu_supported():
@@ -91,13 +96,13 @@ def lower_cpu(
 
     # Key/value may be in a lower precision than query, e.g. an FP8 KV cache.
     kv_dtypes = [query.dtype, torch.float8_e4m3fn, torch.float8_e5m2]
-    if query.dtype == torch.float:
-        kv_dtypes += [torch.bfloat16, torch.float16]
     if key.dtype not in kv_dtypes or value.dtype not in kv_dtypes:
         raise ValueError(
-            f"Unsupported key/value dtype on CPU for query.dtype: {query.dtype}, "
-            f"got key.dtype: {key.dtype} and value.dtype: {value.dtype}. "
-            f"Supported key/value dtypes are {kv_dtypes}."
+            f"Unsupported key/value dtype on CPU, got query.dtype: {query.dtype}, "
+            f"key.dtype: {key.dtype} and value.dtype: {value.dtype}. "
+            f"Key and value must each be either the query dtype ({query.dtype}) "
+            f"or an FP8 dtype (torch.float8_e4m3fn, torch.float8_e5m2). "
+            f"Please cast key and value to {query.dtype}, e.g. key.to({query.dtype})."
         )
 
     if kernel_options["OUTPUT_LOGSUMEXP"]:
@@ -245,8 +250,20 @@ def lower_cpu(
         query, key, PARTITION_SIZE, SPARSE_KV_BLOCK_SIZE
     ):
         # Only the decoding template reads lower-precision key/value directly
-        key = to_dtype(key, query.get_dtype())
-        value = to_dtype(value, query.get_dtype())
+        q_dtype = query.get_dtype()
+        if key.get_dtype() != q_dtype or value.get_dtype() != q_dtype:
+            warning_once(
+                log,
+                "CPU flex attention is upcasting the %s key and %s value to the %s query "
+                "dtype on every call. Cast the KV cache to %s once outside the compiled "
+                "function to avoid the repeated conversion.",
+                key.get_dtype(),
+                value.get_dtype(),
+                q_dtype,
+                q_dtype,
+            )
+        key = to_dtype(key, q_dtype)
+        value = to_dtype(value, q_dtype)
 
     # CPU kernel requires last dim to be contiguous
     query, key, value = map(contiguous_last_dim, [query, key, value])
