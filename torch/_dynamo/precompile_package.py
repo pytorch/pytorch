@@ -88,6 +88,33 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
+def _frozen_kernel_config() -> dict[str, object]:
+    """The Triton config both precompile tracers lower under.
+
+    A frozen DynamoTracer artifact replays each kernel with one recorded
+    config, so every kernel is tuned before replay and no multi-kernel picks
+    its sub-kernel at first launch. A MakeFxTracer module is inlined into
+    the artifact, which never defines its multi-kernels (NameError on the
+    first call). Warns once for each user value overridden.
+    """
+    import torch._inductor.config as inductor_config
+
+    if inductor_config.triton.autotune_at_compile_time is False:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides triton.autotune_at_compile_time=False: "
+            "a frozen artifact needs every kernel tuned before replay",
+        )
+    if inductor_config.triton.multi_kernel:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides triton.multi_kernel=%s to 0: "
+            "the artifact does not record which sub-kernel a multi-kernel picks",
+            inductor_config.triton.multi_kernel,
+        )
+    return {"triton.autotune_at_compile_time": True, "triton.multi_kernel": 0}
+
+
 @contextlib.contextmanager
 def _capture_config() -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -159,19 +186,6 @@ def _capture_config() -> Iterator[None]:
         functorch_patch["strict_autograd_cache"] = True
     import torch._inductor.config as inductor_config
 
-    if inductor_config.triton.autotune_at_compile_time is False:
-        torch._logging.warning_once(
-            log,
-            "precompile capture overrides triton.autotune_at_compile_time=False: "
-            "a frozen artifact needs every kernel tuned before replay",
-        )
-    if inductor_config.triton.multi_kernel:
-        torch._logging.warning_once(
-            log,
-            "precompile capture overrides triton.multi_kernel=%s to 0: "
-            "the artifact does not record which sub-kernel a multi-kernel picks",
-            inductor_config.triton.multi_kernel,
-        )
     # TODO: drop the bundled_autotune_remote_cache patch once
     # AutotuneCacheBundler keeps one bundle per compiled module rather than one
     # per CompileContext, which fixes every eager-backward caller.
@@ -180,8 +194,7 @@ def _capture_config() -> Iterator[None]:
         inductor_config.patch(
             {
                 "bundled_autotune_remote_cache": False,
-                "triton.autotune_at_compile_time": True,
-                "triton.multi_kernel": 0,
+                **_frozen_kernel_config(),
             }
         ),
         torch._dynamo.config.patch(allow_empty_graphs=True),

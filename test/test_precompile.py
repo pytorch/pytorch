@@ -7617,10 +7617,19 @@ def recording_benchmark_sub_kernels(self, *args, **kwargs):
 CachingAutotuner.bench = recording_bench
 MultiKernelCall.benchmark_sub_kernels = recording_benchmark_sub_kernels
 x, w = inputs(0)
+make_fx = sys.argv[4] == "make_fx"
 if phase == "capture":
-    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    if make_fx:
+        tracer = pc.MakeFxTracer()
+    else:
+        tracer = pc.DynamoTracer(require_no_risky_drops=False)
     with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
         cap(x, w)
+    assert "sub-kernel" not in benchmarked, benchmarked
+elif make_fx:
+    # A MakeFxTracer artifact freezes no runtime cache: its kernels compile on load.
+    os.environ.pop("TORCH_PRECOMPILE_NO_COMPILATION")
+    torch.testing.assert_close(pc.load(artifact, cache)(x, w), fn(x, w))
     assert "sub-kernel" not in benchmarked, benchmarked
 else:
     FileCacheManager.put = recording_put
@@ -9233,7 +9242,7 @@ class TestPrecompileRuntimeCache(TestCase):
             ):
                 TritonBundler.read_and_emit(bundle)
 
-    def _capture_and_replay(self, module_source, driver, marker):
+    def _capture_and_replay(self, module_source, driver, marker, *extra_args):
         from torch.compiler._runtime_cache import _triton_runtime_cache
 
         if _triton_runtime_cache() is None:
@@ -9244,7 +9253,9 @@ class TestPrecompileRuntimeCache(TestCase):
                 f.write(module_source)
             for phase in ("capture", "replay"):
                 cmd = [sys.executable, "-c", driver, phase, directory, module]
-                out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+                out = subprocess.run(
+                    [*cmd, *extra_args], capture_output=True, text=True, timeout=900
+                )
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertIn(f"{marker}: {phase}", out.stdout)
 
@@ -9266,9 +9277,10 @@ class TestPrecompileRuntimeCache(TestCase):
 
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    def test_strict_replay_with_multi_kernel(self):
+    @parametrize("tracer", ["dynamo", "make_fx"])
+    def test_strict_replay_with_multi_kernel(self, tracer):
         self._capture_and_replay(
-            _MULTI_KERNEL_MODULE, _MULTI_KERNEL_DRIVER, "multi-kernel phase ok"
+            _MULTI_KERNEL_MODULE, _MULTI_KERNEL_DRIVER, "multi-kernel phase ok", tracer
         )
 
 

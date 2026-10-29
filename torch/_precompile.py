@@ -3151,6 +3151,7 @@ class PrecompiledModule(PrecompiledRunnable):
         # save_cache_artifacts bundle that primes the inductor cache on load, or None
         # for uncacheable graphs).
         import torch._inductor.config as _ind_config
+        from torch._dynamo.precompile_package import _frozen_kernel_config
         from torch._functorch import aot_autograd
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
@@ -3173,7 +3174,7 @@ class PrecompiledModule(PrecompiledRunnable):
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, object] = {"size_asserts": True}
+        options: dict[str, object] = {"size_asserts": True, **_frozen_kernel_config()}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
