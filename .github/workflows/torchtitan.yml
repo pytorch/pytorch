@@ -22,9 +22,14 @@ on:
         type: boolean
         default: false
         description: Compare native adjacent Triton commits around the FP fusion policy change.
+      control-runner:
+        type: choice
+        default: a10g-8
+        options: [a10g-8, a10g-4]
+        description: Allocate the original two-A10G controls on a four- or eight-device runner.
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.inputs.artifact-run-id }}-${{ github.event.inputs.boundary-controls }}-${{ github.event.inputs.fusion-only }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.inputs.artifact-run-id }}-${{ github.event.inputs.boundary-controls }}-${{ github.event.inputs.fusion-only }}-${{ github.event.inputs.control-runner }}
   cancel-in-progress: true
 
 permissions:
@@ -118,7 +123,7 @@ jobs:
       timeout-minutes: 180
       test-matrix: |
         { include: [
-          { config: "${{ github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
+          { config: "${{ github.event.inputs.boundary-controls == 'true' && 'torchtitan_triton_pin_boundary_controls' || github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "${{ github.event.inputs.control-runner == 'a10g-4' && format('{0}l-x86aavx2-45-167-a10g-4', needs.get-label-type.outputs.label-type) || 'mt-l-x86aavx2-189-704-a10g-8' }}" }
         ]}
       python-version: '3.12'
       compiler: gcc11
