@@ -286,6 +286,9 @@ struct PyObjectRedispatchFunc {
   PyObjectDispatchSchema* schema_info;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
+  // Redispatch below Autograd: mask the key set with after_autograd_keyset
+  // and exclude the Autograd keys for the call.
+  bool below_autograd;
 };
 
 // ORs the dispatch keys from `obj` into key_set
@@ -1165,30 +1168,33 @@ static PyObject* pyobject_redispatch_vectorcall(
   auto* self = reinterpret_cast<PyObjectRedispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
-    return PyObject_Vectorcall(
-        self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
   if (nargs == 0) {
     PyErr_SetString(
         PyExc_TypeError,
         "redispatch() expected redispatch(keyset, *args, **kwargs)");
     return nullptr;
   }
-
-  PyObject* raw_key_set = PyObject_CallMethod(args[0], "raw_repr", nullptr);
-  if (raw_key_set == nullptr) {
+  c10::DispatchKeySet key_set;
+  try {
+    key_set = py::handle(args[0]).cast<c10::DispatchKeySet>();
+  } catch (const py::cast_error&) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "redispatch() expected a DispatchKeySet as its first argument");
     return nullptr;
   }
-  auto raw_repr = PyLong_AsUnsignedLongLong(raw_key_set);
-  Py_DECREF(raw_key_set);
-  if (PyErr_Occurred()) {
-    return nullptr;
+  std::optional<at::AutoDispatchBelowAutograd> below_autograd_guard;
+  if (self->below_autograd) {
+    below_autograd_guard.emplace();
+    key_set = key_set & c10::after_autograd_keyset;
   }
-  auto key_set = c10::DispatchKeySet::from_raw_repr(raw_repr);
+  bool skip_torch_function = torch::peek_should_skip_torch_function();
+  if (C10_UNLIKELY(
+          !skip_torch_function &&
+          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
+    return pyobject_dispatch_call_redispatch_cpp(
+        self->cpp_redispatch_fn, key_set, args, nargs, nkwargs, kwnames, 1);
+  }
   if (C10_UNLIKELY(skip_torch_function)) {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
@@ -1243,7 +1249,8 @@ static PyObject* make_pyobject_dispatch_func(
 static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
-    vectorcallfunc vectorcall) {
+    vectorcallfunc vectorcall,
+    bool below_autograd) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto schema_info = make_pyobject_dispatch_schema(handle.schema());
   auto* result =
@@ -1255,6 +1262,7 @@ static PyObject* make_pyobject_redispatch_func(
   result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
+  result->below_autograd = below_autograd;
   return reinterpret_cast<PyObject*>(result);
 }
 
@@ -1274,10 +1282,15 @@ static py::tuple make_pyobj_dispatch_fns(
       cpp_dispatch_fn.ptr(),
       cpp_redispatch_fn.ptr(),
       pyobject_dispatch_vectorcall));
-  auto redispatch =
-      py::reinterpret_steal<py::object>(make_pyobject_redispatch_func(
-          handle, cpp_redispatch_fn.ptr(), pyobject_redispatch_vectorcall));
-  return py::make_tuple(std::move(dispatch), std::move(redispatch));
+  auto make_redispatch = [&](bool below_autograd) {
+    return py::reinterpret_steal<py::object>(make_pyobject_redispatch_func(
+        handle,
+        cpp_redispatch_fn.ptr(),
+        pyobject_redispatch_vectorcall,
+        below_autograd));
+  };
+  return py::make_tuple(
+      std::move(dispatch), make_redispatch(false), make_redispatch(true));
 }
 
 // A small RAII guard that lets you explicitly *remove* a key from the TLS

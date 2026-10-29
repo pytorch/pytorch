@@ -52,9 +52,11 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         keyword_only_args: dict[str, Any]
 
     def redispatch_no_grad(keyset, args, kwargs):
+        pyobj_dispatcher = op._pyobj_dispatcher
+        if pyobj_dispatcher is not None:
+            return pyobj_dispatcher.redispatch_below_autograd(keyset, *args, **kwargs)
         with _C._AutoDispatchBelowAutograd():
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            return result
+            return op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
 
     def forward(ctx, *args):
         metadata = args[-1]
@@ -63,7 +65,15 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         with _C._AutoDispatchBelowAutograd():
             keyset = metadata.keyset
             kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+            pyobj_dispatcher = op._pyobj_dispatcher
+            if pyobj_dispatcher is not None:
+                result = pyobj_dispatcher.redispatch_below_autograd(
+                    keyset, *args, **kwargs
+                )
+            else:
+                result = op.redispatch(
+                    keyset & _C._after_autograd_keyset, *args, **kwargs
+                )
             if info._setup_context_fn:
                 # The Dispatcher will remove args that are equal to their default
                 # values from (args, kwargs). We're going to add it back so that
