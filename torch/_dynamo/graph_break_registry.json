@@ -1,4 +1,14 @@
 {
+  "GB2484": [
+    {
+      "Gb_type": "Dictionary merge after iteration slot mutation",
+      "Context": "dict_merge: {other}",
+      "Explanation": "Dynamo cannot merge a dictionary after changing its type's __iter__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0000": [
     {
       "Gb_type": "All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
@@ -1102,6 +1112,16 @@
       "Context": "",
       "Explanation": "Graph breaks in an inlined call are not supported.",
       "Hints": []
+    }
+  ],
+  "GB4179": [
+    {
+      "Gb_type": "OrderedDict mutation with user-defined hash",
+      "Context": "OrderedDict.move_to_end",
+      "Explanation": "Dynamo cannot replay input OrderedDict moves without repeating user hash callbacks.",
+      "Hints": [
+        "Construct the OrderedDict inside the compiled function."
+      ]
     }
   ],
   "GB0066": [
@@ -3701,6 +3721,14 @@
       "Hints": [
         "Write the repr method in Python"
       ]
+    }
+  ],
+  "GB2214": [
+    {
+      "Gb_type": "Unsupported OrderedDict instance dictionary",
+      "Context": "OrderedDict.__dict__",
+      "Explanation": "A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
+      "Hints": []
     }
   ],
   "GB8395": [
@@ -6847,6 +6875,16 @@
       "Gb_type": "Frozen dataclass with missing field",
       "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
       "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1146": [
+    {
+      "Gb_type": "frozendict subclass methods",
+      "Context": "str(type(args[0]))",
+      "Explanation": "Dynamo cannot access this dictionary's stored keys and values.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

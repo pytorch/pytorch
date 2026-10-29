@@ -1389,7 +1389,9 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            use_const_keys = all(ConstantVariable.is_literal(k) for k in value)
+            use_const_keys = all(
+                ConstantVariable.is_literal(k) for k in dict.keys(value)
+            )
 
             # For use_const_keys, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -2584,8 +2586,8 @@ class VariableBuilder:
                 dict_source = MappingProxyMappingSource(self.source)
                 owner = gc.get_referents(value)[0]
                 dict_vt = VariableBuilder(self.tx, dict_source)(owner)
-                if not isinstance(dict_vt, ConstDictVariable):
-                    raise AssertionError(f"Expected a dict, got {dict_vt}")
+                if not isinstance(dict_vt, (ConstDictVariable, FrozenDictVariable)):
+                    raise AssertionError(f"Expected a dictionary, got {dict_vt}")
                 return DictKeysVariable(
                     dict_vt, source=self.source, is_ordered=type(value) is odict_keys
                 )
