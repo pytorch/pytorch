@@ -10795,6 +10795,32 @@ class AOTInductorTestsTemplate:
             launches.append(launched)
         self.assertEqual(launches, [False, True, True])
 
+    @skipIfRocm
+    def test_aot_cudagraphs_run_eagerly_with_cuda_malloc_async(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        model = torch.nn.Linear(16, 32).to(self.device)
+        x = torch.randn(4, 16, device=self.device)
+        package_path = torch._inductor.aoti_compile_and_package(
+            torch.export.export(model, (x,)),
+            inductor_configs={"aot_inductor.cudagraphs": True},
+        )
+        # The allocator backend is fixed when CUDA initializes.
+        code = f"""
+import torch
+compiled = torch._inductor.aoti_load_package({package_path!r})
+x = torch.randn(4, 16, device="cuda")
+for _ in range(3):
+    torch.testing.assert_close(compiled.run_with_lazy_cuda_graphs(x), compiled(x))
+"""
+        env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "backend:cudaMallocAsync"}
+        proc = subprocess.run(
+            [sys.executable, "-c", code], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("capturing failed", proc.stderr)
+        self.assertIn("backend:cudaMallocAsync", proc.stderr)
+
     def test_aot_cudagraphs_run_requires_cuda_model(self):
         if self.device != "cpu":
             raise unittest.SkipTest("requires CPU")

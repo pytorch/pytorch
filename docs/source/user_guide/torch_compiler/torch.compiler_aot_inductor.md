@@ -224,6 +224,9 @@ arguments as `run`.
   outputs come back as separate tensors.
 - If a capture fails but the eager call succeeds, that layout runs eagerly from
   then on, with a warning.
+- Capturing needs PyTorch's native CUDA caching allocator: under
+  `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync`, models run eagerly, with a
+  warning.
 - Once a graph is captured, the model's constants can't change; load the model
   again to use new weights.
 
