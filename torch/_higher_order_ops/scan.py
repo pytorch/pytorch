@@ -10,7 +10,7 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
+from torch._functorch.vmap import unwrap_batched, wrap_batched
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
@@ -22,7 +22,10 @@ from torch._higher_order_ops.partitioner import (
     HopPartitionedGraph,
 )
 from torch._higher_order_ops.utils import (
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
+    _move_batch_dims_to_last_for_scan,
+    _VmapCombineFnWrapper,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
@@ -163,8 +166,9 @@ def scan(
             (not zero), since the body is never called and the carry passes through untouched.
 
     Restrictions:
-        - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
+        - The combine_fn shouldn't have any aliasing between input-output and output-output. E.g. return a view
             or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
+            Inputs may share storage (e.g. views of one tensor), as long as none of them is mutated.
 
         - The combine_fn shouldn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
             if you input mutation support for training is needed.
@@ -1102,6 +1106,8 @@ def scan_functionalize(
             additional_inputs,
             mutated_arg_indices=mutated_arg_indices,
         )
+        # mutated_arg_indices is only set by Dynamo, which rejects mutating an
+        # input that aliases another input, so auto_functionalize never sees one.
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
                 ctx.mode,
@@ -1133,7 +1139,13 @@ def scan_functionalize(
             )
         )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        _check_alias_and_mutation(combine_fn, sample_inputs, "scan", pre_dispatch)
+        _check_alias_and_mutation(
+            combine_fn,
+            sample_inputs,
+            "scan",
+            pre_dispatch,
+            allow_input_input_aliasing=True,
+        )
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,
@@ -1152,47 +1164,19 @@ def scan_batch_rule(
         (init, xs, additional_inputs), interpreter.level()
     )
     # move to last dim to not interfere with scan's batching
-    unbatched_init, unbatched_xs, unbatched_additional_inputs = pytree.tree_map(
-        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
-        unbatched_args,
-        in_dims,
+    unbatched_init, unbatched_xs, unbatched_additional_inputs = (
+        _move_batch_dims_to_last_for_scan(unbatched_args, in_dims)
     )
-    after_move_dims = tuple(
-        pytree.tree_flatten(
-            pytree.tree_map(lambda x: -1 if x is not None else None, in_dims)
-        )[0]
-    )
+    after_move_dims = _batch_dims_as_last_for_scan(in_dims)
 
     with interpreter.lower():
-        out_dims = None
-
-        def wrapper(*args):
-            nonlocal out_dims
-            outputs, per_slice_out_dims = restore_vmap(
-                combine_fn,
-                after_move_dims,
-                interpreter.batch_size(),
-                interpreter.randomness(),
-            )(*args)
-            # Note: outputs are not batched, we just move the batch dim to the end
-            # this is to avoid it interfering with scan's batching
-            outputs = tuple(
-                pytree.tree_map(
-                    lambda out, out_bdim: out.movedim(out_bdim, -1)
-                    if out_bdim is not None
-                    else out,
-                    outputs,
-                    per_slice_out_dims,
-                )
-            )
-            out_dims = tuple(
-                pytree.tree_map(
-                    lambda out_bdim: -1 if out_bdim is not None else None,
-                    per_slice_out_dims,
-                )
-            )
-            return outputs
-
+        wrapper = _VmapCombineFnWrapper(
+            combine_fn,
+            after_move_dims,
+            interpreter.batch_size(),
+            interpreter.randomness(),
+            op_name="scan",
+        )
         op_kwargs = {}
         if mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -1204,9 +1188,13 @@ def scan_batch_rule(
             **op_kwargs,
         )
 
-    if out_dims is None:
+    if wrapper.out_dims is None:
         raise AssertionError("out_dims must not be None after scan_op")
-    batched_out = wrap_batched(unwrapped_out, out_dims, interpreter.level())
+    # wrap_batched matches bdims against the output container; normalize to a
+    # tuple to align with the tuple out_dims (as in associative_scan_batch_rule).
+    batched_out = wrap_batched(
+        tuple(unwrapped_out), wrapper.out_dims, interpreter.level()
+    )
     return batched_out
 
 

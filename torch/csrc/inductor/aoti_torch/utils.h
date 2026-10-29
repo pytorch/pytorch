@@ -73,7 +73,7 @@ inline std::vector<at::Tensor> resolve_tensor_list_dispatch_flags(
     int64_t len) {
   std::vector<at::Tensor> ret{};
   ret.reserve(len);
-  for (int64_t i{0}; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     ret.emplace_back(resolve_tensor_dispatch_flags(handle[i]));
   }
   return ret;
@@ -84,7 +84,7 @@ inline std::vector<std::optional<at::Tensor>> resolve_tensor_list_dispatch_flags
     int64_t len) {
   std::vector<std::optional<at::Tensor>> ret{};
   ret.reserve(len);
-  for (int64_t i{0}; i < len; ++i) {
+  for (const auto i : c10::irange(len)) {
     ret.emplace_back(resolve_tensor_dispatch_flags(handle[i]));
   }
   return ret;
@@ -109,13 +109,11 @@ inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
   auto isnan_tensor = check_tensor.isnan();
-  if (isnan_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one NaN in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isnan_tensor.any().item<bool>(), "At least one NaN in ", tensor_name);
   auto isinf_tensor = check_tensor.isinf();
-  if (isinf_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one INF in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isinf_tensor.any().item<bool>(), "At least one INF in ", tensor_name);
 }
 
 // utility functions to convert a pointer to an optional value

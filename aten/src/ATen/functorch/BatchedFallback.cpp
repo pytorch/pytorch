@@ -13,10 +13,10 @@
 #include <ATen/MatrixRef.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
 #include <atomic>
+#include <bit>
 
 namespace at::functorch {
 
@@ -145,7 +145,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
     if (self_vmap_levels != (self_vmap_levels | other_vmap_levels)) {
       // Find one vmap level to complain about
       auto additional_bdims = (self_vmap_levels | other_vmap_levels) ^ self_vmap_levels;
-      [[maybe_unused]] auto offending_level = llvm::findLastSet(additional_bdims.to_ulong());
+      [[maybe_unused]] auto offending_level = std::bit_width(additional_bdims.to_ulong()) - 1;
       // The following prints out "vmap: aten::add_(tensor, ...) is not possible",
       // but it would be better to print out "tensor.add_(...) is not possible".
       // Afaict there's no official way to get the add_ and there is no way to
@@ -183,7 +183,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, and call `op`.
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
@@ -337,7 +337,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // more easily in the next step.
   std::vector<Tensor> output_shards(num_batches * num_returns);
 
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
