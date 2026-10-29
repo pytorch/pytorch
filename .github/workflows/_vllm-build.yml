@@ -104,8 +104,6 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      # TODO (huydhn): Lumen CLI won't work inside the container, need to revisit
-      # the approach later. So, this is the bare minimum to build vLLM wheel
       - name: Build vLLM
         working-directory: vllm-project/vllm
         shell: bash
