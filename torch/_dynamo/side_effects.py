@@ -618,10 +618,16 @@ class SideEffects:
         # re-inserts at the end.
         if not isinstance(value, variables.DeletedVariable):
             existing = self.store_attr_mutations.get(item, {}).get(name)
-            if isinstance(
-                existing, variables.DeletedVariable
-            ) and self.has_pending_mutation_of_attr(
-                item, name, AttrMutationKind.INSTANCE_DICT
+            if isinstance(existing, variables.DeletedVariable) and (
+                self.has_pending_mutation_of_attr(
+                    item, name, AttrMutationKind.INSTANCE_DICT
+                )
+                or not (
+                    sys.version_info >= (3, 13)
+                    and name == "__name__"
+                    and isinstance(item, variables.UserDefinedPropertyVariable)
+                    and item.lookup_class_mro_attr(name) is property.__dict__[name]
+                )
             ):
                 # store_attr always writes both maps together, so the
                 # attr_mutation_kinds entry is guaranteed present here; use del

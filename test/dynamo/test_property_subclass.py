@@ -1560,6 +1560,50 @@ class PropertySubclassTests(TestCase):
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
         self.assertEqual(events, [])
 
+    @parametrize("cls", (property, PropertyWithoutDoc))
+    @parametrize("action", ("get", "set", "delete"))
+    @parametrize("explicit", (False, True))
+    @parametrize("name_case", ("original", "alias", "renamed"))
+    def test_missing_accessor_stored_name(self, cls, action, explicit, name_case):
+        class Holder:
+            prop = cls()
+            if name_case == "alias":
+                alias = prop
+
+        p = Holder.__dict__["prop"]
+        if name_case == "renamed":
+            p.__set_name__(Holder, "renamed's property")
+
+        def fn(x):
+            obj = Holder()
+            try:
+                if action == "get":
+                    if explicit:
+                        p.__get__(obj, Holder)
+                    else:
+                        obj.prop
+                elif action == "set":
+                    if explicit:
+                        p.__set__(obj, x)
+                    else:
+                        obj.prop = x
+                elif explicit:
+                    p.__delete__(obj)
+                else:
+                    del obj.prop
+            except AttributeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.ones(2)
+        if sys.version_info < (3, 13):
+            with self.assertRaisesRegex(Unsupported, "legacy property error message"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            compiled = torch.compile(fn, backend="eager")
+        else:
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x + 1), fn(x + 1))
+
 
 if __name__ == "__main__":
     run_tests()

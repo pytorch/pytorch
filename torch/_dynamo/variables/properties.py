@@ -158,7 +158,10 @@ class PropertyVariable(VariableTracker):
     def _get_accessor(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        source = self.source and PropertyAccessorSource(self.source, name)
+        source_cls = (
+            AttrSource if type(self.descriptor) is property else PropertyAccessorSource
+        )
+        source = self.source and source_cls(self.source, name)
         return VariableTracker.build(
             tx, get_property_accessor(self.descriptor, name), source, realize=True
         )
@@ -257,61 +260,51 @@ class PropertyVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", obj: VariableTracker, kind: str
     ) -> NoReturn:
         from .object_protocol import generic_getattr, generic_repr
-        from .user_defined import UserDefinedPropertyVariable
 
-        if sys.version_info < (3, 13) and isinstance(self, UserDefinedPropertyVariable):
+        if sys.version_info < (3, 13):
             unimplemented(
                 gb_type="Unsupported legacy property error message",
-                context=f"property subclass missing {kind}",
+                context=f"property missing {kind}",
                 explanation="Before Python 3.13 the stored property name is not exposed, so Dynamo cannot safely format its accessor error.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         name = None
-        if sys.version_info >= (3, 13):
+        try:
+            name_vt = self._name_getter(tx)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+        else:
             try:
-                name_vt = self._name_getter(tx)
-            except ObservedAttributeError:
-                handle_observed_exception(tx)
-            else:
-                try:
-                    name = str.__str__(generic_repr(tx, name_vt).as_python_constant())
-                except AsPythonConstantNotImplementedError:
-                    unimplemented(
-                        gb_type="Unsupported property name formatting",
-                        context="non-constant property name representation",
-                        explanation="Dynamo cannot format a property error with a non-constant name representation.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-        if sys.version_info >= (3, 11):
-            cls = obj.python_type()
-            if (
-                inspect.getattr_static(type(cls), "__getattribute__")
-                is not type.__getattribute__
-            ):
+                name = str.__str__(generic_repr(tx, name_vt).as_python_constant())
+            except AsPythonConstantNotImplementedError:
                 unimplemented(
-                    gb_type="Unsupported property owner name lookup",
-                    context="custom metaclass __getattribute__",
-                    explanation="Dynamo cannot format a property error through custom metaclass attribute access.",
+                    gb_type="Unsupported property name formatting",
+                    context="non-constant property name representation",
+                    explanation="Dynamo cannot format a property error with a non-constant name representation.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            cls_source = getattr(obj, "cls_source", None) or (
-                obj.source and TypeSource(obj.source)
+        cls = obj.python_type()
+        if (
+            inspect.getattr_static(type(cls), "__getattribute__")
+            is not type.__getattribute__
+        ):
+            unimplemented(
+                gb_type="Unsupported property owner name lookup",
+                context="custom metaclass __getattribute__",
+                explanation="Dynamo cannot format a property error through custom metaclass attribute access.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-            cls_vt = VariableTracker.build(tx, cls, cls_source, realize=True)
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                cls_vt, "__qualname__"
-            ):
-                owner_name = tx.output.side_effects.load_attr(cls_vt, "__qualname__")
-            else:
-                owner_name = generic_getattr(tx, cls_vt, "__qualname__")
-            owner_repr = str.__str__(generic_repr(tx, owner_name).as_python_constant())
-            prefix = "property" if name is None else f"property {name}"
-            msg = f"{prefix} of {owner_repr} object has no {kind}"
-        elif kind == "getter":
-            msg = "unreadable attribute"
+        cls_source = getattr(obj, "cls_source", None) or (
+            obj.source and TypeSource(obj.source)
+        )
+        cls_vt = VariableTracker.build(tx, cls, cls_source, realize=True)
+        if tx.output.side_effects.has_pending_mutation_of_attr(cls_vt, "__qualname__"):
+            owner_name = tx.output.side_effects.load_attr(cls_vt, "__qualname__")
         else:
-            verb = "set" if kind == "setter" else "delete"
-            msg = f"can't {verb} attribute"
+            owner_name = generic_getattr(tx, cls_vt, "__qualname__")
+        owner_repr = str.__str__(generic_repr(tx, owner_name).as_python_constant())
+        prefix = "property" if name is None else f"property {name}"
+        msg = f"{prefix} of {owner_repr} object has no {kind}"
         raise_attribute_error(tx, msg)
 
     def tp_descr_set_impl(

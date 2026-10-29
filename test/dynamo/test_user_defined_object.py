@@ -334,9 +334,17 @@ class TestSlotsAttrAssignment(TestCase):
             obj.x = 99
             return obj.x
 
+        expected = (
+            "can't set attribute" if sys.version_info < (3, 11) else "has no setter"
+        )
+        self.assertRaisesRegex(AttributeError, expected, fn, Foo())
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertRaises(AttributeError, fn, Foo())
-        self.assertRaisesRegex(Exception, "has no setter", compiled_fn, Foo())
+        if sys.version_info < (3, 13):
+            self.assertRaisesRegex(
+                Unsupported, "legacy property error message", compiled_fn, Foo()
+            )
+            compiled_fn = torch.compile(fn, backend="eager")
+        self.assertRaisesRegex(Exception, expected, compiled_fn, Foo())
 
     def test_delattr_instance_dict_exposes_non_data_descriptor(self):
         class Descriptor:
@@ -395,9 +403,17 @@ class TestSlotsAttrAssignment(TestCase):
             del obj.x
             return obj.x
 
+        expected = (
+            "can't delete attribute" if sys.version_info < (3, 11) else "has no deleter"
+        )
+        self.assertRaisesRegex(AttributeError, expected, fn, Foo())
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertRaises(AttributeError, fn, Foo())
-        self.assertRaisesRegex(Exception, "has no deleter", compiled_fn, Foo())
+        if sys.version_info < (3, 13):
+            self.assertRaisesRegex(
+                Unsupported, "legacy property error message", compiled_fn, Foo()
+            )
+            compiled_fn = torch.compile(fn, backend="eager")
+        self.assertRaisesRegex(Exception, expected, compiled_fn, Foo())
 
     def test_slot_and_dict_mutation_same_object(self):
         class Foo:

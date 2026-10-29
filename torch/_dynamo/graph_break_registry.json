@@ -2755,6 +2755,14 @@
   "GB5512": [
     {
       "Gb_type": "Unsupported legacy property error message",
+      "Context": "property missing {kind}",
+      "Explanation": "Before Python 3.13 the stored property name is not exposed, so Dynamo cannot safely format its accessor error.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported legacy property error message",
       "Context": "property subclass missing {kind}",
       "Explanation": "Before Python 3.13 the stored property name is not exposed, so Dynamo cannot safely format its accessor error.",
       "Hints": [

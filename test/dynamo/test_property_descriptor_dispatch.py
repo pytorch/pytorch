@@ -5,6 +5,7 @@ from collections.abc import MutableMapping
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -210,6 +211,114 @@ class PropertyDescriptorDispatchTests(TestCase):
         self.assertEqual(compiled(x), fn(x))
         self.assertEqual(compiled(x + 1), fn(x + 1))
         self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("descriptor_type", (property, GlobalProperty))
+    @parametrize("inherited", (False, True))
+    def test_mode_property_source_and_replacement(self, descriptor_type, inherited):
+        class BaseMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        class Mode(BaseMode):
+            pass
+
+        owner = BaseMode if inherited else Mode
+        owner.offset = descriptor_type(lambda obj: 1)
+        mode = Mode()
+
+        def fn(x, mode):
+            return x + mode.offset
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x, mode), fn(x, mode))
+        self.assertEqual(compiled(x + 1, mode), fn(x + 1, mode))
+        self.assertEqual(counter.frame_count, 1)
+        Mode.offset = descriptor_type(lambda obj: 2)
+        self.assertEqual(compiled(x, mode), fn(x, mode))
+        self.assertEqual(compiled(x + 1, mode), fn(x + 1, mode))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("descriptor_type", (property, GlobalProperty))
+    @parametrize("inherited", (False, True))
+    @parametrize("delete", (False, True))
+    def test_mode_property_mutation_replacement(
+        self, descriptor_type, inherited, delete
+    ):
+        class BaseMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        class Mode(BaseMode):
+            pass
+
+        def first_setter(obj, value):
+            obj.value = value + 1
+
+        def second_setter(obj, value):
+            obj.value = value + 100
+
+        def first_deleter(obj):
+            obj.value = obj.value + 1
+
+        def second_deleter(obj):
+            obj.value = obj.value + 100
+
+        owner = BaseMode if inherited else Mode
+        owner.offset = descriptor_type(fset=first_setter, fdel=first_deleter)
+        mode = Mode()
+
+        def fn(x, mode):
+            if delete:
+                mode.value = x
+                del mode.offset
+            else:
+                mode.offset = x
+            return mode.value
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x, mode), fn(x, mode))
+        self.assertEqual(compiled(x + 1, mode), fn(x + 1, mode))
+        self.assertEqual(counter.frame_count, 1)
+        Mode.offset = descriptor_type(fset=second_setter, fdel=second_deleter)
+        self.assertEqual(compiled(x, mode), fn(x, mode))
+        self.assertEqual(compiled(x + 1, mode), fn(x + 1, mode))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_mode_property_descriptor_reconstruction(self):
+        events = []
+
+        class ReturningProperty(property):
+            def __get__(self, obj, owner=None):
+                if obj is not None:
+                    events.append("get")
+                return self
+
+        class Mode(TorchFunctionMode):
+            prop = ReturningProperty()
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        mode = Mode()
+        descriptor = Mode.__dict__["prop"]
+
+        def fn(x, mode):
+            return x + 1, mode.prop
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        for value in (x, x + 1):
+            result, prop = compiled(value, mode)
+            self.assertEqual(result, value + 1)
+            self.assertIs(prop, descriptor)
+            self.assertEqual(events, ["get"])
+            events.clear()
+        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

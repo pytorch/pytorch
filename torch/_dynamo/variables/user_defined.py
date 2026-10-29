@@ -3428,17 +3428,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
 
-        def raise_property_error(action: str) -> NoReturn:
-            if sys.version_info < (3, 11):
-                verb = "delete" if action == "deleter" else "set"
-                msg = f"can't {verb} attribute {name_str!r}"
-            else:
-                msg = (
-                    f"property '{name_str}' of "
-                    f"'{type(self.value).__qualname__}' object has no {action}"
-                )
-            raise_observed_exception(AttributeError, tx, args=[msg])
-
         descriptor = self.lookup_class_mro_attr(name_str)
         if descriptor is not NO_SUCH_SUBOBJ and (
             hasattr(type(descriptor), "__set__")
@@ -3449,24 +3438,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 desc_source = self.get_source_by_walking_mro(tx, name_str)
 
             if isinstance(descriptor, property):
+                if desc_source is None and self.source:
+                    desc_source = mro_attr_source(
+                        tx, self.python_type(), TypeSource(self.source), name_str
+                    )
                 slot = (
                     "__delete__"
                     if isinstance(value, variables.DeletedVariable)
                     else "__set__"
                 )
-                if (
-                    sys.version_info < (3, 13)
-                    and type(descriptor) is property
-                    and inspect.getattr_static(type(descriptor), slot)
-                    is getattr(property, slot)
-                    and property.__dict__[
-                        "fdel" if slot == "__delete__" else "fset"
-                    ].__get__(descriptor)
-                    is None
-                ):
-                    raise_property_error(
-                        "deleter" if slot == "__delete__" else "setter"
-                    )
                 if desc_source is None and inspect.getattr_static(
                     type(descriptor), slot
                 ) is not getattr(property, slot):
@@ -3934,6 +3914,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the property wrapper.
             if self.cls_source:
                 source = self.get_source_by_walking_mro(tx, name)
+            elif self.source:
+                source = mro_attr_source(
+                    tx, self.python_type(), TypeSource(self.source), name
+                )
+            else:
+                source = None
             prop_vt = PropertyVariable.from_descriptor(tx, type_attr, source=source)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
@@ -4127,8 +4113,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
-        if self.cls_source is not None:
+        if can_use_mro_source or (
+            isinstance(self, UserDefinedPropertyVariable)
+            and self.cls_source is not None
+        ):
             source = self.get_source_by_walking_mro(tx, name)
+        elif not source and self.cls_source is not None:
+            source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(

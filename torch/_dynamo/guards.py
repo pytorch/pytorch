@@ -2193,9 +2193,7 @@ class GuardBuilder(GuardBuilderBase):
             if not base_guard_manager:
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
-                python_lambda=functools.partial(
-                    get_property_accessor, name=source.member
-                ),
+                python_lambda=property.__dict__[source.member].__get__,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
