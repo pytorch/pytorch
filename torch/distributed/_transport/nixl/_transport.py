@@ -38,7 +38,7 @@ def _agent_name(name: str | bytes) -> str:
     return name.decode() if isinstance(name, bytes) else name
 
 
-# Bounds loaded peer descriptors; past this, a peer is reset when it is idle.
+# Bounds loaded descriptors per peer; past this, a peer is reset when it is idle.
 _MAX_LOADED = 4096
 
 _LoadedKey = tuple[str, int, int, int]
@@ -129,7 +129,7 @@ class NIXLTransport(Transport):
             raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
         self._timeout = timeout
         self._default_timeout = timeout
-        self._peer_name: str | None = None
+        self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
         # Peer registrations loaded into NIXL, keyed by (memory type, device,
         # registration address, registration length).
@@ -215,15 +215,13 @@ class NIXLTransport(Transport):
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        if self._peer_name is not None:
-            raise RuntimeError("transport is already connected")
         name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
-        self._peer_name = name
+        self._peers.add(name)
         self._remote_agents.add(name)
         return 0
 
     def connected(self) -> bool:
-        return self._peer_name is not None and not self._closed and not self._closing
+        return bool(self._peers) and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -323,8 +321,8 @@ class NIXLTransport(Transport):
         remote_buffer._validate(
             {name: getattr(remote_buffer, name) for name in remote_buffer._fields}
         )
-        if self._peer_name != remote_buffer.agent_name:
-            raise ValueError("remote buffer does not belong to the connected peer")
+        if remote_buffer.agent_name not in self._peers:
+            raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
@@ -449,16 +447,21 @@ class NIXLTransport(Transport):
             # which then refuses reloads and in-flight status queries.
             self._closing = True
             raise
-        self._remote_agents.add(loaded_name)
         if loaded_name != name:
-            try:
-                self._remove_remote_agent(agent, loaded_name)
-            except Exception:
-                # Preserve the agent for retryable close, including failed cleanup.
-                self._closing = True
-                _live_transports.add(self)
-                raise
+            if loaded_name in self._remote_agents:
+                # Another peer may have transfers in flight; reset it when idle.
+                self._resetting.add(loaded_name)
+            else:
+                self._remote_agents.add(loaded_name)
+                try:
+                    self._remove_remote_agent(agent, loaded_name)
+                except Exception:
+                    # Preserve the agent for retryable close, including failed cleanup.
+                    self._closing = True
+                    _live_transports.add(self)
+                    raise
             raise ValueError("remote buffer metadata names a different agent")
+        self._remote_agents.add(loaded_name)
         loaded[key] = remote_buffer.metadata
         self._loaded[name] = loaded
         return []
@@ -651,7 +654,7 @@ class NIXLTransport(Transport):
             self._remote_agents.remove(name)
         self._loaded.clear()
         self._resetting.clear()
-        self._peer_name = None
+        self._peers.clear()
         self._agent = None
         self._closed = True
         _live_transports.discard(self)

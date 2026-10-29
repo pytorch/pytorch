@@ -131,6 +131,43 @@ def _reregister_worker(rank, connection):
     connection.close()
 
 
+def _multi_peer_worker(rank, connections):
+    # Rank 0 reads from ranks 1 and 2 through one endpoint.
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        tensor = torch.full((1024,), float(rank))
+        memory = transport.register_memory(tensor)
+        if rank == 0:
+            urls = [_receive(connection) for connection in connections]
+            for url in urls:
+                transport.connect(url)
+            remotes = [NIXLRemoteBuffer.deserialize(_receive(c)) for c in connections]
+            targets = [torch.zeros(1024) for _ in remotes]
+            views = [transport.register_memory(t).to_mutable_view() for t in targets]
+            for _ in range(2):
+                works = [
+                    transport.read(view, remote, async_op=True)
+                    for view, remote in zip(views, remotes)
+                ]
+                for work in works:
+                    work.wait()
+                for value, target in enumerate(targets, 1):
+                    torch.testing.assert_close(target, torch.full_like(target, value))
+                    target.zero_()
+                # Reconnecting a peer with loaded descriptors is a no-op.
+                transport.connect(urls[0])
+        else:
+            connections[0].send_bytes(transport.bind())
+            connections[0].send_bytes(memory.to_remote_buffer().serialize())
+        for connection in connections:
+            connection.send_bytes(b"done")
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+        transport.unregister_memory(memory)
+        asyncio.run(transport.close_async(timeout=5))
+    for connection in connections:
+        connection.close()
+
+
 def _exit_after(worker, *args):
     worker(*args)
     # NIXL 1.5 can segfault during interpreter teardown after a clean close.
@@ -150,14 +187,25 @@ class TestNIXLNative(TestCase):
     def test_two_process_cpu_reregistered_memory(self):
         self._run(_reregister_worker)
 
+    def test_three_process_cpu_multi_peer(self):
+        pipes = [multiprocessing.Pipe() for _ in range(2)]
+        self._spawn(
+            _multi_peer_worker,
+            [([first for first, _ in pipes],), ([pipes[0][1]],), ([pipes[1][1]],)],
+            [connection for pipe in pipes for connection in pipe],
+        )
+
     def _run(self, worker, *args):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            worker, [(connection, *args) for connection in connections], connections
+        )
+
+    def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")
-        connections = context.Pipe()
         processes = [
-            context.Process(
-                target=_exit_after, args=(worker, rank, connections[rank], *args)
-            )
-            for rank in range(2)
+            context.Process(target=_exit_after, args=(worker, rank, *rank_args))
+            for rank, rank_args in enumerate(args)
         ]
         try:
             for process in processes:

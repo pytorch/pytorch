@@ -4,8 +4,9 @@
 independently managed workers. It does not require a process group, global rank
 assignment, or matching receives.
 
-An endpoint connects to one peer. Exchange `bind()` bytes and remote memory
-descriptors through a trusted application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
+An endpoint may connect to multiple peers; remote descriptors identify their
+peer. Exchange `bind()` bytes and remote memory descriptors through a trusted
+application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
 copies from the remote base to a writable local view. Offsets and lengths are bytes;
 shape and dtype agreement is the application's responsibility.
 
@@ -83,6 +84,15 @@ The initial backend is NIXL, installed separately with `pip install nixl`;
 `nixlNotAllowedError` and `nixlNotFoundError`.
 Its default UCX plugin supports CPU and CUDA memory, subject to the installed
 NIXL/UCX build and hardware.
+
+Peers are identified by NIXL agent name. Connecting again with the same
+`bind()` bytes is a no-op. While NIXL holds a peer, connecting a restarted peer
+under the same agent name raises the backend error; the first transfer to the
+restarted peer's descriptors may fail, and retrying it reaches the peer. A
+descriptor whose metadata belongs to another connected peer can reset either
+peer once its transfers finish, so an authorized client can stall transfers to
+other peers. Peer state grows with each connected peer and is released only by
+`close`, which waits for pending transfers to all peers.
 
 `unregister_memory(memory)` deregisters a local allocation without closing the
 transport. Wait for local transfers first and coordinate with peers to stop remote

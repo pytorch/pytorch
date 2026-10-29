@@ -1105,10 +1105,97 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
 
+    def connect_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            third, fourth = (
+                new_transport("nixl", agent_name=name, plugin=self.plugin, timeout=5)
+                for name in ("third", "fourth")
+            )
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth), targets)
+        ]
+        return first, source, targets, remotes
+
+    def test_connects_multiple_peers(self):
+        first, source, targets, remotes = self.connect_peers()
+        _Agent.transfer_state = "PROC"
+        work = first.write(source.to_view(), remotes[0], async_op=True)
+        other = first.write(source.to_view(), remotes[1], async_op=True, timeout=0)
+        self.assertIn("second", first._agent.remote_metadata)
+        _Agent.transfer_state = "DONE"
+        work.wait()
+        other.wait()
+        for remote in remotes[:2]:
+            first.write(source.to_view(), remote)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        self.assertEqual(first._peers, {"second", "third"})
+        self.assertTrue(first.connected())
+        loads = first._agent.loads
+        self.assertEqual(first.connect(json.dumps(["third", []]).encode()), 0)
+        first.write(source.to_view(), remotes[1])
+        self.assertEqual(first._agent.loads, loads + 1)
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+
+    def test_mismatched_metadata_keeps_other_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[1])
+        _Agent.transfer_state = "PROC"
+        work = first.write(source.to_view(), remotes[0], async_op=True)
+        wrong = replace(remotes[1], metadata=remotes[0].metadata)
+        with self.assertRaisesRegex(ValueError, "different agent"):
+            first.write(source.to_view(), wrong)
+        self.assertIn("second", first._agent.remote_metadata)
+        _Agent.transfer_state = "DONE"
+        work.wait()
+        # The other peer is reset before its next new descriptor is loaded.
+        self.assertIn("second", first._resetting)
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertNotIn("second", first._resetting)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+
+    def test_reset_waits_only_for_its_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[1])
+        _Agent.transfer_state = "PROC"
+        work = first.write(source.to_view(), remotes[0], async_op=True)
+        _Agent.transfer_state = "DONE"
+        first._resetting.add("third")
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[1], timeout=0)
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertFalse(work._done)
+        work.wait()
+
+    def test_reset_marks_only_its_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        first.write(source.to_view(), remotes[0])
+        first.write(source.to_view(), remotes[1])
+        first._resetting.add("third")
+        loads = first._agent.loads
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads)
+        first._resetting.add("second")
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(first._agent.loads, loads + 1)
+        self.assertEqual(first._resetting, {"third"})
+        # A new registration of an idle peer loads without resetting it.
+        moved = replace(remotes[0], region_address=remotes[0].region_address + 4096)
+        self.assertEqual(first._load_remote(first._agent, moved), [])
+        self.assertEqual(len(first._loaded["second"]), 2)
+
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
-        with self.assertRaisesRegex(RuntimeError, "already connected"):
-            first.connect(second.bind())
         with self.assertRaisesRegex(ValueError, "connected peer"):
             first.write(source.to_view(), replace(remote, agent_name="other"))
         with self.assertRaisesRegex(ValueError, "different agent"):
