@@ -6,10 +6,10 @@ import hashlib
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 import triton_pin_mi350_controls as controls
 
@@ -49,6 +49,7 @@ class CaptureOriginal:
         self.label = label
         self.aten = aten
         self.captures = []
+        self.actual = self.reference = None
 
     def pytest_runtest_call(self, item):
         if item.name != "test_conv_with_as_strided_cuda":
@@ -62,6 +63,10 @@ class CaptureOriginal:
             "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
             "cudnn_deterministic": torch.backends.cudnn.deterministic,
             "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "compiler_debug": os.environ.get("TORCH_COMPILE_DEBUG"),
+            "disable_fresh_cache": os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE"),
+            "inductor_cache": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
+            "triton_cache": os.environ.get("TRITON_CACHE_DIR"),
             "environment": {
                 k: v
                 for k, v in os.environ.items()
@@ -146,6 +151,35 @@ class CaptureOriginal:
                         json.dumps(result, indent=2)
                     )
                     print("CONV_NUMERICS", self.label, json.dumps(result), flush=True)
+                    from torch._inductor.runtime.cache_dir_utils import (
+                        cache_dir,
+                        triton_cache_dir,
+                    )
+
+                    # Copy while the original test's fresh_cache is still active.
+                    with zipfile.ZipFile(
+                        DEBUG / f"{self.label}-generated-kernels.zip",
+                        "w",
+                        zipfile.ZIP_DEFLATED,
+                    ) as archive:
+                        for kind, directory in (
+                            ("inductor", cache_dir()),
+                            ("triton", triton_cache_dir(torch.cuda.current_device())),
+                        ):
+                            base = Path(directory)
+                            if base.exists():
+                                for path in base.rglob("*"):
+                                    if path.is_file() and path.suffix in {
+                                        ".py",
+                                        ".json",
+                                        ".ttir",
+                                        ".ttgir",
+                                        ".ll",
+                                        ".amdgcn",
+                                    }:
+                                        archive.write(
+                                            path, Path(kind) / path.relative_to(base)
+                                        )
 
         module.check_model = capture_check
         module._assert_equal_with_significant_stride_check = capture_equal
@@ -165,12 +199,15 @@ class CaptureOriginal:
 
 def child(label, aten, prefix):
     import pytest
-    import torch
     import triton
 
+    import torch
+
     prop = torch.cuda.get_device_properties(0)
-    assert torch.version.hip and "gfx950" in prop.gcnArchName
-    assert torch.version.git_version == TORCH_HEAD
+    if not torch.version.hip or "gfx950" not in prop.gcnArchName:
+        raise AssertionError(f"Expected native MI350, got {prop}")
+    if torch.version.git_version != TORCH_HEAD:
+        raise AssertionError(f"Unexpected Torch head: {torch.version.git_version}")
     distributions = [
         {
             "name": d.metadata["Name"],
@@ -180,7 +217,8 @@ def child(label, aten, prefix):
         for d in importlib.metadata.distributions()
         if "triton" in d.metadata.get("Name", "").lower()
     ]
-    assert triton.__file__ and hasattr(triton, "jit")
+    if not triton.__file__ or not hasattr(triton, "jit"):
+        raise AssertionError("Expected an importable native Triton package")
     probe = {
         "torch_sha": torch.version.git_version,
         "torch_config": torch.__config__.show(),
@@ -215,7 +253,8 @@ def child(label, aten, prefix):
         ],
         plugins=[plugin],
     )
-    assert code in (0, 1) and plugin.captures, (code, plugin.captures)
+    if code not in (0, 1) or not plugin.captures:
+        raise AssertionError((code, plugin.captures))
     sys.exit(code)
 
 
@@ -231,9 +270,11 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
         # Match the original CI cache policy. Fresh per-phase directories isolate
         # attempts without changing tests that compare generated source text.
         env.pop("TORCHINDUCTOR_FORCE_DISABLE_CACHES", None)
+        env.pop("TORCH_COMPILE_DEBUG", None)
+        env.pop("INDUCTOR_TEST_DISABLE_FRESH_CACHE", None)
     else:
         env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
-    env["TORCH_COMPILE_DEBUG"] = "1"
+        env["TORCH_COMPILE_DEBUG"] = "1"
     env["MIOPEN_ENABLE_LOGGING"] = "1"
     env["MIOPEN_LOG_LEVEL"] = "6"
     if sha:
@@ -241,10 +282,11 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
             [
                 sys.executable,
                 "-c",
-                "import triton,importlib.metadata,pathlib; "
-                f"assert '{sha[:8]}' in importlib.metadata.version('triton'); "
-                f"assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}); "
-                "print(triton.__file__)",
+                "import triton,importlib.metadata,pathlib,sys; "
+                "print(triton.__file__); "
+                f"valid = '{sha[:8]}' in importlib.metadata.version('triton') and "
+                f"pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}); "
+                "sys.exit(0 if valid else 1)",
             ],
             cwd=ROOT / "test",
             env=env,
@@ -259,16 +301,19 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
         command, cwd=ROOT / "test", env=env, name=label, check=False, timeout=1200
     )
     log = (REPORT / f"{label}.log").read_text(errors="replace")
-    assert code in (0, 1) and "CONV_NUMERICS" in log
-    assert "passed" in log or "1 failed" in log
-    if not prefix:
-        assert "RuntimeError:" not in log
+    if code not in (0, 1) or "CONV_NUMERICS" not in log:
+        raise AssertionError(f"Missing convolution capture, exit {code}")
+    if "passed" not in log and "1 failed" not in log:
+        raise AssertionError("Missing convolution pytest result")
+    if not prefix and "RuntimeError:" in log:
+        raise AssertionError("Standalone convolution raised RuntimeError")
     import xml.etree.ElementTree as ET
 
     cases = ET.parse(REPORT / f"{label}.xml").getroot().iter("testcase")
     cases = list(cases)
     target = [c for c in cases if c.get("name") == "test_conv_with_as_strided_cuda"]
-    assert len(target) == 1 and target[0].find("skipped") is None
+    if len(target) != 1 or target[0].find("skipped") is not None:
+        raise AssertionError("Original convolution must execute exactly once")
     test_results = {
         "original_case": {
             "name": target[0].get("name"),
@@ -282,20 +327,6 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
             if c.find("failure") is not None or c.find("error") is not None
         ],
     }
-    with zipfile.ZipFile(
-        DEBUG / f"{label}-generated-kernels.zip", "w", zipfile.ZIP_DEFLATED
-    ) as archive:
-        if cache.exists():
-            for path in cache.rglob("*"):
-                if path.is_file() and path.suffix in {
-                    ".py",
-                    ".json",
-                    ".ttir",
-                    ".ttgir",
-                    ".ll",
-                    ".amdgcn",
-                }:
-                    archive.write(path, path.relative_to(cache))
     return {
         "exit": code,
         **test_results,
