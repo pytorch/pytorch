@@ -63,6 +63,7 @@ from .autograd_cache import (
 )
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
+from .deterministic_recompute import deterministic_recompute
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -1031,6 +1032,11 @@ def run_joint_graph_passes_on_hops(
                 ) from e
             else:
                 raise
+
+        if config.deterministic_recompute:
+            deterministic_recompute(
+                new_fw_hop_gm, new_bw_hop_gm, num_fw_outputs, prefix=f"{identifier}_"
+            )
 
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
@@ -2011,6 +2017,8 @@ def _partition_joint_graph_into_fw_bw(
         num_fwd_outputs=num_inner_fwd_outputs,
         static_lifetime_input_indices=inner_meta.static_input_indices,
     )
+    if config.deterministic_recompute:
+        deterministic_recompute(fw_module, bw_module, num_inner_fwd_outputs)
 
     rng_states = [
         n
