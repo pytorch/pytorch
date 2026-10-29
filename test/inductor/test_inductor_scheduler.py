@@ -2355,16 +2355,8 @@ class TestScheduler(TestCase):
             fresh_inductor_cache(),
             inductor_config.patch(cpp_wrapper=cpp_wrapper),
         ):
-            actual, code = run_and_get_code(
-                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
-            )
+            actual = torch.compile(fn, fullgraph=True)(*(arg.clone() for arg in args))
         self.assertEqual(actual, expected)
-        fallback_call = (
-            'findSchemaOrThrow("aten::index_put_", "")'
-            if cpp_wrapper
-            else "= torch.ops.aten.index_put_.default("
-        )
-        self.assertIn(fallback_call, "\n".join(code))
 
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)

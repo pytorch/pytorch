@@ -241,7 +241,6 @@ test_failures = {
     # test_amp_update_scale does not use self.common(), so check_codegen() is
     # never triggered — the test calls torch.compile() directly and passes.
     # No TestFailure entry needed.
-    "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
@@ -266,7 +265,6 @@ test_failures = {
     "test_bmm2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_both_scalars_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_compar_dynamic_shapes": TestFailure(("cpu",)),
-    "test_complex_from_real_imag_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_const_int32_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
