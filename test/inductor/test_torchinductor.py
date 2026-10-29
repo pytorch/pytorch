@@ -8571,7 +8571,6 @@ for dtype in (torch.int32, torch.int64):
             reference_in_float=False,
         )
 
-    @xfail_if_mps_unimplemented  # aten::linalg_eig not implemented for MPS
     @skipIfNoLapack
     def test_linalg_eig_stride_consistency(self):
         def fn(x):
