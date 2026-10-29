@@ -1,5 +1,4 @@
 import inspect
-import sys
 from collections.abc import Callable, Iterable
 from typing import Any, Literal, TYPE_CHECKING
 
@@ -23,8 +22,7 @@ def _jit_executor_name(fn: Callable[..., Any]) -> str | None:
 
 
 def is_cutedsl_jit_function(obj: object) -> bool:
-    """Whether ``obj`` is a ``@cute.jit`` host function. Cheap enough for Dynamo's
-    VariableBuilder: it only imports cutlass once the function looks like one."""
+    """Whether ``obj`` is a ``@cute.jit`` host function."""
     if not inspect.isfunction(obj):
         return False
     dsl_cls = obj.__dict__.get("_dsl_cls")
@@ -37,22 +35,15 @@ def is_cutedsl_jit_function(obj: object) -> bool:
     return issubclass(dsl_cls, CuTeDSL) and _jit_executor_name(obj) != "_kernel_helper"
 
 
-def is_traceable_cutedsl_wrapper(obj: object) -> bool:
-    """Whether ``obj`` is what wrap_cutedsl returns, without importing the HOP
-    module (an instance implies it is imported)."""
-    module = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")
-    return module is not None and isinstance(obj, module.TraceableCuteDSLKernelWrapper)
-
-
 def wrap_cutedsl(
     host_fn: Callable[..., Any],
     /,
     *,
     mutates_args: Iterable[str] | Literal["unknown"],
 ) -> "TraceableCuteDSLKernelWrapper":
-    """Allows capture of a CuTeDSL kernel launch into a graph via ``torch.compile``,
-    make_fx or non-strict ``torch.export``: the counterpart of
-    :func:`torch.library.wrap_triton` for ``@cute.jit`` host functions.
+    """Allows capture of a CuTeDSL kernel launch into a graph via make_fx or
+    non-strict ``torch.export``: the counterpart of :func:`torch.library.wrap_triton`
+    for ``@cute.jit`` host functions.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
@@ -86,11 +77,14 @@ def wrap_cutedsl(
         >>>
         >>> add = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
         >>>
-        >>> @torch.compile(fullgraph=True)
-        >>> def f(x, y):
-        >>>     out = torch.empty_like(x)
-        >>>     add(x, y, out, x.numel())
-        >>>     return out.relu()
+        >>> class M(torch.nn.Module):
+        >>>     def forward(self, x, y):
+        >>>         out = torch.empty_like(x)
+        >>>         add(x, y, out, x.numel())
+        >>>         return out.relu()
+        >>>
+        >>> x = torch.randn(1000, device="cuda")
+        >>> ep = torch.export.export(M(), (x, torch.randn_like(x)), strict=False)
     """
     from torch._higher_order_ops.cutedsl_kernel_wrap import (
         TraceableCuteDSLKernelWrapper,
