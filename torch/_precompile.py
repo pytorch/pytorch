@@ -1984,6 +1984,15 @@ def _called_op_names(python_code: str) -> set[tuple[str, str]]:
     return names
 
 
+def _importable_module(name: str) -> bool:
+    """Whether the loaded module ``name`` can be imported by name in another
+    process; ``__main__`` has a spec under ``python -m`` but is the loader's own."""
+    return (
+        name != "__main__"
+        and getattr(sys.modules.get(name), "__spec__", None) is not None
+    )
+
+
 def _custom_op_module(op_name: str, overload: str) -> str | None:
     """The importable module that registers ``op_name``, if one is known: the one
     defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
@@ -1995,10 +2004,7 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     else:
         pystub = torch._C._dispatch_pystub(op_name, overload)
         name = pystub[0] if pystub is not None else None
-    if name is None or name == "__main__":
-        return None
-    module = sys.modules.get(name)
-    return name if getattr(module, "__spec__", None) is not None else None
+    return name if name is not None and _importable_module(name) else None
 
 
 def _registration_path(op_name: str, overload: str) -> str:
@@ -2119,9 +2125,7 @@ def _file_modules() -> dict[str, str]:
     modules: dict[str, str] = {}
     for name, module in list(sys.modules.items()):
         path = getattr(module, "__file__", None)
-        if name == "__main__" or getattr(module, "__spec__", None) is None:
-            continue
-        if isinstance(path, str):
+        if isinstance(path, str) and _importable_module(name):
             modules.setdefault(os.path.realpath(path), name)
     return modules
 
@@ -2288,7 +2292,7 @@ def _custom_op_modules(
                 untracked_kernels.add((op_name, k))
             elif caller == value or caller.partition(".")[0] == "torch":
                 continue
-            elif getattr(sys.modules.get(caller), "__spec__", None) is not None:
+            elif _importable_module(caller):
                 # An importable module adding a kernel to another module's op.
                 modules.add(caller)
             else:
@@ -3003,9 +3007,10 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_modules: tuple[str, ...] = (),
-    custom_ops: tuple[tuple[str, str], ...] = (),
-    custom_op_keys: tuple[str, ...] = (),
+    *,
+    custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
+    custom_op_keys: tuple[str, ...],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 

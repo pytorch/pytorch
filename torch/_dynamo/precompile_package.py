@@ -1682,14 +1682,14 @@ class _CapturePackage(CompilePackage):
         self.computing_frames: set[tuple[str, str, int]] = set()
         # The operators each backend graph calls, by backend id, and those Dynamo
         # graph-breaks on and runs eagerly, for any reason.
-        # Not recorded: the ops of a torch._dynamo.disable'd function; in a frame
-        # Dynamo falls back on, every op but the one it graph-broke on; under the
-        # eager backend the ops of a custom op's backward formula, which no graph
-        # holds; under cpp_wrapper the ops only Inductor's code calls (inserted by
-        # a post-grad pass, or in the backward), which it names in C++ strings;
-        # and those of a bypassed compile, whose frame serving re-traces under
-        # allow_serve_time_compiles=True. The artifact adds the ops Inductor's
-        # Python code calls.
+        # Not recorded: the ops of a torch._dynamo.disable'd function; in a frame Dynamo
+        # falls back on or cannot resume (a graph break in a loop or a try block), every
+        # op but the one it graph-broke on; under the eager backend the ops of a custom
+        # op's backward formula, which no graph holds; under cpp_wrapper the ops only
+        # Inductor's code calls (inserted by a post-grad pass, or in the backward),
+        # which it names in C++ strings; and those of a bypassed compile, whose frame
+        # serving re-traces under allow_serve_time_compiles=True. The artifact adds the
+        # ops Inductor's Python code calls.
         self.op_names: dict[str, set[tuple[str, str]]] = {}
         # The device types each backend graph runs on, by backend id.
         self.device_types: dict[str, frozenset[str]] = {}
@@ -2340,8 +2340,9 @@ class PrecompileSession(Generic[_P, _R]):
         wanted = {*found.modules, *served}
         modules = tuple(m for m in sys.modules if m in wanted)
         _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
+        sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         return _build_multigraph_artifact(
-            entry, backends, summary, self._backend, self._fn, modules, ops, keys
+            entry, backends, summary, self._backend, self._fn, **sections
         )
 
 
