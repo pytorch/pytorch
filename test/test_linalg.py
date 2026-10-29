@@ -11130,7 +11130,8 @@ class TestLinalgCudaOnly(TestCase):
             torch.backends.cuda.preferred_blas_library("cublas")
             torch.nn.functional.linear(x, w, bias)
 
-            torch.backends.cuda.preferred_blas_library("cublaslt")
+            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
+                raise SystemExit("hipBLASLt unsupported")
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_duration(1)
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -11145,7 +11146,10 @@ class TestLinalgCudaOnly(TestCase):
         # TunableOp writes its results file into the cwd at exit.
         cmd = [sys.executable, "-c", script]
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, check=True)
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True)
+        if "hipBLASLt unsupported" in result.stderr:
+            self.skipTest("hipBLASLt is not supported on this device")
+        self.assertEqual(result.returncode, 0, result.stderr)
         op_sigs = result.stdout.split()
         self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
 
