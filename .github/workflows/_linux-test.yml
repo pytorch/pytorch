@@ -178,7 +178,9 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        # ARC container jobs resolve local actions on the host workspace.
+        # Use the already pushed diagnostic helper revision explicitly.
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@3ac4c8a78af1cb6e508d0cfe8c94ca188dac6ac4
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
