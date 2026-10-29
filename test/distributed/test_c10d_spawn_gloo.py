@@ -150,26 +150,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self._test_broadcast("gloo")
 
         @requires_gloo()
-        @skip_but_pass_in_sandcastle_if(
-            not _torch_dist_nn_available, "torch.distributed.nn is not available"
-        )
-        def test_broadcast_subgroup_with_nonzero_global_src(self):
-            store = c10d.FileStore(self.file_name, self.world_size)
-            c10d.init_process_group(
-                store=store,
-                rank=self.rank,
-                world_size=self.world_size,
-                backend="gloo",
-            )
-            group = c10d.new_group([1])
-
-            if self.rank == 1:
-                x = torch.ones(5, 5, requires_grad=True)
-                y = torch.distributed.nn.broadcast(x, 1, group=group)
-                y.sum().backward()
-                self.assertEqual(x.grad, torch.ones_like(x))
-
-        @requires_gloo()
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
@@ -275,6 +255,29 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 self.assertEqual(x1.grad, x1_s)
             if self.rank == 0:
                 self.assertEqual(x0.grad, torch.zeros(5, 5, device=device))
+
+    class TestDistributedNNFunctionsGlooGeneric(TestDistributedNNFunctions):
+        hw_classification = HardwareClassification.GENERIC
+
+        @requires_gloo()
+        @skip_but_pass_in_sandcastle_if(
+            not _torch_dist_nn_available, "torch.distributed.nn is not available"
+        )
+        def test_broadcast_subgroup_with_nonzero_global_src(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="gloo",
+            )
+            group = c10d.new_group([1])
+
+            if self.rank == 1:
+                x = torch.ones(5, 5, requires_grad=True)
+                y = torch.distributed.nn.broadcast(x, 1, group=group)
+                y.sum().backward()
+                self.assertEqual(x.grad, torch.ones_like(x))
 
 
 if __name__ == "__main__":
