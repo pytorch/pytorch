@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import functools
 import logging
 from collections.abc import Callable
@@ -163,15 +162,20 @@ def get_none():
 global_ctx_getter: Callable = get_none
 
 
-@contextlib.contextmanager
-def set_ctx_getter(ctx_getter):
-    global global_ctx_getter
-    prev = global_ctx_getter
-    try:
-        global_ctx_getter = ctx_getter
-        yield
-    finally:
-        global_ctx_getter = prev
+class set_ctx_getter:
+    # A class rather than a @contextmanager: run_fake_impl enters it on every
+    # call of a custom op under FakeTensorMode.
+    def __init__(self, ctx_getter):
+        self.ctx_getter = ctx_getter
+
+    def __enter__(self):
+        global global_ctx_getter
+        self.prev = global_ctx_getter
+        global_ctx_getter = self.ctx_getter
+
+    def __exit__(self, *exc_info):
+        global global_ctx_getter
+        global_ctx_getter = self.prev
 
 
 class FakeImplCtx:
