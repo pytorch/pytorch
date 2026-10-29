@@ -16,7 +16,6 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     set_default_dtype,
@@ -312,6 +311,18 @@ user_stack=None)
         self.assertTrue(guard(foo))
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
+
+    def test_default_device_guard(self):
+        root = RootGuardManager()
+        foo = 1
+        guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
+        self.assertTrue(guard(foo))
+
+        try:
+            torch.set_default_device("meta")
+            self.assertFalse(guard(foo))
+        finally:
+            torch.set_default_device(None)
 
     def test_length_check_guard(self):
         root = RootGuardManager()
@@ -617,6 +628,14 @@ user_stack=None)
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
+
+    def test_call_function_no_args_guard(self):
+        root = RootGuardManager()
+        x = 0
+        guard = guards.EQUALS_MATCH(root, x, [0], None)
+        self.assertTrue(guard(x))
+        self.assertFalse(guard(x + 1))
+        self.assertFalse(guard(x + 2))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
@@ -1221,41 +1240,6 @@ user_stack=None)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
-
-
-class GuardManagerAcceleratorTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_default_device_guard(self, device):
-        root = RootGuardManager()
-        foo = 1
-        guard = guards.DEFAULT_DEVICE(root, ["cpu device"], None)
-        self.assertTrue(guard(foo))
-
-        try:
-            torch.set_default_device(device)
-            self.assertFalse(guard(foo))
-        finally:
-            torch.set_default_device(None)
-
-    def test_call_function_no_args_guard(self, device):
-        root = RootGuardManager()
-        device = torch.device(device)
-        # Use device.index which is device-agnostic (works on all accelerators)
-        x = device.index if device.index is not None else 0
-        guard = guards.EQUALS_MATCH(root, x, [0], None)
-        self.assertTrue(guard(x))
-        self.assertFalse(guard(x + 1))
-        self.assertFalse(guard(x + 2))
-
-
-instantiate_device_type_tests(
-    GuardManagerAcceleratorTests,
-    globals(),
-    except_for="cpu",
-    allow_mps=True,
-    allow_xpu=True,
-)
 
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
