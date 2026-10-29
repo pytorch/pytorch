@@ -288,6 +288,37 @@ class TestInnerTreeOrder(TestCase):
                     ref = self._run(T.SumOps, x.contiguous())
                     self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
 
+    def test_row_staging_matches_the_unstaged_fold(self):
+        """Stage 128-byte rows, including a short last block, to the unstaged bits."""
+        cases = (
+            ("sum_fp32", T.SumOps(acc=cutlass.Float32), torch.float32, 32, 1),
+            ("sum_fp16", T.SumOps(acc=cutlass.Float32), torch.float16, 64, 1),
+            ("var_mean_fp32", T.VarMeanOps(acc=cutlass.Float32), torch.float32, 32, 2),
+        )
+        m = 4096 + 37  # not a multiple of the 128 rows per staged block
+        for name, trait, dtype, n, nouts in cases:
+            x = torch.randn(m, n, device="cuda", dtype=dtype)
+            out_dtypes = [dtype] * nouts
+            outs = {}
+            for profile in ((9, 0), "default"):
+                arch = rt._ITREE_ARCH[profile]
+                with mock.patch.object(rt, "_itree_arch", return_value=arch):
+                    self.assertEqual(
+                        rt.itree_plan(n, m, x.element_size()).stage_rows,
+                        profile != "default",
+                    )
+                    outs[profile] = rt.reduce_row_tile(
+                        trait,
+                        f"rowstage_{name}_{profile}",
+                        x,
+                        out_dtypes,
+                        nouts=nouts,
+                        order="inner_tree",
+                    )
+            with self.subTest(case=name):
+                for g, w in zip(outs[(9, 0)], outs["default"]):
+                    self.assertEqual(g.view(torch.int16), w.view(torch.int16))
+
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
         # Exact only covers the tile's N from column 0; a bound or offset invalidates its
         # unpredicated load. No plan may pair them because wrong columns can look plausible.
@@ -440,13 +471,20 @@ class TestInnerTreeOrder(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         key = "inner_tree_test_strided_trait_plan"
         # The plans differ only in kchunk, which is bit-neutral, so assert the selection.
-        trait_plan = rt.trait_itree_plan
+        trait_plan, plans = rt.trait_itree_plan, []
+
+        def capture(*args, **kwargs):
+            plans.append((kwargs.get("stage"), trait_plan(*args, **kwargs)))
+            return plans[-1][1]
+
+        b200 = rt._ITREE_ARCH[(10, 0)]
         with (
             _order_on(),
-            mock.patch.object(rt, "trait_itree_plan", wraps=trait_plan) as plan,
+            mock.patch.object(rt, "_itree_arch", return_value=b200),
+            mock.patch.object(rt, "trait_itree_plan", side_effect=capture),
         ):
             strided = kg.reduce_dim(trait, key, x, [1], torch.float16)
-        self.assertIn(False, [c.kwargs.get("stage") for c in plan.call_args_list])
+        self.assertIn((False, 2), [(stage, p.kchunk) for stage, p in plans])
         with _order_on():
             contiguous = kg.reduce_dim(trait, key, x.contiguous(), [1], torch.float16)
         self.assertEqual(strided.view(torch.int16), contiguous.view(torch.int16))
