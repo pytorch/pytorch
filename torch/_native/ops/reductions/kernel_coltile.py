@@ -441,7 +441,7 @@ def reduce_col_tile(
     npar: int | None = None,
     vec: int | None = None,
 ) -> torch.Tensor:
-    """Reduce dim 0 of 2D x with a unit last stride to (C,), splitting it npar ways."""
+    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -463,7 +463,7 @@ def reduce_col_tile_2out(
     npar: int | None = None,
     vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Reduce dim 0 of 2D x like reduce_col_tile, projecting two outputs per column."""
+    """Reduce dim 0 of contiguous 2D x to two outputs per column, like reduce_col_tile."""
     return _reduce_col_tile(
         trait,
         trait_key,
@@ -502,10 +502,9 @@ def _reduce_col_tile(
     npar: int | None,
     vec: int | None,
 ) -> tuple[torch.Tensor, ...]:
-    if x.dim() not in (2, 3) or not x.is_cuda or x.stride(-1) != 1:
-        raise AssertionError(
-            f"want 2D/3D contiguous-last-dim CUDA, got {tuple(x.shape)}"
-        )
+    # Stage one compiles a packed row-major descriptor.
+    if x.dim() not in (2, 3) or not x.is_cuda or not x.is_contiguous():
+        raise AssertionError(f"want contiguous 2D/3D CUDA, got {tuple(x.shape)}")
     if len(out_dtypes) < nouts:
         raise AssertionError(f"want {nouts} output dtypes, got {len(out_dtypes)}")
     if x.dim() == 2:
@@ -513,8 +512,6 @@ def _reduce_col_tile(
         rows = x
         out_shape = (C,)
     else:
-        if not x.is_contiguous():
-            raise AssertionError(f"want contiguous batched input, got {x.stride()}")
         B, R, C = x.shape
         # Stage one indexes batched rows as batch * R + row in Int32.
         if B * R >= _INT32_LIMIT:
@@ -532,7 +529,12 @@ def _reduce_col_tile(
         npar=npar,
         vec=vec,
     )
-    threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, cfg.vec
+    # Partials are indexed in Int32 up to B * C * npar.
+    max_npar = _INT32_LIMIT // max(1, B * C)
+    if npar is not None and npar > max_npar:
+        raise ValueError(f"npar={npar} overflows Int32 partials for {B * C} outputs")
+    threads_per_block, vec = cfg.threads_per_block, cfg.vec
+    npar = min(cfg.npar, max_npar)
     if vec <= 0:
         raise ValueError(f"vec must be positive, got {vec}")
     if C % vec:
