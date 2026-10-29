@@ -2770,6 +2770,30 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
 
+    def test_eager_capture_keeps_triton_config_silently(self):
+        import torch._inductor.config as inductor_config
+
+        def fn(x):
+            return (
+                x + 1,
+                inductor_config.triton.autotune_at_compile_time,
+                inductor_config.triton.multi_kernel,
+                tuple(inductor_config.multi_kernel_hints),
+            )
+
+        ambient = {
+            "triton.autotune_at_compile_time": False,
+            "triton.multi_kernel": 1,
+            "multi_kernel_hints": [64],
+        }
+        session = precompile_package.precompile_capture(fn, backend="eager")
+        with inductor_config.patch(ambient):
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertNoLogs(precompile_package.log, "WARNING"):
+                with session as call:
+                    _, *seen = call(torch.ones(2))
+        self.assertEqual(seen, [False, 1, (64,)])
+
     def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
         import torch._functorch.config as functorch_config
         from torch._dynamo.exc import PackageError
