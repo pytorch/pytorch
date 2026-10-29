@@ -1448,8 +1448,16 @@ class PointwiseStrictNumericsTest(TestCase):
     @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
+        xfail = POINTWISE_XFAIL
+        if IS_SM89 and dtype == torch.bfloat16 and _op_id(op) == "abs":
+            import triton
+
+            # Triton #11478 uses scalar abs.bf16 with its NVIDIA vectorizer
+            # on SM89, matching eager's NaN canonicalization.
+            if not getattr(triton.knobs.nvidia, "use_slp_vectorizer", True):
+                xfail = xfail - {("abs", "bfloat16")}
         self._assert_ledger(
-            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
+            mismatches, op, dtype, "forward", xfail, "POINTWISE_XFAIL"
         )
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
