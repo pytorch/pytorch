@@ -24,6 +24,7 @@ from torch.nn.functional import (
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     IS_SM12X,
+    IS_SM10X,
     IS_SM90,
     _get_torch_cuda_version,
     rocm_mx_swizzle,
@@ -3669,9 +3670,38 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @skipIfRocm
+    @unittest.skipIf(IS_SM10X and "USE_MSLK" in torch.__config__.show(), "MSLK grouped GEMM is supported")
+    def test_scaled_grouped_mm_mslk_unsupported_platform(self, device):
+        a = torch.empty(128, 64, device=device, dtype=torch.float4_e2m1fn_x2)
+        scale = torch.empty(512, device=device, dtype=torch.float8_e8m0fnu)
+        offs = torch.tensor([128], device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(NotImplementedError, "MSLK MXFP4 grouped GEMM requires"):
+            scaled_grouped_mm_wrap(
+                a, a.t(), scale, scale, ScalingType.BlockWise1x32, ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4, swizzle_b=SwizzleType.SWIZZLE_32_4_4, offs=offs,
+            )
+
+    @onlyCUDA
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
-    @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
-    def test_scaled_grouped_mm_mslk_rejects_group_count(self, device, format):
+    @parametrize("legacy", [False, True])
+    def test_scaled_grouped_mm_mslk_rejects_layout(self, device, legacy):
+        a = torch.empty(2, 128, 128, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.empty(2, 512, device=device, dtype=torch.float8_e8m0fnu)
+        with self.assertRaisesRegex(ValueError, "requires 2D/2D or 2D/3D inputs"):
+            if legacy:
+                torch._scaled_grouped_mm(a, a.transpose(-2, -1), scale, scale)
+            else:
+                scaled_grouped_mm(
+                    a, a.transpose(-2, -1), scale, ScalingType.BlockWise1x32, scale, ScalingType.BlockWise1x32,
+                    swizzle_a=SwizzleType.SWIZZLE_32_4_4, swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format,legacy", [("mxfp8", False), ("mxfp4", False), ("nvfp4", False), ("mxfp8", True)])
+    def test_scaled_grouped_mm_mslk_rejects_group_count(self, device, format, legacy):
         offs = torch.tensor([128], device=device, dtype=torch.int32)
         value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
         _, a, block_scale, global_scale = _2d_grouped_tensor_to_blocked_scaled(
@@ -3680,7 +3710,10 @@ class TestFP8Matmul(TestCase):
         scale = [block_scale, global_scale] if format == "nvfp4" else block_scale
         kwargs = _build_scaled_grouped_mm_kwargs(scale, scale, offs.repeat(1025), format)
         with self.assertRaisesRegex(ValueError, r"batchCount must be in \[1, 1024\]"):
-            scaled_grouped_mm_wrap(a, a.t(), **kwargs)
+            if legacy:
+                torch._scaled_grouped_mm(a, a.t(), block_scale, block_scale, offs=offs.repeat(1025))
+            else:
+                scaled_grouped_mm_wrap(a, a.t(), **kwargs)
 
     @onlyCUDA
     @skipIfRocm
