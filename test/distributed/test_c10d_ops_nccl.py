@@ -25,7 +25,7 @@ if not c10d.is_available() or not (
 
 
 import torch.distributed as dist
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, TEST_CUDA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinuousTest,
@@ -64,16 +64,8 @@ def _device_graph():
 
 
 def _nccl_version_at_least(version):
-    # These gates describe NCCL capabilities (e.g. AVG, PREMUL_SUM). Other
-    # backends advertise their own support, so treat the gate as unmet for them:
-    # oneCCL, for instance, has no AVG reduction.
-    return TEST_CUDA and torch.cuda.nccl.version() >= version
-
-
-def _supports_premul_sum():
-    # NCCL gained PREMUL_SUM in 2.11.1. Other accelerator backends expose the
-    # generic ReduceOp.PREMUL_SUM independently of any NCCL version.
-    return device_type != "cuda" or _nccl_version_at_least((2, 11, 1))
+    # Only NCCL gates AVG / PREMUL_SUM on its version.
+    return device_type != "cuda" or torch.cuda.nccl.version() >= version
 
 
 class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
@@ -218,6 +210,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     def test_allreduce_ops(self):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, local_device_id)
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
@@ -226,9 +219,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             work.wait()
 
         # Sum
-        tensors = [
-            torch.tensor([self.rank + 1]).to(torch.device(device_type, local_device_id))
-        ]
+        tensors = [torch.tensor([self.rank + 1]).to(device)]
 
         allreduce(tensors, c10d.ReduceOp.SUM)
 
@@ -238,13 +229,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             tensors[0],
         )
 
-        # Avg (only available for NCCL 2.10+)
-        if device_type != "cuda" or _nccl_version_at_least((2, 10, 0)):
-            tensors = [
-                torch.tensor([self.rank + 1.0]).to(
-                    torch.device(device_type, local_device_id)
-                )
-            ]
+        # Avg (needs NCCL 2.10+; XCCL AVG is wrong on 4 ranks: https://github.com/intel/torch-xpu-ops/issues/5949)
+        if _nccl_version_at_least((2, 10, 0)) and device_type != "xpu":
+            tensors = [torch.tensor([self.rank + 1.0]).to(device)]
 
             allreduce(tensors, c10d.ReduceOp.AVG)
             ndev = self.world_size
@@ -254,17 +241,13 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             )
 
         # Premul Sum
-        if _supports_premul_sum():
+        if _nccl_version_at_least((2, 11, 1)):
             for dtype in torch.half, torch.float, torch.double, torch.bfloat16:
                 for factor in (
                     3.0,
                     torch.tensor([5.0], device=local_device_id, dtype=dtype),
                 ):
-                    tensors = [
-                        torch.tensor([self.rank + 1])
-                        .to(torch.device(device_type, local_device_id))
-                        .to(dtype=dtype)
-                    ]
+                    tensors = [torch.tensor([self.rank + 1]).to(device).to(dtype=dtype)]
 
                     allreduce(tensors, c10d.ReduceOp.PREMUL_SUM(factor))
 
@@ -279,25 +262,19 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     )
 
         # Product
-        tensors = [
-            torch.tensor([self.rank + 1]).to(torch.device(device_type, local_device_id))
-        ]
+        tensors = [torch.tensor([self.rank + 1]).to(device)]
 
         allreduce(tensors, c10d.ReduceOp.PRODUCT)
         self.assertEqual(torch.tensor([math.factorial(self.world_size)]), tensors[0])
 
         # Min
-        tensors = [
-            torch.tensor([self.rank + 1]).to(torch.device(device_type, local_device_id))
-        ]
+        tensors = [torch.tensor([self.rank + 1]).to(device)]
 
         allreduce(tensors, c10d.ReduceOp.MIN)
         self.assertEqual(torch.tensor([1]), tensors[0])
 
         # Max
-        tensors = [
-            torch.tensor([self.rank + 1]).to(torch.device(device_type, local_device_id))
-        ]
+        tensors = [torch.tensor([self.rank + 1]).to(device)]
 
         allreduce(tensors, c10d.ReduceOp.MAX)
         self.assertEqual(torch.tensor([self.world_size]), tensors[0])
@@ -306,7 +283,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
             ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
         ):
-            with self.assertRaisesRegex(ValueError, "Cannot use " + err + " with NCCL"):
+            with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
                 allreduce(tensors, op)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/157879")
@@ -393,10 +370,13 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected_val *= self.world_size
             self.assertEqual(xs.item(), expected_val)
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/3570
+        msg="XCCL collectives captured in an XPU graph are not replayed"
+    )
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg
@@ -462,12 +442,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    @skipIfXpu(
-        msg="XCCL reduce does not handle PREMUL_SUM: https://github.com/intel/torch-xpu-ops/issues/5777"
-    )
     def test_reduce_ops(self):
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, local_device_id)
 
         def reduce(xs, rootRank, rootTensor, op=None):
             opts = c10d.ReduceOptions()
@@ -480,11 +458,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # for every root tensor
         for rt in range(self.world_size):
-            tensors = [
-                torch.tensor([self.rank + 1]).to(
-                    torch.device(device_type, local_device_id)
-                )
-            ]
+            tensors = [torch.tensor([self.rank + 1]).to(device)]
 
             reduce(tensors, rt, 0)
 
@@ -503,27 +477,21 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
                 ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
             ):
-                with self.assertRaisesRegex(
-                    ValueError, "Cannot use " + err + " with NCCL"
-                ):
+                with self.assertRaisesRegex(ValueError, f"Cannot use {err} with X?CCL"):
                     reduce(tensors, self.rank, rt, op)
 
-            # Premul sum
-            if _supports_premul_sum():
+            # Premul sum (XCCL reduce lacks it: https://github.com/intel/torch-xpu-ops/issues/5777)
+            if _nccl_version_at_least((2, 11, 1)) and device_type != "xpu":
                 for factor in (3.0, torch.tensor([5.0], device=local_device_id)):
                     if isinstance(factor, torch.Tensor):
                         factor_ref = factor.cpu().item()
                     else:
                         factor_ref = factor
-                    float_tensors = [
-                        torch.tensor(
-                            [self.rank + 1.0], device=f"{device_type}:{local_device_id}"
-                        )
-                    ]
+                    float_tensors = [torch.tensor([self.rank + 1.0], device=device)]
                     float_tensors_ref = [
                         torch.tensor(
                             [(self.rank + 1.0) * factor_ref],
-                            device=f"{device_type}:{local_device_id}",
+                            device=device,
                         )
                     ]
 
@@ -577,7 +545,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     )
     def test_allgather_base_ops(self):
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def allgather_base(output_t, input_t):
             work = pg.all_gather_single(output_t, input_t)
@@ -585,12 +553,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # allgather_base is GPU number agnostic.
         # Each rank contribute one tensor regardless of GPU counts
-        tensor = torch.tensor([self.rank]).to(
-            torch.device(device_type, local_device_id)
-        )
-        output_t = torch.empty((self.world_size), dtype=tensor.dtype).to(
-            torch.device(device_type, local_device_id)
-        )
+        tensor = torch.tensor([self.rank]).to(device)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).to(device)
 
         allgather_base(output_t, tensor)
 
@@ -603,7 +567,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     )
     def test_allgather_base_basics(self):
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def allgather_base(output_t, input_t):
             work = pg.all_gather_single(output_t, input_t)
@@ -614,12 +578,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             ValueError,
             "output tensor size must be equal to world_size times input tensor size",
         ):
-            tensor = torch.tensor([self.rank]).to(
-                torch.device(device_type, local_device_id)
-            )
-            output_t = torch.empty((self.world_size + 1), dtype=tensor.dtype).to(
-                torch.device(device_type, local_device_id)
-            )
+            tensor = torch.tensor([self.rank]).to(device)
+            output_t = torch.empty((self.world_size + 1), dtype=tensor.dtype).to(device)
             # fails the check because output_t is not correctly sized
             allgather_base(output_t, tensor)
 
@@ -627,12 +587,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         with self.assertRaisesRegex(
             TypeError, "output tensor must have the same type as input tensor"
         ):
-            tensor = torch.tensor([self.rank], dtype=torch.float).to(
-                torch.device(device_type, local_device_id)
-            )
-            output_t = torch.empty((self.world_size + 1), dtype=torch.long).to(
-                torch.device(device_type, local_device_id)
-            )
+            tensor = torch.tensor([self.rank], dtype=torch.float).to(device)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).to(device)
             # fails the check because the dtype is different
             allgather_base(output_t, tensor)
 
@@ -902,7 +858,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     )
     def test_reduce_scatter_base_basics(self):
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def reduce_scatter_base(output_t, input_t):
             work = pg.reduce_scatter_single(output_t, input_t)
@@ -913,11 +869,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             ValueError,
             "input tensor must be the same size as output size times world size",
         ):
-            input_t = torch.tensor([self.rank]).to(
-                torch.device(device_type, local_device_id)
-            )
+            input_t = torch.tensor([self.rank]).to(device)
             output_t = torch.empty((self.world_size + 1), dtype=input_t.dtype).to(
-                torch.device(device_type, local_device_id)
+                device
             )
             # fails the check because output_t is not correctly sized
             reduce_scatter_base(output_t, input_t)
@@ -926,12 +880,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         with self.assertRaisesRegex(
             TypeError, "input tensor must be the same type as the output tensor."
         ):
-            tensor = torch.tensor([self.rank], dtype=torch.float).to(
-                torch.device(device_type, local_device_id)
-            )
-            output_t = torch.empty((self.world_size + 1), dtype=torch.long).to(
-                torch.device(device_type, local_device_id)
-            )
+            tensor = torch.tensor([self.rank], dtype=torch.float).to(device)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).to(device)
             # fails the check because the dtype is different
             reduce_scatter_base(output_t, tensor)
 
@@ -1071,7 +1021,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         expected = torch.tensor(prod_val)
         self.assertEqual(expected, output_tensor)
 
-        if _supports_premul_sum():
+        if _nccl_version_at_least((2, 11, 1)):
             for factor in (3.0, torch.tensor([5.0], device=self.rank)):
                 if isinstance(factor, torch.Tensor):
                     factor_ref = factor.cpu().item()
@@ -1093,7 +1043,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     )
     def test_reduce_scatter_base_ops(self):
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def reduce_scatter_base(output_t, input_t):
             work = pg.reduce_scatter_single(output_t, input_t)
@@ -1101,10 +1051,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # reduce_scatter_base is GPU number agnostic.
         # Each rank contribute one tensor regardless of GPU counts
-        output_t = torch.empty([1]).to(torch.device(device_type, local_device_id))
-        tensor = torch.arange(self.world_size, dtype=output_t.dtype).to(
-            torch.device(device_type, local_device_id)
-        )
+        output_t = torch.empty([1]).to(device)
+        tensor = torch.arange(self.world_size, dtype=output_t.dtype).to(device)
 
         reduce_scatter_base(output_t, tensor)
 
@@ -1253,7 +1201,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
 
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def allgather_base(output_t, input_t):
             work = pg.all_gather_single(output_t, input_t)
@@ -1261,12 +1209,8 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # allgather_base is GPU number agnostic.
         # Each rank contribute one tensor regardless of GPU counts
-        tensor = torch.tensor([self.rank]).to(
-            torch.device(device_type, local_device_id)
-        )
-        output_t = torch.empty((self.world_size), dtype=tensor.dtype).to(
-            torch.device(device_type, local_device_id)
-        )
+        tensor = torch.tensor([self.rank]).to(device)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).to(device)
 
         allgather_base(output_t, tensor)
 
@@ -1280,15 +1224,12 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    @skipIfXpu(
-        msg="XCCL reduce does not handle PREMUL_SUM: https://github.com/intel/torch-xpu-ops/issues/5777"
-    )
     def test_reduce_op_premul_sum(self):
-        if not _supports_premul_sum():
+        if not _nccl_version_at_least((2, 11, 1)):
             self.skipTest("NCCL 2.11.1+ is required for PREMUL_SUM")
 
         pg = self.pg
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        device = torch.device(device_type, self.rank_to_GPU[self.rank][0])
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
@@ -1312,93 +1253,70 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         # allreduce
         for dtype in (torch.half, torch.float, torch.double):
             scalar_factor = 3.0
-            tensors = [
-                torch.tensor([self.rank + 1])
-                .to(torch.device(device_type, local_device_id))
-                .to(dtype=dtype)
-            ]
+            tensors = [torch.tensor([self.rank + 1]).to(device).to(dtype=dtype)]
 
             allreduce(tensors, c10d.ReduceOp.PREMUL_SUM(scalar_factor))
 
             expected = scalar_factor * torch.tensor(
                 [self.world_size * (self.world_size + 1) / 2],
                 dtype=dtype,
-                device=f"{device_type}:{local_device_id}",
+                device=device,
             )
             self.assertEqual(expected, tensors[0])
 
         for dtype in (torch.half, torch.float, torch.double):
-            tensor_factor = torch.tensor(
-                [5.0], device=f"{device_type}:{local_device_id}", dtype=dtype
-            )
-            tensors = [
-                torch.tensor([self.rank + 1])
-                .to(torch.device(device_type, local_device_id))
-                .to(dtype=dtype)
-            ]
+            tensor_factor = torch.tensor([5.0], device=device, dtype=dtype)
+            tensors = [torch.tensor([self.rank + 1]).to(device).to(dtype=dtype)]
 
             allreduce(tensors, c10d.ReduceOp.PREMUL_SUM(tensor_factor))
 
             expected = tensor_factor * torch.tensor(
                 [self.world_size * (self.world_size + 1) / 2],
                 dtype=dtype,
-                device=f"{device_type}:{local_device_id}",
+                device=device,
             )
             self.assertEqual(expected, tensors[0])
 
-        #  reduce
-        for root in range(self.world_size):
-            for dtype in (torch.half, torch.float, torch.double):
-                # Test with scalar factor
-                scalar_factor = 2.0
-                tensors = [
-                    torch.tensor([self.rank + 1])
-                    .to(torch.device(device_type, local_device_id))
-                    .to(dtype=dtype)
-                ]
+        #  reduce (XCCL lacks PREMUL_SUM reduce: https://github.com/intel/torch-xpu-ops/issues/5777)
+        if device_type != "xpu":
+            for root in range(self.world_size):
+                for dtype in (torch.half, torch.float, torch.double):
+                    # Test with scalar factor
+                    scalar_factor = 2.0
+                    tensors = [torch.tensor([self.rank + 1]).to(device).to(dtype=dtype)]
 
-                reduce(tensors, c10d.ReduceOp.PREMUL_SUM(scalar_factor), root)
+                    reduce(tensors, c10d.ReduceOp.PREMUL_SUM(scalar_factor), root)
 
-                if self.rank == root:
-                    expected = scalar_factor * torch.tensor(
-                        [self.world_size * (self.world_size + 1) / 2],
-                        dtype=dtype,
-                        device=f"{device_type}:{local_device_id}",
-                    )
-                    self.assertEqual(expected, tensors[0])
+                    if self.rank == root:
+                        expected = scalar_factor * torch.tensor(
+                            [self.world_size * (self.world_size + 1) / 2],
+                            dtype=dtype,
+                            device=device,
+                        )
+                        self.assertEqual(expected, tensors[0])
 
-                # Test with tensor factor
-                tensor_factor = torch.tensor(
-                    [4.0], device=f"{device_type}:{local_device_id}", dtype=dtype
-                )
-                tensors = [
-                    torch.tensor([self.rank + 1])
-                    .to(torch.device(device_type, local_device_id))
-                    .to(dtype=dtype)
-                ]
+                    # Test with tensor factor
+                    tensor_factor = torch.tensor([4.0], device=device, dtype=dtype)
+                    tensors = [torch.tensor([self.rank + 1]).to(device).to(dtype=dtype)]
 
-                reduce(tensors, c10d.ReduceOp.PREMUL_SUM(tensor_factor), root)
+                    reduce(tensors, c10d.ReduceOp.PREMUL_SUM(tensor_factor), root)
 
-                if self.rank == root:
-                    expected = tensor_factor * torch.tensor(
-                        [self.world_size * (self.world_size + 1) / 2],
-                        dtype=dtype,
-                        device=f"{device_type}:{local_device_id}",
-                    )
-                    self.assertEqual(expected, tensors[0])
+                    if self.rank == root:
+                        expected = tensor_factor * torch.tensor(
+                            [self.world_size * (self.world_size + 1) / 2],
+                            dtype=dtype,
+                            device=device,
+                        )
+                        self.assertEqual(expected, tensors[0])
 
         #  reduce_scatter
         for dtype in (torch.half, torch.float, torch.double):
             # Test with scalar factor
             scalar_factor = 3.0
-            output = [
-                torch.zeros(1, dtype=dtype, device=f"{device_type}:{local_device_id}")
-            ]
+            output = [torch.zeros(1, dtype=dtype, device=device)]
             input_lists = [
                 [
-                    torch.tensor(
-                        [i + 1], dtype=dtype, device=f"{device_type}:{local_device_id}"
-                    )
+                    torch.tensor([i + 1], dtype=dtype, device=device)
                     for i in range(self.world_size)
                 ]
             ]
@@ -1409,22 +1327,16 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = scalar_factor * torch.tensor(
                 [self.world_size * (self.rank + 1)],
                 dtype=dtype,
-                device=f"{device_type}:{local_device_id}",
+                device=device,
             )
             self.assertEqual(expected, output[0])
 
             # Test with tensor factor
-            tensor_factor = torch.tensor(
-                [5.0], device=f"{device_type}:{local_device_id}", dtype=dtype
-            )
-            output = [
-                torch.zeros(1, dtype=dtype, device=f"{device_type}:{local_device_id}")
-            ]
+            tensor_factor = torch.tensor([5.0], device=device, dtype=dtype)
+            output = [torch.zeros(1, dtype=dtype, device=device)]
             input_lists = [
                 [
-                    torch.tensor(
-                        [i + 1], dtype=dtype, device=f"{device_type}:{local_device_id}"
-                    )
+                    torch.tensor([i + 1], dtype=dtype, device=device)
                     for i in range(self.world_size)
                 ]
             ]
@@ -1434,7 +1346,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             expected = tensor_factor * torch.tensor(
                 [self.world_size * (self.rank + 1)],
                 dtype=dtype,
-                device=f"{device_type}:{local_device_id}",
+                device=device,
             )
             self.assertEqual(expected, output[0])
 
