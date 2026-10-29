@@ -11,6 +11,10 @@ on:
       - ciflow/periodic/*
       - ciflow/s390/*
   workflow_dispatch:
+    inputs:
+      pin-controls:
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
@@ -38,7 +42,7 @@ jobs:
 
   linux-manylinux-2_28-py3-cpu-s390x-build:
     needs: check-ci
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'pytorch' && github.event.inputs.pin-controls != 'true'
     name: linux-manylinux-2_28-py3-cpu-s390x
     uses: ./.github/workflows/_s390x-build.yml
     with:
@@ -61,6 +65,7 @@ jobs:
     secrets: inherit
 
   linux-manylinux-2_28-py3-cpu-s390x-test:
+    if: github.event.inputs.pin-controls != 'true'
     name: linux-manylinux-2_28-py3-cpu-s390x
     uses: ./.github/workflows/_s390x-test.yml
     needs:
@@ -72,4 +77,20 @@ jobs:
       test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
       timeout-minutes: 600
       use-gha: "yes"
+    secrets: inherit
+
+  s390x-pin-controls:
+    if: github.event.inputs.pin-controls == 'true'
+    name: native-s390x-grid-gradient-controls
+    uses: ./.github/workflows/_s390x-test.yml
+    with:
+      build-environment: linux-s390x-binary-manywheel
+      docker-image: pytorch/manylinuxs390x-builder:cpu-s390x
+      artifact-run-id: '40852471198'
+      use-gha: 'yes'
+      timeout-minutes: 90
+      test-matrix: |
+        { include: [
+          { config: "triton_pin_s390_controls", shard: 1, num_shards: 1, runner: "linux.s390x" },
+        ]}
     secrets: inherit

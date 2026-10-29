@@ -2485,6 +2485,12 @@ test_torchtitan() {
     export OUTPUT_DIR="${RUNNER_TEMP}/artifacts-to-be-uploaded"
   fi
 
+  if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_controls" ]]; then
+    python ../.ci/pytorch/triton_pin_titan_controls.py
+    popd
+    return
+  fi
+
   if [[ "${TEST_CONFIG}" == *features* ]]; then
     scripts/ci/pytorch_ci_test_runner.sh feature_tests
   elif [[ "${TEST_CONFIG}" == *models* ]]; then
@@ -2590,6 +2596,10 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
 fi
 if [[ "${TEST_CONFIG}" == "triton_pin_l4_controls" ]]; then
   exec python .ci/pytorch/triton_pin_l4_controls.py
+fi
+
+if [[ "${TEST_CONFIG}" == "triton_pin_s390_controls" ]]; then
+  exec python .ci/pytorch/triton_pin_s390_controls.py
 fi
 
 if [[ "${TEST_CONFIG}" == "triton_pin_mi350_boundary" ]]; then

@@ -39,6 +39,11 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
+      artifact-run-id:
+        type: string
+        required: false
+        default: ""
+        description: Diagnostic native wheel artifact source run.
       dashboard-tag:
         required: false
         type: string
@@ -96,6 +101,7 @@ jobs:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ inputs.use-gha }}
+          run-id: ${{ inputs.artifact-run-id }}
 
       - name: Download TD artifacts
         continue-on-error: true

@@ -9,6 +9,10 @@ inputs:
   use-gha:
     description: If set to any value, use GHA to download the artifact. Otherwise use s3.
     required: false
+  run-id:
+    description: Diagnostic artifact source run; empty selects the current run.
+    required: false
+    default: ""
   s3-bucket:
     description: S3 bucket to download builds
     required: false
@@ -29,6 +33,8 @@ runs:
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: ${{ inputs.name }}
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ github.token }}
 
     - name: Unzip artifacts
       shell: bash
