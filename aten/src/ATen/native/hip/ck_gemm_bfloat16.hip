@@ -781,7 +781,7 @@ void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
-  else if (at::detail::getCUDAHooks().isGPUArch({"gfx9"})) {
+  else if (at::globalContext().ckGemmSupported()) {
     dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
   else {

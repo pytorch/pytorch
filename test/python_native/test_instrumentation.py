@@ -21,6 +21,7 @@ from torch._native.instrumentation import (
     instrument_helion_kernel,
     instrument_triton_kernel,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
@@ -712,8 +713,9 @@ def _scan_for_missing_instrumentation(source, label):
 
     A compile site is any function carrying a DSL rule's ``jit_decorator`` or
     its ``combined_decorator``. A violation is such a site that isn't fully
-    instrumented (see :func:`_is_instrumented`). ``n_compile_sites`` lets
-    callers assert the scan saw something rather than passing vacuously.
+    instrumented (see :func:`_is_instrumented`).
+    ``n_compile_sites`` lets callers assert the scan saw something rather than
+    passing vacuously.
     """
     violations = []
     n_compile_sites = 0
@@ -825,9 +827,11 @@ class TestInstrumentationCoverage(TestCase):
         checked = 0
         for path in self._native_files():
             with open(path) as f:
-                violations, n = _scan_for_missing_instrumentation(
-                    f.read(), os.path.relpath(path).replace(os.sep, "/")
-                )
+                source = f.read()
+            violations, n = _scan_for_missing_instrumentation(
+                source,
+                os.path.relpath(path).replace(os.sep, "/"),
+            )
             missing += violations
             checked += n
 
@@ -940,7 +944,7 @@ class TestInstrumentationCoverage(TestCase):
         v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
         self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
 
-    @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
+    @unittest.skipUnless(_HAS_CUDA and SM90OrLater, "Hopper+ required")
     @skipIfNoCuteDSL
     def test_every_cute_compile_hits_instrumented_frame(self):
         # Runtime coverage finds an instrumentation frame regardless of op factoring; the

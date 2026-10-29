@@ -817,6 +817,172 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         self.assertIsNone(result)
 
 
+class TestC10dTorchCommsDynamicCreation(TestCase):
+    TIMEOUT = datetime.timedelta(seconds=30)
+
+    def _capture_new_comm_options(self, *, enable_reconfigure, timeout=TIMEOUT):
+        captured = {}
+
+        def fake_new_comm(
+            backend_str,
+            device,
+            name=None,
+            store=None,
+            hints=None,
+            **kwargs,
+        ):
+            captured.update(kwargs)
+            raise RuntimeError("stop-after-new_comm")
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _use_torchcomms_enabled=lambda: True,
+            _torchcomms_handles_backend=lambda b: True,
+            new_comm=fake_new_comm,
+            _BackendWrapper=mock.sentinel.backend_wrapper,
+            _TorchCommsFlightRecorderHook=mock.sentinel.flight_recorder_hook,
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop-after-new_comm"):
+                c10d._new_process_group_helper(
+                    group_size=4,
+                    group_rank=1,
+                    global_ranks_in_group=[],
+                    backend="nccl",
+                    store=dist.HashStore(),
+                    group_name=c10d.GroupName(self.id()),
+                    timeout=timeout,
+                    device_id=torch.device("cuda:1"),
+                    enable_reconfigure=enable_reconfigure,
+                )
+        return captured
+
+    def test_new_comm_options_are_dynamic_only(self):
+        dynamic = self._capture_new_comm_options(
+            enable_reconfigure=True,
+            timeout=self.TIMEOUT,
+        )
+        self.assertEqual(
+            dynamic,
+            {"timeout": self.TIMEOUT, "enable_reconfigure": True},
+        )
+
+        static = self._capture_new_comm_options(enable_reconfigure=False)
+        self.assertEqual(static, {})
+
+    def test_backend_wrapper_and_options_match_creation_mode(self):
+        for enable_reconfigure, timeout, expected_options in (
+            (False, self.TIMEOUT, {}),
+            (
+                True,
+                self.TIMEOUT,
+                {"timeout": self.TIMEOUT, "enable_reconfigure": True},
+            ),
+            (True, None, {"enable_reconfigure": True}),
+        ):
+            with self.subTest(enable_reconfigure=enable_reconfigure, timeout=timeout):
+                new_comm = mock.Mock(return_value=mock.sentinel.comm)
+                backend_wrapper_instance = mock.Mock()
+                backend_wrapper = mock.Mock(return_value=backend_wrapper_instance)
+                recorder = mock.MagicMock()
+                previous_count = len(c10d._world.comms)
+                try:
+                    with mock.patch.multiple(
+                        c10d,
+                        _TORCHCOMM_AVAILABLE=True,
+                        new_comm=new_comm,
+                        _BackendWrapper=backend_wrapper,
+                        _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+                        create=True,
+                    ):
+                        result = c10d._create_torchcomms_backend(
+                            "mccl",
+                            "cuda",
+                            group_rank=2,
+                            group_size=4,
+                            group_name=c10d.GroupName(self.id()),
+                            store=dist.HashStore(),
+                            device_id=torch.device("cuda:1"),
+                            backend_options=None,
+                            timeout=timeout,
+                            enable_reconfigure=enable_reconfigure,
+                        )
+                finally:
+                    del c10d._world.comms[previous_count:]
+
+                self.assertIs(result, backend_wrapper_instance)
+                backend_wrapper.assert_called_once_with(mock.sentinel.comm)
+                recorder.register_with_comm.assert_called_once_with(mock.sentinel.comm)
+                new_comm.assert_called_once()
+                actual_options = {
+                    key: value
+                    for key, value in new_comm.call_args.kwargs.items()
+                    if key in {"timeout", "enable_reconfigure"}
+                }
+                self.assertEqual(actual_options, expected_options)
+                backend_wrapper_instance.set_timeout.assert_not_called()
+
+    def test_backend_wrapper_failure_does_not_register_or_publish_comm(self):
+        previous_count = len(c10d._world.comms)
+        recorder = mock.Mock()
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            new_comm=mock.Mock(return_value=mock.sentinel.comm),
+            _BackendWrapper=mock.Mock(side_effect=RuntimeError("wrapper failed")),
+            _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "wrapper failed"):
+                c10d._create_torchcomms_backend(
+                    "mccl",
+                    "cuda",
+                    group_rank=2,
+                    group_size=4,
+                    group_name=c10d.GroupName(self.id()),
+                    store=dist.HashStore(),
+                    device_id=torch.device("cuda:1"),
+                    backend_options=None,
+                    timeout=self.TIMEOUT,
+                    enable_reconfigure=True,
+                )
+
+        self.assertEqual(len(c10d._world.comms), previous_count)
+        recorder.register_with_comm.assert_not_called()
+
+    def test_recorder_failure_does_not_publish_comm(self):
+        previous_count = len(c10d._world.comms)
+        recorder = mock.Mock()
+        recorder.register_with_comm.side_effect = RuntimeError("recorder failed")
+        backend_wrapper = mock.Mock()
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            new_comm=mock.Mock(return_value=mock.sentinel.comm),
+            _BackendWrapper=backend_wrapper,
+            _TorchCommsFlightRecorderHook=mock.Mock(return_value=recorder),
+            create=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "recorder failed"):
+                c10d._create_torchcomms_backend(
+                    "mccl",
+                    "cuda",
+                    group_rank=2,
+                    group_size=4,
+                    group_name=c10d.GroupName(self.id()),
+                    store=dist.HashStore(),
+                    device_id=torch.device("cuda:1"),
+                    backend_options=None,
+                    timeout=self.TIMEOUT,
+                    enable_reconfigure=True,
+                )
+
+        self.assertEqual(len(c10d._world.comms), previous_count)
+        backend_wrapper.assert_called_once_with(mock.sentinel.comm)
+        backend_wrapper.return_value.set_timeout.assert_not_called()
+
+
 class TestC10dGroupNameHashSalt(TestCase):
     """Unit-test the collective-consistent group-name hash salt.
 
@@ -1080,6 +1246,102 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(comm_a.finalize_calls, 1)
             self.assertEqual(comm_b.finalize_calls, 1)
             self.assertEqual(c10d._world.comms, [])
+
+    def _register_abortable_pg(self, calls, comm, name):
+        # _abort_process_group also looks up the backend of the current
+        # accelerator, so answer for any device.
+        backend = _FakeOtherBackend() if comm is None else _FakeBackendWrapper(comm)
+        pg = self._register_pg({"cuda": backend}, name=name)
+        pg._get_backend.side_effect = lambda dev: backend
+        calls.attach_mock(pg.abort, f"abort_{name}")
+        return pg
+
+    def test_abort_finalizes_comms_and_releases_nvshmem_teams(self):
+        # Releases what destroy_process_group does, but only after the abort,
+        # so that finalizing a comm skips its collective destroy.
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        call = mock.call
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            c10d._abort_process_group(group_a)
+            group_a_calls = [call.abort_a(), call.comm_a.finalize(), call.release("a")]
+            self.assertListEqual(calls.mock_calls, group_a_calls)
+            self.assertEqual(c10d._world.comms, [comm_b])
+
+            calls.reset_mock()
+            c10d._abort_process_group()
+            aborts = [call.abort_world(), call.abort_b()]
+            freed = [call.comm_b.finalize(), call.release("world"), call.release("b")]
+            self.assertCountEqual(calls.mock_calls[:2], aborts)
+            self.assertCountEqual(calls.mock_calls[2:], freed)
+            self.assertEqual(c10d._world.comms, [])
+
+    def test_abort_cleanup_continues_when_finalize_and_release_raise(self):
+        calls = mock.Mock()
+        comm_a, comm_b = calls.comm_a, calls.comm_b
+        world = self._register_abortable_pg(calls, None, "world")
+        group_a = self._register_abortable_pg(calls, comm_a, "a")
+        group_b = self._register_abortable_pg(calls, comm_b, "b")
+        c10d._world.default_pg = world
+        c10d._world.comms.extend([comm_a, comm_b])
+        timeout = RuntimeError("Work timed out during finalize")
+        comm_a.finalize.side_effect = comm_b.finalize.side_effect = timeout
+        sticky_error = RuntimeError("CUDA error: unspecified launch failure")
+        calls.release.side_effect = sticky_error
+        finalize_failed = "Failed to finalize TorchComms communicator after abort"
+
+        with mock.patch.multiple(
+            c10d,
+            _TORCHCOMM_AVAILABLE=True,
+            _BackendWrapper=_FakeBackendWrapper,
+            _release_nvshmem_team_pool=calls.release,
+            _unregister_process_group=lambda group_name: None,
+            _unregister_all_process_groups=lambda: None,
+            _update_default_pg=lambda pg: setattr(c10d._world, "default_pg", pg),
+            create=True,
+        ):
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group(group_a)
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group a", output)
+            calls.release.assert_called_once_with("a")
+            self.assertEqual(c10d._world.comms, [comm_b])
+            self.assertNotIn(group_a, c10d._world.pg_map)
+            self.assertNotIn(group_a, c10d._world.pg_names)
+            self.assertNotIn(group_a, c10d._world.pg_group_ranks)
+            self.assertIn(group_b, c10d._world.pg_map)
+
+            calls.reset_mock()
+            with self.assertLogs(c10d.logger, level="WARNING") as logs:
+                c10d._abort_process_group()
+            output = "\n".join(logs.output)
+            self.assertIn(finalize_failed, output)
+            self.assertIn("NVSHMEM team pool of group world", output)
+            self.assertIn("NVSHMEM team pool of group b", output)
+            calls.release.assert_has_calls(
+                [mock.call("world"), mock.call("b")], any_order=True
+            )
+            self.assertEqual(c10d._world.comms, [])
+            self.assertEqual(c10d._world.pg_map, {})
+            self.assertEqual(c10d._world.pg_names, {})
+            self.assertEqual(c10d._world.pg_group_ranks, {})
+            self.assertIsNone(c10d._world.default_pg)
 
 
 class TestC10dTorchCommsBackendConfig(TestCase):

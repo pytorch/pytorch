@@ -4,17 +4,17 @@ import unittest
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
 class GridSamplerCodegenTests(InductorTestCase):
-    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires CUDA and Triton")
     def test_grid_sampler_2d_uses_32bit_coordinate_indices(self):
         def fn(a, b):
             return torch.ops.aten.grid_sampler_2d(a, b, 0, 0, False)
 
-        a = torch.randn([2, 3, 16, 16], dtype=torch.float32, device="cuda")
-        b = torch.rand([2, 16, 16, 2], dtype=torch.float32, device="cuda") * 2 - 1
+        a = torch.randn([2, 3, 16, 16], dtype=torch.float32, device=GPU_TYPE)
+        b = torch.rand([2, 16, 16, 2], dtype=torch.float32, device=GPU_TYPE) * 2 - 1
 
         expected = fn(a, b)
         actual, codes = run_and_get_code(torch.compile(fn, backend="inductor"), a, b)

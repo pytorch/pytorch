@@ -20,7 +20,7 @@ from torch._guards import Source
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
-from ..utils import istype, unpack_iterable
+from ..utils import istype, tracked_repr, unpack_iterable
 from .base import (
     GetSet,
     getset_build,
@@ -558,12 +558,14 @@ class ExceptionVariable(VariableTracker):
                 "which formats differently from BaseException.__repr__.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        single = len(self.args) == 1
-        args = self.args[0] if single else TupleVariable(list(self.args))
-        args_repr = generic_repr(tx, args).as_python_constant()
-        if single:
-            args_repr = f"({args_repr})"
-        return VariableTracker.build(tx, f"{self.python_type_name()}{args_repr}")
+        name = self.python_type_name()
+        if len(self.args) == 1:
+            return VariableTracker.build(
+                tx, f"{name}({tracked_repr(tx, self.args[0])})"
+            )
+        return VariableTracker.build(
+            tx, name + tracked_repr(tx, TupleVariable(list(self.args)))
+        )
 
 
 class StopIterationVariable(ExceptionVariable):

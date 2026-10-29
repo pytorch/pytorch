@@ -33,6 +33,8 @@ struct TriangularSolveParams {
   bool transpose; // op transposes A
   bool conj; // op conjugates A (adjoint when combined with transpose)
   bool unit; // unit (implicit 1) diagonal
+  bool b_col_major; // B is column-major (element (r, c) at r + c * n)
+  bool x_col_major; // X is column-major
 };
 
 C10_METAL_CONSTEXPR uint32_t kTriangularSolveTileSize = 8;
@@ -84,9 +86,8 @@ struct EighParams {
 };
 
 // Per-thread small-matrix inverse kernel: up to this size one thread inverts a
-// whole matrix from registers. LinearAlgebra.metal instantiates exact sizes
-// 1..4 and static_asserts the list against this constant. Strides are in
-// elements.
+// whole matrix from registers. LU.metal instantiates exact sizes 1..4 and
+// static_asserts the list against this constant. Strides are in elements.
 C10_METAL_CONSTEXPR int64_t kLUSmallInvMax = 4;
 
 template <typename index_t = int64_t>
