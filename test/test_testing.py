@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     getRocmVersion, TemporaryFileName, sanitize_pytest_xml, known_failure_skip_if, skipIfRocm, skipIfRocmArch,
     skipIfRocmVersionAtLeast, skipIfRocmVersionInRange,
 )
-from torch.testing._internal.rerun_code_skip import mark_rerun_code_skip, rerun_code_skip, rerun_code_skip_reason
+from torch.testing._internal.rerun_code_skip import mark_rerun_code_skip, rerun_code_skip_reason
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -792,8 +792,7 @@ class TestJunitXml(TestCase):
 @contextlib.contextmanager
 def _rerun_code_skips_on_rocm(enabled):
     with contextlib.ExitStack() as stack:
-        for module in ("rerun_code_skip", "common_utils"):
-            stack.enter_context(unittest.mock.patch(f"torch.testing._internal.{module}.RUN_CODE_SKIPS", enabled))
+        stack.enter_context(unittest.mock.patch("torch.testing._internal.common_utils.RUN_CODE_SKIPS", enabled))
         for module in ("common_utils", "common_device_type"):
             stack.enter_context(unittest.mock.patch(f"torch.testing._internal.{module}.TEST_WITH_ROCM", True))
         yield
@@ -804,18 +803,8 @@ def _returns_ran(self):
 
 
 class TestRerunCodeSkip(TestCase):
-    @parametrize("rerun", [False, True])
-    def test_rerun_code_skip(self, rerun):
-        with _rerun_code_skips_on_rocm(rerun):
-            decorated = rerun_code_skip("known failure")(_returns_ran)
-        self.assertEqual(getattr(decorated, "__unittest_skip__", False), not rerun)
-        self.assertEqual(rerun_code_skip_reason(decorated, None), "known failure" if rerun else None)
-        self.assertIsNone(rerun_code_skip_reason(_returns_ran, None))
-        if rerun:
-            self.assertEqual(decorated(None), "ran")
-
     def test_reason_survives_outer_wrappers(self):
-        marked = mark_rerun_code_skip(_returns_ran, "known failure")
+        marked = mark_rerun_code_skip(_returns_ran, "known failure", lambda: True)
 
         @functools.wraps(marked)
         def outer(self):
@@ -824,17 +813,9 @@ class TestRerunCodeSkip(TestCase):
         self.assertEqual(rerun_code_skip_reason(outer, None), "known failure")
         self.assertEqual(outer(None), "ran")
 
-    def test_device_specific_reason(self):
-        marked = mark_rerun_code_skip(_returns_ran, "cuda failure", "cuda")
-        cuda_cls = type("TestFooCUDA", (), {"device_type": "cuda"})
-        cpu_cls = type("TestFooCPU", (), {"device_type": "cpu"})
-        self.assertEqual(rerun_code_skip_reason(marked, cuda_cls), "cuda failure")
-        self.assertIsNone(rerun_code_skip_reason(marked, cpu_cls))
-        self.assertIsNone(rerun_code_skip_reason(marked, None))
-
     def test_condition_is_checked_when_read(self):
         failing = False
-        marked = mark_rerun_code_skip(_returns_ran, "known failure", condition=lambda: failing)
+        marked = mark_rerun_code_skip(_returns_ran, "known failure", lambda: failing)
         self.assertIsNone(rerun_code_skip_reason(marked, None))
         failing = True
         self.assertEqual(rerun_code_skip_reason(marked, None), "known failure")
@@ -844,7 +825,7 @@ class TestRerunCodeSkip(TestCase):
             def test_a(self):
                 pass
 
-        self.assertIs(mark_rerun_code_skip(TestFoo, "known failure"), TestFoo)
+        self.assertIs(mark_rerun_code_skip(TestFoo, "known failure", lambda: True), TestFoo)
         self.assertEqual(rerun_code_skip_reason(TestFoo.test_a, TestFoo), "known failure")
 
     @parametrize("rerun", [False, True])
@@ -859,7 +840,6 @@ class TestRerunCodeSkip(TestCase):
         self.assertEqual(rerun_code_skip_reason(decorated, None), "known failure" if rerun else None)
 
     def test_rocm_skips_are_not_marked(self):
-        cuda_cls = type("TestFooCUDA", (), {"device_type": "cuda"})
         with _rerun_code_skips_on_rocm(True):
             skip_if_rocm = [
                 skipIfRocm(_returns_ran),
@@ -875,7 +855,7 @@ class TestRerunCodeSkip(TestCase):
                 skipIfRocmVersionInRange([7, 0], [7, 1], "regression")(_returns_ran),
             ]
         for fn in skip_if_rocm + others:
-            self.assertIsNone(rerun_code_skip_reason(fn, cuda_cls))
+            self.assertIsNone(rerun_code_skip_reason(fn, None))
 
 
 def _junit_outcome(case: ET.Element) -> tuple[str, str | None]:
@@ -905,9 +885,6 @@ class TestRerunCodeSkipCollection(TestCase):
                 f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider",
             ]
             env = dict(_JUNIT_CHILD_ENV)
-            # CPU-only shards of GPU builds set this, which would drop the fixture's CPU device class.
-            for key in (PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY):
-                env.pop(key, None)
             if rerun:
                 issue = "https://github.com/pytorch/pytorch/issues/1"
                 disabled = Path(tmp) / "disabled.json"
@@ -933,9 +910,7 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_code_skip_fails": [("failed", "known failure")] * 2,
             "test_code_skip_capability_skip": [("skipped", "known failure")] * 2,
             "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
-            "test_known_failure_here": [("passed", "known failure here")] * 2,
             "test_listed": [("passed", None)] * 2,
-            "test_cpu_known_failure_cpu": [("passed", "cpu failure")] * 2,
         })
 
     def test_normal_mode_skips_known_failures(self):
@@ -944,12 +919,9 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_code_skip_fails": [("skipped", None)],
             "test_code_skip_capability_skip": [("skipped", None)],
             "test_code_skip_disabled_elsewhere": [("skipped", None)],
-            "test_known_failure_here": [("skipped", None)],
             "test_known_failure_elsewhere": [("passed", None)],
             "test_listed": [("passed", None)],
             "test_not_listed": [("passed", None)],
-            "test_cpu_known_failure_cpu": [("passed", None)],
-            "test_cuda_known_failure_cpu": [("passed", None)],
         })
 
 
