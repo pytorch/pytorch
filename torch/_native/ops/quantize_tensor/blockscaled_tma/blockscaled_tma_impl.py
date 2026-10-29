@@ -391,6 +391,8 @@ def _blockscaled_tma_impl_dual(
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
         >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
     """
+    if not isinstance(dim, tuple) or len(dim) != 2 or not isinstance(dim[0], tuple):
+        raise ValueError("dual quantization requires two axis pairs")
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(

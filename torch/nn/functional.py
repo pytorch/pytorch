@@ -7362,14 +7362,15 @@ def quantize_tensor(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
-          ``SwizzleType.SWIZZLE_32_4_4``. Unswizzled scales require a layout
-          supported by the dim-k kernel.
+          ``SwizzleType.SWIZZLE_32_4_4``. Unswizzled scales use the dim-k kernel
+          layout, materializing the input if a compatible view is unavailable.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
           Note that the output scale size is still controlled by ``scaling_type``
           and ``swizzle_type``. If this flag is ``True``, currently
-          ``SwizzleType.SWIZZLE_32_4_4`` and a dim-k kernel layout are required.
+          ``SwizzleType.SWIZZLE_32_4_4`` and a dim-k kernel layout are required;
+          the input is materialized if a compatible view is unavailable.
           Default: ``False``.
 
     Returns:
