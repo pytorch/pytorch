@@ -758,7 +758,7 @@ class BaseListVariable(VariableTracker):
     }
 
 
-class RangeVariable(BaseListVariable):
+class RangeVariable(BaseListVariable):  # noqa: RVT001
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
     _index_not_found_msg = "sequence.index(x): x not in sequence"
@@ -1159,7 +1159,7 @@ class RangeVariable(BaseListVariable):
         return hash(self.as_python_constant()), False
 
 
-class ListVariable(BaseListVariable):
+class ListVariable(BaseListVariable):  # noqa: RVT001
     # PyList_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3776
     _cpython_type = list
     # CPython 3.14 stopped including the repr of the searched value (gh-121288)
@@ -1405,7 +1405,7 @@ class ListVariable(BaseListVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # list __reversed__: reverse iterator over items.
-        return ListReverseIteratorVariable(
+        return ListReverseIteratorVariable(  # noqa: RVT001
             source_seq=self,
             mutation_type=ValueMutationNew(),
         )
@@ -1425,7 +1425,7 @@ class ListVariable(BaseListVariable):
     }
 
 
-class DequeVariable(BaseListVariable):
+class DequeVariable(BaseListVariable):  # noqa: RVT001
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
@@ -1907,7 +1907,7 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker:
         # deque.__reversed__ returns a _deque_reverse_iterator that snapshots
         # the current state and detects mutation during iteration.
-        return DequeReverseIteratorVariable(
+        return DequeReverseIteratorVariable(  # noqa: RVT001
             list(reversed(self.items)),
             self,
             self.state,
@@ -1978,7 +1978,7 @@ class DequeVariable(BaseListVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1886-L1904
-        return DequeIteratorVariable(
+        return DequeIteratorVariable(  # noqa: RVT001
             list(self.items),
             self,
             self.state,
@@ -2006,7 +2006,7 @@ class DequeVariable(BaseListVariable):
     }
 
 
-class TupleVariable(BaseListVariable):
+class TupleVariable(BaseListVariable):  # noqa: RVT001
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
 
@@ -2041,6 +2041,7 @@ class TupleVariable(BaseListVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
+        # noqa: RVT001
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2259,6 +2260,7 @@ class ByteArrayVariable(VariableTracker):
         return self
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # noqa: RVT001
         return ByteArrayIteratorVariable(self, 0, mutation_type=ValueMutationNew())
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -2488,6 +2490,8 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
+        from .builder import SourcelessBuilder
+
         # bytearray_extend: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if not self.is_mutable():
             return None
@@ -2509,9 +2513,8 @@ class ByteArrayVariable(VariableTracker):
             iterator = generic_getiter(tx, iterable)
             # CPython asks the argument for a length hint (default 32) once it
             # has the iterator and before it reads any item.
-            variables.BuiltinVariable(operator.length_hint).call_function(
-                tx, [iterable, ConstantVariable.create(32)], {}
-            )
+            hint_fn = SourcelessBuilder.create_internal_builtin(operator.length_hint)
+            hint_fn.call_function(tx, [iterable, ConstantVariable.create(32)], {})
             # One item at a time, like CPython: a bad byte must leave the rest
             # of the iterator unread, and __index__ may grow the iterable.
             while True:
@@ -2659,7 +2662,7 @@ class ByteArrayVariable(VariableTracker):
         raise_type_error(tx, "unhashable type: 'bytearray'")
 
 
-class SizeVariable(TupleVariable):
+class SizeVariable(TupleVariable):  # noqa: RVT001
     """torch.Size(...)"""
 
     _cpython_type = torch.Size
@@ -2909,7 +2912,7 @@ class SizeVariable(TupleVariable):
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
-class SliceVariable(VariableTracker):
+class SliceVariable(VariableTracker):  # noqa: RVT001
     # PySlice_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L689
     _cpython_type = slice
 
@@ -3167,7 +3170,7 @@ class BaseListIteratorVariable(IteratorVariable):
     tp_methods = {"__length_hint__": Method(length_hint)}
 
 
-class ListIteratorVariable(BaseListIteratorVariable):
+class ListIteratorVariable(BaseListIteratorVariable):  # noqa: RVT001
     # PyListIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3842
     _cpython_type = type(iter([]))
 
@@ -3441,7 +3444,7 @@ class ListReverseIteratorVariable(IteratorVariable):
             codegen.extend_output(create_call_function(1, False))
 
 
-class RangeIteratorVariable(IteratorVariable):
+class RangeIteratorVariable(IteratorVariable):  # noqa: RVT001
     # PyRangeIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L896
     _cpython_type = type(iter(range(0)))
 

@@ -935,10 +935,11 @@ class ConstantVariable(VariableTracker):
         return ConstantVariable.create(~self.value)
 
 
-CONSTANT_VARIABLE_NONE = ConstantVariable(None)
-CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
-CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
-CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)
+# These interned singletons back ConstantVariable.create itself.
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)  # noqa: RVT001
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)  # noqa: RVT001
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)  # noqa: RVT001
+CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)  # noqa: RVT001
 
 
 class FakeValueKind(enum.Enum):
