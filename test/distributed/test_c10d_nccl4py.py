@@ -40,9 +40,13 @@ class TestNCCL4PyBackendUnit(TestCase):
 
     def test_registration(self):
         dist.Backend.register_backend(
-            "nccl4py_test", _create_nccl4py_backend, devices=["cuda"]
+            "nccl4py_test",
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
         )
         self.assertIn("nccl4py_test", dist.Backend.backend_list)
+        self.assertTrue(dist.Backend._plugins["NCCL4PY_TEST"].extended_api)
 
     def test_backend_name(self):
         store = dist.HashStore()
@@ -66,13 +70,22 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls):
         dist.Backend.register_backend(
-            "nccl4py", _create_nccl4py_backend, devices=["cuda"]
+            "nccl4py",
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
         )
         return "nccl4py"
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce(self):
         device = torch.device(f"cuda:{self.rank}")
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(device)
+        self.assertEqual(
+            backend.options.group_name,
+            dist.distributed_c10d._get_process_group_name(pg),
+        )
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.all_reduce(t)
         # SUM of [1,1,1,1] and [2,2,2,2] = [3,3,3,3]
@@ -301,7 +314,10 @@ class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
 
     def _init_pg(self, device_id=None):
         dist.Backend.register_backend(
-            "nccl4py", _create_nccl4py_backend, devices=["cuda"]
+            "nccl4py",
+            _create_nccl4py_backend,
+            extended_api=True,
+            devices=["cuda"],
         )
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -331,10 +347,10 @@ class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_subgroup_preserves_device(self):
-        # Subgroup {1}: the backend creator only sees the group-local rank (0),
-        # which differs from this process's physical device (cuda:1). The
-        # communicator must be created on cuda:1, not cuda:(group_rank), or the
-        # collective runs against a comm on the wrong GPU.
+        # Subgroup {1} has group-local rank 0 on physical device cuda:1. The
+        # extended creator must preserve the device bound by the default group
+        # when it splits the communicator, or the collective runs against a
+        # comm on the wrong GPU.
         self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
         subgroup = dist.new_group([1])
@@ -347,8 +363,6 @@ class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
         self._destroy_pg()
 
     def _split_pg(self, device, timeout=None):
-        # new_group() builds a fresh backend through the creator function;
-        # split_group() is the only path that reaches Backend.split().
         self._init_pg(device_id=device)
         subgroup = dist.split_group(split_ranks=[[0, 1]], timeout=timeout)
         return subgroup, subgroup._get_backend(device)
@@ -360,6 +374,7 @@ class TestNCCL4PyBackendLifecycle(MultiProcessTestCase):
         self.assertEqual(child.rank(), self.rank)
         self.assertEqual(child.size(), self.world_size)
         self.assertEqual(child._device, device)
+        self.assertEqual(child.options.global_ranks_in_group, [0, 1])
         t = torch.ones(4, device=device) * (self.rank + 1)
         dist.all_reduce(t, group=subgroup)
         torch.cuda.synchronize(device)

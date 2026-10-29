@@ -20,9 +20,7 @@ class VarSubMutator : public IRMutator {
     for (auto& entry : var_mapping) {
       VarPtr key_var = entry.first;
       ExprPtr value = entry.second;
-      if (!key_var) {
-        throw malformed_input("missing key in VarSubMutator");
-      }
+      TORCH_CHECK(key_var, "MALFORMED INPUT: missing key in VarSubMutator");
       var_mapping_[std::move(key_var)] = std::move(value);
     }
   }

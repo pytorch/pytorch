@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -29,6 +30,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
+from .cpp_wrapper_gpu import cpp_string_literal
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
@@ -212,6 +214,8 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
+        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
@@ -255,7 +259,7 @@ class MetalOverrides(OpOverrides):
             rc = body()
 
         # Compute cache key manually as variable name is needed to actually generate the code
-        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{rc}:{other_str}"
         var = V.kernel.cse.try_get(cache_key)
         if not var:
             var = V.kernel.cse.newvar(dtype=rc.dtype)
@@ -276,7 +280,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
@@ -328,8 +334,23 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def log1p(x: CSEVariable) -> str:
+        return f"c10::metal::log1p({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def expm1(x: CSEVariable) -> str:
+        # same form as expm1_functor in UnaryKernel.metal
+        V.kernel.headers.add("special_math")
+        return (
+            f"(metal::fabs({x}) < 0.1f ? c10::metal::expm1f({x})"
+            f" : metal::precise::exp({x}) - 1.0f)"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -439,6 +460,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
+        # metal::sign has no integer overloads
+        if x.dtype is not None and not x.dtype.is_floating_point:
+            return f"static_cast<decltype({x})>(({x} > 0) - ({x} < 0))"
         return f"metal::sign({x})"
 
     @staticmethod
@@ -556,6 +580,7 @@ class MetalOverrides(OpOverrides):
 
         # Unary special ops with forward in method name
         for name in [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
             "bessel_y0",
@@ -591,6 +616,7 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
             "laguerre_polynomial_l",
+            "legendre_polynomial_p",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -626,7 +652,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -635,7 +661,12 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
+        # Reductions shorter than a simdgroup run serially, in one thread per output
+        rnumel = self.features.reduction_numel
+        if isinstance(rnumel, sympy.Integer) and rnumel < self.simd_group_size:
+            self.max_threadgroup_size = 1
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
@@ -668,6 +699,10 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
+                reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+                line = f"if ({reduction_dim.name} == 0) {line}"
         else:
             raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
@@ -688,18 +723,18 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: str | torch.dtype,
+        dtype: torch.dtype,
         elem_count: int | None = None,
         default_value: Any | None = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        metal_type: str | None = None,
     ) -> CSEVariable:
-        if isinstance(dtype, torch.dtype):
-            dtype = self.dtype_to_str(dtype)
+        is_threadgroup &= self.max_threadgroup_size > 1
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         var_def = "threadgroup " if is_threadgroup else ""
-        var_def += f"{dtype} {var_name}"
+        var_def += f"{metal_type or self.dtype_to_str(dtype)} {var_name}"
         if elem_count:
             var_def += f"[{self.sexpr(elem_count)}]"
         if default_value is not None:
@@ -738,6 +773,11 @@ class MetalKernel(SIMDKernel):
             raise AssertionError("expected to be inside reduction")
         if self._load_mask:
             raise AssertionError("expected no load mask during reduction")
+        if self.max_threadgroup_size == 1:
+            # Loop over every reduction dim, including those the value does not index
+            for tree in self.range_trees:
+                if tree.is_reduction:
+                    tree.full_range().codegen()
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
             # Unwraps vec3 dtype into individual components
@@ -814,7 +854,9 @@ class MetalKernel(SIMDKernel):
 
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})"
+                if self.max_threadgroup_size > 1
+                else str(val),
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min"]:
@@ -834,17 +876,25 @@ class MetalKernel(SIMDKernel):
                 )
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})"
+                if self.max_threadgroup_size > 1
+                else str(val),
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["argmin", "argmax"]:
-            data_acc_buf = self._new_idxvar(src_dtype, shmem_buf_size)
+            value, logical_idx = value if isinstance(value, tuple) else (value, None)
+            # Metal compiler miscompiles the bf16 simd argmax/argmin for some reduction
+            # sizes (wrong indices), so combine bf16 partials in fp32. Not done for fp16,
+            # where it is correct and fp32 partials make the kernel up to 4x slower.
+            # See https://github.com/pytorch/pytorch/pull/199132
+            acc_dtype = torch.float32 if src_dtype == torch.bfloat16 else src_dtype
+            data_acc_buf = self._new_idxvar(acc_dtype, shmem_buf_size)
             idx_acc_buf = self._new_idxvar(dtype, shmem_buf_size)
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             cast_value = f"static_cast<{src_metal_type}>({value})"
             if not self.multistage_reduction_entry:
                 val = cast_value  # type: ignore[assignment]
-                idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({reduction_idx})"
+                idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({logical_idx or reduction_idx})"
             else:
                 op_struct = "MaxOp" if reduction_type == "argmax" else "MinOp"
                 limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
@@ -852,24 +902,26 @@ class MetalKernel(SIMDKernel):
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
                 idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
-                idx_var = next(
-                    t for t in self.range_tree_nodes.values() if t.is_reduction
-                )
+                idx_var = f"{self.multistage_reduction_entry[0].root.prefix}_linear_idx"
                 self.compute.splice(f"""
                 if (::c10::metal::{op_struct}<{src_metal_type}>::replace({cast_value}, {val})) {{
                     {val} = {cast_value};
-                    {idx_val} = {idx_var.name};
+                    {idx_val} = {logical_idx or idx_var};
                 }}
                 """)
             return self.cse.generate(
                 self.stores,
                 f"c10::metal::threadgroup_{reduction_type}({data_acc_buf}, {idx_acc_buf}, "
-                f"{val}, {idx_val}, {reduction_idx}, {acc_buf_size_str})",
+                f"static_cast<{DTYPE_TO_METAL[acc_dtype]}>({val}), {idx_val}, {reduction_idx}, {acc_buf_size_str})"
+                if self.max_threadgroup_size > 1
+                else str(idx_val),
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
             if not self.multistage_reduction_entry:
-                acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+                acc_buf = self._new_idxvar(
+                    torch.float32, acc_buf_alloc_size, metal_type="float3"
+                )
                 self.compute.splice(
                     f"{acc_buf}[{reduction_idx}] = float3({value}, 0.0, 1.0);"
                 )
@@ -879,7 +931,9 @@ class MetalKernel(SIMDKernel):
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar(
+                torch.float32, acc_buf_alloc_size, metal_type="float3"
+            )
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
             self.compute.writeline(
@@ -887,14 +941,18 @@ class MetalKernel(SIMDKernel):
             )
             wf_res = self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})"
+                if self.max_threadgroup_size > 1
+                else acc_thread_var,
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             if not isinstance(value, tuple):
                 raise AssertionError("Input to welford combine must be tuple")
-            acc_buf = self._new_idxvar("float3", acc_buf_alloc_size)
+            acc_buf = self._new_idxvar(
+                torch.float32, acc_buf_alloc_size, metal_type="float3"
+            )
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             inp_value = f"float3({value[0]}, {value[1]}, {value[2]})"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -907,7 +965,9 @@ class MetalKernel(SIMDKernel):
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
-                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_welford_combine({acc_buf}, {reduction_idx}, {acc_buf_size_str})"
+                if self.max_threadgroup_size > 1
+                else acc_thread_var,
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
@@ -1049,12 +1109,12 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(__file__).parent.parent.parent / "include"],
+                    [Path(get_file_path("torch")) / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
 
-            if self.inside_reduction:
+            if self.inside_reduction and self.max_threadgroup_size > 1:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
                 )
@@ -1196,7 +1256,7 @@ class MetalKernel(SIMDKernel):
             if V.graph.cpp_wrapper:
                 raise RuntimeError("We should always have threads?")
 
-        if self.inside_reduction:
+        if self.inside_reduction and self.max_threadgroup_size > 1:
             threads = [
                 expr_printer(Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
@@ -1235,7 +1295,7 @@ class MetalKernel(SIMDKernel):
             self.compute.writelines(
                 [
                     f"if (!{cond}) {{",
-                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    f"    TORCH_REPORT_ERROR(error_buf, {cpp_string_literal(msg)});",
                     "    return;",
                     "}",
                 ]
@@ -1326,7 +1386,7 @@ class MetalScheduling(SIMDScheduling):
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
         for line in body_lines:
-            wrapper.header.writeline(line)
+            wrapper.header.writeline(line.replace("\\", "\\\\").replace("'", "\\'"))
         wrapper.header.writeline(f"''', {headers_repr})")
 
         return fn_name

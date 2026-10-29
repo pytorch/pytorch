@@ -171,8 +171,7 @@ class Vectorized<float> {
     const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-    const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
-    auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+    auto angle = _mm256_blendv_ps(zero_vec, pi, values);
     angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
     return angle;
   }
@@ -558,6 +557,10 @@ class Vectorized<float> {
     v = _mm256_add_ps(v, v1);
     return _mm256_cvtss_f32(v);
   }
+  // Propagates NaN, matching maximum() and torch.max. MAXPS returns its second
+  // operand when either input is NaN, so the ladder below does not merely drop
+  // a NaN, it displaces whatever the NaN was compared against -- a real maximum
+  // can fall out of the reduction. Test the inputs rather than the result.
   float reduce_max() const {
     auto v = values;
     // 128-bit shuffle
@@ -569,7 +572,10 @@ class Vectorized<float> {
     // 32-bit shuffle
     v1 = _mm256_shuffle_ps(v, v, 0xB1);
     v = _mm256_max_ps(v, v1);
-    return _mm256_cvtss_f32(v);
+    const float m = _mm256_cvtss_f32(v);
+    return _mm256_movemask_ps(_mm256_cmp_ps(values, values, _CMP_UNORD_Q))
+        ? std::numeric_limits<float>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

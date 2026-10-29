@@ -230,7 +230,7 @@ class Vectorized<float> {
         _mm512_castsi512_ps(not_nan_vec), zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm512_set1_ps(c10::pi<double>);
 
-    const auto neg_mask = _mm512_cmp_ps_mask(values, zero_vec, _CMP_LT_OQ);
+    const auto neg_mask = _mm512_movepi32_mask(_mm512_castps_si512(values));
     auto angle = _mm512_mask_blend_ps(neg_mask, zero_vec, pi);
     angle = _mm512_mask_blend_ps(nan_mask, angle, nan_vec);
     return angle;
@@ -607,8 +607,13 @@ class Vectorized<float> {
   float reduce_add() const {
     return _mm512_reduce_add_ps(values);
   }
+  // Propagates NaN, matching maximum() and torch.max; the vmaxps sequence
+  // behind _mm512_reduce_max_ps drops it. See Vectorized<float> in vec256.
   float reduce_max() const {
-    return _mm512_reduce_max_ps(values);
+    const float m = _mm512_reduce_max_ps(values);
+    return _mm512_cmp_ps_mask(values, values, _CMP_UNORD_Q)
+        ? std::numeric_limits<float>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN

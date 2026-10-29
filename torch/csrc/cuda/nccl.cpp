@@ -808,10 +808,23 @@ void all2all_single_unequal_split(
 
   auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
-#if defined(USE_ROCM) || defined(NCCL_ALLTOALLV_SUPPORTED)
-  // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
-  // operations issued as a part of the collective (e.g. alltoallv) vs those
-  // inside traditional p2p operations.
+// Upstream NCCL never added a lowercase `ncclAlltoAllv`, so NCCLX keeps the
+// capital-T name as its canonical one; RCCL deprecated it in 2.28 in favor of
+// the lowercase spelling. Using the collective rather than a send/recv loop
+// lets NCCL differentiate send/recv operations issued as a part of the
+// collective (e.g. alltoallv) vs those inside traditional p2p operations.
+#if defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  NCCL_CHECK(ncclAlltoAllv(
+      sendbuff,
+      sendcounts,
+      senddispls,
+      recvbuff,
+      recvcounts,
+      recvdispls,
+      type,
+      comm,
+      stream.stream()));
+#elif defined(USE_ROCM) || defined(NCCL_ALLTOALLV_SUPPORTED)
   NCCL_CHECK(ncclAllToAllv(
       sendbuff,
       sendcounts,

@@ -52,10 +52,10 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      build-environment: linux-jammy-py3.11-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
     secrets: inherit
 
@@ -67,11 +67,11 @@ jobs:
       - get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-gcc11
+      build-environment: linux-jammy-py3.11-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
@@ -89,7 +89,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.10'
+          python-version: '3.11'
       - name: Install requirements
         run: pip install pyyaml==6.0.2
       - name: Update metamates rule

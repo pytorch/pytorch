@@ -187,6 +187,15 @@ class WorkerServerTest(TestCase):
                 self.assertEqual(resp.status, 200, msg=path)
                 self.assertIn("pg_status", json.loads(resp.data))
 
+    def test_c10d_health_check(self) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/c10d_health_check")
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(
+                json.loads(resp.data),
+                {"healthy": True, "unhealthy_backends": []},
+            )
+
     def test_tcp(self) -> None:
         import requests
 

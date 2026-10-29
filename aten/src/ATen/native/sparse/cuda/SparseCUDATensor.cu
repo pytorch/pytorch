@@ -71,9 +71,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
-  thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
-  thrust_ptr origIndicesIter(origIndices.data_ptr<int64_t>());
-  thrust_ptr uniqueOffsetsIter(uniqueOffsets.data_ptr<int64_t>());
+  thrust_ptr indicesIter(indices1D.mutable_data_ptr<int64_t>());
+  thrust_ptr origIndicesIter(origIndices.mutable_data_ptr<int64_t>());
+  thrust_ptr uniqueOffsetsIter(uniqueOffsets.mutable_data_ptr<int64_t>());
 
 
   // Fill sortedOrigIndices with sequential indices
@@ -115,41 +115,21 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
 #endif
     dim3 block(warp_size, SZ);
-#ifdef USE_ROCM
-    // Must duplicate the whole section otherwise does not compile on Windows
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data_ptr<int64_t>(),
-          origIndices.data_ptr<int64_t>(),
-          values.data_ptr<scalar_t>(),
-          newValues.data_ptr<scalar_t>(),
-          nnz,
-          newNnz,
-          nsegments,
-          stride
-        );
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
-#else
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
-      values.scalar_type(), "coalesce_sparse_cuda", [&] {
-        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data_ptr<int64_t>(),
-          origIndices.data_ptr<int64_t>(),
-          values.data_ptr<scalar_t>(),
-          newValues.data_ptr<scalar_t>(),
+          uniqueOffsets.const_data_ptr<int64_t>(),
+          origIndices.const_data_ptr<int64_t>(),
+          values.const_data_ptr<scalar_t>(),
+          newValues.mutable_data_ptr<scalar_t>(),
           nnz,
           newNnz,
           stride
         );
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-#endif
   }
 
 // this grid-strided version is slower but probably more flexible

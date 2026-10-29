@@ -4,10 +4,7 @@ Wraps NVIDIA's official nccl4py bindings to provide a Python NCCL backend for
 torch.distributed. Uses the PyBackend trampoline so that ProcessGroup dispatches
 collective calls into Python overrides in this class.
 
-Register with
-    dist.Backend.register_backend("nccl4py", _create_nccl4py_backend, devices=["cuda"])
-
-Or use
+Use with
     dist.init_process_group("nccl4py", ...)
 """
 
@@ -79,7 +76,9 @@ class NCCL4PyBackend(C10DBackend):
 
     _UID_STORE_KEY = "nccl4py_uid"
 
-    def __init__(self, store, rank, size, timeout, *, comm=None, device=None):
+    def __init__(
+        self, store, rank, size, timeout, *, comm=None, device=None, options=None
+    ):
         if nccl is None:
             raise RuntimeError(
                 "nccl4py backend requires the 'nccl4py' package. "
@@ -87,12 +86,11 @@ class NCCL4PyBackend(C10DBackend):
             )
         super().__init__(rank, size)
         self._store = store
-        self._options = C10DBackend.Options("nccl4py", timeout=timeout)
-
-        # TODO (thisisatharva-rh): workaround. The basic creator API only passes the group-local
-        # rank, which is not a valid device index for a subgroup, so we recover
-        # the device from the default group. The proper fix is to migrate to the
-        # extended_api=True, which supplies the resolved device directly
+        self._options = (
+            options
+            if options is not None
+            else C10DBackend.Options("nccl4py", timeout=timeout)
+        )
 
         if device is not None:
             self._device = device
@@ -451,6 +449,14 @@ class NCCL4PyBackend(C10DBackend):
 
     def split(self, store, ranks, opts):
         ranks_list = list(ranks)
+        if opts is None:
+            opts = C10DBackend.Options("nccl4py", timeout=self._options._timeout)
+        parent_ranks = self._options.global_ranks_in_group
+        opts.global_ranks_in_group = (
+            ranks_list
+            if len(parent_ranks) < self.size()
+            else [parent_ranks[rank] for rank in ranks_list]
+        )
         if self.rank() in ranks_list:
             color = min(ranks_list)
             key = ranks_list.index(self.rank())
@@ -463,13 +469,19 @@ class NCCL4PyBackend(C10DBackend):
         if self.rank() not in ranks_list:
             return None
 
-        timeout = opts._timeout if opts is not None else self._options._timeout
         child = NCCL4PyBackend(
-            store, key, len(ranks_list), timeout, comm=new_comm, device=self._device
+            store,
+            key,
+            len(ranks_list),
+            opts._timeout,
+            comm=new_comm,
+            device=self._device,
+            options=opts,
         )
-        if opts is not None:
-            child._options = opts
         return child
+
+    def perform_nocolor_split(self, _device):
+        self._comm.split(color=None, key=0)
 
     def shutdown(self):
         if self._comm is not None and self._comm.is_valid:
@@ -489,9 +501,63 @@ class NCCL4PyBackend(C10DBackend):
             self._comm = None
 
 
-def _create_nccl4py_backend(store, group_rank, group_size, timeout):
-    return NCCL4PyBackend(store, group_rank, group_size, timeout)
+def _nccl4py_device(opts):
+    process_group = opts.process_group
+    device = process_group.bound_device_id if process_group is not None else None
+    if device is not None:
+        return device
+
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        raise RuntimeError("nccl4py requires at least one CUDA device")
+
+    global_rank = (
+        opts.global_ranks_in_group[opts.group_rank]
+        if opts.global_ranks_in_group
+        else opts.group_rank
+    )
+    device = torch.device(
+        "cuda", dist.get_node_local_rank(fallback_rank=global_rank) % device_count
+    )
+    if process_group is not None:
+        process_group.bound_device_id = device
+    return device
+
+
+def _nccl4py_options(opts, backend_options):
+    if backend_options is None:
+        backend_options = C10DBackend.Options("nccl4py", timeout=opts.timeout)
+    elif not isinstance(backend_options, C10DBackend.Options):
+        raise AssertionError(
+            "Expected backend_options argument to be of type Backend.Options"
+        )
+    backend_options._timeout = opts.timeout
+    backend_options.global_ranks_in_group = opts.global_ranks_in_group
+    backend_options.group_name = opts.group_id
+    backend_options.enable_reconfigure = opts.enable_reconfigure
+    return backend_options
+
+
+def _create_nccl4py_backend(opts, backend_options):
+    options = _nccl4py_options(opts, backend_options)
+    if opts.split_from:
+        if not isinstance(opts.split_from, NCCL4PyBackend):
+            raise AssertionError("Expected split_from to be NCCL4PyBackend")
+        return opts.split_from.split(opts.store, opts.global_ranks_in_group, options)
+    return NCCL4PyBackend(
+        opts.store,
+        opts.group_rank,
+        opts.group_size,
+        opts.timeout,
+        device=_nccl4py_device(opts),
+        options=options,
+    )
 
 
 def _register_nccl4py_backend():
-    dist.Backend.register_backend("nccl4py", _create_nccl4py_backend, devices=["cuda"])
+    dist.Backend.register_backend(
+        "nccl4py",
+        _create_nccl4py_backend,
+        extended_api=True,
+        devices=["cuda"],
+    )
