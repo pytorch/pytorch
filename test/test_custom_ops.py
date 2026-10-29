@@ -789,7 +789,17 @@ class TestCustomOp(CustomOpTestCaseBase):
         x, y = torch.randn(2), torch.randn(2)
         cases = {
             "t": ("(Tensor x) -> Tensor", [x, None, 3]),
+            "ot": ("(Tensor x) -> Tensor?", [x, None]),
+            "l": ("(Tensor x) -> Tensor[]", [[x, y], (x, y), [x, 3], x]),
             "tt": ("(Tensor x) -> (Tensor, Tensor)", [(x, y), [x, y], (x,), (x, None)]),
+            "tl": ("(Tensor x) -> (Tensor, Tensor[])", [(x, [y]), (x, (y,))]),
+            "i": ("(Tensor x) -> int", [3, True, 3.5, 2**70]),
+            "f": ("(Tensor x) -> float", [0.5, 1, True]),
+            "b": ("(Tensor x) -> bool", [True, 1]),
+            "s": ("(Tensor x) -> str", ["hi", 3]),
+            "n": ("(Tensor x) -> ()", [None, x]),
+            "dt": ("(Tensor x) -> ScalarType", [torch.float32]),
+            "sc": ("(Tensor x) -> Scalar", [1, 2.5, True]),
         }
         returned = {}
 
@@ -905,7 +915,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         f.register_autograd(backward, setup_context=setup_context)
 
         op = self.ns().pyobject_dispatch_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2, requires_grad=True)
         sizes = torch.tensor([1, 2, 3])
@@ -955,7 +965,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                 return self.list_module([input_embs[0]])[0]
 
         op = self.ns().pyobject_dispatch_module_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2)
         sizes = torch.tensor([1, 2, 3])
