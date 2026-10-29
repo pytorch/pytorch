@@ -496,6 +496,18 @@ class TestSparseOnlyCPU(TestSparseBase):
                 "sspaddmm: expected 'self' to have sparse layout, got 'self' with layout Strided"):
             torch.sspaddmm(self_dense, mat1_sparse, mat2_dense)
 
+        self_3d = torch.zeros(m, n, 2, dtype=dtype, device=device).to_sparse()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: Argument #1: matrices expected, got 3D tensor"):
+            torch.sspaddmm(self_3d, mat1_sparse, mat2_dense)
+
+        self_hybrid = torch.zeros(m, n, 2, dtype=dtype, device=device).to_sparse(2)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: Argument #1: scalar values expected, got 1D values"):
+            torch.sspaddmm(self_hybrid, mat1_sparse, mat2_dense)
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_saddmm(self, device, dtype, coalesced):
