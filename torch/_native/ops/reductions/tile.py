@@ -1300,8 +1300,9 @@ class TileReduce:
                     )
                     cute.copy(g2s, gv[None, ks], sv[None, dst // Int32(vec)])
                 cute.arch.cp_async_commit_group()
-        # Looped seeds identity; split writes the batch tree directly.
-        return tree[0] if const_expr(it.shape == "split") else op(ident, tree[0])
+        # Looped seeds identity; split merges it last, like the unstaged lane butterfly.
+        split = const_expr(it.shape == "split")
+        return op(tree[0], ident) if split else op(ident, tree[0])
 
     @cute.jit
     def _fold_itree_rowstage(self, mX, tx, bx, r_in_block, lane_w, warp_id, batch_idx):

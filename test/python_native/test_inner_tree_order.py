@@ -193,6 +193,7 @@ class TestInnerTreeOrder(TestCase):
         cases = (
             ("float16_sum", T.SumOps(), x.to(torch.float16), [torch.float16]),
             ("var_mean", T.VarMeanOps(), x, [torch.float32, torch.float32]),
+            ("negzero_sum", T.SumOps(), torch.full_like(x, -0.0), [torch.float32]),
         )
         for name, trait, src, out_dtypes in cases:
             with self.subTest(op=name):
@@ -438,8 +439,15 @@ class TestInnerTreeOrder(TestCase):
         x = torch.randn(64, 2 * 4097, device="cuda", dtype=torch.float16)[:, ::2]
         trait = T.SumOps(acc=cutlass.Float32)
         key = "inner_tree_test_strided_trait_plan"
-        with _order_on():
+        # The plans differ only in kchunk, which is bit-neutral, so assert the selection.
+        trait_plan = rt.trait_itree_plan
+        with (
+            _order_on(),
+            mock.patch.object(rt, "trait_itree_plan", wraps=trait_plan) as plan,
+        ):
             strided = kg.reduce_dim(trait, key, x, [1], torch.float16)
+        self.assertIn(False, [c.kwargs.get("stage") for c in plan.call_args_list])
+        with _order_on():
             contiguous = kg.reduce_dim(trait, key, x.contiguous(), [1], torch.float16)
         self.assertEqual(strided.view(torch.int16), contiguous.view(torch.int16))
 
