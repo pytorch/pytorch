@@ -9814,6 +9814,27 @@ class TestPrecompileCustomOpRecording(TestCase):
         with mock.patch("torch._precompile._torch_source_root", return_value=root):
             self.assertEqual(_custom_op_modules([op]), ((), (op,)))
 
+    def test_kernels_recorded_only_for_the_graph_devices(self):
+        from torch._functorch._aot_autograd.codegen import PySourceBuilder
+        from torch._precompile import _graph_kernel_keys, _write_custom_op_imports
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.library import _scoped_library
+
+        ns = f"precompile_devices_{uuid.uuid4().hex}"
+        lib = self.enterContext(_scoped_library(ns, "DEF"))
+        lib.define("op(Tensor x) -> Tensor")
+        for key in ("CPU", "CUDA", "CompositeExplicitAutograd"):
+            lib.impl("op", lambda x: x.clone(), key)
+        op = getattr(torch.ops, ns).op.default
+        # A CPU graph does not require the op's CUDA kernel at load.
+        gm = make_fx(op)(torch.randn(2))
+        buf = PySourceBuilder()
+        _write_custom_op_imports(buf, (), ((f"{ns}::op", ""),), _graph_kernel_keys(gm))
+        namespace = {}
+        exec(buf.getvalue(), namespace)
+        expected = {f"{ns}::op": ("CPU", "CompositeExplicitAutograd")}
+        self.assertEqual(namespace["CUSTOM_OP_KERNELS"], expected)
+
     def test_pystub_module_is_recorded(self):
         from torch._precompile import _custom_op_module
 
