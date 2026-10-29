@@ -52,15 +52,16 @@ run_if_exists cuda_atomic_ops_test
 run_if_exists cuda_allocator_test
 run_if_exists cuda_event_test
 run_if_exists cuda_cublas_handle_pool_test
-run_if_exists cuda_tunable_nearest_test
-
-# Read once into function-local statics, so the TunableOp kill switches need a
-# process started with them set, and every other case in that binary needs them
-# unset. Hence a second, filtered invocation.
-if [[ -x "${CPP_TESTS_DIR}/cuda_tunable_nearest_test" ]]; then
+# ROCm builds the hipified copy as hip_tunable_nearest_test (the ^cuda_ rename
+# in aten/src/ATen/test/CMakeLists.txt), so exactly one of these exists per
+# build. The kill switches are read once into function-local statics, so they
+# need a process started with them set and every other case needs them unset.
+for t in cuda_tunable_nearest_test hip_tunable_nearest_test; do
+  [[ -x "${CPP_TESTS_DIR}/$t" ]] || continue
+  python test/run_test.py --cpp --verbose -i "cpp/$t"
   PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED=0 PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED=0 \
-    "${CPP_TESTS_DIR}/cuda_tunable_nearest_test" --gtest_filter='*EnvKillSwitch*'
-fi
+    "${CPP_TESTS_DIR}/$t" --gtest_filter='*EnvKillSwitch*'
+done
 
 if [ "$VALGRIND" == "ON" ]; then
   # NB: As these tests are invoked by valgrind, let's leave them for now as it's
