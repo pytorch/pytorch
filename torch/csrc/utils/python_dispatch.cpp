@@ -257,6 +257,8 @@ static py::object ophandle_call_boxed(
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
+struct PyObjectDispatchSchema;
+
 // Function that performs PyObject dispatch
 struct PyObjectDispatchFunc {
   PyObject_HEAD
@@ -265,6 +267,7 @@ struct PyObjectDispatchFunc {
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  PyObjectDispatchSchema* schema_info;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
 };
@@ -276,6 +279,7 @@ struct PyObjectRedispatchFunc {
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  PyObjectDispatchSchema* schema_info;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
 };
@@ -474,6 +478,168 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
       kwnames);
 }
 
+// The Python types PyObject dispatch can check a value against cheaply.
+struct PyObjectDispatchType {
+  enum class Kind : uint8_t {
+    Tensor,
+    TensorList,
+    Int,
+    Float,
+    Bool,
+    Str,
+    Other,
+  };
+  Kind kind = Kind::Other;
+  bool optional = false;
+};
+
+static PyObjectDispatchType pyobject_dispatch_type(c10::TypePtr type) {
+  using Kind = PyObjectDispatchType::Kind;
+  PyObjectDispatchType result;
+  if (const auto* opt = type->castRaw<c10::OptionalType>()) {
+    result.optional = true;
+    type = opt->getElementType();
+  }
+  switch (type->kind()) {
+    case c10::TypeKind::TensorType:
+      result.kind = Kind::Tensor;
+      break;
+    case c10::TypeKind::IntType:
+    case c10::TypeKind::SymIntType:
+      result.kind = Kind::Int;
+      break;
+    case c10::TypeKind::FloatType:
+    case c10::TypeKind::SymFloatType:
+      result.kind = Kind::Float;
+      break;
+    case c10::TypeKind::BoolType:
+    case c10::TypeKind::SymBoolType:
+      result.kind = Kind::Bool;
+      break;
+    case c10::TypeKind::StringType:
+      result.kind = Kind::Str;
+      break;
+    case c10::TypeKind::ListType:
+      if (type->castRaw<c10::ListType>()->getElementType()->kind() ==
+          c10::TypeKind::TensorType) {
+        result.kind = Kind::TensorList;
+      }
+      break;
+    default:
+      break;
+  }
+  return result;
+}
+
+// Per-operator schema information for PyObject dispatch.
+struct PyObjectDispatchSchema {
+  std::vector<PyObjectDispatchType> returns;
+  // The common case of a single, non-optional Tensor return.
+  bool returns_one_tensor = false;
+};
+
+static std::unique_ptr<PyObjectDispatchSchema> make_pyobject_dispatch_schema(
+    const c10::FunctionSchema& schema) {
+  auto info = std::make_unique<PyObjectDispatchSchema>();
+  for (const auto& ret : schema.returns()) {
+    info->returns.push_back(pyobject_dispatch_type(ret.real_type()));
+  }
+  info->returns_one_tensor = info->returns.size() == 1 &&
+      info->returns[0].kind == PyObjectDispatchType::Kind::Tensor &&
+      !info->returns[0].optional;
+  return info;
+}
+
+static bool pyobject_dispatch_is_int64(PyObject* obj) {
+  if (!PyLong_CheckExact(obj)) {
+    return false;
+  }
+  int overflow = 0;
+  PyLong_AsLongLongAndOverflow(obj, &overflow);
+  return overflow == 0;
+}
+
+// Whether a kernel's return value is already what the C++ Dispatcher's round
+// trip through IValues would give the caller. A Tensor[] still needs copying
+// into a new list.
+static bool pyobject_dispatch_result_ok(
+    const PyObjectDispatchType& type,
+    PyObject* obj) {
+  using Kind = PyObjectDispatchType::Kind;
+  if (obj == Py_None) {
+    return type.optional;
+  }
+  switch (type.kind) {
+    case Kind::Tensor:
+      return THPVariable_Check(obj);
+    case Kind::Int:
+      return pyobject_dispatch_is_int64(obj);
+    case Kind::Float:
+      return PyFloat_CheckExact(obj);
+    case Kind::Bool:
+      return PyBool_Check(obj);
+    case Kind::Str:
+      return PyUnicode_CheckExact(obj);
+    case Kind::TensorList:
+      if (!PyList_CheckExact(obj)) {
+        return false;
+      }
+      for (Py_ssize_t i = 0; i < PyList_GET_SIZE(obj); ++i) {
+        if (!THPVariable_Check(PyList_GET_ITEM(obj, i))) {
+          return false;
+        }
+      }
+      return true;
+    case Kind::Other:
+      return false;
+  }
+  return false;
+}
+
+// The C++ Dispatcher converts a Python kernel's return value to IValues
+// (pushPyOutToStack) and back (createPyObjectForStack). Return `result` (a
+// new reference) if it already is what that would produce; otherwise do
+// exactly that round trip, including its errors.
+static PyObject* pyobject_dispatch_normalize_result(
+    const c10::OperatorHandle& op,
+    const PyObjectDispatchSchema& info,
+    PyObject* result) {
+  if (C10_LIKELY(info.returns_one_tensor && THPVariable_Check(result))) {
+    return result;
+  }
+  auto owned = py::reinterpret_steal<py::object>(result);
+  const auto& returns = info.returns;
+  if (returns.empty()) {
+    if (result == Py_None) {
+      return owned.release().ptr();
+    }
+  } else if (returns.size() == 1) {
+    if (pyobject_dispatch_result_ok(returns[0], result)) {
+      if (returns[0].kind == PyObjectDispatchType::Kind::TensorList &&
+          result != Py_None) {
+        return PyList_GetSlice(result, 0, PyList_GET_SIZE(result));
+      }
+      return owned.release().ptr();
+    }
+  } else if (
+      PyTuple_CheckExact(result) &&
+      static_cast<size_t>(PyTuple_GET_SIZE(result)) == returns.size()) {
+    bool ok = true;
+    for (size_t i = 0; i < returns.size() && ok; ++i) {
+      ok =
+          returns[i].kind != PyObjectDispatchType::Kind::TensorList &&
+          pyobject_dispatch_result_ok(
+              returns[i], PyTuple_GET_ITEM(result, static_cast<Py_ssize_t>(i)));
+    }
+    if (ok) {
+      return owned.release().ptr();
+    }
+  }
+  torch::jit::Stack stack;
+  pushPyOutToStack(op, &stack, std::move(owned), "PythonKernelHolder");
+  return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
+}
+
 // Whether autograd needs to see a call with these arguments; like
 // any_requires_grad, but for the PyObject arguments of a fast-path call.
 static bool pyobject_dispatch_any_requires_grad(
@@ -568,7 +734,8 @@ static PyObject* pyobject_dispatch_with_keyset(
   if (result == nullptr) {
     return nullptr;
   }
-  return result;
+  return pyobject_dispatch_normalize_result(
+      *self->handle, *self->schema_info, result);
 }
 
 static PyObject* pyobject_dispatch_vectorcall(
@@ -666,12 +833,14 @@ static void pyobject_dispatch_dealloc(PyObjectDispatchFunc* self) {
   Py_XDECREF(self->cpp_dispatch_fn);
   Py_XDECREF(self->cpp_redispatch_fn);
   delete self->handle;
+  delete self->schema_info;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static void pyobject_redispatch_dealloc(PyObjectRedispatchFunc* self) {
   Py_XDECREF(self->cpp_redispatch_fn);
   delete self->handle;
+  delete self->schema_info;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
@@ -689,6 +858,7 @@ static PyObject* make_pyobject_dispatch_func(
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  auto schema_info = make_pyobject_dispatch_schema(handle.schema());
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
@@ -696,6 +866,7 @@ static PyObject* make_pyobject_dispatch_func(
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->handle = owned_handle.release();
+  result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -706,12 +877,14 @@ static PyObject* make_pyobject_redispatch_func(
     PyObject* cpp_redispatch_fn,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  auto schema_info = make_pyobject_dispatch_schema(handle.schema());
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->handle = owned_handle.release();
+  result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
