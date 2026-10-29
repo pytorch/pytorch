@@ -10916,15 +10916,17 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(f"CUSTOM_OPS = {((f'{ns}::op', ''),)!r}", python_code)
 
     def test_an_op_passed_to_a_skipped_call_is_checked(self):
-        _, name = self._op("passed")
-        # The global op is still lazy when the call it is passed to breaks.
+        (_, name), (_, nested) = self._op("passed"), self._op("nested")
+        # The global ops are still lazy when the call they are passed to breaks.
         python_code = self._capture_module(
             f"import torch\nop = torch.ops.{name.replace('::', '.')}.default\n"
-            "call = torch._dynamo.disable(lambda o, x: o(x))\n"
-            "def fn(x):\n    return call(op, x.sin()) + 1\n",
+            f"nested = torch.ops.{nested.replace('::', '.')}.default\n"
+            "call = torch._dynamo.disable(lambda o, x, _: o(x))\n"
+            "def fn(x):\n    return call(op, x.sin(), (nested,)) + 1\n",
             tracer=DynamoTracer(),
         )
-        self.assertIn(f"CUSTOM_OPS = {((name, ''),)!r}", python_code)
+        ops = tuple(sorted([(name, ""), (nested, "")]))
+        self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
