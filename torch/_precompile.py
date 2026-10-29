@@ -222,12 +222,13 @@ it.
 # the artifact's frames); then the load fails. The load then refuses unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
 # every overriding kernel is still the active one, registered from the same file.
-# make_fx case: before load, the caller must import C++ extension ops, ops from
-# torch.library.define or __main__, and kernels registered through @torch.library.impl,
-# register_kernel or another module's Library. Dynamo case: if an op or kernel has no
-# recorded module or a recorded module is outside torch, the artifact also imports its
-# served frames' modules, all in the order their imports finished, so the caller must
-# import only those registered outside every served frame's module.
+# make_fx case: before load, the caller must import C++ extension ops, ops defined
+# from __main__ or outside a module's import, and kernels registered through
+# @torch.library.impl, register_kernel or another module's Library. Dynamo case: if an
+# op or kernel has no recorded module or a recorded module is outside torch, the
+# artifact also imports its served frames' modules, all in the order their imports
+# finished, so the caller must import only those registered outside every served
+# frame's module.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -2096,17 +2097,6 @@ _TORCH_DIR = os.path.dirname(torch.__file__)
 _TORCH_OP_HELPERS = tuple(
     os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
 )
-# torch.library.define, unlike torch.library.impl, registers an op at torch/library.py
-# rather than its caller's file, so torch's own torch.library.define ops are listed.
-_TORCH_HELPER_OP_MODULES = MappingProxyType(
-    {
-        "coor::current_device": "torch.fx.experimental.proxy_tensor",
-        "coor::current_device_index": "torch.fx.experimental.proxy_tensor",
-        "debugprims::load_tensor": "torch._prims",
-        "device_mesh::_runtime_compute_coordinate_on_dim": "torch.distributed._ops.device_mesh",
-        "pippy::_pipe_split": "torch.distributed.pipelining._IR",
-    }
-)
 # The modules defining prims with torch._prims._make_prim, which records itself.
 _TORCH_PRIM_MODULES = (
     "torch._prims",
@@ -2144,14 +2134,11 @@ def _library_op_module(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> str | None:
     """The module whose import registers ``op_name``, if a loaded module defines it:
-    the one a torch helper defines it from (listed in ``_TORCH_HELPER_OP_MODULES``),
-    or the one creating the ``torch.library.Library`` that defines it.
-    ``file_modules`` is ``_file_modules``."""
+    the one creating the ``torch.library.Library`` that defines it, or whose body
+    calls ``torch.library.define``. ``file_modules`` is ``_file_modules``."""
     path = _registration_path(op_name, overload)
-    if not path.endswith(".py"):
+    if not path.endswith(".py") or path.startswith(_TORCH_OP_HELPERS):
         return None
-    if path.startswith(_TORCH_OP_HELPERS):
-        return _TORCH_HELPER_OP_MODULES.get(op_name)
     return file_modules().get(os.path.realpath(path))
 
 
@@ -2335,8 +2322,8 @@ def _warn_unregistered_ops(
     if names:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which no "
-            "importable module is known to register: defined in __main__, defined "
-            "with torch.library.define or torch._custom_ops.custom_op, or a C++ op "
+            "importable module is known to register: defined in __main__ or outside "
+            "a module's import, with torch._custom_ops.custom_op, or a C++ op "
             "without set_python_module. %s "
             "Define a Python op with torch.library.custom_op in an importable "
             "module, and give a C++ op m.set_python_module; for a library's ops, "
@@ -2416,7 +2403,7 @@ def _write_custom_op_imports(
     # path imports the module that registers the op. The recorded modules are the
     # ones that constructed each Library used for the op's define and impls, which
     # misses a module calling impl on another module's Library (and an op defined
-    # with torch.library.define or from __main__ has none), so the imports are best
+    # from __main__ has none), so the imports are best
     # effort and the ops and their kernels are checked.
     if not ops:
         return

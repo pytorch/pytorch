@@ -9316,7 +9316,7 @@ def data_dependent_fn(x):
 def dynamic_shape_fn(x):
     return torch.ops.{ns}.dynamic_shape.default(x.sin()) + 1
 
-# torch.library.define records itself, so the artifact knows no module for this op.
+# torch.library.define records the module whose body calls it.
 torch.library.define("{ns}::entry_op", "(Tensor x) -> Tensor")
 torch.library.impl("{ns}::entry_op", "CPU", func=lambda x: x * 2)
 torch.library.impl("{ns}::entry_op", "Meta", func=torch.empty_like)
@@ -10385,6 +10385,64 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.enterContext(mock.patch.dict(sys.modules, {"__mp_main__": mp_main}))
         found = register("__mp_main__", "cuda", in_module)
         self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
+
+    @parametrize("helper", ("register_kernel", "impl"))
+    def test_a_kernel_registered_outside_an_import_is_untracked(self, helper):
+        from torch._precompile import _custom_op_modules
+
+        op, qualname = self._op("overridden")
+        names = [f"precompile_{n}_{uuid.uuid4().hex}" for n in ("ops", "utils", "user")]
+        modules = {n: types.ModuleType(n) for n in names}
+        for m in modules.values():
+            m.__spec__ = importlib.machinery.ModuleSpec(m.__name__, None)
+            m.__file__ = os.path.join(tempfile.gettempdir(), f"{m.__name__}.py")
+        self.enterContext(mock.patch.dict(sys.modules, modules))
+        ops, utils, user = modules.values()
+        callers = op._backend_fn_callers
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = ops.__name__
+        keys = ("CPU", "CUDA", "XPU", "CompositeExplicitAutograd")
+        libs = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
+        self.addCleanup(lambda: [lib._destroy() for lib in libs])
+
+        def run(module, code, **scope):
+            vars(module).update(scope)
+            exec(compile(code, module.__file__, "exec"), vars(module))
+
+        # Defined in the op's module and a helper module, but called later.
+        enable = f"def enable(device):\n    torch.library.{helper}(q, device, k)"
+        for m in (ops, utils):
+            run(m, enable, torch=torch, q=qualname, k=torch.neg)
+        main = types.ModuleType("__main__")
+        main.__file__ = os.path.join(tempfile.gettempdir(), "precompile_main.py")
+        # A script calling either at runtime registers nothing a module import does.
+        run(main, "enable('cuda')", enable=vars(ops)["enable"])
+        found = _custom_op_modules({(qualname, ""): keys})
+        self.assertEqual(found.modules, (ops.__name__,))
+        self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
+        # A module whose body calls the helper is the one whose import registers.
+        run(user, "enable('xpu')", enable=vars(utils)["enable"])
+        found = _custom_op_modules({(qualname, ""): keys})
+        self.assertEqual(found.modules, (ops.__name__, user.__name__))
+        self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
+
+    def test_torch_library_define_records_the_module_whose_body_calls_it(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_define_{uuid.uuid4().hex}"
+        module = types.ModuleType(f"precompile_defining_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        module.__file__ = os.path.join(tempfile.gettempdir(), f"{module.__name__}.py")
+        main = types.ModuleType("__main__")
+        main.__file__ = os.path.join(tempfile.gettempdir(), "precompile_main.py")
+        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        libs = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
+        self.addCleanup(lambda: [lib._destroy() for lib in libs])
+        for m, name in ((module, "op"), (main, "main_op")):
+            code = f"torch.library.define('{ns}::{name}', '(Tensor x) -> Tensor')"
+            exec(compile(code, m.__file__, "exec"), {"torch": torch})
+        found = _custom_op_modules({(f"{ns}::op", ""): (), (f"{ns}::main_op", ""): ()})
+        self.assertEqual(found.modules, (module.__name__,))
+        self.assertEqual(found.unrecorded, ((f"{ns}::main_op", ""),))
 
     def test_an_overloaded_custom_op_records_its_module_and_kernel_callers(self):
         from torch._precompile import _custom_op_modules

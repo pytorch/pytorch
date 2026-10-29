@@ -2258,8 +2258,8 @@ class PrecompileSession(Generic[_P, _R]):
         if found.unrecorded or found.unrecorded_kernels or mapped:
             # A module the frames run in, which the driver imports only after the ops
             # are checked, may register a kernel over an override's, or an op or kernel
-            # with no known module (torch.library.define, a kernel registered from
-            # __main__, a C++ extension). Torch's own ops skip this.
+            # with no known module (one registered from __main__, a C++ extension).
+            # Torch's own ops skip this.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
         wanted = {*found.modules, *served}
         modules = tuple(m for m in sys.modules if m in wanted)
