@@ -435,7 +435,7 @@ class TestModuleTypeOpenReg(TestCase):
                 raise AssertionError(f"{module_name} test body should never run")
         if cls._executed["module_skip_f32"] != 1:
             raise AssertionError(
-                "module_skip_f32 should have run exactly once,"
+                "module_skip_f32 should have run exactly once, "
                 f"but ran {cls._executed['module_skip_f32']} times"
             )
         super().tearDownClass()
@@ -512,6 +512,60 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestModuleAllowlistWithOverrides, globals(), only_for=("openreg",)
     )
+
+
+class TestInstantiationErrors(TestCase):
+    """Verify the errors raised while instantiating @ops / @modules tests.
+
+    The test classes are defined locally so the test runner never collects them.
+    """
+
+    def _instantiate(self, test_cls, **configs):
+        scope = {test_cls.__name__: test_cls}
+        with _temp_test_configs(PrivateUse1TestBase, **configs):
+            instantiate_device_type_tests(test_cls, scope, only_for="openreg")
+        return scope
+
+    def test_empty_modules_list_raises(self):
+        class TestEmpty(TestCase):
+            @modules([])
+            def test_empty(self, device, dtype, module_info, training):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "test_empty: An empty"):
+            self._instantiate(TestEmpty)
+
+    def test_allowlist_emptying_modules_list_generates_no_tests(self):
+        class TestNarrowed(TestCase):
+            @modules([module_normal])
+            def test_narrowed(self, device, dtype, module_info, training):
+                pass
+
+        allowlist = ("module_combined_supported",)
+        scope = self._instantiate(TestNarrowed, module_allowlist=allowlist)
+        (device_cls,) = scope.values()
+        generated = [n for n in dir(device_cls) if n.startswith("test_narrowed")]
+        self.assertEqual(generated, [])
+
+    def test_duplicate_module_names_raise_with_overrides(self):
+        class TestDuplicateModules(TestCase):
+            @modules([module_normal, module_normal])
+            def test_duplicate(self, device, dtype, module_info, training):
+                pass
+
+        overrides = {"module_normal": [DecorateInfo(unittest.skip("skip"))]}
+        with self.assertRaisesRegex(AssertionError, "Duplicate module names"):
+            self._instantiate(TestDuplicateModules, module_overrides=overrides)
+
+    def test_duplicate_op_names_raise_with_overrides(self):
+        class TestDuplicateOps(TestCase):
+            @ops([op_normal, op_normal])
+            def test_duplicate(self, device, dtype, op):
+                pass
+
+        overrides = {"op_normal": [DecorateInfo(unittest.skip("skip"))]}
+        with self.assertRaisesRegex(AssertionError, "Duplicate op full_names"):
+            self._instantiate(TestDuplicateOps, op_overrides=overrides)
 
 
 @unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
