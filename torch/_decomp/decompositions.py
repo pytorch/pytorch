@@ -3289,7 +3289,13 @@ def _max_unpoolnd(
     # always return contiguous output.
     def _restride(t: TensorLike) -> TensorLike:
         if dim == 2 and self.device.type in ("cpu", "xpu"):
-            return t.contiguous(memory_format=utils.suggest_memory_format(self))
+            # Go through aten rather than Tensor.contiguous: the latter's Python
+            # binding takes an OptionalDeviceGuard on the tensor's own device,
+            # which throws for a FakeTensor reporting a device type that is not
+            # linked into this build (e.g. xpu on a CPU-only build).
+            return aten.contiguous.default(
+                t, memory_format=utils.suggest_memory_format(self)
+            )
         return t
 
     output_shape = list(self.shape[:-dim]) + list(output_size)
