@@ -9,7 +9,6 @@
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h>
 
 #include <algorithm>
 #include <atomic>
@@ -33,11 +32,6 @@ struct CudaGraphOptions {
   int64_t warmup_calls = 1;
   // Calls with new keys run eagerly once this many graphs exist.
   int64_t max_graphs = 8;
-  // If set, held by warm-up calls, a thread's first eager call and captures,
-  // so managers sharing it never overlap them. ROCm needs it: a hipBLASLt
-  // handle created during another thread's capture invalidates that capture
-  // and can deadlock.
-  std::mutex* capture_mutex = nullptr;
 };
 
 // Deleters run in destructors, so they log errors instead of throwing.
@@ -58,37 +52,45 @@ inline void delete_cuda_mem_pool(void* ptr) {
 // Runs a capturable part of a model instance eagerly or as CUDA graphs, one
 // graph per input layout (dtypes, sizes, strides). The graphs share one
 // memory pool, so replays run one at a time; each copies the inputs in and
-// clones the outputs out. A key whose capture fails runs eagerly from then on.
+// clones the outputs out. A key whose capture fails runs eagerly from then on,
+// and after kMaxCaptureFailures failures in a row, so do new keys.
 class CudaGraphManager {
  public:
   explicit CudaGraphManager(int32_t device_index, CudaGraphOptions options = {})
       : device_index_(device_index), options_(checked(options)) {
     AOTICudaGuard device_guard(device_index_);
-    // Owned, so no other thread enqueues work into a capture, and non-blocking,
-    // as the shim requires.
-    AOTI_RUNTIME_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&capture_stream_, cudaStreamNonBlocking));
-    AOTI_RUNTIME_CUDA_CHECK(
-        cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
-    AOTI_RUNTIME_CUDA_CHECK(
-        cudaEventCreateWithFlags(&last_replay_, cudaEventDisableTiming));
+    try {
+      // Owned, so no other thread enqueues work into a capture, and
+      // non-blocking, as the shim requires.
+      AOTI_RUNTIME_CUDA_CHECK(
+          cudaStreamCreateWithFlags(&capture_stream_, cudaStreamNonBlocking));
+      AOTI_RUNTIME_CUDA_CHECK(
+          cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
+      AOTI_RUNTIME_CUDA_CHECK(
+          cudaEventCreateWithFlags(&last_replay_, cudaEventDisableTiming));
+    } catch (...) {
+      destroy_cuda_objects();
+      throw;
+    }
   }
 
   ~CudaGraphManager() {
-    AOTICudaGuard device_guard(device_index_);
-    if (pool_) {
-      // The last replay may still be running on the caller's stream, and
-      // deleting the pool returns its memory to the device.
-      cudaError_t code = cudaEventSynchronize(last_replay_);
-      if (code != cudaSuccess) {
-        std::cerr << "CudaGraphManager: " << cudaGetErrorString(code) << '\n';
+    try {
+      AOTICudaGuard device_guard(device_index_);
+      if (pool_) {
+        // The last replay may still be running on the caller's stream, and
+        // deleting the pool returns its memory to the device.
+        cudaError_t code = cudaEventSynchronize(last_replay_);
+        if (code != cudaSuccess) {
+          std::cerr << "CudaGraphManager: " << cudaGetErrorString(code) << '\n';
+        }
       }
+      graphs_.clear();
+      pool_.reset();
+      destroy_cuda_objects();
+    } catch (const std::exception& e) {
+      std::cerr << "CudaGraphManager: " << e.what() << '\n';
     }
-    graphs_.clear();
-    pool_.reset();
-    (void)cudaEventDestroy(last_replay_);
-    (void)cudaEventDestroy(event_);
-    (void)cudaStreamDestroy(capture_stream_);
   }
 
   CudaGraphManager(const CudaGraphManager&) = delete;
@@ -100,8 +102,11 @@ class CudaGraphManager {
   // manager serves one fn with a fixed number of outputs. fn borrows `inputs`,
   // writes new references into `outputs`, enqueues all its GPU work on
   // `stream`, and must not mutate its inputs: a replay would only mutate the
-  // graph's copies. Replayed outputs never alias the inputs, nor each other
-  // unless fn wrote the same handle twice.
+  // graph's copies. fn may also see views over the graph's buffers, at other
+  // storage offsets than the caller's inputs, and must not use random numbers:
+  // replays advance the generator without its lock. Each output slot gets its
+  // own handle; replayed outputs never alias the inputs, nor each other unless
+  // fn wrote the same handle twice.
   template <typename Fn>
   void run(
       Fn&& fn,
@@ -131,6 +136,10 @@ class CudaGraphManager {
         run_eagerly(fn, inputs, outputs, num_outputs, stream);
         return;
       }
+      if (capture_failures_ >= kMaxCaptureFailures) {
+        run_eagerly(fn, inputs, outputs, num_outputs, stream);
+        return;
+      }
       if (warmup_counts_.size() >= kMaxWarmupKeys &&
           warmup_counts_.count(key) == 0) {
         warmup_counts_.clear();
@@ -149,11 +158,16 @@ class CudaGraphManager {
         graph = capture(fn, inputs, num_inputs, num_outputs, stream);
       } catch (const std::exception& e) {
         // A failed capture ran nothing, so run eagerly; an error here is the
-        // caller's.
+        // caller's. Without graphs, the pool only holds the failed capture's
+        // memory.
+        if (graphs_.empty()) {
+          release_pool();
+        }
         run_eagerly(fn, inputs, outputs, num_outputs, stream);
         mark_uncapturable(std::move(key), e.what());
         return;
       }
+      capture_failures_ = 0;
       it = graphs_.emplace(std::move(key), std::move(graph)).first;
     }
     replay(*it->second, inputs, outputs, num_outputs, stream);
@@ -165,8 +179,10 @@ class CudaGraphManager {
     // The last replay may still be using the graphs' buffers.
     AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
     graphs_.clear();
+    release_pool();
     warmup_counts_.clear();
     uncapturable_.clear();
+    capture_failures_ = 0;
   }
 
   size_t num_graphs() {
@@ -174,19 +190,14 @@ class CudaGraphManager {
     return graphs_.size();
   }
 
-  // Caps the keys and threads remembered for warm-up and failed captures,
-  // so one-off shapes or threads can't grow the manager without bound.
+  // Caps the keys and threads remembered for warm-up, so one-off shapes or
+  // threads can't grow the manager without bound. Failed captures are bounded
+  // by kMaxCaptureFailures per successful one.
   static constexpr size_t kMaxWarmupKeys = 1024;
+  static constexpr int kMaxCaptureFailures = 8;
 
  private:
   static constexpr size_t kNoOutput = std::numeric_limits<size_t>::max();
-
-  std::unique_lock<std::mutex> lock_captures() {
-    if (options_.capture_mutex == nullptr) {
-      return {};
-    }
-    return std::unique_lock<std::mutex>(*options_.capture_mutex);
-  }
 
   static CudaGraphOptions checked(const CudaGraphOptions& options) {
     AOTI_RUNTIME_CHECK(
@@ -318,8 +329,8 @@ class CudaGraphManager {
         sources.push_back(block);
       }
       auto n = static_cast<int64_t>(sources.size());
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__foreach_copy_(
-          group.destinations.data(), n, sources.data(), n, 0));
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_foreach_copy_(
+          group.destinations.data(), sources.data(), n));
     }
     for (size_t i : graph.elementwise_inputs) {
       AOTI_TORCH_ERROR_CODE_CHECK(
@@ -360,15 +371,17 @@ class CudaGraphManager {
       size_t num_outputs,
       cudaStream_t stream,
       bool warmup = false) {
-    // Warm-up and first calls may create library handles; see
-    // CudaGraphOptions::capture_mutex.
-    std::unique_lock<std::mutex> capture_lock;
-    if (warmup || warm_threads_.count(thread_token()) == 0) {
-      capture_lock = lock_captures();
-    }
     std::fill(outputs, outputs + num_outputs, nullptr);
     try {
       fn(inputs, outputs, stream);
+      // Each slot gets its own handle, as after a replay.
+      for (size_t i = 1; i < num_outputs; ++i) {
+        if (outputs[i] != nullptr &&
+            std::find(outputs, outputs + i, outputs[i]) != outputs + i) {
+          AOTI_TORCH_ERROR_CODE_CHECK(
+              aoti_torch_new_tensor_handle(outputs[i], &outputs[i]));
+        }
+      }
     } catch (...) {
       delete_outputs(outputs, num_outputs);
       throw;
@@ -381,18 +394,45 @@ class CudaGraphManager {
   }
 
   void mark_uncapturable(std::vector<int64_t> key, const char* error) {
-    if (uncapturable_.size() >= kMaxWarmupKeys) {
-      uncapturable_.clear();
-    }
     uncapturable_.insert(std::move(key));
-    std::string reason(error);
-    reason = reason.substr(0, reason.find('\n'));
-    std::string msg =
-        "AOTInductor CUDA graphs: capturing failed, so calls with these input "
-        "shapes run eagerly: " +
-        reason;
+    ++capture_failures_;
+    std::string msg;
+    if (capture_failures_ == kMaxCaptureFailures) {
+      msg = "AOTInductor CUDA graphs: capturing failed " +
+          std::to_string(kMaxCaptureFailures) +
+          " times in a row, so calls with new input shapes run eagerly too";
+    } else if (!warned_capture_failure_) {
+      warned_capture_failure_ = true;
+      std::string reason(error);
+      msg =
+          "AOTInductor CUDA graphs: capturing failed, so calls with these "
+          "input shapes run eagerly: " +
+          reason.substr(0, reason.find('\n'));
+    } else {
+      return;
+    }
     aoti_torch_warn(
         __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
+  }
+
+  // Deleting the pool returns its memory to the device.
+  void release_pool() {
+    if (pool_) {
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
+      pool_.reset();
+    }
+  }
+
+  void destroy_cuda_objects() {
+    if (last_replay_ != nullptr) {
+      (void)cudaEventDestroy(last_replay_);
+    }
+    if (event_ != nullptr) {
+      (void)cudaEventDestroy(event_);
+    }
+    if (capture_stream_ != nullptr) {
+      (void)cudaStreamDestroy(capture_stream_);
+    }
   }
 
   void warn_max_graphs() {
@@ -456,14 +496,9 @@ class CudaGraphManager {
       size_t num_inputs,
       size_t num_outputs,
       cudaStream_t stream) {
-    auto capture_lock = lock_captures();
     // A pool can't take a capture once every graph captured into it is gone.
     if (graphs_.empty()) {
-      if (pool_) {
-        // Deleting the pool returns its memory to the device.
-        AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
-        pool_.reset();
-      }
+      release_pool();
       CUDAMemPoolHandle pool = nullptr;
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_create_cuda_mem_pool(device_index_, &pool));
@@ -592,6 +627,8 @@ class CudaGraphManager {
       delete_cuda_mem_pool};
   std::mutex mutex_;
   bool warned_max_graphs_ = false;
+  bool warned_capture_failure_ = false;
+  int capture_failures_ = 0;
   std::map<std::vector<int64_t>, int64_t> warmup_counts_;
   std::set<std::vector<int64_t>> uncapturable_;
   std::set<uint64_t> warm_threads_;
