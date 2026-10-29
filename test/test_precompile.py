@@ -10027,6 +10027,20 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn("_ensure_cusparselt_mm_registered()", message)
         self.assertNotIn("set_python_module", message)
 
+        ops = [
+            ("semi_structured::cusparselt_mm", ""),
+            ("semi_structured::cutlass_mm", ""),
+        ]
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            self.assertEqual(_custom_op_modules(ops), ((), ()))
+        cusparselt, cutlass = logs.output
+        self.assertIn("semi_structured::cusparselt_mm,", cusparselt)
+        self.assertIn("_ensure_cusparselt_mm_registered() runs", cusparselt)
+        self.assertNotIn("cutlass", cusparselt)
+        self.assertIn("semi_structured::cutlass_mm,", cutlass)
+        self.assertIn("_ensure_cutlass_mm_registered() runs", cutlass)
+        self.assertNotIn("cusparselt", cutlass)
+
     def test_a_prim_a_lazy_module_defines_is_imported_and_checked(self):
         from torch._functorch._aot_autograd.codegen import PySourceBuilder
         from torch._precompile import (
