@@ -14,6 +14,7 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
+import torch
 import torch.distributed as dist
 
 from . import config
@@ -21,6 +22,7 @@ from . import config
 
 _COMPILE_PG: dist.ProcessGroup | None = None
 _GUARD_PG: dist.ProcessGroup | None = None
+_COMPILE_SYNC_PG: dist.ProcessGroup | None = None
 
 
 def get_compile_pg() -> dist.ProcessGroup | None:
@@ -31,7 +33,6 @@ def get_compile_pg() -> dist.ProcessGroup | None:
     ):
         global _COMPILE_PG
         if _COMPILE_PG is None:
-            # , timeout=datetime.timedelta(seconds=2)
             compile_pg = dist.distributed_c10d._new_group_with_tag(
                 pg_tag="pt2_compile_pg"
             )
@@ -54,5 +55,92 @@ def get_guard_pg() -> dist.ProcessGroup | None:
                 raise AssertionError("Guard process group must include all ranks")
             _GUARD_PG = guard_pg
         return _GUARD_PG
+
+    return None
+
+
+def _default_device_backends() -> dict[str, str]:
+    """The default group's backend for each device type."""
+    return dist.BackendConfig(dist.get_backend_config()).get_device_backend_map()
+
+
+def _compile_sync_backend(device_backends: dict[str, str]) -> str | None:
+    """The backend get_compile_sync_pg builds its group on, given the default group's
+    ``device_backends``, or None in a real world without gloo."""
+    # Every backend fake: no rank has a real peer to rendezvous with.
+    if all(backend == dist.Backend.FAKE for backend in device_backends.values()):
+        return dist.Backend.FAKE
+    if dist.is_gloo_available():
+        return dist.Backend.GLOO
+    return None
+
+
+def _compile_sync_pg_available() -> bool:
+    """With an initialized default group, whether get_compile_sync_pg returns a
+    group rather than raising."""
+    if _COMPILE_SYNC_PG is not None:
+        return True
+    return _compile_sync_backend(_default_device_backends()) is not None
+
+
+# NB: Like get_guard_pg, this is only called when the caller explicitly asked for
+# compile time synchronization.
+def get_compile_sync_pg() -> dist.ProcessGroup | None:
+    """
+    Process group for collectives issued from inside the compiler itself, e.g. the
+    partitioner's cross rank decision sync.
+
+    These must not share a process group with the model's runtime collectives: ranks
+    reach a given compile at different times, so a rank that has already resumed
+    execution can otherwise match one of its runtime ops against another rank's
+    compile time op. We thus require gloo as the backend. Gloo keeps the traffic off
+    the accelerator as well, so a compile time collective can't interleave with
+    an in flight NCCL op.
+
+    The exception is a fake default group, where one real rank stands in for the
+    whole world and has no peers to rendezvous with over gloo. Its sync group is
+    fake as well, so every compile time collective returns the local value: fake
+    allgather copies the input into every output slot and MIN/MAX all_reduce leave
+    it unchanged, which makes each decision the local one.
+    """
+    if dist.is_available() and dist.is_initialized():
+        global _COMPILE_SYNC_PG
+        if _COMPILE_SYNC_PG is None:
+            backends = _default_device_backends()
+            backend = _compile_sync_backend(backends)
+            if backend is None:
+                # No fallback: per above, the accelerator backend would let a compile
+                # time collective match a runtime one.
+                raise RuntimeError(
+                    "Compile time cross rank synchronization requires the gloo "
+                    "backend, which this build of PyTorch does not have. Either "
+                    "build with gloo, or turn off "
+                    "torch._functorch.config._sync_decision_cross_ranks and "
+                    "torch._functorch.config._sync_cache_decision_cross_ranks."
+                )
+            # Left to itself, _new_group_with_tag picks the global default_pg_timeout
+            # constant rather than the timeout init_process_group was configured with.
+            default_pg = dist.distributed_c10d._get_default_group()
+            coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
+            # A fake backend does not keep the configured timeout, so read it from
+            # a real one, the object-collective device's first (cuda's in
+            # cpu:fake,cuda:nccl).
+            timeout = None
+            for device in sorted(backends, key=lambda d: d != coll_device):
+                if backends[device] == dist.Backend.FAKE:
+                    continue
+                options = default_pg._get_backend(torch.device(device)).options
+                if options is not None:
+                    timeout = options._timeout
+                    break
+            compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
+                backend=backend, timeout=timeout, pg_tag="pt2_compile_sync_pg"
+            )
+            if compile_sync_pg == dist.GroupMember.NON_GROUP_MEMBER:
+                raise AssertionError(
+                    "Compile sync process group must include all ranks"
+                )
+            _COMPILE_SYNC_PG = compile_sync_pg
+        return _COMPILE_SYNC_PG
 
     return None

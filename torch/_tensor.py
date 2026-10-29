@@ -603,10 +603,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (Sequence[Tensor] or dict[str, Tensor], optional): Inputs w.r.t. which
+            inputs (Sequence[Tensor] or Mapping[str, Tensor], optional): Inputs w.r.t. which
                 the gradient will be accumulated into ``.grad``. All other tensors will be
                 ignored. If not provided, the gradient is accumulated into all the leaf
-                Tensors that were used to compute the :attr:`tensors`. A dict of tensors
+                Tensors that were used to compute the :attr:`tensors`. A mapping of tensors
                 (e.g. ``dict(model.named_parameters())``) is also accepted.
                 Defaults to ``None``.
         """
@@ -691,6 +691,8 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError(
                 "cannot register a hook on a tensor that doesn't require gradient"
             )
+        # Accessing grad_fn refreshes a stale view before creating its hook dict.
+        _ = self.grad_fn
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
@@ -1146,7 +1148,14 @@ class Tensor(torch._C.TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
+        # A cpp fake tensor's exact type is Tensor, so it needs its own check to
+        # stay out of the .item() path below.
+        if (
+            self.dim() == 0
+            and not self.is_meta
+            and type(self) is Tensor
+            and not torch._C._is_fake_tensor(self)
+        ):
             # Use detach() here to avoid the warning when converting a scalar Tensor that
             # requires gradients to a python number. It is ok for formatting.
             return self.detach().item().__format__(format_spec)
@@ -1566,7 +1575,7 @@ class Tensor(torch._C.TensorBase):
             stream (integer or None): An optional Python integer representing a
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this make it safe to access from
+                shares its storage with the tensor this makes it safe to access from
                 both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack
@@ -1616,6 +1625,8 @@ class Tensor(torch._C.TensorBase):
                 "Can't export tensors with layout other than torch.strided"
             )
 
+        # CUDA stream synchronization below uses the current CUDA device,
+        # rather than the device of the tensor being exported.
         if (
             self.device.type == "cuda"
             and self.device.index != torch.cuda.current_device()

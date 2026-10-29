@@ -1,12 +1,10 @@
 // See Note [BatchLinearAlgebraLib split implementation files]
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
@@ -21,6 +19,8 @@
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/linalg_svd.h>
+#include <ATen/ops/linalg_svdvals.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/scalar_tensor.h>
@@ -640,6 +640,100 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
   return std::move(ss).str();
 }
 
+#ifdef USE_ROCM
+// rocSOLVER's gesvdj diagonalizes A^H A, which squares the condition number, so singular values
+// much smaller than sqrt(eps) * S_max come back inaccurate. Recompute the matrices where gesvdj
+// found such a singular value: single precision in double precision (still gesvdj, whose error
+// there is far below float eps), double precision with gesvd, which bidiagonalizes A directly.
+template <typename scalar_t>
+static void apply_svd_rocsolver_ill_conditioned(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+  const Tensor& infos, bool full_matrices, bool compute_uv) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+  const auto k = std::min(m, n);
+
+  // Smallest S_min / S_max at which gesvdj's singular values stay within ~5x of gesvd's error (measured for n <= 128)
+  const value_t tol = (std::is_same_v<value_t, float> ? 2 : 32) * std::sqrt(std::numeric_limits<value_t>::epsilon());
+  const Tensor S_flat = S.view({-1, k});
+  const Tensor idx = S_flat.select(-1, k - 1).lt(S_flat.select(-1, 0).mul(tol)).nonzero().squeeze(-1);
+  const int batch_count = cuda_int_cast(idx.numel(), "batch count");
+  if (batch_count == 0) {
+    return;
+  }
+  const auto u_cols = full_matrices ? m : k;
+  const auto vh_rows = full_matrices ? n : k;
+  const Tensor A_sub = A.reshape({-1, m, n}).index_select(0, idx);
+  Tensor S_sub, U_sub, V_sub;
+
+  if constexpr (std::is_same_v<value_t, float>) {
+    const auto A_double = A_sub.to(A.is_complex() ? kComplexDouble : kDouble);
+    if (compute_uv) {
+      const auto [U_double, S_double, Vh_double] = at::linalg_svd(A_double, full_matrices);
+      U_sub = U_double.to(A.scalar_type());
+      S_sub = S_double.to(S.scalar_type());
+      V_sub = Vh_double.mH().to(A.scalar_type());
+    } else {
+      S_sub = at::linalg_svdvals(A_double).to(S.scalar_type());
+    }
+    infos.view(-1).index_fill_(0, idx, 0);
+  } else {
+    using rocsolver_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, rocblas_double_complex>;
+    const Tensor A_colmajor = cloneBatchedColumnMajor(A_sub);
+    S_sub = S.new_empty({batch_count, k});
+    const Tensor E = S.new_empty({batch_count, k});
+    const Tensor infos_sub = infos.new_empty({batch_count});
+    // F-contig U and Vh
+    U_sub = compute_uv ? A.new_empty({batch_count, u_cols, m}).mT() : Tensor{};
+    const Tensor Vh_sub = compute_uv ? A.new_empty({batch_count, n, vh_rows}).mT() : Tensor{};
+    const auto svect = !compute_uv ? rocblas_svect_none : (full_matrices ? rocblas_svect_all : rocblas_svect_singular);
+
+    auto handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
+    if (!rocblas_is_managing_device_memory(handle)) {
+      TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
+    }
+    const int mi = cuda_int_cast(m, "m");
+    const int ldvh = std::max<int>(1, vh_rows);
+    auto A_ptr = reinterpret_cast<rocsolver_t*>(A_colmajor.data_ptr<scalar_t>());
+    auto U_ptr = compute_uv ? reinterpret_cast<rocsolver_t*>(U_sub.data_ptr<scalar_t>()) : nullptr;
+    auto Vh_ptr = compute_uv ? reinterpret_cast<rocsolver_t*>(Vh_sub.data_ptr<scalar_t>()) : nullptr;
+    auto S_ptr = S_sub.data_ptr<value_t>();
+    auto E_ptr = E.data_ptr<value_t>();
+    auto infos_ptr = infos_sub.data_ptr<int>();
+    const auto gesvd = [&](auto fn) {
+      return fn(handle, svect, svect, mi, cuda_int_cast(n, "n"), A_ptr, std::max(1, mi), m * n, S_ptr, k,
+                U_ptr, std::max(1, mi), m * u_cols, Vh_ptr, ldvh, vh_rows * n, E_ptr, k, rocblas_outofplace, infos_ptr, batch_count);
+    };
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      TORCH_ROCBLAS_CHECK(gesvd(rocsolver_dgesvd_strided_batched));
+    } else {
+      TORCH_ROCBLAS_CHECK(gesvd(rocsolver_zgesvd_strided_batched));
+    }
+    // gesvd can fail to converge where gesvdj did not; keep gesvdj's result for those matrices
+    const Tensor converged = infos_sub.eq(0);
+    infos.view(-1).index_copy_(0, idx, at::where(converged, 0, infos.view(-1).index_select(0, idx)));
+    S_sub = at::where(converged.unsqueeze(-1), S_sub, S_flat.index_select(0, idx));
+    if (compute_uv) {
+      U_sub = at::where(converged.view({-1, 1, 1}), U_sub, U.view({-1, m, u_cols}).index_select(0, idx));
+      V_sub = at::where(converged.view({-1, 1, 1}), Vh_sub.mH(), V.view({-1, n, vh_rows}).index_select(0, idx));
+    }
+  }
+
+  S_flat.index_copy_(0, idx, S_sub);
+  if (compute_uv) {
+    U.view({-1, m, u_cols}).index_copy_(0, idx, U_sub);
+    V.view({-1, n, vh_rows}).index_copy_(0, idx, V_sub.resolve_conj());
+  }
+}
+
+static void svd_rocsolver_ill_conditioned(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+  const Tensor& infos, bool full_matrices, bool compute_uv) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_rocsolver_ill_conditioned", [&] {
+    apply_svd_rocsolver_ill_conditioned<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
+  });
+}
+#endif // USE_ROCM
+
 // This function returns V, not V^H.
 void svd_cusolver(const Tensor& A,
                   const bool full_matrices,
@@ -675,6 +769,9 @@ void svd_cusolver(const Tensor& A,
       // gesvdj driver may be numerically unstable for large sized matrix
       svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
     }
+#ifdef USE_ROCM
+    svd_rocsolver_ill_conditioned(A, U, S, V, info, full_matrices, compute_uv);
+#endif
   } else if (driver_v == "gesvda") {
     // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" (m > n) matrices
     // We do a transpose here to make it also work for (m < n) matrices.
@@ -791,11 +888,17 @@ static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy
 
   // cusolver batched kernels require input be "device array of device pointers"
   Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
+  auto self_working_copy_array_ptr = reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr());
+  auto infos_ptr = infos.data_ptr<int>();
 
-  at::cuda::solver::potrfBatched<scalar_t>(
-    handle, uplo, n,
-    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
-    lda, infos.data_ptr<int>(), batch_size);
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrfBatched<scalar_t>(
+      handle, uplo, n,
+      &self_working_copy_array_ptr[mini_idx],
+      lda, &infos_ptr[mini_idx], cur_batch_size);
+  }
 }
 
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
@@ -895,18 +998,24 @@ static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, cons
 
   auto self_ptr_array = get_device_pointers<scalar_t>(self_working_copy);
   auto A_ptr_array = get_device_pointers<scalar_t>(A_column_major_copy);
+  auto self_ptr_array_data = reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr());
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
 
-  at::cuda::solver::potrsBatched(
-    handle, uplo,
-    cuda_int_cast(n, "n"),
-    cuda_int_cast(nrhs, "nrhs"),
-    reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr()),
-    cuda_int_cast(lda, "lda"),
-    reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr()),
-    cuda_int_cast(ldb, "ldb"),
-    infos_ptr,
-    cuda_int_cast(batch_size, "batch_size")
-  );
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrsBatched(
+      handle, uplo,
+      cuda_int_cast(n, "n"),
+      cuda_int_cast(nrhs, "nrhs"),
+      &A_ptr_array_data[mini_idx],
+      cuda_int_cast(lda, "lda"),
+      &self_ptr_array_data[mini_idx],
+      cuda_int_cast(ldb, "ldb"),
+      infos_ptr,
+      cur_batch_size
+    );
+  }
 }
 
 void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper) {
@@ -1284,25 +1393,52 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
 
   rocblas_handle handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
 
-  // rocsolver will manage the workspace size automatically
-   if(!rocblas_is_managing_device_memory(handle))
-        TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
+  auto run_syevd = [&] {
+    return _rocsolver_syevd_strided_batched<scalar_t>(
+        handle,
+        evect,
+        uplo,
+        n,
+        vectors_data,
+        lda,
+        vectors_stride,
+        values_data,
+        values_stride,
+        static_cast<scalar_t*>(work_data.get()),
+        work_stride,
+        infos_data,
+        batch_size);
+  };
 
-  TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
-    handle,
-    evect,
-    uplo,
-    n,
-    vectors_data,
-    lda,
-    vectors_stride,
-    values_data,
-    values_stride,
-    static_cast<scalar_t*>(work_data.get()),
-    work_stride,
-    infos_data,
-    batch_size
-  ));
+  TORCH_ROCBLAS_CHECK(rocblas_start_device_memory_size_query(handle));
+  auto query_status = run_syevd();
+  size_t workspace_size = 0;
+  TORCH_ROCBLAS_CHECK(
+      rocblas_stop_device_memory_size_query(handle, &workspace_size));
+  TORCH_CHECK(
+      query_status == rocblas_status_success ||
+          query_status == rocblas_status_size_increased ||
+          query_status == rocblas_status_size_unchanged,
+      "rocblas error: ",
+      rocblas_status_to_string(query_status),
+      " when querying workspace for rocsolver syevd");
+
+  // The query accumulator starts at 0, so size_increased does not mean the
+  // installed workspace is too small. Bind whenever this call needs memory.
+  c10::DataPtr workspace;
+  if (workspace_size > 0) {
+    workspace = allocator.allocate(workspace_size);
+    TORCH_ROCBLAS_CHECK(
+        rocblas_set_workspace(handle, workspace.get(), workspace_size));
+  }
+  auto status = run_syevd();
+  rocblas_status reset_status = rocblas_status_success;
+  if (workspace_size > 0) {
+    // Drop the user pointer before its DataPtr is freed.
+    reset_status = rocblas_set_workspace(handle, nullptr, 0);
+  }
+  TORCH_ROCBLAS_CHECK(status);
+  TORCH_ROCBLAS_CHECK(reset_status);
 }
 #endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 

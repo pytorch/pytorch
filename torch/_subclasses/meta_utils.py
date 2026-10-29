@@ -827,14 +827,20 @@ class MetaTensorDesc(Generic[_TensorT]):
 # FakeTensor as src, we MUST NOT run the copy/clone operation.  A better way
 # to do this would be to not use no_dispatch and instead just disable fake
 # tensor mode only (allowing for subclass dispatch to occur)
+# A cpp fake is a plain torch.Tensor (not a subclass), so the type check alone
+# misses it; is_fake_tensor catches both Python and cpp fakes.
 def _safe_copy(dst: torch.Tensor, src: torch.Tensor | None) -> None:
-    if type(src) is not torch.Tensor:
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
+    if type(src) is not torch.Tensor or is_fake_tensor(src):
         return
     dst.copy_(src)
 
 
 def _safe_clone(src: torch.Tensor) -> torch.Tensor | None:
-    if type(src) is not torch.Tensor:
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
+    if type(src) is not torch.Tensor or is_fake_tensor(src):
         return None
     return src.clone()
 
@@ -1085,7 +1091,13 @@ class MetaConverter(Generic[_TensorT]):
         source: Source | None,
         symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
-        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_real_tensor
+        from torch._subclasses.fake_tensor import (
+            is_fake_tensor,
+            maybe_get_fake_mode,
+            maybe_get_real_tensor,
+            maybe_set_fake_device,
+            maybe_set_real_tensor,
+        )
 
         callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
             callback_, device=t.device
@@ -1596,8 +1608,7 @@ class MetaConverter(Generic[_TensorT]):
                         with torch.no_grad(), no_dispatch():
                             if not is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[missing-attribute]
-                            r.real_tensor = _safe_clone(t.data)
+                            maybe_set_real_tensor(r, _safe_clone(t.data))
                     if not safe_is_leaf(r):
                         raise AssertionError(
                             "the callback you passed in doesn't detach"
@@ -1672,8 +1683,7 @@ class MetaConverter(Generic[_TensorT]):
                         with torch.no_grad(), no_dispatch():
                             if not is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[missing-attribute]
-                            r.real_tensor = _safe_clone(t.data)
+                            maybe_set_real_tensor(r, _safe_clone(t.data))
                     if not safe_is_leaf(r):
                         raise AssertionError(
                             "the callback you passed in doesn't detach"
@@ -1724,8 +1734,7 @@ class MetaConverter(Generic[_TensorT]):
                             real_tensor = torch.empty_strided(
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
-                            # pyrefly: ignore[missing-attribute]
-                            r.real_tensor = real_tensor
+                            maybe_set_real_tensor(r, real_tensor)
                             if t.data is None:
                                 raise AssertionError(
                                     "t.data must not be None when copy_data is True"
@@ -1851,17 +1860,18 @@ class MetaConverter(Generic[_TensorT]):
                             )
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
-                                    r.real_tensor = torch.empty_strided(  # type: ignore[attr-defined]
+                                    real_tensor = torch.empty_strided(
                                         t.size,
                                         t.stride,
                                         dtype=t.dtype,
                                         device=t.device,
                                     )
+                                    maybe_set_real_tensor(r, real_tensor)
                                     if t.data is None:
                                         raise AssertionError(
                                             "t.data must not be None when copy_data is True"
                                         )
-                                    _safe_copy(r.real_tensor, t.data)  # type: ignore[attr-defined]
+                                    _safe_copy(real_tensor, t.data)
                         # pyrefly: ignore [bad-return]
                         return r
 
@@ -2026,7 +2036,7 @@ class MetaConverter(Generic[_TensorT]):
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
                         )
 
-                    r.fake_device = t.device  # type: ignore[attr-defined]
+                    maybe_set_fake_device(r, t.device)
 
                 else:
                     is_leaf = t.is_leaf
@@ -2077,8 +2087,7 @@ class MetaConverter(Generic[_TensorT]):
                                 real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
-                                # pyrefly: ignore[missing-attribute]
-                                r.real_tensor = real_tensor
+                                maybe_set_real_tensor(r, real_tensor)
                                 _safe_copy(real_tensor, t.data)
 
                     if not safe_is_leaf(r):
@@ -2224,7 +2233,6 @@ class MetaConverter(Generic[_TensorT]):
                             )
                             from torch._subclasses.fake_tensor import (
                                 in_kernel_invocation_manager,
-                                maybe_get_fake_mode,
                             )
 
                             mb_fake_mode = maybe_get_fake_mode(r)
@@ -2312,7 +2320,7 @@ class MetaConverter(Generic[_TensorT]):
                 if not is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
                 # pyrefly: ignore [unbound-name, missing-attribute]
-                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
+                r.nested_int_memo = maybe_get_fake_mode(r).create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
 

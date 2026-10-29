@@ -29,7 +29,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/native/IndexKernel.h>
-#include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_copy_native.h>
@@ -313,7 +312,10 @@ static inline const char* index_kernel_suffix(bool use_32bit_index) {
 static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
+  TORCH_CHECK(out_.scalar_type() == kLong,
+              max_elements ? "nonzero_static" : "nonzero",
+              ": Expected out tensor to have scalar type Long but got scalar type ",
+              out_.scalar_type());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
               out_.device(),
@@ -493,57 +495,57 @@ Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& re
   return mps::masked_select_out_mps_impl(result, self, mask);
 }
 
-Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
+static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
   using namespace mps;
 
-  Tensor result = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  auto total_dims = self.dim();
-  // It wraps the dims and checks that there are no repeated dims
-  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  NSMutableArray<NSNumber*>* ns_dims = [[NSMutableArray<NSNumber*> new] autorelease];
-
-  for (const auto i : c10::irange(total_dims)) {
-    if (flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
-      [ns_dims addObject:[NSNumber numberWithInt:i]];
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      flip_kernel_mps(sub_iter, quantized);
     }
+    return;
   }
 
-  // Nothing to do, we return fast
-  if (self.numel() <= 1 || ns_dims.count == 0) {
-    result.copy_(self);
-    return result;
+  const auto input = iter.input(0);
+  const auto ndim = safe_downcast<uint32_t, int64_t>(iter.ndim());
+  const bool use_direct_grid = ndim > 0 && ndim <= 3;
+  const auto bit_size = getBitSizeString(input);
+  const auto kernel_name = use_direct_grid ? fmt::format("flip_direct_{}", bit_size) : fmt::format("flip_{}", bit_size);
+  const auto pipeline_state = lib.getPipelineStateForFunc(kernel_name);
+  const auto metadata_ndim = std::max<uint32_t>(ndim, 3);
+  c10::SmallVector<uint32_t> sizes(metadata_ndim);
+  c10::SmallVector<int32_t> output_strides(metadata_ndim);
+  c10::SmallVector<int32_t> input_strides(metadata_ndim);
+  for (const auto dim : c10::irange(ndim)) {
+    sizes[dim] = static_cast<uint32_t>(iter.shape()[dim]);
+    output_strides[dim] = static_cast<int32_t>(iter.strides(0)[dim]);
+    input_strides[dim] = static_cast<int32_t>(iter.strides(1)[dim]);
   }
 
-  MPSStream* stream = getCurrentMPSStream();
-
-  using CachedGraph = mps::MPSUnaryCachedGraph;
-
-  MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
-  MPSDataType outputDataType = getMPSScalarType(self.scalar_type());
-  @autoreleasepool {
-    NSString* ns_dims_key = [[ns_dims valueForKey:@"description"] componentsJoinedByString:@","];
-    // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types
-    // etc match the earlier created MPSGraph
-    std::string key = "flip_mps:" + getTensorsStringKey({self}) + ":" + std::string([ns_dims_key UTF8String]);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
-      MPSGraphTensor* outputTensor = [mpsGraph reverseTensor:inputTensor axes:ns_dims name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
-    Placeholder inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/true, inputDataType);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, result, /*mpsShape*/ nil, /*gatherTensorData=*/false, outputDataType);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return result;
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto compute_encoder = stream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(pipeline_state, "flip", {input}, stream);
+      [compute_encoder setComputePipelineState:pipeline_state];
+      bind_iter_tensors(compute_encoder, iter, 2);
+      if (use_direct_grid) {
+        mtl_setArgs<2>(compute_encoder, output_strides, input_strides);
+        const auto grid_x = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto grid_y = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
+        const auto grid_z = ndim > 2 ? static_cast<NSUInteger>(iter.shape()[2]) : 1;
+        const auto max_threads = [pipeline_state maxTotalThreadsPerThreadgroup];
+        const auto tg_x = std::min(grid_x, max_threads);
+        const auto tg_y = std::min(grid_y, max_threads / tg_x);
+        const auto tg_z = std::clamp(grid_z, 1UL, max_threads / (tg_x * tg_y));
+        [compute_encoder dispatchThreads:MTLSizeMake(grid_x, grid_y, grid_z)
+                   threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+      } else {
+        mtl_setArgs<2>(compute_encoder, sizes, output_strides, input_strides, ndim);
+        mtl_dispatch1DJob(compute_encoder, pipeline_state, iter.numel());
+      }
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
+    }
+  });
 }
 
 // Validate index in [0, dim_size) once (one thread per index) on the given
@@ -861,14 +863,17 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
-  // Atomic prod/mean are non-associative for floating-point; alert unless we're
-  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
-  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
-  // actually produce non-deterministic output on MPS.
-  const auto dtype = self.scalar_type();
-  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
-      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
-    at::globalContext().alertNotDeterministic("index_reduce_mps");
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms() &&
+      !c10::isIntegralType(result.scalar_type(), /*includeBool=*/true) &&
+      (reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN);
+  if (serial && (self.scalar_type() != kFloat || index.scalar_type() != kLong)) {
+    result.copy_(self.to(kFloat).index_reduce(dim, index.to(kLong), source.to(kFloat), reduce, include_self));
+    return;
   }
 
   if (!result.is_same(self)) {
@@ -901,12 +906,18 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   MPSStream* stream = getCurrentMPSStream();
 
   auto num_threads = source.numel();
+  if (num_threads > 0 && serial) {
+    num_threads /= source.size(dim);
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format("index_reduce_{}_{}_{}{}",
+                                                                         reduce,
+                                                                         mps::scalarToMetalTypeString(result),
+                                                                         mps::scalarToMetalTypeString(index),
+                                                                         serial ? "_serial" : ""));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(compute_encoder, result, index, source, params);
@@ -1229,6 +1240,7 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
 REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
+REGISTER_DISPATCH(flip_stub, &flip_kernel_mps)
 REGISTER_DISPATCH(put_stub, &put_kernel_mps)
 REGISTER_DISPATCH(take_stub, &take_kernel_mps)
 } // namespace at::native
