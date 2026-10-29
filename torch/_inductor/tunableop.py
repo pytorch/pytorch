@@ -48,18 +48,18 @@ _mode_warned = False
 def _mode() -> str:
     """The configured mode, warning once on values that silently mean "off".
 
-    TORCHINDUCTOR_ATEN_TUNABLEOP_MODE is taken as given, so an unknown value
+    TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE is taken as given, so an unknown value
     like "on" would otherwise disable both passes with no signal.
     """
     global _mode_warned
-    configured = config.cuda.aten_tunableop_mode
+    configured = config.cuda.autotune_tunableop_mode
     # Normalized here, not at the env read, so a value set on the config is
     # covered too.
     mode = configured.lower()
     if mode not in _valid_modes and not _mode_warned:
         _mode_warned = True
         log.warning(
-            "Unknown TORCHINDUCTOR_ATEN_TUNABLEOP_MODE=%r (expected one of %s); "
+            "Unknown TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE=%r (expected one of %s); "
             'treating as "off"',
             configured,
             ", ".join(_valid_modes),
@@ -543,11 +543,14 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
 
     A hang or crash leaves the worker dead; the next submission restarts it and the
     restarted process re-reads the results file, so recorded solutions survive.
+    Results reach this process only through that file, which the parent's manager
+    reads once and lazily, on its first TunableOp GEMM: anything that initialises
+    the manager earlier misses rows the worker writes after that.
     Faults are reported rather than raised: a compile must continue even when a GEMM
     cannot be benchmarked.
     """
     if timeout is None:
-        timeout = config.cuda.aten_tunableop_timeout
+        timeout = config.cuda.autotune_tunableop_timeout
     try:
         # Inside the try: this reports faults rather than raising, and reading
         # the device can fail just as the benchmark can.
