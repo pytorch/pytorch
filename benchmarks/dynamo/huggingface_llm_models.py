@@ -288,6 +288,10 @@ def load_tensor_parallel_model(model_name, dtype, tp_size):
     return model
 
 
+# TextGenerationPrefillModel relies on StaticCache internals from this release.
+MIN_TRANSFORMERS_VERSION = "5.14.1"
+
+
 class TextGenerationPrefillModel(torch.nn.Module):
     def __init__(self, model, batch_size, prompt_length, cache_capacity):
         super().__init__()
@@ -334,6 +338,8 @@ class TextGenerationPrefillModel(torch.nn.Module):
             )
             if config.model_type == "qwen3_5_text":
                 # KV early initialization skips the hybrid cache's linear layers.
+                # These tensors are shape templates: lazy_initialization allocates
+                # zeroed states for each layer.
                 key_dim = config.linear_num_key_heads * config.linear_key_head_dim
                 value_dim = config.linear_num_value_heads * config.linear_value_head_dim
                 conv_states = torch.empty(

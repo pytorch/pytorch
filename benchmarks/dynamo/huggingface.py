@@ -2,6 +2,7 @@
 # flake8: noqa: F821
 
 import importlib
+import importlib.metadata
 import logging
 import os
 import re
@@ -28,6 +29,8 @@ except ImportError:
         reset_rng_state,
         should_diff_branch,
     )
+
+from packaging.version import Version
 
 import torch
 from torch._dynamo.testing import collect_results
@@ -135,6 +138,7 @@ try:
     from .huggingface_llm_models import (
         HF_LLM_MODELS,
         INFERENCE_MODE_MODELS,
+        MIN_TRANSFORMERS_VERSION,
         TextGenerationBenchmark,
         TP_MODELS,
         WhisperBenchmark,
@@ -143,6 +147,7 @@ except ImportError:
     from huggingface_llm_models import (
         HF_LLM_MODELS,
         INFERENCE_MODE_MODELS,
+        MIN_TRANSFORMERS_VERSION,
         TextGenerationBenchmark,
         TP_MODELS,
         WhisperBenchmark,
@@ -438,6 +443,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             )
         if mode == "generate":
             return
+        installed = importlib.metadata.version("transformers")
+        if Version(installed) < Version(MIN_TRANSFORMERS_VERSION):
+            raise ValueError(
+                f"--hf-inference-mode={mode} requires "
+                f"transformers>={MIN_TRANSFORMERS_VERSION}, found {installed}"
+            )
         if args.prompt_length is not None and args.prompt_length <= 0:
             raise ValueError(
                 f"--prompt-length must be positive, got {args.prompt_length}"
@@ -663,6 +674,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
+        # --batch_size_file values reach here without passing validate_args.
         if self.args.hf_inference_mode != "generate" and batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
