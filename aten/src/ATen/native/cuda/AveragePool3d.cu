@@ -11,6 +11,7 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -261,11 +262,11 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
 
     scalar_t val = static_cast<scalar_t>(
       static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
-    for (int iFrame = tstart; iFrame < tend; ++iFrame)
+    for (const auto iFrame : c10::irange(tstart, tend))
     {
-      for (int iRow = hstart; iRow < hend; ++iRow)
+      for (const auto iRow : c10::irange(hstart, hend))
       {
-        for (int iCol = wstart; iCol < wend; ++iCol)
+        for (const auto iCol : c10::irange(wstart, wend))
         {
           const int64_t index = slice * gradInput.stride(0) + iFrame * gradInput.stride(1) + iRow * gradInput.stride(2) + iCol * gradInput.stride(3);
           fastAtomicAdd(gradInput.data(), index, gradInput_numel, val, true);
@@ -323,11 +324,11 @@ __global__ void avg_pool3d_cuda_update_grad_input(
 
     scalar_t val = static_cast<scalar_t>(
       static_cast<accscalar_t>(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
-    for (int iFrame = tstart; iFrame < tend; ++iFrame)
+    for (const auto iFrame : c10::irange(tstart, tend))
     {
-      for (int iRow = hstart; iRow < hend; ++iRow)
+      for (const auto iRow : c10::irange(hstart, hend))
       {
-        for (int iCol = wstart; iCol < wend; ++iCol)
+        for (const auto iCol : c10::irange(wstart, wend))
         {
           gradInput[slice][iFrame][iRow][iCol] = val;
         }

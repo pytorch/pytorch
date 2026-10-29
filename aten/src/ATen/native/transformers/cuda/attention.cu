@@ -76,6 +76,7 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
@@ -248,7 +249,7 @@ __global__ void transform_bias_rescale_qkv_kernel(
 
 #pragma unroll
       // TODO: specialize for float2half2/half2float2?
-      for (auto ii = 0; ii < VEC; ++ii) {
+      for (const auto ii : c10::irange(VEC)) {
         qkv_q[ii] = static_cast<scalar_t>(
             (static_cast<accscalar_t>(qkv_q[ii]) +
              static_cast<accscalar_t>(qkv_bias_q[ii])) *
@@ -361,7 +362,7 @@ __global__ void transform_bias_rescale_qkv_add_padding_kernel(
             *reinterpret_cast<const LoadT*>(&qkv[offset + 2 * D]);
 #pragma unroll
         // TODO: specialize for float2half2/half2float2?
-        for (auto ii = 0; ii < VEC; ++ii) {
+        for (const auto ii : c10::irange(VEC)) {
           qkv_q[ii] = static_cast<scalar_t>(
               (static_cast<accscalar_t>(qkv_q[ii]) +
                static_cast<accscalar_t>(qkv_bias_q[ii])) *
@@ -413,7 +414,7 @@ __global__ void transform_bias_rescale_qkv_add_padding_kernel(
         }
       } else {
 #pragma unroll
-        for (auto ii = 0; ii < VEC; ++ii) {
+        for (const auto ii : c10::irange(VEC)) {
           qkv_q[ii] = 0;
           qkv_k[ii] = 0;
           qkv_v[ii] = 0;
@@ -2168,7 +2169,7 @@ __global__ void rand_uniform_kernel(
     float4 rand_quad = curand_uniform4(&curand_state);
 
 #pragma unroll
-    for (int i = 0; i < 4; ++i) {
+    for (const auto i : c10::irange(4)) {
       const int64_t linear_idx = dropout_seq_start + query_start_idx + key_start_idx + i;
       if (linear_idx < mask_numel) {
         mask_out[linear_idx] = (&rand_quad.x)[i];

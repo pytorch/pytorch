@@ -1,6 +1,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <algorithm>
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace at::cuda::detail {
@@ -52,7 +53,7 @@ bool maybeOverlappingIndices(const TensorBase& t) {
   /* Ascending order (innermost dimension in sorted view is at [0]) */
   std::sort(info.begin(), info.begin() + nonSize1Dims);
 
-  for (int i = 0; i < (nonSize1Dims - 1); ++i) {
+  for (const auto i : c10::irange(nonSize1Dims - 1)) {
     if (((info[i].size - 1) * info[i].stride) >= info[i + 1].stride) {
       return true;
     }

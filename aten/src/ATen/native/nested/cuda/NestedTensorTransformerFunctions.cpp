@@ -18,6 +18,7 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 namespace {
@@ -172,7 +173,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       TORCH_CHECK(
           output_size_.size() == new_size.size(),
           "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
-      for (uint64_t i = 0; i < new_size.size(); i++) {
+      for (const auto i : c10::irange(new_size.size())) {
         TORCH_CHECK(
             output_size_[i] >= new_size[i],
             "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");

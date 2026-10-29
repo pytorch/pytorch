@@ -8,6 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -73,7 +74,7 @@ template <uint8_t bits_per_dim>
 __forceinline__ __device__ void
 accumulate_packed_intx(float4* acc, uint32_t packedVals, float2 scale_bias, float sample_weight) {
   constexpr uint8_t dims_per_byte = 8 / bits_per_dim;
-  for (uint8_t i = 0; i < dims_per_byte; i++) {
+  for (const auto i : c10::irange(dims_per_byte)) {
     float4 res = dequantize_intx<bits_per_dim>(packedVals, scale_bias, 4 * bits_per_dim * i /* offset_bits */);
     // Accumulate in float32.
     acc[i].x += (res.x * sample_weight);

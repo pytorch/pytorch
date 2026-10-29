@@ -13,6 +13,7 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -66,8 +67,8 @@ __global__ void upsample_bilinear2d_out_frame(
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
+    for (const auto n : c10::irange(batchsize)) {
+      for (const auto c : c10::irange(channels)) {
         const accscalar_t val = h0lambda *
                 (w0lambda * idata[n][c][h1][w1] +
                  w1lambda * idata[n][c][h1][w1 + w1p]) +
@@ -673,7 +674,7 @@ __global__ void upsample_gen2d_aa_out_frame(
     int n = i / channels;
     int c = i % channels;
     // interpolate on y-axis for ymin to ymin + ysize
-    for (int y = 0; y < ysize; y++) {
+    for (const auto y : c10::irange(ysize)) {
       buffer1 = &(idata[n][c][ymin + y][xmin]);
       buffer2[y] = static_cast<scalar_t>(
           upsample_antialias::interpolate_aa_single_dim<scalar_t, accscalar_t>(
@@ -774,8 +775,8 @@ __global__ void upsample_gen2d_aa_backward_out_frame(
     int n = i / channels;
     int c = i % channels;
     scalar_t out_value = odata[n][c][output_y][output_x];
-    for (int y = 0; y < ysize; y++) {
-      for (int x = 0; x < xsize; x++) {
+    for (const auto y : c10::irange(ysize)) {
+      for (const auto x : c10::irange(xsize)) {
         upsample_increment_value_bounded<scalar_t, accscalar_t>(
             idata,
             n,

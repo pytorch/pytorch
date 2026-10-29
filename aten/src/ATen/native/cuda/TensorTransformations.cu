@@ -15,6 +15,7 @@
 #include <ATen/ops/roll_native.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <cstddef>
 #include <vector>
 
@@ -61,12 +62,12 @@ __global__ void flip_cuda_kernel(
   }
 
   int64_t cur_indices = linear_index, rem = 0, dst_offset = 0;
-  for (int64_t i = 0; i < total_dims; i++) {
+  for (const auto i : c10::irange(total_dims)) {
     int64_t temp = cur_indices;
     cur_indices = cur_indices / strides_contiguous[i];
     rem = temp - cur_indices * strides_contiguous[i];
     // flip the indices if it is in flip_dims
-    for (int64_t j = 0; j < flip_dims_size; j++) {
+    for (const auto j : c10::irange(flip_dims_size)) {
       if (i == flip_dims[j]) {
         cur_indices = shape[i] - 1 - cur_indices;
       }

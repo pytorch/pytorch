@@ -37,6 +37,7 @@
 #include <thrust/functional.h>
 #include <thrust/execution_policy.h>
 
+#include <c10/util/irange.h>
 #include <library_types.h>
 
 namespace at::native {
@@ -469,7 +470,7 @@ void sparse_sparse_matmul_cuda_kernel(
         auto Ap = csr_output_pointers_accessor.data();
         int64_t* indices_row = output_indices_accessor[0].data();
 
-        for (int jj = Ap[i];  jj < Ap[i + 1]; jj++) {
+        for (const auto jj : c10::irange(Ap[i], Ap[i + 1])) {
           indices_row[jj] = i;
         }
       });

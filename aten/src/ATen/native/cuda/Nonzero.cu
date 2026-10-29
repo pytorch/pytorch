@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -116,7 +117,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
 
   int64_t remaining =  input_nelem - start_idx;
   int64_t out_remaining = output_nelem - aggregate;
-  for (int i=0; i<iters_per_cta; i++){
+  for ([[maybe_unused]] const auto _ : c10::irange(iters_per_cta)){
 
   // Load items into a blocked arrangement
     if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
@@ -144,7 +145,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
     BlockExchangeT(temp_storage.exchange).BlockedToStriped(data);
     __syncthreads();
     BlockExchangeT(temp_storage.exchange).BlockedToStriped(out_indices);
-    for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
+    for (const auto ii : c10::irange(ITEMS_PER_THREAD)){
       if (data[ii] != 0 && out_indices[ii] < out_remaining) {
         int64_t inp_idx = start_idx + threadIdx.x + blockDim.x * ii;
         d_out[out_indices[ii]] = inp_idx;
@@ -182,7 +183,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   size_t temp_storage_bytes = 0;
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int) * num_chunks);
-  for (int64_t idx = 0; idx < num_chunks; idx++) {
+  for (const auto idx : c10::irange(num_chunks)) {
     int64_t remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
     ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*) itr(
         self_.const_data_ptr<scalar_t>() + idx * chunk_size,
@@ -219,7 +220,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
       stream);
   int64_t num_nonzeros_h = 0;
 
-  for (int64_t idx = 0; idx < num_chunks; idx++) {
+  for (const auto idx : c10::irange(num_chunks)) {
     num_nonzeros_h += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
   }
   // num_nonzeros_h = (int)*(pinned_num_nonzeros_h.const_data_ptr<int>());
@@ -240,7 +241,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   // it
   int64_t curr_nonzeros = 0;
   if (self.dim() > 0) {
-    for (int64_t idx = 0; idx < num_chunks; idx++) {
+    for (const auto idx : c10::irange(num_chunks)) {
       int remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
 
       ATEN_CUB_COUNTING_ITERATOR(int64_t) counting_itr(idx * chunk_size);

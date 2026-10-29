@@ -9,6 +9,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -59,8 +60,8 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 
     accscalar_t aveval = accscalar_t(0);
     const scalar_t* const bottom_slice = bottom_data + (n * channels + c) * height * width;
-    for (int h = hstart; h < hend; ++h) {
-      for (int w = wstart; w < wend; ++w) {
+    for (const auto h : c10::irange(hstart, hend)) {
+      for (const auto w : c10::irange(wstart, wend)) {
         aveval += bottom_slice[h * width + w];
       }
     }
@@ -108,8 +109,8 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 
     accscalar_t aveval = accscalar_t(0);
     const scalar_t* const bottom_slice = bottom_data + n * channels * height * width + c;
-    for (int h = hstart; h < hend; ++h) {
-      for (int w = wstart; w < wend; ++w) {
+    for (const auto h : c10::irange(hstart, hend)) {
+      for (const auto w : c10::irange(wstart, wend)) {
         aveval += bottom_slice[(h * width + w) * channels];
       }
     }
@@ -155,8 +156,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const
     accscalar_t gradient = accscalar_t(0);
     const scalar_t* const top_diff_slice =
         top_diff + (n * channels + c) * pooled_height * pooled_width;
-    for (int ph = phstart; ph < phend; ++ph) {
-      for (int pw = pwstart; pw < pwend; ++pw) {
+    for (const auto ph : c10::irange(phstart, phend)) {
+      for (const auto pw : c10::irange(pwstart, pwend)) {
         int divide_factor;
         if (uniform_divisor) {
           divide_factor = hoisted_divisor;
@@ -207,8 +208,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     const int pwend = min(w / stride_w + 1, pooled_width);
     accscalar_t gradient = accscalar_t(0);
     const scalar_t* const top_diff_slice = top_diff + n * channels * pooled_height * pooled_width + c;
-    for (int ph = phstart; ph < phend; ++ph) {
-      for (int pw = pwstart; pw < pwend; ++pw) {
+    for (const auto ph : c10::irange(phstart, phend)) {
+      for (const auto pw : c10::irange(pwstart, pwend)) {
         int divide_factor;
         if (uniform_divisor) {
           divide_factor = hoisted_divisor;

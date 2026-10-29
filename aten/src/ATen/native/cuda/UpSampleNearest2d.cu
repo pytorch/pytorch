@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -223,8 +224,8 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     int w1_up = nn_bw_compute_source_index_fn(width_scale, w2 + 1, width1);
 
     accscalar_t grad = 0;
-    for (int ih = h1; ih < h1_up; ih++) {
-      for (int iw = w1; iw < w1_up; iw++) {
+    for (const auto ih : c10::irange(h1, h1_up)) {
+      for (const auto iw : c10::irange(w1, w1_up)) {
         grad += go[idx_cl<size_t>(n, ih, iw, c, height1, width1, channels)];
       }
     }

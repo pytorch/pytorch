@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -124,7 +125,7 @@ conv_depthwise2d_forward_kernel_generic(
     acc_t value = biasEnabled ? static_cast<acc_t>(bias.data()[c]) : acc_t(0);
     const index_t offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
 
-    for (int kH = kHmin; kH < kHmax; ++kH) {
+    for (const auto kH : c10::irange(kHmin, kHmax)) {
       const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
       for (int kW = kWmin; kW < kWmax; ++kW) {
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
@@ -192,11 +193,11 @@ conv_depthwise2d_forward_kernel(
 #if !defined(USE_ROCM)
 #pragma unroll
 #endif
-    for (int kH = 0; kH < KH_LIMIT; ++kH) {
+    for (const auto kH : c10::irange(KH_LIMIT)) {
 #if !defined(USE_ROCM)
 #pragma unroll
 #endif
-      for (int kW = 0; kW < KW_LIMIT; ++kW) {
+      for (const auto kW : c10::irange(KW_LIMIT)) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
 
@@ -248,14 +249,14 @@ __global__ void conv_depthwise2d_backward_kernel(
 
     acc_t value(0);
 
-    for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
+    for (const auto multiplier : c10::irange(depthwiseMultiplier)) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
-      for (int kh = 0; kh < KH_LIMIT; ++kh) {
+      for (const auto kh : c10::irange(KH_LIMIT)) {
 #if !defined(USE_ROCM)
 #pragma unroll
 #endif
-        for (int kw = 0; kw < KW_LIMIT; ++kw) {
+        for (const auto kw : c10::irange(KW_LIMIT)) {
           int h_out = h + padHeight - kh * dilationHeight;
           int w_out = w + padWidth - kw * dilationWidth;
           if ((h_out % strideH == 0) && (w_out % strideW == 0)) {
