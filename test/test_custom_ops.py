@@ -1216,6 +1216,52 @@ class TestCustomOp(CustomOpTestCaseBase):
             "redispatch\\(\\) expected redispatch\\(keyset, \\*args, \\*\\*kwargs\\)",
         ):
             op._pyobj_dispatcher.redispatch()
+        with self.assertRaisesRegex(TypeError, "expected a DispatchKeySet"):
+            op._pyobj_dispatcher.redispatch(1, torch.ones(2))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_redispatch_below_autograd(self):
+        lib = self.lib()
+        lib.define("pyobject_redispatch_below_autograd(Tensor x) -> Tensor")
+        autograd_excluded = []
+
+        def cpu_impl(x):
+            autograd_excluded.append(
+                torch._C._dispatch_tls_is_dispatch_key_excluded(
+                    torch._C.DispatchKey.AutogradOther
+                )
+            )
+            return x + 1
+
+        def autograd_impl(x):
+            raise AssertionError("the Autograd kernel should be skipped")
+
+        lib.impl("pyobject_redispatch_below_autograd", cpu_impl, "CPU")
+        lib.impl("pyobject_redispatch_below_autograd", autograd_impl, "Autograd")
+        op = self.ns().pyobject_redispatch_below_autograd.default
+        op._enable_pyobj_dispatch(True)
+        redispatch = op._pyobj_dispatcher.redispatch_below_autograd
+
+        class TorchFunctionTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU) | (
+            torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        )
+        x = torch.ones(2)
+        # A __torch_function__ input sends the redispatch through the C++
+        # Dispatcher.
+        for arg in (x, x.as_subclass(TorchFunctionTensor)):
+            autograd_excluded.clear()
+            self.assertEqual(redispatch(keyset, arg), torch.full((2,), 2.0))
+            self.assertEqual(autograd_excluded, [True])
+        self.assertFalse(
+            torch._C._dispatch_tls_is_dispatch_key_excluded(
+                torch._C.DispatchKey.AutogradOther
+            )
+        )
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd_defaults(self):
