@@ -10244,7 +10244,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Not mock.patch.dict, which would drop the modules the compile imports.
         sys.modules[module.__name__] = module
         self.addCleanup(sys.modules.pop, module.__name__)
-        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
+        callers = torch._library.utils.kernel_callers[qualname]
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         op.register_fake(torch.empty_like)
         inputs, tracer = [(torch.ones(4),)], MakeFxTracer()
         with self.assertNoLogs("torch._precompile", level="WARNING"):
@@ -10261,7 +10262,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         (warning,) = [m for m in logs.output if qualname in m]
         self.assertIn(f"run the kernels {qualname} (CPU), which no recorded", warning)
 
-    def test_the_module_calling_register_kernel_registers_the_kernel(self):
+    @parametrize("helper", ("register_kernel", "impl"))
+    def test_the_module_calling_register_kernel_or_impl_registers_the_kernel(
+        self, helper
+    ):
         from torch._precompile import _custom_op_modules, _warn_unregistered_ops
 
         op, qualname = self._op("overridden")
@@ -10273,11 +10277,14 @@ class TestPrecompileCustomOpRecording(TestCase):
             m.__spec__ = importlib.machinery.ModuleSpec(m.__name__, None)
         modules = {module.__name__: module, other.__name__: other}
         self.enterContext(mock.patch.dict(sys.modules, modules))
-        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
+        callers = torch._library.utils.kernel_callers[qualname]
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         keys = ("CPU", "CUDA", "XPU", "CompositeExplicitAutograd")
+        libs = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
+        self.addCleanup(lambda: [lib._destroy() for lib in libs])
 
         def register(caller, device, kernel):
-            code = "torch.library.register_kernel(qualname, device, kernel)"
+            code = f"torch.library.{helper}(qualname, device, kernel)"
             scope = {"qualname": qualname, "device": device, "kernel": kernel}
             exec(code, {"__name__": caller, "torch": torch}, scope)
             return _custom_op_modules([(qualname, "")], keys)
@@ -10305,6 +10312,29 @@ class TestPrecompileCustomOpRecording(TestCase):
             _warn_unregistered_ops(found)
         (warning,) = logs.output
         self.assertIn(f"run the kernels {qualname} (CUDA), which no recorded", warning)
+
+    def test_an_overloaded_custom_op_records_its_module_and_kernel_callers(self):
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_recording_{uuid.uuid4().hex}"
+
+        @torch.library.custom_op(f"{ns}::f.ovl", mutates_args=())
+        def op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        self.addCleanup(op._lib._destroy)
+        module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        callers = torch._library.utils.kernel_callers[op._qualname]
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
+        code = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
+        exec(code, {"__name__": "__main__", "torch": torch}, {"qualname": op._qualname})
+        found = _custom_op_modules([(f"{ns}::f", "ovl")], ("CPU",))
+        self.assertEqual(
+            (found.modules, found.unrecorded, found.untracked_kernels),
+            ((module.__name__,), (), ((f"{ns}::f", "CPU"),)),
+        )
 
     def test_custom_op_modules_reports_the_ops_no_module_registers(self):
         from torch._native import registry as native_registry
@@ -10730,7 +10760,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Not mock.patch.dict, which would drop the modules the compile imports.
         sys.modules[module.__name__] = module
         self.addCleanup(sys.modules.pop, module.__name__)
-        op._init_fn.__module__ = op._backend_fn_modules[None] = module.__name__
+        callers = torch._library.utils.kernel_callers[qualname]
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         register = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
         exec(register, {"__name__": "__main__", "torch": torch}, {"qualname": qualname})
         # As under python -m, where __main__ has a spec.
@@ -10884,6 +10915,17 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         self.assertIn(f"CUSTOM_OPS = {((f'{ns}::op', ''),)!r}", python_code)
 
+    def test_an_op_passed_to_a_skipped_call_is_checked(self):
+        _, name = self._op("passed")
+        # The global op is still lazy when the call it is passed to breaks.
+        python_code = self._capture_module(
+            f"import torch\nop = torch.ops.{name.replace('::', '.')}.default\n"
+            "call = torch._dynamo.disable(lambda o, x: o(x))\n"
+            "def fn(x):\n    return call(op, x.sin()) + 1\n",
+            tracer=DynamoTracer(),
+        )
+        self.assertIn(f"CUSTOM_OPS = {((name, ''),)!r}", python_code)
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
     def test_a_bypassed_compiles_graph_break_op_is_not_checked(self):
@@ -10931,34 +10973,21 @@ class TestPrecompileCustomOpRecording(TestCase):
                 "lib.define('helper(Tensor x) -> Tensor')\n"
                 "lib.impl('helper', lambda x: x * 2, 'CPU')\n"
             )
-        entry = f"precompile_fake_only_entry_{uuid.uuid4().hex}"
-        with open(os.path.join(directory, entry + ".py"), "w") as f:
-            f.write(
-                "import torch\ndef fn(x):\n"
-                "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n"
-            )
         self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
         self.addCleanup(lambda: sys.modules.pop(name).lib._destroy())
-        self.addCleanup(sys.modules.pop, entry, None)
         helper = getattr(torch.ops, importlib.import_module(name).lib.ns).helper
         lib = self.enterContext(_scoped_library("precompile_fake_helper", "DEF"))
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, key)
         torch.library.register_fake("precompile_fake_helper::op", helper, lib=lib)
-        artifact = os.path.join(directory, "artifact.py")
-        with capture(
-            importlib.import_module(entry).fn,
-            artifact_path=artifact,
-            cache_path=os.path.join(directory, "artifact.cache"),
+        python_code = self._capture_module(
+            "import torch\ndef fn(x):\n"
+            "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n",
             tracer=DynamoTracer(),
-            backend="eager",
-        ) as cap:
-            cap(torch.ones(4))
-        with open(artifact) as f:
-            python_code = f.read()
+        )
         self.assertIn("CUSTOM_OPS = (('precompile_fake_helper::op', ''),)", python_code)
         # The op has no known module, so only the entry's is imported.
-        self.assertIn(f"CUSTOM_OP_MODULES = {(entry,)!r}", python_code)
+        self.assertRegex(python_code, r"_MODULES = \('precompile_recording_\w+',\)")
 
     @parametrize("mode", ["standalone", "installed"])
     def test_a_served_module_that_fails_to_import_fails_the_load(self, mode):
