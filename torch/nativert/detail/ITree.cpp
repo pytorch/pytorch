@@ -6,6 +6,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Synchronized.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 #include <nlohmann/json.hpp>
 
@@ -48,7 +49,7 @@ class PytreeNodeRegistry {
                std::vector<c10::IValue>& ivalues) {
               const auto& tuple = nested.toTupleRef().elements();
               TORCH_CHECK(tuple.size() == spec.children().size());
-              for (size_t i = 0; i < tuple.size(); i++) {
+              for (const auto i : c10::irange(tuple.size())) {
                 itreeFlatten(tuple[i], spec.children(i), ivalues);
               }
             },
@@ -62,7 +63,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec) {
               const auto& tuple = nested.toTupleRef().elements();
               TORCH_CHECK(tuple.size() == spec.children().size());
-              for (size_t i = 0; i < tuple.size(); i++) {
+              for (const auto i : c10::irange(tuple.size())) {
                 ivalueApply(fn, tuple[i], spec.children(i));
               }
             }});
@@ -85,7 +86,7 @@ class PytreeNodeRegistry {
                const ITreeSpec& spec,
                std::vector<c10::IValue>& ivalues) {
               auto list = nested.toListRef();
-              for (size_t i = 0; i < list.size(); i++) {
+              for (const auto i : c10::irange(list.size())) {
                 itreeFlatten(list[i], spec.children(i), ivalues);
               }
             },
@@ -103,7 +104,7 @@ class PytreeNodeRegistry {
                const c10::IValue& nested,
                const ITreeSpec& spec) {
               auto list = nested.toListRef();
-              for (size_t i = 0; i < list.size(); i++) {
+              for (const auto i : c10::irange(list.size())) {
                 ivalueApply(fn, list[i], spec.children(i));
               }
             }});
@@ -474,7 +475,7 @@ std::vector<c10::IValue> itreeFlattenFromArgs(
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
   TORCH_CHECK(specArgs.children().size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     itreeFlatten(args[i], specArgs.children(i), ivalues);
   }
 
@@ -502,7 +503,7 @@ void ivalueApplyFromArgs(
   const auto& specArgs = spec.children(0);
   TORCH_CHECK(!specArgs.isIValue());
   TORCH_CHECK(specArgs.children().size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     ivalueApply(fn, args[i], specArgs.children(i));
   }
 
