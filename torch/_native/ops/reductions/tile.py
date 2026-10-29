@@ -1667,6 +1667,7 @@ class TileReduce:
             zero = Int32(0)
             cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
             if const_expr(self.batched_col):
+                # Batched columns pass column chunks per batch in the nwaves slot.
                 batch = unit // nwaves
                 col = unit % nwaves
                 storage_row0 = batch * project_n + index_row0
