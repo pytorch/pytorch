@@ -6526,6 +6526,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         self.assertEqual(len(gradient_asserts), 1)
 
+    # Nested breaks expose a Dynamo wrapper-protocol hasattr bug here.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
         self,
     ):
