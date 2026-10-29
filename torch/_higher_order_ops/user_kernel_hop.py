@@ -4,8 +4,8 @@ A user-defined kernel (a ``@triton.jit`` kernel, a ``@cute.jit`` host function) 
 captured as a pair of HOPs: a mutation HOP that launches the kernel and writes its
 arguments in place, and a functional HOP that functionalization rewrites it into
 (clones of the written arguments, then the launch on the clones). Everything here is
-shared by every DSL's pair; the DSL modules (triton_kernel_wrap.py,
-cutedsl_kernel_wrap.py) add the parts that depend on the kernel object: how to launch
+shared by every DSL's pair; each DSL's module (triton_kernel_wrap.py,
+cutedsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to launch
 it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
@@ -35,7 +35,6 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 if TYPE_CHECKING:
-    from torch._guards import Source
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
 
@@ -456,8 +455,8 @@ def register_user_kernel_hop_dispatch(
 
 
 class UserKernelHOPifier:
-    """Base of the HOPifiers (TritonHOPifier, CuteDSLHOPifier), which turn a call to a
-    user kernel into a call to the DSL's mutation HOP.
+    """Base of each DSL's HOPifier (TritonHOPifier, CuteDSLHOPifier), which turns a
+    call to a user kernel into a call to the DSL's mutation HOP.
 
     Each DSL has one subclass per capture environment: Dynamo, which works on
     VariableTrackers and reports unsupported features as graph breaks, and tracing
@@ -469,10 +468,3 @@ class UserKernelHOPifier:
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
-
-    @staticmethod
-    def get_kernel_source(variable: Any) -> "Source | None":
-        kernel_source = getattr(variable, "kernel_source", None)
-        if kernel_source is None:
-            kernel_source = getattr(variable, "source", None)
-        return kernel_source
