@@ -657,7 +657,7 @@ _run_fabric_handle_tests() {
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLOneSidedOpHandleTypeTest or NCCLSymmetricMemoryRestartTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -1475,11 +1475,12 @@ test_huggingface_tp_benchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   local validation_status=0
+  local tp_size=2
   local phase
   for phase in prefill decode; do
     local tp_args=(
       --ci --inference --bfloat16 --inductor --disable-cudagraphs --device cuda --nopython
-      --tp-size=2 --batch-size=1 --hf-inference-mode="$phase"
+      --tp-size="$tp_size" --batch-size=1 --hf-inference-mode="$phase"
     )
     python benchmarks/dynamo/huggingface.py --accuracy --timing --explain \
       "${tp_args[@]}" --output "$TEST_REPORTS_DIR/${phase}_huggingface.csv" \
@@ -1495,10 +1496,11 @@ test_huggingface_tp_benchmark() {
       || validation_status=$?
     # benchmarks/dynamo/perf_cli.py parses this name for summaries and repros.
     python benchmarks/dynamo/huggingface.py --performance "${tp_args[@]}" \
-      --output "$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_${phase}_performance.csv" \
+      --output "$TEST_REPORTS_DIR/inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp${tp_size}_${phase}_performance.csv" \
       || validation_status=$?
   done
-  python test/run_test.py --include dynamo/test_benchmark_runner \
+  # The process-launching TP tests only run with PYTORCH_TEST_WITH_SLOW=1.
+  PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --include dynamo/test_benchmark_runner \
     -k TensorParallel --verbose || validation_status=$?
   return "$validation_status"
 }
@@ -2023,6 +2025,7 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
+    python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
 }
 
@@ -2031,7 +2034,6 @@ test_distributed_single_gpu() {
   # `distributed` config to run on the cheaper 1-GPU `default` CUDA runner (see
   # the `multigpu` marker in test/conftest.py). Sharded with the rest of the
   # `default` config's Python tests.
-  install_torchcomms
   install_spmd_types
   install_nccl4py
   test_distributed not-multigpu
@@ -2476,7 +2478,6 @@ test_executorch() {
 
 test_torchtitan() {
   install_torchao
-  install_torchcomms
   # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
   # from the pinned commit rather than PyPI so it links the CI-built torch.
   install_torchvision
@@ -2494,7 +2495,7 @@ test_torchtitan() {
   # Neither helion nor torchtitan should pull their own copies of these from
   # PyPI, that would silently run the tests against the wrong PyTorch
   local ci_built_versions
-  ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
+  ci_built_versions=$(get_pkg_versions torch torchao)
 
   pip_install helion
 
@@ -2502,7 +2503,7 @@ test_torchtitan() {
   pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
-  installed_versions=$(get_pkg_versions torch torchao torchcomms)
+  installed_versions=$(get_pkg_versions torch torchao)
   if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
     echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
     echo "Expected:"
@@ -2657,11 +2658,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
-  install_torchcomms
   install_spmd_types
   test_distributed_4gpu
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchcomms
   install_spmd_types
   install_nccl4py
   # On CUDA and ROCm the single-process (single-GPU) distributed tests are hived
@@ -2720,7 +2719,6 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2889,7 +2887,6 @@ elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   install_spmd_types
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
-  install_torchcomms
   install_nccl4py
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
