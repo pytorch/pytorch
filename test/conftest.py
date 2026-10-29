@@ -262,21 +262,19 @@ class LogXMLReruns(LogXML):
                 report.longrepr = (fspath, lineno, reason)
 
     def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
-        nodeid: str | TestReport = getattr(report, "nodeid", report)
-        # Local hack to handle xdist report order.
-        workernode = getattr(report, "node", None)
-
-        key = nodeid, workernode
-
-        if key in self.node_reporters:
-            # TODO: breaks for --dist=each
-            return self.node_reporters[key]
-
-        reporter = _NodeReporterReruns(nodeid, self)
-
-        self.node_reporters[key] = reporter
-        self.node_reporters_ordered.append(reporter)
-
+        # Delegate to LogXML.node_reporter() for the node_reporters key
+        # derivation instead of recomputing it here: pytest 9.2 switched
+        # that key from the plain report.nodeid string to a structured
+        # report.id (NodeId), and LogXML.finalize() (not overridden here)
+        # always pops using whatever the installed pytest version computes.
+        # Recomputing the old string-only key in this override made it
+        # diverge from finalize()'s key on pytest >= 9.2, causing a
+        # KeyError on every test. _NodeReporterReruns adds no new __init__
+        # state over _NodeReporter, so reclassing a reporter already
+        # created/cached by super() is safe.
+        reporter = super().node_reporter(report)
+        if reporter.__class__ is not _NodeReporterReruns:
+            reporter.__class__ = _NodeReporterReruns
         return reporter
 
 
