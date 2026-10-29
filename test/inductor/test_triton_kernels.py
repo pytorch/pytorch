@@ -3369,6 +3369,57 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
 
+    @requires_gpu
+    def test_clone_of_offset_view_passed_to_triton_kernel_is_kept(self):
+        # A user kernel may need an aligned base, e.g. for a device-side TMA
+        # descriptor, so a clone it receives is not erased as a no-op.
+        @triton.jit
+        def copy_kernel(in_ptr, out_ptr, BLOCK_SIZE: "tl.constexpr"):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            tl.store(out_ptr + offsets, tl.load(in_ptr + offsets))
+
+        def f(x):
+            y = x.clone()
+            out = torch.empty_like(y)
+            copy_kernel[(1,)](y, out, BLOCK_SIZE=64)
+            return out
+
+        x = torch.arange(65, dtype=torch.float32, device=GPU_TYPE)[1:].view(4, 16)
+        graphs = []
+        with inductor_config.patch(
+            post_grad_custom_post_pass=lambda graph: graphs.append(str(graph)),
+            force_disable_caches=True,
+        ):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), x)
+        self.assertRegex("".join(graphs), r"in_ptr: %clone\b")
+
+    @requires_cuda_tma
+    @requires_gpu
+    def test_tma_descriptor_clone_with_pointer_and_view(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        @triton.jit
+        def add_pointer_and_descriptor(
+            in_ptr, in_desc, out_ptr, BLOCK_SIZE: "tl.constexpr"
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(in_ptr + offsets) + in_desc.load([0])
+            tl.store(out_ptr + offsets, values)
+
+        def f(x):
+            y = x.clone()
+            out = torch.empty_like(y)
+            desc = create_tensor_descriptor_shim(y.view(-1), [64], new_api=True)
+            add_pointer_and_descriptor[(1,)](y, desc, out, BLOCK_SIZE=64)
+            return out
+
+        x = torch.arange(65, dtype=torch.float32, device=GPU_TYPE)[1:].view(4, 16)
+        expected = x + x
+        self.assertEqual(f(x), expected)
+        with inductor_config.patch(force_disable_caches=True):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), expected)
+
     @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -3582,6 +3633,46 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
+
+    @requires_cuda_tma
+    @requires_gpu
+    def test_tma_descriptor_on_realigning_clone(self):
+        # Cloning an input whose base is not 16-byte aligned gives a TMA descriptor
+        # an aligned base; Inductor must not remove the clone as a no-op.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        def f(a, b):
+            BLOCK_SIZE_X = 16
+            BLOCK_SIZE_Y = 32
+            a, b = a.clone(), b.clone()
+            out = torch.zeros_like(a)
+            x_size, y_size = out.size()
+            desc_a, desc_b, desc_out = (
+                create_tensor_descriptor_shim(
+                    t, [BLOCK_SIZE_X, BLOCK_SIZE_Y], new_api=True
+                )
+                for t in (a, b, out)
+            )
+            grid = (
+                triton.cdiv(x_size, BLOCK_SIZE_X),
+                triton.cdiv(y_size, BLOCK_SIZE_Y),
+            )
+            add_kernel_with_tma_2d_new_api[grid](
+                desc_a,
+                desc_b,
+                desc_out,
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        a, b = (
+            torch.randn(25 * 16 + 1, device=GPU_TYPE)[1:].view(25, 16) for _ in range(2)
+        )
+        self.assertNotEqual(a.data_ptr() % 16, 0)
+        compiled_out = torch.compile(f, fullgraph=True, backend="inductor")(a, b)
+        self.assertEqual(compiled_out, a + b)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -4422,7 +4513,8 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_with_docstring(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_docstring(self, quotes, cpp_wrapper):
         kernel = (
             kernel_with_docstring_single_quotes
             if quotes == "single"
@@ -4438,12 +4530,18 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            # Only a wrapper that consumes string kernels carries the escaped block.
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    def test_kernel_with_backslash_in_docstring(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_backslash_in_docstring(self, cpp_wrapper):
         # https://github.com/pytorch/pytorch/issues/183420
         # Backslash escapes in the kernel source text must be doubled before
         # the source is spliced into the generated triple-quoted wrapper,
@@ -4457,8 +4555,12 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @skipIfXpu(
@@ -4467,7 +4569,8 @@ def forward(self, arg0_1, arg1_1):
     )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_inline_asm(self, quotes, cpp_wrapper):
         if torch.version.cuda:
             kernel = (
                 kernel_inline_asm_single_quotes
@@ -4492,8 +4595,12 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.randn(345, device=GPU_TYPE)
         actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, inp)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
