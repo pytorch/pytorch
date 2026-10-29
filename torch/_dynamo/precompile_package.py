@@ -116,7 +116,7 @@ def _frozen_kernel_config() -> dict[str, object]:
         torch._logging.warning_once(
             log,
             "precompile capture overrides triton.autotune_at_compile_time=False: "
-            "a frozen artifact needs every kernel tuned before replay",
+            "every kernel is tuned during capture, before the artifact is written",
         )
     if inductor_config.triton.multi_kernel:
         torch._logging.warning_once(
