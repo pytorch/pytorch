@@ -94,59 +94,29 @@ def _frozen_kernel_config() -> dict[str, object]:
     """The Triton config both precompile tracers lower under.
 
     A frozen DynamoTracer artifact replays each kernel with one recorded
-    config, so every kernel is tuned before replay. Under
-    autotune_at_compile_time the Python wrapper emits multi-kernel defs only
-    into the compile-time autotune block (_write_multi_kernel_defs), so a
-    module calls an undefined multi_kernel_N (NameError on the first call).
-    That holds for any tracer and every multi-kernel: ``triton.multi_kernel``
-    at any nonzero value, and the size-hint multi-kernels
-    ``multi_kernel_hints`` builds whatever ``triton.multi_kernel`` is, so
-    both are off. Only ``triton.multi_kernel=1`` also picks its sub-kernel by
-    benchmarking at first launch, which a frozen artifact cannot record;
-    size-hint multi-kernels pick from the runtime shapes and
-    ``triton.multi_kernel >= 2`` picks sub-kernel ``multi_kernel - 2``.
-    Warns once for each user value overridden.
+    config, so every kernel is tuned before replay. ``triton.multi_kernel=1``
+    is turned off: such a multi-kernel picks its sub-kernel by benchmarking at
+    first launch, which a frozen artifact cannot record. Warns once for each
+    user value overridden.
     """
     import torch._inductor.config as inductor_config
 
-    # TODO: drop the multi_kernel_hints and triton.multi_kernel >= 2 overrides,
-    # and the MakeFxTracer triton.multi_kernel=1 one, once
-    # PythonWrapperCodegen._write_multi_kernel_defs emits multi-kernel defs
-    # outside the compile-time autotune block too.
-    name_error_reason = (
-        "under autotune_at_compile_time the wrapper never defines multi_kernel_N"
-    )
     if inductor_config.triton.autotune_at_compile_time is False:
         torch._logging.warning_once(
             log,
             "precompile capture overrides triton.autotune_at_compile_time=False: "
             "every kernel is tuned during capture, before the artifact is written",
         )
-    if inductor_config.triton.multi_kernel:
-        reason = name_error_reason
-        if inductor_config.triton.multi_kernel == 1:
-            reason += (
-                ", and a frozen artifact cannot record which sub-kernel a "
-                "multi-kernel picks by benchmarking at first launch"
-            )
+    frozen: dict[str, object] = {"triton.autotune_at_compile_time": True}
+    if inductor_config.triton.multi_kernel == 1:
         torch._logging.warning_once(
             log,
-            "precompile capture overrides triton.multi_kernel=%s to 0: %s",
-            inductor_config.triton.multi_kernel,
-            reason,
+            "precompile capture overrides triton.multi_kernel=1 to 0: a frozen "
+            "artifact cannot record which sub-kernel a multi-kernel picks by "
+            "benchmarking at first launch",
         )
-    if inductor_config.multi_kernel_hints:
-        torch._logging.warning_once(
-            log,
-            "precompile capture overrides multi_kernel_hints=%s to []: %s",
-            str(inductor_config.multi_kernel_hints),
-            name_error_reason,
-        )
-    return {
-        "triton.autotune_at_compile_time": True,
-        "triton.multi_kernel": 0,
-        "multi_kernel_hints": [],
-    }
+        frozen["triton.multi_kernel"] = 0
+    return frozen
 
 
 @contextlib.contextmanager
@@ -171,9 +141,9 @@ def _capture_config(lowers_kernels: bool = True) -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
-    ``triton.multi_kernel`` and ``multi_kernel_hints`` are off (see
-    _frozen_kernel_config). These Triton overrides, and their warnings, apply
-    only when ``lowers_kernels``: an eager-backend capture lowers no kernels.
+    ``triton.multi_kernel=1`` is off (see _frozen_kernel_config). These Triton
+    overrides, and their warnings, apply only when ``lowers_kernels``: an
+    eager-backend capture lowers no kernels.
     Under ``cpp_wrapper`` the forced flag also turns off
     ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
     keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
@@ -2305,37 +2275,43 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = set(self._package.graph_break_op_names)
-        # Graph-break custom ops run eagerly on their inputs' devices, or on those
-        # of any compiled frame.
-        graph_break_ops = set(_custom_ops(op_names))
-        device_types = set(self._package._device_types if graph_break_ops else ())
-        device_types |= {
-            t for n, t in self._package.graph_break_op_devices if n in graph_break_ops
+        package = self._package
+        # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
+        # on those of any compiled frame, and a graph's ops on the graph's devices.
+        op_devices: dict[tuple[str, str], set[str]] = {
+            n: set(package._device_types) for n in package.graph_break_op_names
         }
+        for n, t in package.graph_break_op_devices:
+            op_devices.setdefault(n, set()).add(t)
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
-            op_names |= self._package.op_names.get(backend_id, set())
-            device_types |= self._package.device_types.get(backend_id, set())
+            names = set(package.op_names.get(backend_id, ()))
             if isinstance(artifact, BundledAOTAutogradCacheArtifact):
                 # Inductor's code also calls the ops a post-grad pass inserted,
                 # and those of the backward.
                 compiled = (artifact.content.compiled_fw, artifact.content.compiled_bw)
                 for result in (c.result for c in compiled if c is not None):
                     if isinstance(result, CompiledFxGraph):
-                        op_names |= _called_op_names(result.source_code)
+                        names |= _called_op_names(result.source_code)
+            for n in names:
+                op_devices.setdefault(n, set()).update(
+                    package.device_types.get(backend_id, ())
+                )
         entry = self._served_entry()[0]
-        ops = _custom_ops(op_names)
-        # No compiled graph names a device for graph-break ops to run on.
-        keys = _device_kernel_keys(device_types) if device_types else _KERNEL_KEYS
-        found = _custom_op_modules(ops, keys)
+        ops = _custom_ops(op_devices)
+        # An op no compiled graph names a device for is checked on every key.
+        keys = {
+            n: _device_kernel_keys(op_devices[n]) if op_devices[n] else _KERNEL_KEYS
+            for n in ops
+        }
+        found = _custom_op_modules(keys)
         served: set[str] = set()
         if found.unrecorded or found.unrecorded_kernels:
-            # An op or kernel with no known module (torch.library.define, any
-            # custom_op's kernels, which torch's helpers register, a C++ extension)
-            # may be registered by a module the frames run in, which the driver
-            # imports only after the ops are checked. Torch's own ops skip this.
+            # An op or kernel with no known module (torch.library.define, a kernel
+            # registered from __main__, a C++ extension) may be registered by a
+            # module the frames run in, which the driver imports only after the ops
+            # are checked. Torch's own ops skip this.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
         wanted = {*found.modules, *served}
         modules = tuple(m for m in sys.modules if m in wanted)
