@@ -12,7 +12,8 @@ Run:
 import unittest
 from unittest.mock import MagicMock, patch
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 def _make_mock_launcher(
@@ -54,6 +55,8 @@ def _make_mock_autotuner(kernel_name="test_kernel"):
 
 class SaveGpuKernelSchemaTest(TestCase):
     """Unit tests for save_gpu_kernel() reading from Level 0 schema."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _call_save_gpu_kernel(self, launcher, kernel_name="test_kernel"):
         """Call save_gpu_kernel with mocks and return the params passed to cache."""
@@ -140,18 +143,14 @@ class SaveGpuKernelSchemaTest(TestCase):
 # Requires GPU + torch + inductor. Run via buck2 on H100.
 # =========================================================================
 
-_HAS_GPU = False
-try:
-    import torch
-
-    _HAS_GPU = hasattr(torch, "cuda") and torch.cuda.is_available()
-except (ImportError, AttributeError):
-    pass
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
-@unittest.skipUnless(_HAS_GPU, "requires CUDA GPU")
+@unittest.skipUnless(HAS_TRITON, "requires Inductor+GPU")
 class SaveGpuKernelAOTIE2ETest(TestCase):
     """E2E tests for 3/N: verify AOTI pipeline uses save_gpu_kernel schema path."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -176,7 +175,7 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         if torch.utils.cpp_extension.CUDA_HOME is None:
             torch.utils.cpp_extension.CUDA_HOME = os.environ.get("CUDA_HOME")
 
-    def test_aoti_pipeline_correctness(self):
+    def test_aoti_pipeline_correctness(self, device):
         """Full AOTI pipeline (export → compile → load → run) should produce correct results."""
         import torch._dynamo
         import torch._inductor
@@ -188,9 +187,10 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
             def forward(self, x, y):
                 return x + y
 
-        model = AddModel().to("cuda")
-        x = torch.randn(1024, device="cuda")
-        y = torch.randn(1024, device="cuda")
+        device_type = torch.device(device).type
+        model = AddModel().to(device_type)
+        x = torch.randn(1024, device=device_type)
+        y = torch.randn(1024, device=device_type)
         expected = model(x, y)
 
         ep = torch.export.export(model, (x, y))
@@ -199,7 +199,7 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         result = loaded(x, y)
         torch.testing.assert_close(result, expected)
 
-    def test_aoti_schema_populated(self):
+    def test_aoti_schema_populated(self, device):
         """AOTI compilation should call save_gpu_kernel with a populated schema."""
         import torch._dynamo
         import torch._inductor
@@ -226,10 +226,11 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
                 def forward(self, x, y, z):
                     return x * y + z
 
-            model = MulAddModel().to("cuda")
-            x = torch.randn(512, device="cuda")
-            y = torch.randn(512, device="cuda")
-            z = torch.randn(512, device="cuda")
+            device_type = torch.device(device).type
+            model = MulAddModel().to(device_type)
+            x = torch.randn(512, device=device_type)
+            y = torch.randn(512, device=device_type)
+            z = torch.randn(512, device=device_type)
             expected = model(x, y, z)
 
             ep = torch.export.export(model, (x, y, z))
@@ -256,6 +257,10 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         finally:
             th.CachingAutotuner.save_gpu_kernel = original_save
 
+
+instantiate_device_type_tests(
+    SaveGpuKernelAOTIE2ETest, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
