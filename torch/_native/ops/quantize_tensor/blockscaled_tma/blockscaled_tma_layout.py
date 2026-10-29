@@ -15,7 +15,6 @@ from .blockscaled_tma_plan import (
 
 
 _SingleQuantDim: TypeAlias = tuple[int, int]
-_QuantDim: TypeAlias = _SingleQuantDim | tuple[_SingleQuantDim, _SingleQuantDim]
 _BlockscaledTmaOutput: TypeAlias = (
     tuple[torch.Tensor, torch.Tensor]
     | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
@@ -53,9 +52,10 @@ class _BlockscaledTmaSpec(NamedTuple):
 def _build_blockscaled_tma_spec(
     input: torch.Tensor,
     *,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
+    dual: bool,
     input_matrix_axes: _SingleQuantDim,
-    requested_dim: _QuantDim | list[int],
+    requested_dim: _SingleQuantDim | list[int],
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaSpec:
@@ -64,9 +64,8 @@ def _build_blockscaled_tma_spec(
     ndim = input.dim()
     is_batched = ndim == 4
     dim_k = (1, 3) if is_batched else (-2, -1)
-    is_dual = isinstance(dim[0], tuple)
-    do_dim_k = is_dual or dim == dim_k
-    do_dim_m = is_dual or dim == dim_k[::-1]
+    do_dim_k = dual or dim == dim_k
+    do_dim_m = dual or dim == dim_k[::-1]
     row_axis, col_axis = input_matrix_axes
 
     if do_dim_k and do_dim_m:
@@ -208,7 +207,7 @@ class _CanonicalMatrixInput(NamedTuple):
 
     Attributes:
         input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
-        dim (_QuantDim): Quantization axis pair(s) in ``input`` coordinates;
+        dim (_SingleQuantDim): Quantization axis pair in ``input`` coordinates;
           ``(1, 3)`` quantizes the last matrix axis of a 4D input, while
           ``(3, 1)`` quantizes the first.
         input_matrix_axes (tuple[int, int]): Caller axes corresponding to the
@@ -222,7 +221,7 @@ class _CanonicalMatrixInput(NamedTuple):
     """
 
     input: torch.Tensor
-    dim: _QuantDim
+    dim: _SingleQuantDim
     input_matrix_axes: _SingleQuantDim
     batch_shape: tuple[int, ...]
     inverse_permutation: tuple[int, ...]
@@ -231,9 +230,11 @@ class _CanonicalMatrixInput(NamedTuple):
 
 def _canonicalize_matrix_input(
     input: torch.Tensor,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dual: bool,
 ) -> _CanonicalMatrixInput:
     r"""Arrange matrix and batch axes for the 2D or 4D TMA kernel.
 
@@ -250,26 +251,20 @@ def _canonicalize_matrix_input(
 
     Args:
         input (Tensor): Input whose two matrix axes are specified by ``dim``.
-        dim (_QuantDim): One ordered matrix-axis pair, or two pairs for dual
-          quantization.
+        dim (_SingleQuantDim): Ordered matrix-axis pair. Dual quantization also
+          quantizes the reverse pair.
         is_square_scaling (bool): Whether square-block scaling is requested.
         is_scale_swizzled (bool): Whether swizzled scale storage is requested.
+        dual (bool): Whether to quantize both matrix axes.
     """
     ndim = input.ndim
     if ndim < 2:
         raise ValueError(f"blockscaled TMA requires at least 2 dimensions; got {ndim}")
     if not isinstance(dim, tuple) or len(dim) != 2:
         raise ValueError(f"unsupported quantization dim: {dim}")
-    pairs: tuple[_SingleQuantDim, ...] = (
-        cast(tuple[_SingleQuantDim, _SingleQuantDim], dim)
-        if isinstance(dim[0], tuple)
-        else (cast(_SingleQuantDim, dim),)
-    )
-    normalized = [normalize_quantize_dim(pair, ndim) for pair in pairs]
-    if len(normalized) == 2 and normalized[1] != normalized[0][::-1]:
-        raise ValueError(f"unsupported quantization dim order: {dim}")
-    matrix_axes = tuple(sorted(normalized[0]))
-    if len(normalized) == 2 and normalized[0] != matrix_axes:
+    normalized = normalize_quantize_dim(dim, ndim)
+    matrix_axes = tuple(sorted(normalized))
+    if dual and normalized != matrix_axes:
         raise ValueError(f"dual quantization must start with dim-k: {dim}")
     physical_axes = tuple(sorted(range(ndim), key=lambda axis: -input.stride(axis)))
     physical_input = (
@@ -278,7 +273,7 @@ def _canonicalize_matrix_input(
     physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
     batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
     fast_axis = physical_matrix_axes[-1]
-    quant_axis = normalized[0][-1]
+    quant_axis = normalized[-1]
     physical_dim_k = quant_axis == fast_axis
 
     # Determine if we can take a no-copy fast path (unaligned pointer can still
@@ -316,13 +311,11 @@ def _canonicalize_matrix_input(
         else:
             matrix_input = physical_input
             single_dim = (-2, -1) if physical_dim_k else (-1, -2)
-        swap_dual_outputs = (
-            len(normalized) == 2 and normalized[0] != physical_matrix_axes
-        )
+        swap_dual_outputs = dual and normalized != physical_matrix_axes
     else:
-        # Materialization fallback, permute-contiguous the input to have the
-        # first dim pair's inner dim last (kernel dim-k)
-        permutation = (*batch_axes, *normalized[0])
+        # Materialization fallback, place the requested quantized axis last
+        # for the dim-k kernel.
+        permutation = (*batch_axes, *normalized)
         matrix_input = (
             input if permutation == tuple(range(ndim)) else input.permute(permutation)
         ).contiguous()
@@ -337,10 +330,8 @@ def _canonicalize_matrix_input(
         else:
             single_dim = (-2, -1)
         swap_dual_outputs = False
-    if len(normalized) == 2:
-        canonical_dim: _QuantDim = (
-            ((1, 3), (3, 1)) if matrix_input.ndim == 4 else ((-2, -1), (-1, -2))
-        )
+    if dual:
+        canonical_dim: _SingleQuantDim = (1, 3) if matrix_input.ndim == 4 else (-2, -1)
     else:
         canonical_dim = single_dim
     inverse = tuple(permutation.index(axis) for axis in range(ndim))
@@ -410,13 +401,14 @@ def infer_blockscaled_tma_outputs(
 ) -> list[torch.Tensor]:
     """Mirror kernel output allocation and layout without importing CuTeDSL."""
     ordered = (min(dim), max(dim))
-    kernel_dim: _QuantDim = (ordered, (ordered[1], ordered[0])) if dual else dim
+    kernel_dim = ordered if dual else dim
     canonical = _canonicalize_matrix_input(
-        input, kernel_dim, is_square_scaling, is_scale_swizzled
+        input, kernel_dim, is_square_scaling, is_scale_swizzled, dual=dual
     )
     spec = _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
+        dual=dual,
         input_matrix_axes=canonical.input_matrix_axes,
         requested_dim=dim,
         is_square_scaling=is_square_scaling,

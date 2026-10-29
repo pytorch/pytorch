@@ -86,9 +86,7 @@ def _quantize_tensor_dual_impl(
     from .blockscaled_tma.blockscaled_tma_impl import _blockscaled_tma_impl_dual
 
     ordered = (min(axes), max(axes))
-    outputs = _blockscaled_tma_impl_dual(
-        input, False, True, dim=(ordered, (ordered[1], ordered[0]))
-    )
+    outputs = _blockscaled_tma_impl_dual(input, False, True, dim=ordered)
     return list((*outputs[2:], *outputs[:2]) if axes != ordered else outputs)
 
 

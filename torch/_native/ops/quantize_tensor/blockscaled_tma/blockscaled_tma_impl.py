@@ -11,7 +11,6 @@ from .blockscaled_tma_layout import (
     _build_blockscaled_tma_spec,
     _canonicalize_matrix_input,
     _checked_blockscaled_tma_plan,
-    _QuantDim,
     _restore_matrix_output,
     _SingleQuantDim,
 )
@@ -183,16 +182,19 @@ def _format_blockscaled_tma_output(
 
 def _blockscaled_tma_impl_on_current_device(
     input: torch.Tensor,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dual: bool,
 ) -> _BlockscaledTmaOutput:
     canonical = _canonicalize_matrix_input(
-        input, dim, is_square_scaling, is_scale_swizzled
+        input, dim, is_square_scaling, is_scale_swizzled, dual=dual
     )
     spec = _build_blockscaled_tma_spec(
         canonical.input,
         dim=canonical.dim,
+        dual=dual,
         input_matrix_axes=canonical.input_matrix_axes,
         requested_dim=dim,
         is_square_scaling=is_square_scaling,
@@ -254,9 +256,11 @@ def _blockscaled_tma_impl_on_current_device(
 
 def _run_blockscaled_tma(
     input: torch.Tensor,
-    dim: _QuantDim,
+    dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    *,
+    dual: bool,
     **kwargs: object,
 ) -> _BlockscaledTmaOutput:
     if kwargs:
@@ -281,6 +285,7 @@ def _run_blockscaled_tma(
             dim=dim,
             is_square_scaling=is_square_scaling,
             is_scale_swizzled=is_scale_swizzled,
+            dual=dual,
         )
 
     if device == torch.cuda.current_device():
@@ -342,12 +347,10 @@ def _blockscaled_tma_impl(
         >>> qdata.stride()
         (1, 128)
     """
-    if isinstance(dim, tuple) and len(dim) == 2 and isinstance(dim[0], tuple):
-        raise ValueError("dual quantization dims require the dual entrypoint")
     return cast(
         _TwoTensorOutput,
         _run_blockscaled_tma(
-            input, dim, is_square_scaling, is_scale_swizzled, **kwargs
+            input, dim, is_square_scaling, is_scale_swizzled, dual=False, **kwargs
         ),
     )
 
@@ -357,10 +360,10 @@ def _blockscaled_tma_impl_dual(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     *,
-    dim: tuple[_SingleQuantDim, _SingleQuantDim] = ((-2, -1), (-1, -2)),
+    dim: _SingleQuantDim = (-2, -1),
     **kwargs: object,
 ) -> _FourTensorOutput:
-    r"""_blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled, *, dim=((-2, -1), (-1, -2)), **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""_blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled, *, dim=(-2, -1), **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize both matrix axes of an N-D tensor in one kernel launch.
 
@@ -371,18 +374,17 @@ def _blockscaled_tma_impl_dual(
             materialized as described above.
         is_square_scaling (bool): Must be ``False``.
         is_scale_swizzled (bool): Must be ``True``.
-        dim (tuple[tuple[int, int], tuple[int, int]], optional): Ordered matrix
-            axis pair followed by its reverse. The first pair must be in
-            ascending order after normalizing negative axes; all other axes
-            are batch axes. Default: ``((-2, -1), (-1, -2))``.
+        dim (tuple[int, int], optional): Ordered matrix-axis pair. Both this
+            pair and its reverse are quantized. The pair must be in ascending
+            order after normalizing negative axes; all other axes are batch
+            axes. Default: ``(-2, -1)``.
         **kwargs: No unlisted keyword arguments are accepted.
 
     Returns:
         tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,
-            s_reverse)``. The first pair uses ``dim[0]`` and quantizes its
-            second axis; the second pair uses ``dim[1]`` and quantizes its
-            second axis. Results retain the input's logical axis order, with
-            batch axes in their original positions, but need not retain its
+            s_reverse)``. The first pair quantizes ``dim[-1]``; the reverse
+            pair quantizes ``dim[0]``. Results retain the input's logical axis
+            order, with batch axes in their original positions, but need not retain its
             strides. Scale shapes follow :func:`_blockscaled_tma_impl` for
             each axis, regardless of input layout.
 
@@ -391,8 +393,6 @@ def _blockscaled_tma_impl_dual(
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
         >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
     """
-    if not isinstance(dim, tuple) or len(dim) != 2 or not isinstance(dim[0], tuple):
-        raise ValueError("dual quantization requires two axis pairs")
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(
@@ -400,6 +400,7 @@ def _blockscaled_tma_impl_dual(
             dim,
             is_square_scaling,
             is_scale_swizzled,
+            dual=True,
             **kwargs,
         ),
     )
