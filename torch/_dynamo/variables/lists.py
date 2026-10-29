@@ -188,9 +188,6 @@ class BaseListVariable(VariableTracker):
     def is_python_constant(self) -> bool:
         return all(x.is_python_constant() for x in self.items)
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        return VariableTracker.build(tx, self.debug_repr())
-
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
             raise AssertionError(
