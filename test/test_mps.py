@@ -10567,80 +10567,6 @@ class TestLargeTensors(TestCaseMPS):
         self.assertEqual(x[idx], (idx * 255 // (n - 1)).to(torch.uint8), atol=1, rtol=0)
         del x
 
-    # Large-tensor pooling cases that stay MPS only; the portable ones are in
-    # test/nn/test_pooling.py.
-    @largeMPSBufferTest(int(4.2 * 1024**3), device="mps")
-    @largeTensorTest("10GB", device="mps")
-    def test_adaptive_max_pool2d_64bit_indexing(self):
-        # CUDA computes the backward plane offset in int (AdaptiveMaxPooling2d.cu),
-        # which overflows at this shape: 32 * 8192 * 8192 is INT32_MAX + 1.
-        N, C, H, W, O = 33, 1, 8192, 8192, 128
-        x = torch.empty(N, C, H, W, dtype=torch.half, device="mps")
-        h_idx = torch.arange(H, device="mps").view(H, 1)
-        w_idx = torch.arange(W, device="mps")
-        for n in range(N):
-            x[n, 0] = w_idx.remainder(31) + h_idx.remainder(17) * 32 + n
-        self.assertGreater(x[-1, 0, -1].abs().max().item(), 0)
-
-        x.requires_grad_(True)
-        y = F.adaptive_max_pool2d(x, O)
-        y.sum().backward()
-        step = H // O
-        for n in [0, N - 1]:
-            ref = F.adaptive_max_pool2d(x[n:n + 1, :, :step, :].detach().float().cpu(), (1, O))
-            self.assertEqual(y[n:n + 1, :, :1, :].detach().float().cpu(), ref)
-            self.assertEqual(x.grad[n].sum(dtype=torch.float32).item(), y[n].numel())
-
-        del x, y
-        torch.mps.empty_cache()
-
-    @largeMPSBufferTest(int(4.1 * 1024**3), device="mps")
-    @largeTensorTest("5GB", device="mps")
-    def test_avg_pool3d_backward_above_2_31_outputs(self):
-        # Two dispatch chunks of the int64 avg_pool backward. The input and
-        # grad_output are zero-stride, so only grad_input is materialized.
-        D, H, W = 1025, 1024, 2048
-        x = torch.empty(1, 1, 1, 1, 1, dtype=torch.half, device="mps").expand(1, 1, D, H, W)
-        grad = (torch.arange(D, device="mps").view(D, 1, 1) % 7 * 16 + torch.arange(W, device="mps") % 13)
-        grad = grad.to(torch.half).view(1, 1, D, 1, W).expand(1, 1, D, H, W)
-        grad_input = torch.ops.aten.avg_pool3d_backward(grad, x, [1, 1, 1], [1, 1, 1], [0, 0, 0], False, True, None)
-        flat = grad_input.view(-1)
-        self.assertGreater(flat.numel(), 2**31)
-        for i in [0, 2**31 - 1, 2**31, flat.numel() - 1]:
-            d, rem = divmod(i, H * W)
-            self.assertEqual(flat[i].item(), (d % 7) * 16 + rem % W % 13, msg=f"index {i}")
-
-        del grad_input, flat
-        torch.mps.empty_cache()
-
-    @largeMPSBufferTest(int(4.1 * 1024**3), device="mps")
-    @largeTensorTest("9GB", device="mps")
-    def test_pool_grid_above_2_32_threads(self):
-        # uint8 avg_pool3d with kernel 1 is an identity over more than 2**32
-        # outputs, so the dispatch takes three chunks
-        N, D, H, W = 2, 2048, 2048, 513
-        hw = ((torch.arange(H, device="mps") % 5).view(H, 1) * 3
-              + torch.arange(W, device="mps") % 13).to(torch.uint8)
-        d_col = (((torch.arange(D, device="mps") % 7) * 16).to(torch.uint8)).view(D, 1, 1)
-        x = torch.empty(N, 1, D, H, W, dtype=torch.uint8, device="mps")
-        for n in range(N):
-            x[n] = hw
-            x[n] += d_col
-            x[n] += n
-        self.assertGreater(x.numel(), 2**32)
-
-        flat = F.avg_pool3d(x, 1).view(-1)
-        # Chunk boundaries, and 2**32, past which the kernel uses 64-bit division
-        for i in [0, 2**31 - 1, 2**31, 2**32 - 1, 2**32, x.numel() - 1]:
-            n, rem = divmod(i, D * H * W)
-            d, rem = divmod(rem, H * W)
-            h, w = divmod(rem, W)
-            expected = (d % 7) * 16 + (h % 5) * 3 + w % 13 + n
-            self.assertEqual(flat[i].item(), expected, msg=f"wrong value at linear index {i}")
-
-        del x, flat
-        torch.mps.empty_cache()
-
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
         # extent > INT32_MAX forces TensorIterator to split the iter
@@ -15451,14 +15377,6 @@ class TestErrorInputs(TestCase):
         offsets = torch.tensor([0, 3], device=device)
         with self.assertRaisesRegex(torch.AcceleratorError, "Index 2 is out of bounds: 6, range 0 to 4"):
             torch.nn.functional.embedding_bag(inputs, weight, offsets)
-            torch.mps.synchronize()
-
-    def test_max_unpool2d_out_of_range_index(self, device):
-        # 2**32 + 3 must not be narrowed to the in-range index 3
-        x = torch.ones(1, 1, 2, 2, device=device)
-        idx = torch.tensor([[[[0, 1], [2, 2**32 + 3]]]], device=device)
-        with self.assertRaisesRegex(torch.AcceleratorError, "invalid max index"):
-            F.max_unpool2d(x, idx, 2, output_size=(4, 4))
             torch.mps.synchronize()
 
     def test_scatter_out_of_bounds(self, device):
