@@ -1,0 +1,256 @@
+"""Temporary native-pin controls for draft PR #202417; no expectation changes."""
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import tomllib
+
+
+ROOT = Path(__file__).resolve().parents[2]
+REPORT = ROOT / "test/test-reports/triton-pin-controls"
+WORK = ROOT / "build/triton-pin-controls"
+PINS = {
+    "old": (
+        "https://github.com/triton-lang/triton.git",
+        "b7ddcf86c095de79527ba3098503e73158bb94bd",
+    ),
+    "candidate": (
+        "https://github.com/warrendeng/triton.git",
+        "1b9ee7ae35e6e56e3f1e53650154910bdbeb4768",
+    ),
+}
+NODES = {
+    "log1p": "test_batch_invariance_log1p_backend_inductor_default_cuda_float32",
+    "tan": "test_unary_ufunc_numerical_tan_backend_inductor_default_cuda_float32",
+}
+
+
+def run(command, *, cwd=ROOT, env=None, name=None, check=True, timeout=7200):
+    print(f"CONTROL {name or command[0]}: {' '.join(map(str, command))}", flush=True)
+    start = time.monotonic()
+    if name:
+        with (REPORT / f"{name}.log").open("w") as log:
+            result = subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
+            )
+        output = (REPORT / f"{name}.log").read_text(errors="replace")
+        print(output[-12000:], flush=True)
+    else:
+        result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout)
+    print(
+        f"CONTROL exit={result.returncode} elapsed={time.monotonic() - start:.1f}s",
+        flush=True,
+    )
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, command)
+    return result.returncode
+
+
+def build_pin(label, repository, sha):
+    phase = WORK / label
+    phase.mkdir(parents=True)
+    source = phase / "source"
+    source.mkdir()
+    run(["git", "init", str(source)])
+    run(
+        ["git", "-C", str(source), "fetch", "--depth=1", repository, sha],
+        name=f"{label}-fetch",
+    )
+    run(["git", "-C", str(source), "checkout", "--detach", "FETCH_HEAD"])
+    actual = subprocess.check_output(
+        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert actual == sha, (actual, sha)
+    run(
+        ["git", "submodule", "update", "--init", "--recursive"],
+        cwd=source,
+        name=f"{label}-submodules",
+    )
+    python = phase / "venv/bin/python"
+    run([sys.executable, "-m", "venv", "--system-site-packages", str(phase / "venv")])
+    env = os.environ.copy()
+    for key in list(env):
+        if key.startswith("TRITON_") or key in {
+            "LLVM_SYSPATH",
+            "JSON_SYSPATH",
+            "LLVM_INCLUDE_DIRS",
+            "LLVM_LIBRARY_DIR",
+        }:
+            env.pop(key)
+    env.update(
+        {
+            "PATH": str(python.parent) + os.pathsep + env["PATH"],
+            "TRITON_HOME": str(phase / "dependencies"),
+            "MAX_JOBS": "4",
+            "TRITON_PARALLEL_LINK_JOBS": "1",
+        }
+    )
+    requirements = tomllib.loads((source / "pyproject.toml").read_text())[
+        "build-system"
+    ]["requires"]
+    run(
+        [str(python), "-m", "pip", "install", "build", *requirements],
+        env=env,
+        name=f"{label}-build-dependencies",
+    )
+    run(
+        [str(python), "-m", "build", "--wheel", "--no-isolation"],
+        cwd=source,
+        env=env,
+        name=f"{label}-native-build",
+    )
+    wheels = list((source / "dist").glob("*.whl"))
+    assert len(wheels) == 1, wheels
+    site = phase / "site"
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--target",
+            str(site),
+            str(wheels[0]),
+        ],
+        name=f"{label}-install",
+    )
+    manifests = {
+        str(path.relative_to(source)): path.read_text()
+        for path in (source / "cmake").glob("*llvm*info.json")
+    }
+    (REPORT / f"{label}-build-provenance.json").write_text(
+        json.dumps(
+            {
+                "source_sha": actual,
+                "wheel": wheels[0].name,
+                "wheel_sha256": hashlib.file_digest(
+                    wheels[0].open("rb"), "sha256"
+                ).hexdigest(),
+                "sdk_manifests": manifests,
+                "compiler": subprocess.check_output(["c++", "--version"], text=True),
+            },
+            indent=2,
+        )
+    )
+    return site
+
+
+def test_pin(label, site, sha, *, fusion=None):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(site) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    env.pop("TRITON_DEFAULT_FP_FUSION", None)
+    if fusion is not None:
+        env["TRITON_DEFAULT_FP_FUSION"] = str(fusion)
+    cache = WORK / f"cache-{label}"
+    env["TRITON_CACHE_DIR"] = str(cache / "triton")
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(cache / "inductor")
+    env["CUDA_CACHE_PATH"] = str(cache / "cuda")
+    env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+    probe = (
+        "import json,torch,triton; "
+        "p=torch.cuda.get_device_properties(0); "
+        "assert torch.version.hip and 'gfx950' in p.gcnArchName, str(p); "
+        f"assert '{sha[:8]}' in triton.__version__, triton.__version__; "
+        "print(json.dumps(dict(torch_version=torch.__version__,torch_sha=torch.version.git_version,"
+        "hip=torch.version.hip,device=str(p),triton_version=triton.__version__,triton_file=triton.__file__),indent=2))"
+    )
+    run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT / "test",
+        env=env,
+        name=f"{label}-runtime-provenance",
+    )
+    results = {}
+    for operation, node in NODES.items():
+        name = f"{label}-{operation}"
+        results[operation] = run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-s",
+                "--tb=short",
+                "--reruns=0",
+                f"--junitxml={REPORT / (name + '.xml')}",
+                f"inductor/test_torchinductor_opinfo_properties.py::TestOpInfoPropertiesCUDA::{node}",
+            ],
+            cwd=ROOT / "test",
+            env=env,
+            name=name,
+            check=False,
+            timeout=1200,
+        )
+        log = (REPORT / f"{name}.log").read_text(errors="replace")
+        assert results[operation] in (0, 1), f"Invalid test execution: {name}"
+        assert "1 passed" in log or "1 xfailed" in log or "XPASS:" in log, (
+            f"Original case did not complete: {name}"
+        )
+    return results
+
+
+def main():
+    REPORT.mkdir(parents=True, exist_ok=True)
+    WORK.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            sys.executable,
+            "-c",
+            "import torch; p=torch.cuda.get_device_properties(0); "
+            "assert torch.version.hip and 'gfx950' in p.gcnArchName, str(p); print(p)",
+        ],
+        cwd=ROOT / "test",
+        name="mi350-preflight",
+        timeout=180,
+    )
+    (REPORT / "pytorch-source-provenance.json").write_text(
+        json.dumps(
+            {
+                "draft_head": "914c15e40b4d5818fb0e85fe7b94d77b5f00c332",
+                "control_head": subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+                ).strip(),
+                "property_test_sha256": hashlib.sha256(
+                    (
+                        ROOT / "test/inductor/test_torchinductor_opinfo_properties.py"
+                    ).read_bytes()
+                ).hexdigest(),
+                "docker_tree": subprocess.check_output(
+                    ["git", "rev-parse", "HEAD:.ci/docker"], cwd=ROOT, text=True
+                ).strip(),
+            },
+            indent=2,
+        )
+    )
+    results = {}
+    sites = {}
+    for label, (repository, sha) in PINS.items():
+        sites[label] = build_pin(label, repository, sha)
+        results[label] = test_pin(label, sites[label], sha)
+        (REPORT / "results.json").write_text(json.dumps(results, indent=2))
+    results["candidate-old-fma-default"] = test_pin(
+        "candidate-old-fma-default",
+        sites["candidate"],
+        PINS["candidate"][1],
+        fusion=1,
+    )
+    (REPORT / "results.json").write_text(json.dumps(results, indent=2))
+    print(
+        "Completed native controls; original XPASS is recorded as a diagnostic outcome."
+    )
+    print(json.dumps(results, indent=2), flush=True)
+
+
+if __name__ == "__main__":
+    main()

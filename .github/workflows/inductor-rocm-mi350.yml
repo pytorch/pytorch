@@ -52,8 +52,7 @@ jobs:
       rocm-arch-list: gfx950
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "triton_pin_controls", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
