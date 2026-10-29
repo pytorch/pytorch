@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     CUSTOM_OP_MODULES: tuple[str, ...] = ()
     CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
     CUSTOM_OP_KERNELS: dict[str, tuple[str, ...]] = {}
+    CUSTOM_OP_KERNEL_MODULES: tuple[str, ...] = ()
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -84,7 +85,8 @@ if TYPE_CHECKING:
 def _import_custom_op_modules():
     """Import the modules registering the custom ops the graphs call, then check
     that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
-    registered. Emitted as section 0 and called at exec time."""
+    registered, and that every module in CUSTOM_OP_KERNEL_MODULES imported.
+    Emitted as section 0 and called at exec time."""
     import importlib
     import warnings
 
@@ -110,21 +112,25 @@ def _import_custom_op_modules():
         for key in CUSTOM_OP_KERNELS.get(qualname, ()):
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
-    if missing:
+    # Another module's kernel under the same key would pass the check above.
+    kernel_errors = [m for m in CUSTOM_OP_KERNEL_MODULES if m in import_errors]
+    if missing or kernel_errors:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
         from torch._precompile import PrecompileError as _PrecompileError
 
+        errors = [import_errors[m] for m in kernel_errors] or [*import_errors.values()]
         raise _PrecompileError(
             f"this artifact calls custom ops or kernels not registered here: "
-            f"{missing}. "
+            f"{missing or 'none'}. Modules registering the kernels it ran at "
+            f"capture that failed to import: {kernel_errors or 'none'}. "
             "Import the modules registering them before loading it. Modules "
             f"that failed to import: {sorted(import_errors) or 'none'}."
-        ) from next(iter(import_errors.values()), None)
+        ) from next(iter(errors), None)
     for module, e in import_errors.items():
         warnings.warn(
-            f"importing custom op module {module!r} raised {e!r}; "
-            "the ops this artifact calls and the kernels they had at capture are "
-            "registered, so it loads anyway"
+            f"importing custom op module {module!r} raised {e!r}; it registered "
+            "none of the kernels this artifact ran at capture, and the ops it calls "
+            "and their kernel keys are registered, so it loads anyway"
         )
 
 

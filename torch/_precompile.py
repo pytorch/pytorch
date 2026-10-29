@@ -209,12 +209,13 @@ it.
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
 # python_code you JIT -- same results either way. One caveat: an artifact whose graph
 # calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a Dynamo
-# artifact does so after its version checks; a failed import only warns), then refuses
-# to load unless every op in CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists
-# for it is registered. The caller must import, before load, what the artifact cannot
-# record: C++ extension ops, ops from torch.library.define or __main__, and kernels
-# registered through @torch.library.impl, register_kernel or another module's
-# Library. The
+# artifact does so after its version checks; a failed import only warns, unless the
+# module is in CUSTOM_OP_KERNEL_MODULES: it registered a kernel the graph ran at
+# capture), then refuses to load unless every op in CUSTOM_OPS and every kernel key
+# CUSTOM_OP_KERNELS lists for it is registered. The caller must import, before load,
+# what the artifact cannot record: C++ extension ops, ops from torch.library.define or
+# __main__, and kernels registered through @torch.library.impl, register_kernel or
+# another module's Library. The
 # eager backend has no kernels to accelerate, so the eager cache carries no compiled
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
@@ -1899,6 +1900,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "CUSTOM_OP_MODULES",
         "CUSTOM_OPS",
         "CUSTOM_OP_KERNELS",
+        "CUSTOM_OP_KERNEL_MODULES",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2142,38 +2144,38 @@ def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], .
     )
 
 
-# The dispatch keys whose kernels an artifact checks are still registered at load.
-_KERNEL_KEYS = (
-    "CPU",
-    "CUDA",
-    "XPU",
-    "MPS",
-    "PrivateUse1",
+_COMPOSITE_KERNEL_KEYS = (
     "CompositeImplicitAutograd",
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
 )
+# The dispatch keys whose kernels an artifact checks are still registered at load,
+# when its graph's tensors are unknown.
+_KERNEL_KEYS = ("CPU", "CUDA", "XPU", "MPS", "PrivateUse1", *_COMPOSITE_KERNEL_KEYS)
 
 
 def _graph_kernel_keys(gm: torch.fx.GraphModule | None) -> tuple[str, ...]:
-    """The ``_KERNEL_KEYS`` an artifact of ``gm`` runs kernels under: the composite
-    keys and the backends of the devices its tensors are on."""
+    """The dispatch keys an artifact of ``gm`` runs kernels under: the composite
+    keys and the backend keys of its tensors (``SparseCPU`` for a sparse CPU one)."""
     if gm is None:
         return _KERNEL_KEYS
-    return _device_kernel_keys(
-        leaf.device.type
+    # A tensor's backend key is its highest key below BackendSelect.
+    below = torch._C._dispatch_keyset_full_after(torch._C.DispatchKey.BackendSelect)
+    backends = {
+        (torch._C._dispatch_keys(leaf) & below).highestPriorityTypeId().name
         for module in gm.modules()
         if isinstance(graph := getattr(module, "graph", None), torch.fx.Graph)
         for node in graph.nodes
         for leaf in pytree.tree_leaves(node.meta.get("val"))
         if isinstance(leaf, torch.Tensor)
-    )
+    }
+    return (*sorted(backends - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
 
 
 def _device_kernel_keys(device_types: Iterable[str]) -> tuple[str, ...]:
-    """The composite ``_KERNEL_KEYS`` and the backend keys of ``device_types``."""
+    """The composite keys and the backend keys of ``device_types``."""
     backends = {torch._C._dispatch_key_for_device(t) for t in device_types}
-    return tuple(k for k in _KERNEL_KEYS if k in backends or k.startswith("Composite"))
+    return (*sorted(backends), *_COMPOSITE_KERNEL_KEYS)
 
 
 def _write_custom_op_imports(
@@ -2200,13 +2202,21 @@ def _write_custom_op_imports(
     # schema alone does not show the op can run.
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     kernels = {}
+    file_modules = functools.cache(_file_modules)
+    owners: set[str] = set()
     for name, overload in ops:
         qualname = f"{name}.{overload}" if overload else name
-        if not torch._C._dispatch_has_kernel(qualname):
-            continue
-        if found := tuple(k for k in keys if has_kernel(qualname, k)):
+        # Despite its name, _dispatch_has_kernel only tests that the op exists,
+        # which _dispatch_has_kernel_for_dispatch_key requires (it raises otherwise).
+        op_exists = torch._C._dispatch_has_kernel(qualname)
+        if op_exists and (found := tuple(k for k in keys if has_kernel(qualname, k))):
             kernels[qualname] = found
+            owners |= _kernel_modules(name, overload, keys, file_modules)
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
+    # The dispatcher reported these as registering the kernels the graph ran, so
+    # another module's kernel under the same key cannot stand in for theirs.
+    owners_in_order = tuple(m for m in modules if m in owners)
+    buf.writeline(f"CUSTOM_OP_KERNEL_MODULES = {owners_in_order!r}")
     from torch import _precompile_driver as driver
 
     buf.writeline(inspect.getsource(driver._import_custom_op_modules).rstrip())
@@ -3932,10 +3942,13 @@ def load(
     ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
     and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
     for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
-    and the backend keys of the devices the graph's tensors were on, that it had a
-    kernel for at capture). A module that fails to import only warns when those ops
-    and kernels are registered anyway, e.g. by a module the server imported under
-    another name.
+    and the backend keys of the graph's tensors, that it had a kernel for at
+    capture). A module in ``CUSTOM_OP_KERNEL_MODULES``, one the dispatcher reported
+    as registering a kernel the graph ran at capture, must import: otherwise another
+    module's kernel under the same key could run in its place. Any other module,
+    a guess at the one defining an op, only warns when it fails to import and the
+    ops and kernels are registered anyway, e.g. by a module the server imported
+    under another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
