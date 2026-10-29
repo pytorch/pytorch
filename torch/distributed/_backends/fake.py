@@ -419,6 +419,11 @@ class FakeProcessGroup(dist.BackendBase):
 
     def all_gather_single_coalesced(self, outputs, inputs, opts=_ALLGATHER_OPTS):
         self._check_collective_error()
+        if len(outputs) != len(inputs):
+            raise _invalid_argument(
+                "allgather_into_tensor_coalesced",
+                "requires input/output tensor lists to have the same length",
+            )
         with torch._C._AutoDispatchBelowADInplaceOrView():
             for output, input in zip(outputs, inputs):
                 for chunk in output.chunk(self.size()):

@@ -1027,6 +1027,14 @@ class TestFakePG(TestCase):
         ):
             pg.reduce_scatter(outputs, inputs, opts)
 
+    def test_all_gather_single_coalesced_wrong_list_size(self):
+        pg = FakeProcessGroup._create_internal(0, 2, FakeProcessGroup.Options())
+        outputs = [torch.empty(4), torch.empty(4)]
+        with self.assertRaisesRegex(
+            RuntimeError, "requires input/output tensor lists to have the same length"
+        ):
+            pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
+
     def test_reduce_scatter_base_wrong_input_size(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
