@@ -29,6 +29,7 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     WorkResult,
 )
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -36,7 +37,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
-    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_CUDA,
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -57,6 +58,250 @@ try:
     HAS_NCCL_COLL_CONFIG = True
 except ImportError:
     HAS_NCCL_COLL_CONFIG = False
+
+
+@instantiate_parametrized_tests
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+@unittest.skipIf(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+class ProcessGroupNCCL2ConditionalGraphTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        # NCCL caches this setting. Each test needs fresh workers that inherit it
+        # before NCCL initializes, rather than MultiProcContinuousTest workers.
+        with mock.patch.dict(os.environ, {"NCCL_GRAPH_MIXING_SUPPORT": "0"}):
+            self._spawn_processes()
+
+    def _init_process_group(self, *, store=None, high_priority_stream=False):
+        self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
+        torch.cuda.set_device(self.rank)
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.is_high_priority_stream = high_priority_stream
+        if store is None:
+            store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl2",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=60),
+            pg_options=opts,
+        )
+        return dist.distributed_c10d._get_default_group().group_name
+
+    @requires_nccl()
+    def test_nccl_cudagraph_nested_capture(self):
+        """Replay NCCL in a parent capture and a conditional-node body."""
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        group_name = self._init_process_group()
+
+        def all_reduce(tensor):
+            result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
+            return torch.ops._c10d_functional.wait_tensor(result)
+
+        def true_branch(tensor):
+            return all_reduce(tensor + 1) / self.world_size
+
+        def false_branch(tensor):
+            return tensor - 1
+
+        tensor = torch.full((4,), self.rank + 1, dtype=torch.float32, device=self.rank)
+        predicate = torch.tensor(True, device=self.rank)
+        capture_stream = torch.cuda.Stream(device=self.rank)
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(capture_stream):
+            all_reduce(tensor)
+            true_branch(tensor)
+            false_branch(tensor)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        try:
+            with (
+                torch.cuda.graph(graph, stream=capture_stream),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                output = all_reduce(tensor)
+                output = torch.cond(predicate, true_branch, false_branch, (output,))
+
+            graph.instantiate()
+            for offset, pred in ((0, True), (2, False), (4, True)):
+                tensor.fill_(self.rank + 1 + offset)
+                predicate.fill_(pred)
+                graph.replay()
+                torch.cuda.synchronize()
+                expected = self.world_size * (self.world_size + 1) // 2
+                expected += self.world_size * offset
+                expected += 1 if pred else -1
+                self.assertEqual(output, torch.full_like(output, expected))
+        finally:
+            # Release NCCL graph resources before destroying the process group.
+            graph.reset()
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    def test_nccl_cudagraph_nested_conditionals(self):
+        """Replay NCCL with more than 32 simultaneously active child captures."""
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        group_name = self._init_process_group()
+        world_size = self.world_size
+        num_cond_nodes = 40
+        levels = torch.arange(num_cond_nodes, device=self.rank)
+        predicates = torch.ones(num_cond_nodes, dtype=torch.bool, device=self.rank)
+
+        def all_reduce(tensor):
+            result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
+            return torch.ops._c10d_functional.wait_tensor(result)
+
+        def leaf(tensor):
+            return all_reduce(tensor + 1) / world_size
+
+        def false_branch(tensor):
+            return all_reduce(tensor - 1) / world_size
+
+        def make_branch(next_branch, level):
+            def branch(tensor):
+                tensor = all_reduce(tensor + 1) / world_size
+                # Use torch.cond's HOP directly to avoid recursive
+                # Dynamo tracing, which is very slow when we nest 40
+                # torch.cond() nodes
+                tensor = torch.ops.higher_order.cond(
+                    predicates[level], next_branch, false_branch, (tensor,)
+                )
+                return all_reduce(tensor + 1) / world_size
+
+            return branch
+
+        nested = leaf
+        for level in reversed(range(num_cond_nodes)):
+            nested = make_branch(nested, level)
+
+        def forward(tensor):
+            tensor = all_reduce(tensor)
+            tensor = nested(tensor)
+            return all_reduce(tensor) / world_size
+
+        tensor = torch.full((4,), self.rank + 1, dtype=torch.float32, device=self.rank)
+        depths = (40, 0, 1, 20, 39, 40)
+        capture_stream = torch.cuda.Stream(device=self.rank)
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        graphs = []
+        python_recursion_limit = sys.getrecursionlimit()
+        try:
+            # Capturing 40 nested HOPs needs a deeper Python dispatch stack.
+            sys.setrecursionlimit(10000)
+            with torch.cuda.stream(capture_stream):
+                leaf(tensor)
+                false_branch(tensor)
+            torch.cuda.synchronize()
+            outputs = []
+            # Reuse ended capture streams while the first graph is still alive.
+            for _ in range(2):
+                graph = torch.cuda.CUDAGraph(keep_graph=True)
+                graphs.append(graph)
+                with (
+                    torch.cuda.graph(graph, stream=capture_stream),
+                    CUDAGraphCaptureControlFlowOpDispatchMode(),
+                ):
+                    outputs.append(forward(tensor))
+                graph.instantiate()
+
+            for graph, output in zip(graphs, outputs):
+                for offset, depth in enumerate(depths):
+                    tensor.fill_(self.rank + 1 + offset)
+                    predicates.copy_(levels < depth)
+                    graph.replay()
+                    torch.cuda.synchronize()
+                    expected = world_size * (world_size + 1) // 2 + world_size * offset
+                    expected += 2 * depth + 1
+                    self.assertEqual(output, torch.full_like(output, expected))
+        finally:
+            for graph in graphs:
+                graph.reset()
+            sys.setrecursionlimit(python_recursion_limit)
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    @parametrize("high_priority_stream", [False, True])
+    def test_cudagraph_stream_outlives_process_group(self, high_priority_stream):
+        # Identify the dedicated NCCL stream through its dependency-event wait.
+        waited_streams = set()
+        torch._C._activate_gpu_trace()
+        gpu_trace.register_callback_for_event_wait(
+            lambda event, stream: waited_streams.add(stream)
+        )
+        store = dist.FileStore(self.file_name, self.world_size)
+        for generation in range(2):
+            self._init_process_group(
+                store=dist.PrefixStore(str(generation), store),
+                high_priority_stream=high_priority_stream,
+            )
+            send = torch.full((4,), self.rank + 1.0, device=self.rank)
+            recv = torch.empty_like(send)
+            parent_input = torch.ones_like(send)
+            pred = torch.tensor(True, device=self.rank)
+
+            def exchange(send, recv):
+                ops = [
+                    dist.P2POp(dist.isend, send, 1 - self.rank),
+                    dist.P2POp(dist.irecv, recv, 1 - self.rank),
+                ]
+                for work in dist.batch_isend_irecv(ops):
+                    work.wait()
+
+            dist.all_reduce(parent_input, async_op=True).wait()
+            exchange(send, recv)
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream(device=self.rank)
+            stream.wait_stream(torch.cuda.current_stream())
+            graph = torch.cuda.CUDAGraph(keep_graph=True)
+            try:
+                with torch.cuda.graph(graph, stream=stream):
+                    dist.all_reduce(parent_input, async_op=True).wait()
+                    graph.begin_capture_to_if_node(pred)
+                    try:
+                        child_stream = torch.cuda.current_stream().cuda_stream
+                        waited_streams.clear()
+                        exchange(send, recv)
+                        nccl_streams = waited_streams - {child_stream}
+                        self.assertEqual(len(nccl_streams), 1)
+                        pooled_stream = torch.cuda.ExternalStream(
+                            nccl_streams.pop(), device=self.rank
+                        )
+                    finally:
+                        graph.end_capture_to_conditional_node()
+                graph.instantiate()
+                for offset in (0, 2, 4):
+                    send.fill_(self.rank + 1 + offset)
+                    graph.replay()
+                    torch.cuda.synchronize()
+                    expected = torch.full_like(recv, 2 - self.rank + offset)
+                    self.assertEqual(recv, expected)
+                # NCCL2's same-device P2P path does not call record_stream.
+                # Explicitly leave an allocator reference to the pool stream.
+                send.record_stream(pooled_stream)
+            finally:
+                graph.reset()
+                dist.destroy_process_group()
+            # Check the raw stream remains valid before allocator deallocation
+            # attempts to record its own event on that same stream.
+            event = torch.cuda.Event()
+            event.record(pooled_stream)
+            event.synchronize()
+            del send, recv
+            torch.cuda.synchronize()
 
 
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
@@ -1459,7 +1704,6 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_timeout_without_process_abort(self) -> None:
         # NoHandling is how a stock NCCL user opts out of the process being
         # taken down by the watchdog; nccl2 reads the same variable, when the
@@ -1545,7 +1789,6 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dumped_on_timeout(self) -> None:
         # The dump is written by the abort hook c10d::FlightRecorderHook
         # registers, which nccl2 runs when it detects the timeout. NoHandling
@@ -1643,7 +1886,6 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dump_is_bounded(self) -> None:
         # Symbolizing a traceback may need the GIL, so the attempt that
         # includes stack traces is made under a bounded wait and abandoned for
@@ -1854,6 +2096,49 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
                 backend.register_mem_pool(pool, symm=True)
         finally:
             backend.deregister_mem_pool(pool)
+
+
+class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_with_pair_comms(self) -> None:
+        # Once a pair comm exists the allocator hook registers new pool segments
+        # with it too; only the primary holds the pool registration. Allocating
+        # before register_mem_pool lets symm=True warn instead of raising when
+        # symmetric memory is unsupported.
+        backend = self._backend()
+        nxt = (self.rank + 1) % self.world_size
+        prev = (self.rank - 1) % self.world_size
+
+        def ring(send_t: torch.Tensor, recv_t: torch.Tensor) -> None:
+            if self.rank % 2 == 0:
+                dist.send(send_t, nxt)
+                dist.recv(recv_t, prev)
+            else:
+                dist.recv(recv_t, prev)
+                dist.send(send_t, nxt)
+            torch.cuda.synchronize()
+
+        ring(torch.zeros(1, device=self.device), torch.empty(1, device=self.device))
+        self.assertGreater(backend._num_active_channels(), 0)
+        for symm in (False, True):
+            pool = torch.cuda.MemPool(backend.mem_allocator)
+            tensor = self._pool_tensor(pool)
+            recv_t = self._pool_tensor(pool)
+            backend.register_mem_pool(pool, symm=symm)
+            try:
+                ring(tensor, recv_t)
+                self.assertEqual(recv_t, torch.full_like(recv_t, float(prev)))
+                dist.all_reduce(tensor)
+                torch.cuda.synchronize()
+                self.assertEqual(tensor, torch.full_like(tensor, self._all_reduced))
+            finally:
+                backend.deregister_mem_pool(pool)
+            del tensor, recv_t, pool
 
 
 class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):

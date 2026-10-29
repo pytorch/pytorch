@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import pickle
+import runpy
 import shutil
 import stat
 import struct
@@ -1109,6 +1110,25 @@ class TestPrecompile(TestCase):
         ns = {"__name__": "_artifact"}
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self):
+        # A module-level Triton kernel reads its source back from the module's file,
+        # which both the header's runpy.run_path recipe and the inlined load provide.
+        m = torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU()).eval().cuda()
+        x = torch.randn(3, 8, device="cuda")
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        self.assertIn(
+            '#     import runpy\n#     ns = runpy.run_path("this_file.py")', code
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
+        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(f_c(m, x), m(x))
 
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
@@ -7596,10 +7616,12 @@ class TestPrecompileRuntimeCache(TestCase):
         source = (
             f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
         )
-        with fresh_cache():
-            lib = CppCodeCache.load(source)
-            with open(lib._name, "rb") as binary:
-                payload = pickle.dumps({lib.key: binary.read()})
+        # Frozen as a capture freezes it, under the key a replay looks it up by.
+        with fresh_cache(), _runtime_cache.capture_scope():
+            CppCodeCache.load(source)
+            [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+            with open(binary_path, "rb") as binary:
+                payload = pickle.dumps({key: binary.read()})
         artifact = _runtime_cache.InductorCppCacheArtifact(
             hashlib.sha256(payload).hexdigest(), payload
         )
@@ -7618,17 +7640,15 @@ class TestPrecompileRuntimeCache(TestCase):
 
         from torch._inductor.codecache import CppCodeCache
         from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
         from torch.compiler._cache import CacheArtifactManager
 
+        code = 'extern "C" long captured_cpp_kernel(long x) { return x; }'
         with fresh_cache():
             loaded = []
 
             def load():
-                loaded.append(
-                    CppCodeCache.load(
-                        'extern "C" long captured_cpp_kernel(long x) { return x; }'
-                    )
-                )
+                loaded.append(CppCodeCache.load(code))
 
             source, cache = _capture_files(
                 self,
@@ -7643,7 +7663,11 @@ class TestPrecompileRuntimeCache(TestCase):
                 torch.load(cache, weights_only=True)["artifact"]
             )
             (frozen,) = artifacts["inductor_cpp"]
-            self.assertEqual(pickle.loads(frozen.content), {lib.key: binary})
+            # The key a replay looks the kernel up by.
+            with _runtime_cache.capture_scope():
+                CppCodeCache.load(code)
+                (key,) = _runtime_cache._capture.cpp_kernels
+            self.assertEqual(pickle.loads(frozen.content), {key: binary})
 
     def test_cpp_kernel_is_recorded_on_every_load(self):
         from torch._inductor.codecache import CppCodeCache
@@ -7656,7 +7680,8 @@ class TestPrecompileRuntimeCache(TestCase):
             CppCodeCache.load_async(source)
             with _runtime_cache.capture_scope():
                 CppCodeCache.load_async(source)
-                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+                [(binary_path, _)] = _runtime_cache._capture.cpp_kernels.values()
+            (key,) = CppCodeCache.cache
             self.assertEqual(CppCodeCache._binary_paths[key], binary_path)
 
     def test_capture_builds_unforced_cpp_loads_and_rejects_missing_binaries(self):
@@ -7694,7 +7719,7 @@ class TestPrecompileRuntimeCache(TestCase):
                         paths=(source, cache),
                         then=record,
                     )
-                self.assertIn("'missing'", str(failure.exception.__cause__))
+                self.assertIn("missing.so", str(failure.exception.__cause__))
                 self.assertFalse(os.path.exists(cache))
                 del _runtime_cache._capture.cpp_kernels["missing"]
                 _capture_files(
