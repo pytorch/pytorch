@@ -146,6 +146,12 @@ class OperatorArgsKwargsView {
       if (std::memcmp(&default_double, &value_double, sizeof(double)) != 0) {
         return false;
       }
+    } else if (default_ivalue.isComplexDouble()) {
+      c10::complex<double> default_complex = default_ivalue.toComplexDouble();
+      c10::complex<double> value_complex = ivalue.toComplexDouble();
+      if (std::memcmp(&default_complex, &value_complex, sizeof(c10::complex<double>)) != 0) {
+        return false;
+      }
     }
     return true;
   }
