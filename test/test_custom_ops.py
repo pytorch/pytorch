@@ -716,6 +716,21 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(calls, ["custom"])
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_records_profiler_events(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_profiled", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = self.ns().pyobject_dispatch_profiled.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+        with torch.profiler.profile() as prof:
+            f(torch.randn(3))
+        names = {e.name for e in prof.events()}
+        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
         @torch.library.custom_op(
             f"{self.test_ns}::pyobject_dispatch_custom_op_autograd",
@@ -5532,6 +5547,25 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_multi_types_register_kernel_for_one(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
