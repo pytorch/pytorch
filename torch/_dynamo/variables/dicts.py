@@ -47,6 +47,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstDictKeySource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -423,11 +424,13 @@ class ConstDictVariable(VariableTracker):
                 if (
                     not self.should_reconstruct_all
                     and isinstance(key_var, ConstantVariable)
+                    and isinstance(key_var.source, ConstDictKeySource)
+                    and key_var.source.base == self.source
                     and not _contains_nan(key_var.as_python_constant())
                 ):
                     key_var = key_var.clone(source=None)
-                # Literal-key updates preserve the input's order. Rebuilding the
-                # dictionary or loading keys by storage position depends on it.
+                # Updating an existing literal key retains its identity and order.
+                # External keys and full reconstruction still need their sources.
                 if isinstance(
                     self.mutation_type,
                     (ValueMutationExisting, AttributeMutationExisting),
@@ -520,11 +523,8 @@ class ConstDictVariable(VariableTracker):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        # `ordered` selects linked order for OrderedDict, storage order otherwise;
-        # plain dicts have only storage order. Ordinary mappings always guard keys.
-        # `guard_keys` also specializes hook IDs when keys affect the trace, such as
-        # key iteration or copying. Hook values/items may guard only relative order
-        # until their sourced keys are observed, allowing equivalent modules to share.
+        # Subclasses use `ordered` for linked order and `guard_keys` for hook IDs;
+        # ordinary dictionaries always guard their keys in storage order.
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -1406,18 +1406,9 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ordered: bool = True,
         guard_keys: bool = False,
     ) -> None:
-        ConstDictVariable.install_dict_order_guard(self, tx, ordered=ordered)
         if guard_keys:
             ConstDictVariable.install_dict_keys_match_guard(self)
-        if (
-            self.source
-            and not is_constant_source(self.source)
-            and ordered
-            and len(self.original_items) > 1
-        ):
-            # Hook values use storage-position sources; their order matters, but
-            # equivalent modules have different hook IDs unless keys are observed.
-            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+        super().install_dict_order_guard(tx, ordered=ordered)
 
     def install_dict_contains_guard(
         self,

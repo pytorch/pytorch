@@ -1577,13 +1577,14 @@ class _OrderedDictWithGetState(collections.OrderedDict):
         self.saved = 0
 
     def __getstate__(self):
-        return {"saved": self.saved}
+        return {"saved": self.saved} if self.saved is not None else None
 
 
 class _OrderedDictWithSetState(_OrderedDictWithGetState):
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.state_restored = True
+        self.state_restored = tuple(self)
+        self.move_to_end("b")
 
 
 _generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
@@ -1637,20 +1638,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(loaded.__dict__, attrs)
 
     @parametrize("mapping_type", [_OrderedDictWithGetState, _OrderedDictWithSetState])
-    def test_ordered_dict_state_hooks(self, mapping_type):
+    @parametrize("saved", [None, 3])
+    def test_ordered_dict_state_hooks(self, mapping_type, saved):
         mapping = mapping_type()
         mapping.update(a=1, b=2)
         mapping.move_to_end("a")
-        mapping.saved = 3
+        mapping.saved = saved
+        expected = pickle.loads(pickle.dumps(mapping))
         buf = io.BytesIO()
         GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
         loaded = load_guards_state(buf.getvalue())
-        self.assertEqual(list(loaded), ["b", "a"])
+        self.assertEqual(list(loaded), list(expected))
         self.assertEqual(list(dict.keys(loaded)), ["a", "b"])
-        self.assertEqual(loaded.saved, 3)
+        self.assertEqual(loaded.saved, expected.saved)
+        self.assertEqual(vars(loaded).keys(), vars(expected).keys())
         self.assertIsNot(loaded.recreated, mapping.recreated)
-        if mapping_type is _OrderedDictWithSetState:
-            self.assertTrue(loaded.state_restored)
+        if mapping_type is _OrderedDictWithSetState and saved is not None:
+            self.assertEqual(loaded.state_restored, expected.state_restored)
 
     def test_ordered_dict_registered_reducer(self):
         mapping = _OrderedDictSubclass(a=1)

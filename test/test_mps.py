@@ -5678,6 +5678,9 @@ class TestMPS(TestCaseMPS):
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
         helper([1, 1, 32, 32], 'mean')
+        # sizes that are not a multiple of 4 and span several threadgroups
+        helper([3, 7, 11], 'sum')
+        helper([1000003], 'mean')
 
     def test_bce_loss_empty(self):
         # A zero-sized input has no Metal buffer to bind, which used to trip the
@@ -5713,6 +5716,20 @@ class TestMPS(TestCaseMPS):
         b = torch.rand(25, 1, device='mps')
         with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
+
+    def test_bce_loss_out_of_range(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201153
+        valid = torch.rand(4, device='mps')
+        for reduction, value in itertools.product(['none', 'sum', 'mean'], [float('nan'), float('inf'), float('-inf'), -0.1, 1.1]):
+            invalid = torch.full((4,), value, device='mps')
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of input should be between 0 and 1'):
+                F.binary_cross_entropy(invalid, valid, reduction=reduction)
+                torch.mps.synchronize()
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of target should be between 0 and 1'):
+                F.binary_cross_entropy(valid, invalid, reduction=reduction)
+                torch.mps.synchronize()
+        # The failed asserts must not leak into later ops
+        self.assertEqual(F.binary_cross_entropy(valid, valid), F.binary_cross_entropy(valid.cpu(), valid.cpu()))
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 1024
