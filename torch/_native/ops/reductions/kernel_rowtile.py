@@ -107,9 +107,78 @@ _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _MULTIROW_ROWS_PER_BLOCK = 128
 _MULTIROW_MAX_DEPTH = 6
 
-# Per-thread elements from fusing adjacent chunks while keeping loads coalesced: 1.79x at
-# (65536, 1024). 64 is within 2% of the measured optimum; 256 takes 127.6us versus 56.7us.
+# Bit-neutral tuning knobs keyed by architecture. They affect launch geometry and
+# staging, and are part of `_ItreePlan.sig`.
+
+
+class _ItreeArch(NamedTuple):
+    split_stage_rows: int  # independent stage-1 batches staged per block
+    combine_rpb: int  # rows per block for the stage-2 combine
+    combine_group_bytes: int  # per iteration of its chain; 0 folds one link at a time
+    stage_rows: bool  # stage the one-thread-per-row shape's block through smem
+    # Most cp.async per lane and row; 0 disables combine staging.
+    combine_async: int
+    combine_max: int  # maximum partials staged per row
+    # Staged fold unroll factor. 0 unrolls a whole tile, which compiles for minutes.
+    combine_unroll: int = 128
+    # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
+    # 0 keeps _ITREE_THREAD_ELEMS.
+    lowp_thread_elems: int = 0
+
+
+# Performance tuning is keyed by full compute capability. Each measured GPU has
+# an explicit row so changing the default cannot retune it.
+# combine_unroll, 128 MiB M=1 CUDA graphs on B200 (H100): full static unrolling compiled
+# fp32 var_mean for 115s (23s) and ran it at 1196us (608us); 128 runs it at 324us (410us)
+# and keeps full sums within 4% (3%) of full unrolling.
+# lowp_thread_elems, 128 MiB fp16/bf16 rows on B200 and H100: 32 runs sum, mean and norm
+# 1.45-1.64x and prod 1.11-1.18x at N=2049 and 4097, nansum up to 1.37x at N=12289, and no
+# trait below 0.95x for N=3000-12289; at N=1025 sum ran 0.65x, so narrower rows keep 64.
+_ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
+    "default": _ItreeArch(
+        split_stage_rows=0,
+        combine_rpb=128,
+        combine_group_bytes=0,
+        stage_rows=False,
+        combine_async=0,
+        combine_max=512,
+    ),
+    (9, 0): _ItreeArch(
+        split_stage_rows=0,
+        combine_rpb=WARP,
+        combine_group_bytes=16,
+        stage_rows=True,
+        combine_async=8,
+        combine_max=512,
+        combine_unroll=128,
+        lowp_thread_elems=32,
+    ),
+    # B200 is the tuning anchor for the other constants in this file.
+    # A 2K combine tile saves 1.1-2.5us at 128 MiB; 4K regresses 16-bit sums.
+    (10, 0): _ItreeArch(
+        split_stage_rows=4,
+        combine_rpb=WARP,
+        combine_group_bytes=16,
+        stage_rows=False,
+        combine_async=32,
+        combine_max=2048,
+        combine_unroll=128,
+        lowp_thread_elems=32,
+    ),
+}
+
+
+def _itree_arch(
+    device: torch.device | int | str | None = None,
+) -> _ItreeArch:
+    """Return tuning for `device`, defaulting safely because all knobs are bit-neutral."""
+    return _ITREE_ARCH.get(_hw.caps(device).cc, _ITREE_ARCH["default"])
+
+
+# Default per-thread width for the order, in elements (k*vec*eff live in registers at once).
+# Fusing adjacent chunks keeps a full warp, and therefore coalesced loads, on each.
 _ITREE_THREAD_ELEMS = 64
+_ITREE_LOWP_MIN_N = 2048
 
 # Vector-width multiplier; each doubling costs ~2x. `bte`, not this, fixes the bits.
 _ITREE_VEC_MUL = 1
@@ -140,7 +209,7 @@ class _ItreePlan(NamedTuple):
     wpr: int  # warps cooperating on one row; 0 == one thread per row
     rows_per_block: int
     depth: int
-    batches: tuple[Any, ...]
+    batches: tuple[tuple[int, int, int, int], ...]
     tms: tuple[tile.TileMap, ...]
     # split only: (nbatch, batch_total_elements, last_remaining, chunk_full, chunk_last)
     split: tuple[int, ...] = ()
@@ -150,6 +219,16 @@ class _ItreePlan(NamedTuple):
     vec_linear: bool = False
     # Staged columns/lane; 0 disables. One butterfly preserves ATen's chunk nesting.
     stage_e: int = 0
+    # Stage the block's rows through smem where the global read is narrower than a full 32-lane
+    # transfer. Bit-neutral: only where the bytes come from moves, not the tile map or any add.
+    stage_rows: bool = False
+    # COMBINE shape only: partials pulled into registers per iteration of its linear chain. 1 folds
+    # link at a time. Bit-neutral -- the chain keeps its association either way.
+    combine_grp: int = 1
+    # COMBINE shape only: partials per row per cp.async-staged smem tile. 0 folds straight from
+    # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
+    combine_tile: int = 0
+    combine_unroll: int = 0
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -165,12 +244,18 @@ class _ItreePlan(NamedTuple):
             self.kchunk,
             self.vec_linear,
             self.stage_e,
+            self.stage_rows,
+            self.combine_grp,
+            self.combine_tile,
+            self.combine_unroll,
         )
 
 
-def _fuse_factor(want: int | None, wpr: int, vec: int, loads: int) -> int:
+def _fuse_factor(
+    want: int | None, wpr: int, vec: int, loads: int, thread_elems: int
+) -> int:
     """Adjacent chunks per thread group: as many as the register budget and wpr allow."""
-    k = _ITREE_THREAD_ELEMS // max(1, vec * loads) if want is None else want
+    k = thread_elems // max(1, vec * loads) if want is None else want
     k = max(1, 1 << (max(k, 1).bit_length() - 1))  # floor to a power of two
     return math.gcd(k, max(wpr, 1))
 
@@ -189,6 +274,8 @@ def itree_plan(
     vmul: int | None = None,
     vec_linear: bool = False,
     stage: bool | None = None,
+    device: torch.device | int | str | None = None,
+    thread_elems: int | None = None,
 ) -> _ItreePlan | None:
     """Return the upstream-matching plan, or None to use default order without declining."""
     from .inner_tree_plan import (
@@ -218,6 +305,11 @@ def itree_plan(
             _MULTIROW_MAX_DEPTH,
             ((0, N, loads, N),),
             (tm,),
+            stage_rows=(
+                stage is not False
+                and N * itemsize >= _TMA_MIN_STRIDE
+                and _itree_arch(device).stage_rows
+            ),
         )
     prm = compute_inner_tree_params(N, M, vec)
     wpr = prm.num_warps
@@ -235,12 +327,31 @@ def itree_plan(
             vec=vec,
             exact=False,
         )
-        k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
+        k = _fuse_factor(
+            kc,
+            wpr,
+            vec,
+            prm.effective_loads,
+            _ITREE_THREAD_ELEMS if thread_elems is None else thread_elems,
+        )
+        split_stage_rows = _itree_arch(device).split_stage_rows
+        stage_rpb = (
+            math.gcd(prm.num_batches, split_stage_rows)
+            if (
+                stage is not False
+                and not vec_linear
+                and itemsize <= 4
+                and last == prm.batch_total_elements
+                and split_stage_rows
+            )
+            else 0
+        )
+        stage_rpb = stage_rpb if stage_rpb > 1 else 0
         return _ItreePlan(
             "split",
             vec,
             wpr,
-            1,
+            stage_rpb or 1,
             prm.depth,
             ((0, prm.batch_total_elements, prm.effective_loads, chunk_full),),
             (tm,),
@@ -253,6 +364,7 @@ def itree_plan(
             ),
             k,
             vec_linear,
+            _ITREE_STAGE_E if stage_rpb else 0,
         )
     batches = []
     for b in range(prm.num_batches):
@@ -273,7 +385,13 @@ def itree_plan(
         )
         for (off_b, _rem, lpw_b, _wc) in batches
     )
-    k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
+    k = _fuse_factor(
+        kc,
+        wpr,
+        vec,
+        prm.effective_loads,
+        _ITREE_THREAD_ELEMS if thread_elems is None else thread_elems,
+    )
     rpb = max(1, min(M, _ITREE_BLOCK_THREADS // max(1, WARP * (wpr // k))))
     # Stage one bounded batch only when removing multiple butterflies repays the smem trip.
     span = wpr * prm.effective_loads * WARP * vec
@@ -293,19 +411,10 @@ def itree_plan(
         and e <= tile.MAX_UNROLL
         and (e // vec) & (e // vec - 1) == 0
     ):
-        return _ItreePlan(
-            "looped",
-            vec,
-            wpr,
-            min(M, prm.rows_per_block) or 1,
-            prm.depth,
-            tuple(batches),
-            tms,
-            (),
-            1,
-            False,
-            e,
-        )
+        rpb = min(M, prm.rows_per_block) or 1
+        k, vec_linear = 1, False
+    else:
+        e = 0
     return _ItreePlan(
         "looped",
         vec,
@@ -317,20 +426,96 @@ def itree_plan(
         (),
         k,
         vec_linear,
+        e,
     )
 
 
-def itree_combine_plan(itree: _ItreePlan) -> _ItreePlan:
-    """Stage 2 of the split shape: one thread per row, folding that row's partials."""
+def trait_itree_plan(
+    trait: Any,
+    N: int,
+    M: int,
+    itemsize: int,
+    stage: bool | None = None,
+    device: torch.device | int | str | None = None,
+) -> _ItreePlan | None:
+    """Retune ragged looped plans whose arithmetic or storage favors less fusion."""
+    plan = itree_plan(N, M, itemsize, stage=stage, device=device)
+    if plan is None or plan.shape != "looped" or all(tm.exact for tm in plan.tms):
+        return plan
+    from . import traits as T
+
+    elems = _itree_arch(device).lowp_thread_elems
+    if (
+        not elems
+        or N <= _ITREE_LOWP_MIN_N
+        or itemsize > 2
+        or not isinstance(
+            trait, (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps)
+        )
+    ):
+        return plan
+    return itree_plan(N, M, itemsize, thread_elems=elems, stage=stage, device=device)
+
+
+def itree_combine_plan(
+    itree: _ItreePlan,
+    itemsize: int,
+    device: torch.device | int | str | None = None,
+    nfields: int = 1,
+    nrows: int | None = None,
+) -> _ItreePlan:
+    """Plan the architecture-tuned, bit-neutral fold of each row's split partials.
+
+    `itemsize` is the widest partial field's size, so each field's copy group stays within
+    `combine_group_bytes` and `nfields * itemsize` bounds the staged footprint.
+    """
+    arch = _itree_arch(device)
+    if arch.combine_unroll < 0:
+        raise ValueError("combine_unroll must be nonnegative")
+    if arch.combine_async and arch.combine_rpb > WARP:
+        # The async copy maps one warp's lanes onto a row's partials.
+        raise ValueError("combine_async requires combine_rpb <= WARP")
+    caps = _hw.caps(device)
+    nbatch = itree.split[0]
+    rpb = arch.combine_rpb
+    if arch.combine_async and nrows is not None:
+        # Bucket the staged footprint while retaining a full warp for cp.async.
+        live = max(1, min(nrows, rpb))
+        rpb = 1 << (live - 1).bit_length()
+    grp = arch.combine_group_bytes // itemsize
+    g = max(1, math.gcd(nbatch, grp)) if grp else 1
+    # A staged tile must DIVIDE the batch count -- a ragged last tile would need predication --
+    # so a wide tile does not apply to every nbatch and the walk falls back to narrower ones.
+    # Bounded by ELEMENTS, not by copy count: capping on k gave fp64 a 256-element tile where
+    # fp32 got 512, so it needed four tiles for the same bytes (9.2us against 7.6).
+    tile_n = next(
+        (
+            k * WARP * g
+            for k in (32, 16, 8, 4, 2, 1)
+            if k <= arch.combine_async
+            and g > 1
+            and k * WARP * g <= arch.combine_max
+            and nbatch % (k * WARP * g) == 0
+            and rpb * (k * WARP * g + g) * itemsize * nfields
+            <= caps.smem_per_block_optin
+        ),
+        0,
+    )
+    if not tile_n:
+        # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
+        rpb = _MULTIROW_ROWS_PER_BLOCK
     return _ItreePlan(
         "combine",
         1,
         0,
-        _MULTIROW_ROWS_PER_BLOCK,
+        rpb,
         itree.depth,
         (),
         (),
         itree.split,
+        combine_grp=g,
+        combine_tile=tile_n,
+        combine_unroll=min(arch.combine_unroll, tile_n),
     )
 
 
@@ -385,6 +570,32 @@ def single_row_config(N: int, dtype_width: int) -> _RowConfig | None:
     return _RowConfig(threads_per_row=rungs[-1], threads_per_block=rungs[-1])
 
 
+def _row_args(
+    inputs: list[Any],
+    outputs: list[Any],
+    nchunks: Any,
+    nwaves: Any,
+    project_n: Any,
+) -> tuple[Any, ...]:
+    # Row kernels omit the column split and general-axis decode.
+    return (
+        inputs,
+        outputs,
+        nchunks,
+        nwaves,
+        project_n,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
+
+
 def _launch_itree(
     trait: Any,
     trait_key: str,
@@ -413,26 +624,6 @@ def _launch_itree(
         itree=plan,
     )
 
-    # N is static and only M is dynamic; None omits costly unused axis arguments.
-    def _args(pair):
-        mIns, mOuts = pair
-        return (
-            mIns,
-            mOuts,
-            Int32(N // plan.vec),
-            None,
-            Int32(N),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            _stream(),
-        )
-
     # Destination types are baked, so include them to prevent a wrong cached plan.
     key = (
         tag,
@@ -444,8 +635,12 @@ def _launch_itree(
         tuple(strided_outs),
         str(device),
     ) + op.cache_sig
-    build = lambda: _compile(op, *_args(fakes))  # noqa: E731
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
+    launch = (Int32(N // plan.vec), None, Int32(N))
+    args = lambda pair: _row_args(  # noqa: E731
+        pair[0], pair[1], launch[0], launch[1], launch[2]
+    )
+    build = lambda: _compile(op, *args(fakes))  # noqa: E731
+    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*args(operands))
 
 
 def _run_itree(
@@ -473,9 +668,16 @@ def _run_itree(
     compact = x.stride(0) == N
     if not compact:
         align = min(align, math.gcd(x.stride(0) * itemsize, natural))
-    if align < natural and itree.stage_e:
-        # Misaligned cp.async fails IR verification; unstaged preserves the same bits.
-        itree = cast(_ItreePlan, itree_plan(N, M, itemsize, stage=False))
+    if align < natural and (itree.stage_e or itree.stage_rows):
+        # cp.async's 128-bit atom needs a statically `natural`-aligned source, so a misaligned base
+        # cannot use the staged form at all -- it fails IR verification rather than the load. Serve
+        # this call with the UNSTAGED form of the same plan: staging is bit-neutral, so the DAG and
+        # therefore the result do not move (verified bitwise against the reference at align 8 and 4
+        # for every staged shape).
+        itree = cast(
+            _ItreePlan,
+            trait_itree_plan(trait, N, M, itemsize, stage=False, device=x.device),
+        )
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
     if compact:
         fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
@@ -487,11 +689,11 @@ def _run_itree(
             assumed_align=align,
         )
 
-    def fake_1d(t, strided=False):
+    def fake_1d(t, strided=False, align=None):
         dt = torch2cute[t.dtype]
         if strided:
             return cute.runtime.make_fake_tensor(dt, (_L.sym(),), (cute.sym_int64(),))
-        return _L.fake_compact(dt, (_L.sym(),))
+        return _L.fake_compact(dt, (_L.sym(),), align=align)
 
     if itree.shape != "split":
         outs = results()
@@ -538,14 +740,24 @@ def _run_itree(
         compact,
     )
     outs = results()
+    # DECLARE the partials' alignment or stage 2 reads them one element at a time: autovec_copy
+    # cannot widen past what the descriptor claims. Keyed on the BATCH COUNT, a row's stride.
+    paligns = [tile.align_bytes(nbatch, p.element_size()) for p in parts]
+    palign = min(paligns)
     strided_outs = tuple(o.stride(0) != 1 for o in outs)
     _launch_itree(
         trait,
         trait_key,
-        itree_combine_plan(itree),
+        itree_combine_plan(
+            itree,
+            max(p.element_size() for p in parts),
+            x.device,
+            nfields=trait.nfields,
+            nrows=M,
+        ),
         dt,
         (
-            [fake_1d(p) for p in parts],
+            [fake_1d(p, align=a) for p, a in zip(parts, paligns)],
             [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
         ),
         ([_L.read_only(p) for p in parts], list(outs)),
@@ -554,7 +766,7 @@ def _run_itree(
         x.device,
         nouts,
         tuple(o.dtype for o in outs),
-        align,
+        palign,
         strided_outs=strided_outs,
     )
     return tuple(outs)
@@ -568,7 +780,7 @@ def reduce_row_itree(
 ) -> bool:
     """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists."""
     M, N = x.shape
-    itree = itree_plan(N, M, x.element_size())
+    itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
     if itree is None:
         return False
     _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
@@ -602,12 +814,12 @@ def reduce_row_tile(
     if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
         final and threads_per_row is None
     ):
-        itree = itree_plan(N, M, x.element_size())
+        itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
     if order == "inner_tree" and itree is None:
         # Explicit inner_tree cannot silently use another DAG; only the env gate may fall back.
         raise ValueError(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
-            f"plan={itree_plan(N, M, x.element_size()) is not None}"
+            f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
@@ -675,7 +887,7 @@ def reduce_row_tile(
     )
 
     def _fake():
-        # TMA bakes N; runtime folds share a vector class. None omits unused column args.
+        # TMA bakes N; runtime folds share a vector class.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -693,21 +905,12 @@ def reduce_row_tile(
                 stride_order=(1, 0),
                 align=align,
             )
-        return (
+        return _row_args(
             [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
             Int32(N),
-            None,  # q, npar: the col axis's split
-            None,
-            None,  # the general axis's decode: exts, strides, in_base, limit
-            None,
-            None,
-            None,
-            None,
-            None,
-            _stream(),
         )
 
     # Pointer-dependent alignment is compiled, so include it in the key.
@@ -722,21 +925,5 @@ def reduce_row_tile(
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    # read_only avoids COW materialization; None omits unused-axis arguments.
-    fn(
-        [_L.read_only(x)],
-        list(outs),
-        nchunks,
-        nwaves,
-        Int32(N),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        _stream(),
-    )
+    fn(*_row_args([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N)))
     return tuple(outs)
