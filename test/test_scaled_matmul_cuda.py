@@ -293,7 +293,7 @@ def scaled_mm_wrap(
 def to_mnk4(scales):
     outer, inner = scales.shape
     padded = pad(scales, (0, -inner % 4, 0, -outer % 4))
-    packed = padded.reshape(padded.shape[0], -1, 4).permute(1, 0, 2)
+    packed = padded.reshape(padded.shape[0], padded.shape[1] // 4, 4).permute(1, 0, 2)
     return packed.contiguous().flatten().to(torch.float8_e8m0fnu)
 
 
@@ -3681,6 +3681,16 @@ class TestFP8Matmul(TestCase):
 
 
     @onlyCUDA
+    @unittest.skipIf(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM, "cuBLASLt FP8 grouped GEMM is supported")
+    def test_scaled_grouped_mm_cublaslt_unsupported_platform(self, device):
+        a = torch.empty(2, 16, 32, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.ones(1, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "cuBLASLt"):
+            scaled_grouped_mm_wrap(
+                a, a.transpose(-2, -1), scale, scale, ScalingType.TensorWise, ScalingType.TensorWise,
+            )
+
+    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(IS_SM10X and "USE_MSLK" in torch.__config__.show(), "MSLK grouped GEMM is supported")
     def test_scaled_grouped_mm_mslk_unsupported_platform(self, device):
@@ -4330,7 +4340,6 @@ torch.cuda.synchronize()
             scaled_mm(a, b, misaligned_scale, recipe, scale_b, recipe, output_dtype=out_dtype, **kwargs)
 
     @onlyCUDA
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
     @parametrize("shortcut", ["alpha_zero", "empty_k"])
@@ -4347,7 +4356,8 @@ torch.cuda.synchronize()
         if PLATFORM_SUPPORTS_CUBLASLT_MNK4:
             self.assertEqual(op(input, *args, **kwargs), torch.full_like(input, 32))
         else:
-            with self.assertRaisesRegex(NotImplementedError, "packed MNxK4 scaling"):
+            message = "is not implemented for ROCm" if torch.version.hip else "packed MNxK4 scaling"
+            with self.assertRaisesRegex(NotImplementedError, message):
                 op(input, *args, **kwargs)
 
     @onlyCUDA
