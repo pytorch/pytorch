@@ -284,7 +284,8 @@ class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
                     msg="Gradient mismatch between the original version and the checkpointed version of the same function",
                 )
 
-        run(functools.partial(torch.compile, fullgraph=fullgraph))
+        if HAS_GPU_AND_TRITON:
+            run(functools.partial(torch.compile, fullgraph=fullgraph))
         if fullgraph:
 
             def export_compiler(fn):
@@ -2908,6 +2909,8 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sac_with_bound_method_context_fn(self):
         # A bound method is a valid context_fn; extracting the underlying
         # function instead would call it with the receiver missing.
@@ -3757,6 +3760,8 @@ instantiate_device_type_tests(
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _count_backward_regions(gm):
