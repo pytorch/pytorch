@@ -63,6 +63,10 @@ FAILURE_GUIDANCE = {
         "On the reported `# owner:` line, use GitHub users, teams, or emails, or "
         "`none` on its own."
     ),
+    "Label lists written more than once": (
+        "Give each reported `# label:` block a distinct label list, or merge the "
+        "blocks if they are one ownership area."
+    ),
     "Label lists with several owner lists": (
         "Use the same `# owner:` list on every `# label:` line with these labels, "
         "or give one of the blocks its own label list."
@@ -291,7 +295,10 @@ def find_ownership_errors(
     *,
     reviewers_not_owners: dict[str, frozenset[str]] = REVIEWERS_NOT_OWNERS,
 ) -> dict[str, list[str]]:
-    """Check that every label block names one owner list that covers its reviewers."""
+    """Check that every label list appears once, with one owner list covering its reviewers.
+
+    Label lists are compared as sets: the order of labels on a line carries no meaning.
+    """
     missing_owner_lines = [
         f"CODEOWNERS:{block.line_number} {LABEL_PREFIX} {', '.join(block.labels)}"
         for block in parsed.label_blocks
@@ -310,11 +317,19 @@ def find_ownership_errors(
 
     # GitHub handles are case-insensitive and owner order carries no meaning.
     # Label blocks are compared even when no path follows them.
+    label_line_numbers = defaultdict(list)
     owner_lists = defaultdict(set)
     for block in parsed.label_blocks:
+        label_line_numbers[frozenset(block.labels)].append(block.line_number)
         if block.owners is not None:
             owners = frozenset(owner.casefold() for owner in block.owners)
-            owner_lists[block.labels].add(owners)
+            owner_lists[frozenset(block.labels)].add(owners)
+    repeated_label_lists = [
+        f"{', '.join(sorted(labels))}: "
+        + ", ".join(f"CODEOWNERS:{number}" for number in numbers)
+        for labels, numbers in label_line_numbers.items()
+        if len(numbers) > 1
+    ]
     # GitHub handles are case-insensitive, so exceptions are too.
     exceptions = {
         path: {handle.casefold() for handle in handles}
@@ -349,7 +364,7 @@ def find_ownership_errors(
         if (path, handle) not in used_exceptions
     ]
     conflicting_lists = [
-        f"{', '.join(labels)}: "
+        f"{', '.join(sorted(labels))}: "
         + " | ".join(
             " ".join(owners) or "none" for owners in sorted(map(sorted, lists))
         )
@@ -360,6 +375,7 @@ def find_ownership_errors(
         "Label lines without an owner line": missing_owner_lines,
         "Misplaced owner lines": misplaced_owner_lines,
         "Invalid owner handles": invalid_handles,
+        "Label lists written more than once": repeated_label_lists,
         "Label lists with several owner lists": conflicting_lists,
         "Reviewers missing from owner lists": missing_reviewers,
         "Unneeded reviewer exceptions": unneeded_exceptions,
