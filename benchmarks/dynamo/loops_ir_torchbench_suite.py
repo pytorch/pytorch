@@ -1358,6 +1358,7 @@ def compile_variant(benchmark: Any, mode: str, test: str) -> dict[str, Any]:
                 # Typed training admission (worker C, landed): real graph
                 # kind + mandatory formal-pipeline trace per graph.
                 entry["graph_kind"] = str(getattr(artifacts, "graph_kind", "inference"))
+                entry["op_selections"] = list(getattr(artifacts, "op_selections", ()))
                 try:
                     trace = getattr(artifacts, "pipeline_trace", ()) or ()
                     entry["pipeline_trace_stages"] = len(trace)
@@ -1458,6 +1459,7 @@ def compile_variant(benchmark: Any, mode: str, test: str) -> dict[str, Any]:
     # Last-graph formal provenance (the existing collector retains only the
     # last graph; per-call entries above are the per-graph record).
     info["last_graph_kind"] = str(getattr(artifacts, "graph_kind", "inference"))
+    info["last_op_selections"] = list(getattr(artifacts, "op_selections", ()))
     try:
         last_trace = getattr(artifacts, "pipeline_trace", ()) or ()
         info["last_pipeline_trace_stages"] = len(last_trace)
@@ -4055,6 +4057,8 @@ def _verdict(case: dict[str, Any], test: str, mode: str) -> str:
 
 
 def _completion_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    import math
+
     passes = sum(case.get("status") == "pass" for case in cases)
     fails = sum(case.get("status") == "fail" for case in cases)
     selected_complete = bool(cases) and passes == len(cases)
@@ -4073,19 +4077,59 @@ def _completion_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         and case.get("batch_size")
         == MODEL_MANIFEST[case["model"]][f"{case['test']}_bs"]
     }
+
+    def measured_pair(case: dict[str, Any]) -> tuple[float, float] | None:
+        timing = case.get("timing")
+        if not isinstance(timing, dict):
+            return None
+        values = []
+        for name in (f"cpp_{case.get('cpp_numerics')}", "stock"):
+            entry = timing.get(name)
+            if not isinstance(entry, dict):
+                return None
+            value = entry.get("median_ms")
+            if type(value) not in (int, float) or value <= 0:
+                return None
+            try:
+                if not math.isfinite(value):
+                    return None
+            except OverflowError:
+                return None
+            values.append(value)
+        return values[0], values[1]
+
+    accuracy_complete = selected_complete and required <= passed_default_cases
+    timing_complete = accuracy_complete and all(
+        measured_pair(case) is not None for case in cases
+    )
+    normal_cases = [case for case in cases if case.get("cpp_numerics") == "inductor"]
+    pairs = [measured_pair(case) for case in normal_cases]
+    selected_parity = (
+        all(pair is not None and pair[0] <= pair[1] for pair in pairs)
+        if pairs and all(pair is not None for pair in pairs)
+        else None
+    )
+    parity_complete = timing_complete and selected_parity is True
     return {
         "total": len(cases),
         "pass": passes,
         "fail": fails,
         "skip_or_inventory": len(cases) - passes - fails,
         "selected_cases_complete": selected_complete,
-        "complete": selected_complete and required <= passed_default_cases,
+        "accuracy_complete": accuracy_complete,
+        "timing_complete": timing_complete,
+        "selected_inductor_performance_parity": selected_parity,
+        "inductor_performance_parity_complete": parity_complete,
+        "complete": parity_complete,
         "note": (
-            "Completion requires all 40 CPP cases passing at manifest batch sizes "
-            "(10 models x eval/train x strict/inductor) with generated-code "
-            "participation and backward-CPP evidence for training. Partial "
-            "progress is explicitly incomplete; skips are never passes. "
-            "The verdict and exit code describe the selected cases only."
+            "Full completion requires all 40 CPP cases passing at manifest batch "
+            "sizes (10 models x eval/train x strict/inductor), generated-code "
+            "participation, backward-CPP evidence for training, measured CPP/stock "
+            "timings for every case, and normal-mode CPP median latency no slower "
+            "than stock. Strict remains subject to bytewise validity, not a stock "
+            "speed threshold. Accuracy-only sweeps and partial progress are "
+            "incomplete; skips are never passes. Selected-case verdict/exit code "
+            "describe accuracy acceptance; performance is recorded separately."
         ),
     }
 

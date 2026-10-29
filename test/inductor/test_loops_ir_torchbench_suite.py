@@ -1697,6 +1697,10 @@ class CompletionScorecardTests(TestCase):
                 "cpp_numerics": mode,
                 "batch_size": spec[f"{test}_bs"],
                 "status": "pass",
+                "timing": {
+                    f"cpp_{mode}": {"median_ms": 1.0},
+                    "stock": {"median_ms": 1.0},
+                },
             }
             for model, spec in suite.MODEL_MANIFEST.items()
             for test in ("eval", "train")
@@ -1714,6 +1718,44 @@ class CompletionScorecardTests(TestCase):
         self.assertTrue(summary["selected_cases_complete"])
         self.assertTrue(summary["complete"])
         self.assertEqual(summary["pass"], 40)
+
+    def test_all_forty_accuracy_only_cases_are_still_incomplete(self):
+        cases = self._full_cases()
+        for case in cases:
+            case.pop("timing")
+        summary = suite._completion_summary(cases)
+        self.assertTrue(summary["selected_cases_complete"])
+        self.assertTrue(summary["accuracy_complete"])
+        self.assertFalse(summary["timing_complete"])
+        self.assertIsNone(summary["selected_inductor_performance_parity"])
+        self.assertFalse(summary["complete"])
+
+    def test_normal_accuracy_pass_does_not_hide_performance_regression(self):
+        cases = self._full_cases()
+        cases[1]["timing"]["cpp_inductor"]["median_ms"] = 2.0
+        cases[1]["timing"]["cpp_inductor"]["raw_ratio_vs_stock"] = 1000.0
+        summary = suite._completion_summary(cases)
+        self.assertTrue(summary["accuracy_complete"])
+        self.assertTrue(summary["timing_complete"])
+        self.assertFalse(summary["selected_inductor_performance_parity"])
+        self.assertFalse(summary["complete"])
+
+    def test_strict_latency_is_not_held_to_stock_precision_speed(self):
+        cases = self._full_cases()
+        for case in cases:
+            if case["cpp_numerics"] == "strict_eager":
+                case["timing"]["cpp_strict_eager"]["median_ms"] = 10.0
+        self.assertTrue(suite._completion_summary(cases)["complete"])
+
+    def test_invalid_latency_never_proves_performance_completion(self):
+        for value in (True, "1.0", 0, -1, None, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                cases = self._full_cases()
+                cases[1]["timing"]["cpp_inductor"]["median_ms"] = value
+                summary = suite._completion_summary(cases)
+                self.assertTrue(summary["accuracy_complete"])
+                self.assertFalse(summary["timing_complete"])
+                self.assertFalse(summary["complete"])
 
     def test_duplicate_passes_cannot_replace_missing_cases(self):
         summary = suite._completion_summary(self._full_cases()[:1] * 40)
