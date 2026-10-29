@@ -3216,6 +3216,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
             node.get_layout.return_value = MagicMock()
             node.get_dtype.return_value = torch.bfloat16
         with (
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
             patch.object(
                 nvgemm,
                 "_create_dummy_tensor_from_layout",
