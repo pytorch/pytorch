@@ -1415,6 +1415,8 @@ if(USE_CUDA AND MSVC)
   # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on them.
   # Related issue: https://github.com/pytorch/pytorch/issues/31611
   target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
+elseif(USE_ROCM AND MSVC)
+  target_link_libraries(torch_hip INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
 endif()
 
 if(NOT BUILD_LITE_INTERPRETER)
@@ -1458,11 +1460,11 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/kineto/libkineto/include)
+  ${TORCH_ROOT}/torch/csrc/profiler/kineto/libkineto/include)
 
 if(USE_KINETO)
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/kineto/libkineto/src)
+    ${TORCH_ROOT}/torch/csrc/profiler/kineto/libkineto/src)
 endif()
 
 target_include_directories(torch_cpu PRIVATE
@@ -1494,11 +1496,13 @@ if(CUPTI_STUBS_GENERATED)
     PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
+# Kineto installs its own public headers to include/kineto.
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
   "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  REGEX "/csrc/profiler/kineto$" EXCLUDE)
 
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
@@ -1617,7 +1621,8 @@ if(USE_ROCM)
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")
   if(USE_NVSHMEM)
-    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.3.0")
+    # rocSHMEM >= 3.5.0 exports the device reduce used by Triton.
+    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.5.0")
       # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
       set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201)
       set(_torch_rocshmem_build_arches)
@@ -1691,7 +1696,7 @@ if(USE_ROCM)
       endif()
     elseif(rocshmem_FOUND)
       message(STATUS
-        "rocSHMEM found but skipped: requires rocSHMEM >= 3.3.0 "
+        "rocSHMEM found but skipped: requires rocSHMEM >= 3.5.0 "
         "(found '${rocshmem_VERSION}'). Building without rocSHMEM support.")
     else()
       message(WARNING "rocSHMEM not found (USE_NVSHMEM=ON). Building without rocSHMEM support.")

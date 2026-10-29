@@ -1699,24 +1699,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
-
             x = torch.ones(4, device=device)
 
-            # NCCL startup is lazy
+            # NCCL startup is lazy; keep it out of the short timeout below
             w = pg.allreduce(x)
             w.wait()
+            torch.accelerator.synchronize(device)
+
+            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
 
             f(x)
             if self.rank != 0:
                 # test fails with NCCL timeout without this line
                 dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(
-                    timedelta(seconds=sleep_time)
+                    timedelta(seconds=30)
                 )
 
             w = pg.allreduce(x)
             w.wait()
             torch.accelerator.synchronize(device)
+            dist.set_timeout(dist.constants.default_pg_nccl_timeout, pg)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
@@ -2822,7 +2824,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         for name, call in calls.items():
             with self.subTest(name=name):
                 msg = f"torch.distributed.nn.functional.{name} is deprecated"
-                with self.assertWarnsRegex(FutureWarning, re.escape(msg)):
+                with self.assertWarnsOnceRegex(FutureWarning, re.escape(msg)):
                     call()
 
     def test_nn_functional_all_reduce_unsupported(self):

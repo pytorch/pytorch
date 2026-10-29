@@ -919,6 +919,10 @@ class serialization_method:
 
 Point = namedtuple('Point', ['x', 'y'])
 
+class ListSubclass(list):
+    pass
+
+
 class ClassThatUsesBuildInstruction:
     def __init__(self, num):
         self.num = num
@@ -1059,6 +1063,13 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
+
+    def test_set_from_file_invalid_size(self):
+        # 2**61 + 1 elements of size 8 wraps around to 8 bytes
+        for size, msg in ((2, "wrong byte size"), (2**61 + 1, "overflows"), (-1, "invalid storage size")):
+            buf = io.BytesIO(size.to_bytes(8, "little", signed=True) + b"\x00" * 8)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.UntypedStorage(8)._set_from_file(buf, None, False, 8)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
@@ -1371,6 +1382,15 @@ class TestSerialization(TestCase, SerializationMixin):
             # safe_globals doesn't work even with allowlist
             with safe_globals([os.execv]):
                 with self.assertRaisesRegex(pickle.UnpicklingError, error_msg):
+                    torch.load(f, weights_only=True)
+
+    def test_weights_only_list_subclass_append(self):
+        # APPEND/APPENDS would call overridden methods of list subclasses.
+        with BytesIOContext() as f:
+            torch.save(ListSubclass([1, 2]), f)
+            f.seek(0)
+            with safe_globals([ListSubclass]):
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Can only extend lists"):
                     torch.load(f, weights_only=True)
 
     @parametrize("module", ["traceback", "linecache"])

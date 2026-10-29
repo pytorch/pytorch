@@ -119,7 +119,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MI200_ARCH,
-    NAVI3_ARCH,
     NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -2713,7 +2712,6 @@ class CommonTemplate:
             fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
         )
 
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 split-scan cumsum numerics
     def test_split_cumsum(self):
         def fn(a):
             return torch.cumsum(a, -1)
@@ -2759,7 +2757,6 @@ class CommonTemplate:
 
     # Triton CPU generates a split scan that uses tl.debug_barrier, which is
     # not yet implemented in Triton CPU.
-    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 split-scan cumsum numerics
     @xfail_if_triton_cpu
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
@@ -6906,7 +6903,6 @@ for dtype in (torch.int32, torch.int64):
             )
 
     @skip_if_gpu_halide  # slow
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     @parametrize("combo_kernels", (False, True))
     def test_adaptive_avg_pool2d1(self, combo_kernels):
         with config.patch(combo_kernels=combo_kernels):
@@ -6934,7 +6930,6 @@ for dtype in (torch.int32, torch.int64):
                 (torch.randn(2, 4, 6, 6),),
             )
 
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -6948,9 +6943,9 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @xfail_if_mps  # float64 is not supported on MPS
     @requires_gpu()
     @skip_if_gpu_halide  # slow
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     @parametrize("comprehensive_padding", (False, True))
     def test_adaptive_avg_pool2d_flatten_sum(self, comprehensive_padding):
         def fn(x):
@@ -7354,7 +7349,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.assertEqual(eager_delta, compile_delta)
 
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool_with_output_size_0(self):
         m1 = nn.AdaptiveAvgPool1d(0)
         self.common(m1, (torch.randn(1, 2),))
@@ -8544,6 +8538,25 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(res.shape, ref.shape)
         self.assertEqual(res.stride(), ref.stride())
         self.assertTrue(bool(((res >= 0.0) & (res <= 1.0)).all()))
+
+    def test_rand_uniform_unsupported_dtype(self):
+        def rand(x):
+            return torch.rand(x.shape, dtype=x.dtype, device=x.device)
+
+        def rand_like(x):
+            return torch.rand_like(x)
+
+        def uniform_(x):
+            return x.uniform_()
+
+        for dtype in (torch.int64, torch.bool, torch.float8_e4m3fn):
+            x = torch.zeros(8, device=self.device).to(dtype)
+            for fn in (rand, rand_like, uniform_):
+                with self.assertRaises(NotImplementedError):
+                    fn(x)
+                torch._dynamo.reset()
+                with self.assertRaises(NotImplementedError):
+                    torch.compile(fn)(x)
 
     def test_complex_from_real_imag(self):
         def fn(x, y):
@@ -9788,6 +9801,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 fn,
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
+
+    def test_expm1_log1p_small_inputs(self):
+        # https://github.com/pytorch/pytorch/issues/201377
+        def fn(x):
+            return torch.expm1(x), torch.expm1(-x), torch.log1p(x), torch.log1p(-x)
+
+        self.common(
+            fn, (torch.logspace(-7, -1, 64),), atol=0, rtol=1e-5, check_lowp=False
+        )
+
+    # Halide doesn't have expm1/log1p lowering
+    test_expm1_log1p_small_inputs._expected_failure_halide = True
 
     @config.patch(force_disable_caches=True)
     def test_deterministic_codegen(self):
@@ -12793,6 +12818,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
+    def test_index_add_after_reduction(self):
+        # https://github.com/pytorch/pytorch/issues/201455
+        def fn(x, index):
+            return torch.zeros(4, device=x.device).index_add(0, index, x.mean(-1))
+
+        self.common(
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
+        )
+
+    def test_index_add_inside_reduction(self):
+        def fn(x, index):
+            out = torch.zeros(4, x.shape[1], device=x.device)
+            return x.sum(-1), out.index_add(0, index, x * 2)
+
+        self.common(
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
+        )
+
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -14323,7 +14366,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # the triton signature specializes on 1 vs non-1, you might get 1
         # or 2 kernels. In newer versions of triton, there's no specialization
         # so we get only 1 kernel.
-        self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
+        self.assertEqual(source_codes[0].count("@triton.jit"), 2)
 
     def test_roll(self):
         def fn(a):
@@ -14624,7 +14667,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]
         self.common(forward, args, atol=1e-5, rtol=1e-5)
 
-    @xfail_if_mps_unimplemented  # embedding bag
     @requires_gpu()
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
@@ -15847,6 +15889,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    def test_where_int64_scalar(self):
+        # The scalar must not narrow the int64 result to 32 bits
+        def fn(x):
+            return torch.where(x < 0, 0, x)
+
+        self.common(fn, (torch.tensor([2**40 + 7, -5, 3_000_000_000]),))
+
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -16420,6 +16469,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    @parametrize("with_out", [False, True])
+    def test_fft_ref_irfftn(self, with_out):
+        def fn(x, out):
+            return torch._refs.fft.irfftn(x, dim=-2, out=out)
+
+        x = make_tensor((5, 6, 7), dtype=torch.float32, device=self.device)
+        out = torch.empty((5, 10, 8), device=self.device) if with_out else None
+        eager_out = out.clone() if with_out else None
+        reference = torch.fft.irfftn(x.cpu().double(), dim=-2).float().to(self.device)
+        compiled = torch.compile(fn)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            eager = fn(x, eager_out)
+            result = compiled(x, out)
+        self.assertEqual(eager, reference)
+        self.assertEqual(result, reference)
+        if with_out:
+            self.assertIs(result, out)
+            self.assertEqual(out, reference)
 
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
@@ -17683,6 +17752,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         "triton.autotune_pointwise", True
     )  # needed to introduce config that exceed max shared memory usage
     @serialTest()
+    # Triton shared-memory test
+    @skip_if_mps
     @largeTensorTest("13GB", inductor=True)
     def test_large_block_sizes(self):
         """
@@ -17723,8 +17794,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         o = torch.optim.AdamW(params)
         pt2_optimizer_step(o)
 
-    # Skipped on MPS because avgpool size is not divisible
-    @xfail_if_mps
+    @xfail_if_mps  # float64 is not supported on MPS
     @skip_if_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
@@ -18046,8 +18116,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if self.device != "mps"
             or name
             not in [
-                "airy_ai",
-                "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
             ]
@@ -20396,6 +20464,51 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check("store")
             .check_not("def triton_")
             .check("gdc_wait")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_load_after_inplace_mutation(self):
+        def fn(idx, src):
+            return src.new_zeros(64, 32).index_put_((idx,), src, accumulate=True) * 2
+
+        idx = torch.randint(0, 64, (128,), device=GPU_TYPE)
+        src = torch.randn(128, 32, device=GPU_TYPE)
+        self.common(fn, (idx, src), check_lowp=False)
+
+        code = run_and_get_triton_code(torch.compile(fn), idx, src)
+        # the mul kernel must wait for index_put_ before loading its result
+        (
+            FileCheck()
+            .check("def triton_poi_fused_mul")
+            .check_not("load")
+            .check("gdc_wait")
+            .check("load")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_store_after_inplace_mutation(self):
+        def fn(x):
+            a = x * 1.5
+            a[torch.arange(0, 64, 3, device=x.device)] = 0
+            return a
+
+        x = torch.randn(64, 32, device=GPU_TYPE)
+        self.common(fn, (x,))
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # the store-only index_fill kernel must wait for mul before storing
+        (
+            FileCheck()
+            .check("def triton_poi_fused_arange_index_fill")
+            .check_not("store")
+            .check("gdc_wait")
+            .check("store")
         ).run(code)
 
     @requires_cuda_and_triton
@@ -23236,6 +23349,28 @@ if RUN_GPU:
             expected = fn(x)
             for a, e in zip(actual, expected):
                 torch.testing.assert_close(a, e)
+
+        @unittest.skipIf(not SM90OrLater, "TMA requires SM90+")
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        )
+        def test_tma_descriptor_aoti_eager_scratch_buffer(self):
+            # Regression test: when TMA generates a kernel with a scratch buffer,
+            # the AOTI cpp wrapper must emit CACHE_TORCH_DEVICE(cuda) so the
+            # cached_torch_device_type_cuda variable is declared before use.
+            # The out= overload triggers the scratch buffer allocation path.
+            a = torch.randn(128, device=GPU_TYPE)
+            out = torch.empty_like(a)
+            ref = torch.clamp(a, min=-0.5, max=0.5)
+
+            with _scoped_library("aten", "IMPL") as lib:
+                register_ops_with_aoti_compile("aten", ["clamp"], "CUDA", lib)
+                torch.clamp(a, min=-0.5, max=0.5, out=out)
+
+            self.assertEqual(ref, out)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

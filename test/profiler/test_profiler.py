@@ -4,6 +4,7 @@
 import collections
 import copy
 import gc
+import gzip
 import json
 import mmap
 import os
@@ -34,6 +35,7 @@ import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch._inductor.utils import is_big_gpu
+from torch._utils import try_import
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -1004,45 +1006,54 @@ class TestProfiler(TestCase):
         self.assertEqual(trace[0]["name"], tricky_name)
 
     def test_experimental_config_pickle(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", BytesWarning)
+        # Test with default values
+        config = _ExperimentalConfig()
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
 
-            # Test with default values
-            config = _ExperimentalConfig()
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Alternate the flags in pickled order so that a flag read from a
+        # neighboring slot gets the wrong value.
+        config = _ExperimentalConfig(
+            verbose=True,
+            performance_events=["event1", "event2"],
+            enable_cuda_sync_events=False,
+            disable_external_correlation=True,
+            profile_all_threads=False,
+            capture_overload_names=True,
+            record_python_gc_info=False,
+            expose_kineto_event_metadata=True,
+            custom_profiler_config="custom_config",
+            adjust_timestamps=False,
+            trace_only=True,
+        )
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
+        self.assertEqual(unpickled.__getstate__(), config.__getstate__())
 
-            # Test with non-default values
-            config = _ExperimentalConfig(
-                verbose=True,
-                performance_events=["event1", "event2"],
-                enable_cuda_sync_events=True,
-                adjust_profiler_step=True,
-                disable_external_correlation=True,
-                profile_all_threads=True,
-                capture_overload_names=True,
-                record_python_gc_info=True,
-                expose_kineto_event_metadata=True,
-                custom_profiler_config="custom_config",
-            )
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Test deepcopy (which uses pickle internally)
+        copied = copy.deepcopy(config)
+        self.assertIsInstance(copied, _ExperimentalConfig)
+        self.assertEqual(copied.__getstate__(), config.__getstate__())
 
-            # Test deepcopy (which uses pickle internally)
-            copied = copy.deepcopy(config)
-            self.assertIsInstance(copied, _ExperimentalConfig)
-
-    def test_adjust_profiler_step_deprecated(self):
-        # adjust_profiler_step is a deprecated no-op: passing it must warn with
-        # FutureWarning and not error.
-        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
-            with profile(
-                activities=[ProfilerActivity.CPU],
-                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
-            ):
-                pass
+    def test_experimental_config_rejects_old_pickle_state(self):
+        # Pickles from before PyTorch 2.16 use a different layout, with more,
+        # fewer, or the same number of values as the current state.
+        state = _ExperimentalConfig().__getstate__()
+        old_states = [
+            state + (False,),
+            state[:-1],
+            (False, [], False, False, False, False, False, False, False, "", False),
+        ]
+        for old_state in old_states:
+            # Unpickling calls __setstate__ on an object made by __new__. pybind
+            # ignores __setstate__ on an already initialized object, so this
+            # test can't use _ExperimentalConfig().
+            config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+            with self.subTest(old_state=old_state):
+                with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+                    config.__setstate__(old_state)
 
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
@@ -1373,6 +1384,24 @@ torch.ones(10) * 2
         ]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
+
+    def test_input_with_poisoned_storage(self):
+        # Metadata-only placeholders (e.g. released cudagraph-tree outputs)
+        # throw on data pointer access. Recording such an input must not leave
+        # the op without its inputs and shift every later op's inputs.
+        placeholder = torch.empty(4, 4)
+        torch._C._set_storage_data_ptr_access_error_msg(
+            placeholder.untyped_storage()._cdata, "placeholder has no data"
+        )
+        x = torch.ones(3, 5)
+        with profile(record_shapes=True) as prof:
+            placeholder.view(16)
+            torch.add(x, x)
+
+        (view,) = [e for e in prof.events() if e.name == "aten::view"]
+        (add,) = [e for e in prof.events() if e.name == "aten::add"]
+        self.assertEqual(view.input_shapes[0], [4, 4])
+        self.assertEqual(add.input_shapes[:2], [[3, 5], [3, 5]])
 
     def test_concrete_inputs_profiling(self):
         x = torch.rand(2, 6)
@@ -2023,12 +2052,20 @@ with open(sys.argv[1], "w") as f:
     json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
 """
         with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
             result = subprocess.run(
                 [sys.executable, "-c", script, filename],
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=120,
+                env=env,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with open(filename) as f:
@@ -4669,8 +4706,7 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
         failure_msg = """\
 ====================================================================================
-IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
-submodule hash and seeing this message?
+IMPORTANT: Are you making a Kineto change and seeing this message?
 
 New metadata keys (see below) were found in the Chrome trace JSON that are not
 yet exposed through the profiler's events() API (i.e. EventMetadata in
@@ -4773,6 +4809,59 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 instantiate_device_type_tests(
     TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
 )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@instantiate_parametrized_tests
+class TestProfilerTraceCompression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("use_python_export", [False, True])
+    @parametrize(
+        "suffix",
+        [".json", ".json.gz", ".json.zst", "", ".unknown", ".zst.bak", ".gz.bak"],
+    )
+    def test_export(self, use_python_export, suffix):
+        if suffix.endswith(".zst"):
+            zstd = try_import("pyzstd") or try_import("zstandard")
+            if zstd is None:
+                self.skipTest("requires zstandard or pyzstd")
+            opener = zstd.open
+        elif suffix.endswith(".gz"):
+            opener = gzip.open
+        else:
+            opener = open
+
+        value = "café 中"
+        escape_unicode = use_python_export and not suffix.endswith(".zst")
+        metadata = json.dumps(value, ensure_ascii=escape_unicode)
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            prof.add_metadata_json("compression_test", metadata)
+            torch.ones(8) + 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            with opener(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertEqual(trace["compression_test"], value)
+
+    @parametrize("use_python_export", [False, True])
+    def test_missing_zstd(self, use_python_export):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with patch.dict(sys.modules, {"zstandard": None, "pyzstd": None}):
+                message = "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
+                with self.assertRaisesRegex(ImportError, message):
+                    prof.export_chrome_trace(path, use_python_export=use_python_export)
+                self.assertFalse(os.path.exists(path))
+                # A missing dependency must not consume the native trace.
+                gzip_path = os.path.join(tmpdir, "trace.json.gz")
+                prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
+                with gzip.open(gzip_path, "rt") as f:
+                    self.assertIn("traceEvents", json.load(f))
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")

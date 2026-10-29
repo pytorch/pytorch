@@ -35,11 +35,11 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
-  auto is_os_version_at_least = [](int major, int minor) {
+  auto is_os_version_at_least = [](int major, int minor, int patch = 0) {
     @autoreleasepool {
       NSProcessInfo* processInfo = [[NSProcessInfo new] autorelease];
       return [processInfo
-          isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
+          isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = patch}];
     }
   };
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
@@ -49,6 +49,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_26_2_plus = is_os_version_at_least(26, 2);
   static bool _macos_26_4_plus = is_os_version_at_least(26, 4);
   static bool _macos_27_0_plus = is_os_version_at_least(27, 0);
+  static bool _macos_27_0_1_plus = is_os_version_at_least(27, 0, 1);
 
   switch (version) {
     case MacOSVersion::MACOS_15_0:
@@ -65,6 +66,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_26_4_plus;
     case MacOSVersion::MACOS_27_0:
       return _macos_27_0_plus;
+    case MacOSVersion::MACOS_27_0_1:
+      return _macos_27_0_1_plus;
     default:
       return false;
   }

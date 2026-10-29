@@ -1,5 +1,6 @@
 # Owner(s): ["module: ci"]
 
+import contextlib
 import functools
 import importlib
 import importlib.util
@@ -11,6 +12,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import types
 import unittest.mock
 import uuid
 import xml.etree.ElementTree as ET
@@ -72,6 +74,7 @@ _REPORT_CHILD_ENV = {
 _RUN_TYPES = {
     "type": str,
     "schema_version": str,
+    "id": str,
     "file": str,
     "suite": str,
     "case_name": str,
@@ -101,8 +104,9 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
+    test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
     test.assertIn(run["outcome"], _RUN_OUTCOMES)
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
@@ -245,7 +249,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
@@ -265,6 +269,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+        # A new uuid per line, not one per report or per test.
+        self.assertEqual(len({run["id"] for run in runs}), len(runs))
 
     def test_identities(self) -> None:
         rendered = {}
@@ -372,6 +378,62 @@ TestUnittest    | test_unittest            | test_unittest""",
         self.assertTrue(
             all(run["ended_at"] - run["started_at"] >= 300 for run in runs), runs
         )
+
+    def test_xdist_maxfail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # -x, as run_test.py passes for C++ tests, stops xdist after the last
+            # test's final failure, before its teardown report.
+            args = ["xdist_report.py", "-n", "1", "--reruns", "1", "-x"]
+            proc, report = _run_plugin(str(_REPORT_TESTDATA), args, Path(tmp) / "xdist")
+            runs = _runs(report)
+        # 2: xdist reports a session stopped by -x as interrupted.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        # test_crash killed its worker. pytest-rerunfailures sends a test's reports
+        # only after each attempt, so the controller never got its identity, and
+        # the crash is left to junit and the log.
+        self.assertEqual(
+            [(run["case_name"], run["outcome"], run["rerun_number"]) for run in runs],
+            [
+                ("test_before", "passed", 0),
+                ("test_after", "passed", 0),
+                ("test_fail_last", "failed", 0),
+                ("test_fail_last", "failed", 1),
+            ],
+        )
+
+    def test_session_without_tests_leaves_no_report(self) -> None:
+        # Like run_test.py's serial pass over a file without serial tests. A session
+        # interrupted after its test started keeps its report for run_test.py
+        # (TestReportCrashes.test_interrupt_leaves_the_run_in_flight).
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in ([], ["-n", "1"]):
+                prefix = Path(tmp) / f"empty{len(args)}"
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "xdist_report.py",
+                        "-k",
+                        "no_such_test",
+                        *args,
+                        "-p",
+                        "torch.testing._internal.torchci.plugin",
+                        f"--torchci-report-prefix={prefix}",
+                        "-p",
+                        "no:cacheprovider",
+                        "-q",
+                    ],
+                    cwd=_REPORT_TESTDATA,
+                    env=_REPORT_CHILD_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                # 5: no tests ran.
+                self.assertEqual(proc.returncode, 5, proc.stdout + proc.stderr)
+                self.assertNotIn("torchci:", proc.stderr)
+                self.assertEqual(_report_files(prefix), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -500,13 +562,428 @@ class TestReportEnablement(TestCase):
         run_test_module = importlib.import_module("run_test")
         args = run_test_module._torchci_report_args
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
-            self.assertEqual(args("/reports"), ["--save-torchci-reports=/reports"])
-            self.assertEqual(args(None), [])
+            self.assertEqual(
+                args("test_type_info", False, "/reports"),
+                ["--save-torchci-reports=/reports"],
+            )
+            # C++ tests don't go through run_tests, so they get the plugin itself.
+            self.assertEqual(
+                args("cpp/test_api", True, "/reports"),
+                [
+                    "-p",
+                    "torch.testing._internal.torchci.plugin",
+                    "--torchci-report-prefix=/reports/cpp.test_api",
+                ],
+            )
+            self.assertEqual(args("test_type_info", False, None), [])
+            self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
-            self.assertEqual(args("/reports"), [])
+            self.assertEqual(args("test_type_info", False, "/reports"), [])
+
+    def test_run_test_default_reports_dir(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default = run_test_module._torchci_reports_default
+        ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        for is_ci, repo, xpu, expected in (
+            (False, "pytorch/pytorch", None, None),
+            # Other repos' CI, such as forks' and out-of-tree backends', writes none.
+            (True, "someone/pytorch", None, None),
+            (True, "pytorch/pytorch", None, ci_dir),
+            # XPU builds write none.
+            (True, "pytorch/pytorch", "20250101", None),
+        ):
+            with (
+                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repo}),
+                unittest.mock.patch.object(torch.version, "xpu", xpu),
+            ):
+                self.assertEqual(default(), expected)
+
+
+# gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
+# fields gtest_identities reads.
+_GTEST_LISTING = {
+    "testsuites": [
+        {"name": "ModulesTest", "testsuite": [{"name": "Linear"}]},
+        {"name": "TypedTest/0", "testsuite": [{"name": "Add", "type_param": "int"}]},
+        {
+            "name": "Inst/TypedPTest/1",
+            "testsuite": [{"name": "Add", "type_param": "float"}],
+        },
+        # gtest doesn't check a custom type name generator's names.
+        {
+            "name": "TypedTest/c10.Half",
+            "testsuite": [{"name": "Add", "type_param": "Half"}],
+        },
+        {
+            "name": "Inst/PrimeTest",
+            "testsuite": [
+                {"name": "Returns/0", "value_param": "2"},
+                {"name": "Returns/Small", "value_param": "3"},
+            ],
+        },
+    ]
+}
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(
+    TEST_CUDA or TEST_WITH_ROCM, "crash recording doesn't depend on the device"
+)
+class TestReportCrashes(TestCase):
+    """run_test.py's retry loop records the run a process was running when it
+    died, from what the writer published in the stepcurrent cache."""
+
+    @staticmethod
+    def _cache_dir(tmp: str) -> Path:
+        stepcurrent_dir = importlib.import_module("conftest").STEPCURRENT_CACHE_DIR
+        return Path(tmp) / ".pytest_cache/v" / stepcurrent_dir / "key"
+
+    @staticmethod
+    def _pytest(tmp: str, fixture: str, prefix: Path) -> list[str]:
+        """A pytest command whose cache is under tmp, as run_test.py's would be."""
+        return [
+            sys.executable,
+            "-m",
+            "pytest",
+            fixture,
+            "-q",
+            "-o",
+            f"cache_dir={tmp}/.pytest_cache",
+            "-p",
+            "torch.testing._internal.torchci.plugin",
+            f"--torchci-report-prefix={prefix}",
+        ]
+
+    def _run_test_retries(
+        self, tmp, command, retry_shell=None, retries=0, env=None, timeout=None
+    ) -> str:
+        """Runs run_test.py's retry loop on command and returns its log. With no
+        process retries, a failure is consistent after one process."""
+        run_test_module = importlib.import_module("run_test")
+        options = types.SimpleNamespace(upload_artifacts_while_running=False)
+        log = Path(tmp) / "run_test.log"
+        with contextlib.ExitStack() as stack:
+            patch = functools.partial(unittest.mock.patch.object, run_test_module)
+            stack.enter_context(patch("REPO_ROOT", Path(tmp)))
+            stack.enter_context(patch("NUM_PROCESS_RETRIES", retries))
+            if retry_shell is not None:
+                stack.enter_context(patch("retry_shell", retry_shell))
+            output = stack.enter_context(open(log, "w"))
+            run_test_module.run_test_retries(
+                command,
+                str(_REPORT_TESTDATA),
+                _REPORT_CHILD_ENV | (env or {}),
+                timeout,
+                "key",
+                output,
+                False,
+                "crash_report",
+                options,
+            )
+        return log.read_text()
+
+    def _publish(self, tmp: str, report: Path, test, rerun: int, start: float):
+        """Publishes a run in flight as the writer does; returns the cache dir."""
+        cache_dir = self._cache_dir(tmp)
+        cache_dir.mkdir(parents=True)
+        inflight = {
+            "path": str(report),
+            "report_size": report.stat().st_size if report.exists() else 0,
+            "test": test._asdict(),
+            "rerun_number": rerun,
+            "started_at": start,
+        }
+        (cache_dir / "report_inflight").write_text(json.dumps(inflight))
+        return cache_dir
+
+    def test_retry_sequence(self) -> None:
+        # Under --sc, test_b fails and then kills the process on its in-process
+        # rerun; it passes under --rs. test_c crashes under --scs and again under
+        # --rs, so it fails consistently after one process retry.
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "reports/crash_sequence_report"
+            state = Path(tmp) / "state"
+            state.mkdir()
+            fixture = "crash_sequence_report.py"
+            command = self._pytest(tmp, fixture, prefix) + ["--reruns=1"]
+            env = {"CRASH_SEQUENCE_STATE": str(state)}
+            t0_ms = int(time.time() * 1000)
+            log = self._run_test_retries(tmp, command, retries=1, env=env)
+            t1_ms = int(time.time() * 1000)
+            # One report per process, in the order the processes ran.
+            reports = sorted(
+                (_runs(report) for report in _report_files(prefix)),
+                key=lambda runs: runs[0]["started_at"] if runs else 0,
+            )
+            left = sorted(file.name for file in self._cache_dir(tmp).iterdir())
+        self.assertIn("Got exit code -9 (SIGKILL)", log)
+        self.assertIn("Test succeeded in new process", log)
+        self.assertIn(
+            "FAILED CONSISTENTLY: test/torchci/testdata/crash_sequence_report.py::test_c",
+            log,
+        )
+        columns = (
+            "suite", "case_name", "declared_case_name", "rerun_number", "outcome", "outcome_summary",
+        )  # fmt: skip
+        rows = []
+        for process, runs in enumerate(reports, 1):
+            for run in runs:
+                _assert_run_line(self, run, t0_ms, t1_ms)
+                rows.append((process, *(run[column] for column in columns)))
+        # The crashed rerun continues the in-process count; the passing --rs
+        # process leaves nothing in flight for the --scs process after it, and a
+        # crash in a new process is rerun 0 again.
+        self.assertExpectedInline(
+            _table(("process", *columns), rows),
+            """\
+process | suite | case_name   | declared_case_name | rerun_number | outcome | outcome_summary
+1       |       | test_a      | test_a             | 0            | passed  |
+1       | TestB | test_b[one] | test_b             | 0            | failed  | AssertionError: first attempt fails
+1       | TestB | test_b[one] | test_b             | 1            | crashed | exit code -9 (SIGKILL)
+2       | TestB | test_b[one] | test_b             | 0            | passed  |
+3       |       | test_c      | test_c             | 0            | crashed | exit code -9 (SIGKILL)
+4       |       | test_c      | test_c             | 0            | crashed | exit code -9 (SIGKILL)""",
+        )
+        # Consumed, so no later process records the run again.
+        self.assertNotIn("report_inflight", left)
+
+    def test_shutdown_crash_records_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "reports/shutdown_crash_report"
+            command = self._pytest(tmp, "shutdown_crash_report.py", prefix)
+            log = self._run_test_retries(tmp, command)
+            (report,) = _report_files(prefix)
+            runs = _runs(report)
+            left = sorted(file.name for file in self._cache_dir(tmp).iterdir())
+        # The process died after its last run line was written and the in-flight
+        # record cleared, so there is no run to record.
+        self.assertIn("Got exit code -9 (SIGKILL)", log)
+        self.assertEqual(
+            [(run["case_name"], run["outcome"]) for run in runs],
+            [("test_only", "passed")],
+        )
+        self.assertNotIn("report_inflight", left)
+
+    def test_disabled_writer_clears_the_run_in_flight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            command = self._pytest(tmp, "failure_isolation.py", Path(tmp) / "finish")
+            proc = subprocess.run(
+                command + ["--sc=key"],
+                cwd=_REPORT_TESTDATA / "failure_isolation",
+                env=_REPORT_CHILD_ENV | {"FAIL_MODE": "finish"},
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            inflight = (self._cache_dir(tmp) / "report_inflight").read_text()
+        self.assertIn("torchci: report disabled after error:", proc.stderr)
+        # The writer published its first test, then broke in _finish. Nothing it
+        # published may outlive it for run_test.py to record.
+        self.assertEqual(inflight, "null")
+
+    def test_publishes_only_under_the_retry_loop(self) -> None:
+        # Without --sc nothing is published, and under xdist the controller, which
+        # writes the report, runs no test.
+        with tempfile.TemporaryDirectory() as tmp:
+            command = self._pytest(tmp, "crash_sequence_report.py", Path(tmp) / "a")
+            for args in ([], ["--sc=key", "-n", "1"]):
+                proc = subprocess.run(
+                    command + ["-k", "test_a", *args],
+                    cwd=_REPORT_TESTDATA,
+                    env=_REPORT_CHILD_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            published = (self._cache_dir(tmp) / "report_inflight").exists()
+        self.assertFalse(published)
+
+    def test_interrupt_leaves_the_run_in_flight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "interrupted"
+            command = self._pytest(tmp, "interrupted_setup_report.py", prefix)
+            proc = subprocess.run(
+                command + ["--sc=key"],
+                cwd=_REPORT_TESTDATA,
+                env=_REPORT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            cache_dir = self._cache_dir(tmp)
+            inflight = json.loads((cache_dir / "report_inflight").read_text())
+            (report,) = _report_files(prefix)
+            content = report.read_bytes()
+        # pytest exits 2 on the KeyboardInterrupt a timeout's SIGINT raises; the
+        # test, interrupted before its setup report, wrote no run line and stays
+        # published for run_test.py, with the report's size at its start.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertEqual(content.count(b"\n"), 1)
+        self.assertEqual(inflight["path"], str(report))
+        self.assertEqual(inflight["report_size"], len(content))
+        self.assertEqual(inflight["test"]["case_name"], "test_interrupted")
+        self.assertEqual(inflight["rerun_number"], 0)
+
+    def test_timeout_reaches_retry_shell(self) -> None:
+        # pytest exits on the SIGINT that follows a timeout, within the grace
+        # period; retry_shell must still report the timeout as 124.
+        command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        with tempfile.TemporaryFile("w+") as output:
+            code, _ = common_utils.retry_shell(
+                command, stdout=output, stderr=output, timeout=1, retries=0
+            )
+            output.seek(0)
+            log = output.read()
+        self.assertEqual(code, 124)
+        self.assertIn("Command took >0min, returning 124", log)
+
+    @parametrize(
+        "exit_code, outcome, summary",
+        [
+            subtest((-11, "crashed", "exit code -11 (SIGSEGV)"), name="signal"),
+            subtest((1, "crashed", "exit code 1"), name="exit"),
+            subtest((124, "timed_out", "timed out after 30min"), name="timed_out"),
+            subtest((2, None, ""), name="interrupted"),
+            subtest((3, None, ""), name="internal_error"),
+        ],
+    )
+    def test_records_the_run_in_flight(self, exit_code, outcome, summary) -> None:
+        # retry_shell's exit code: 124 is its timeout; 2 and 3 are pytest's own
+        # exits (interrupted, internal error), not deaths, so nothing is recorded.
+        test = torchci_report.TestId(
+            "test/test_x.py", "TestX", "test_x[p]", "python", "test_x"
+        )
+        t0 = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "x.report.jsonl"
+            report.write_text('{"type":"report"}\n', encoding="utf-8")
+            cache_dir = self._publish(tmp, report, test, 2, t0)
+            shell = unittest.mock.Mock(return_value=(exit_code, False))
+            self._run_test_retries(tmp, [], retry_shell=shell, timeout=30 * 60)
+            # Consumed: a second exit records nothing more.
+            self._run_test_retries(tmp, [], retry_shell=shell, timeout=30 * 60)
+            lines = report.read_text(encoding="utf-8").split("\n")
+            left = sorted(file.name for file in cache_dir.iterdir())
+        self.assertEqual(left, [])
+        if outcome is None:
+            self.assertEqual(lines, ['{"type":"report"}', ""])
+            return
+        self.assertEqual(len(lines), 3, lines)
+        run = json.loads(lines[1])
+        _assert_run_line(self, run, int(t0 * 1000), int(time.time() * 1000))
+        self.assertEqual({k: run[k] for k in test._fields}, test._asdict())
+        self.assertEqual((run["rerun_number"], run["outcome"]), (2, outcome))
+        self.assertEqual(run["outcome_summary"], summary)
+
+    def test_skips_a_stale_record(self) -> None:
+        # The writer wrote after publishing, so its clear was lost and the run did
+        # finish: it must not be recorded again.
+        test = torchci_report.TestId("test/x.py", "", "test_x", "python", "test_x")
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "x.report.jsonl"
+            report.write_text('{"type":"report"}\n', encoding="utf-8")
+            cache_dir = self._publish(tmp, report, test, 0, time.time())
+            with open(report, "a", encoding="utf-8") as f:
+                f.write('{"type":"run"}\n')
+            crash = unittest.mock.Mock(return_value=(-11, False))
+            log = self._run_test_retries(tmp, [], retry_shell=crash)
+            lines = report.read_text(encoding="utf-8").splitlines()
+            consumed = not (cache_dir / "report_inflight").exists()
+        self.assertEqual(lines, ['{"type":"report"}', '{"type":"run"}'])
+        self.assertTrue(consumed)
+        self.assertNotIn("Could not finish", log)
+
+    def test_skips_a_removed_report(self) -> None:
+        test = torchci_report.TestId("test/x.py", "", "test_x", "python", "test_x")
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "gone.report.jsonl"
+            cache_dir = self._publish(tmp, report, test, 0, time.time())
+            crash = unittest.mock.Mock(return_value=(-11, False))
+            log = self._run_test_retries(tmp, [], retry_shell=crash)
+            created = report.exists()
+            consumed = not (cache_dir / "report_inflight").exists()
+        self.assertFalse(created)
+        self.assertTrue(consumed)
+        self.assertNotIn("Could not finish", log)
+
+    def test_run_test_survives_a_corrupt_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = self._cache_dir(tmp)
+            cache_dir.mkdir(parents=True)
+            (cache_dir / "report_inflight").write_text("{")
+            crash = unittest.mock.Mock(return_value=(-11, False))
+            log = self._run_test_retries(tmp, [], retry_shell=crash)
+            consumed = not (cache_dir / "report_inflight").exists()
+        self.assertIn("Could not finish the test run report:", log)
+        self.assertIn("No stepcurrent file found", log)
+        # Consumed although unreadable, so no later process logs it again.
+        self.assertTrue(consumed)
+
+
+instantiate_parametrized_tests(TestReportCrashes)
 
 
 class TestReportHelpers(TestCase):
+    def test_gtest_identities(self) -> None:
+        def cpp(suite: str, case_name: str, declared_case_name: str) -> tuple:
+            return ("cpp/test_api", suite, case_name, "cpp", declared_case_name)
+
+        self.assertEqual(
+            torchci_report.gtest_identities("build/bin/test_api.exe", _GTEST_LISTING),
+            {
+                "ModulesTest.Linear": cpp("ModulesTest", "Linear", "Linear"),
+                "TypedTest/0.Add": cpp("TypedTest/0", "Add", "Add"),
+                "Inst/TypedPTest/1.Add": cpp("Inst/TypedPTest/1", "Add", "Add"),
+                "TypedTest/c10.Half.Add": cpp("TypedTest/c10.Half", "Add", "Add"),
+                "Inst/PrimeTest.Returns/0": cpp(
+                    "Inst/PrimeTest", "Returns/0", "Returns"
+                ),
+                "Inst/PrimeTest.Returns/Small": cpp(
+                    "Inst/PrimeTest", "Returns/Small", "Returns"
+                ),
+            },
+        )
+
+    @unittest.skipIf(
+        importlib.util.find_spec("pytest_cpp") is None, "pytest-cpp isn't installed"
+    )
+    def test_gtest_item_identity(self) -> None:
+        from pytest_cpp.boost import BoostTestFacade
+        from pytest_cpp.catch2 import Catch2Facade
+        from pytest_cpp.google import GoogleTestFacade
+        from pytest_cpp.plugin import CppItem
+
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        def list_tests(args: list[str], **kwargs: Any) -> None:
+            listing = Path(args[-1].removeprefix("--gtest_output=json:"))
+            listing.write_text(json.dumps(_GTEST_LISTING))
+
+        # identity reads only the item's binary, name and framework.
+        item = object.__new__(CppItem)
+        item.path, item.facade = Path("build/bin/test_api"), GoogleTestFacade()
+        plugin._gtest_identities.cache_clear()
+        self.addCleanup(plugin._gtest_identities.cache_clear)
+        with unittest.mock.patch("subprocess.run", side_effect=list_tests) as run:
+            item.name = "TypedTest/c10.Half.Add"
+            self.assertEqual(
+                plugin.identity(item),
+                ("cpp/test_api", "TypedTest/c10.Half", "Add", "cpp", "Add"),
+            )
+            item.name = "Unlisted.Test"
+            self.assertIsNone(plugin.identity(item))
+            # pytest-cpp's other frameworks don't have gtest's test list.
+            for facade in (BoostTestFacade(), Catch2Facade()):
+                item.facade = facade
+                self.assertIsNone(plugin.identity(item))
+        # Once per binary.
+        run.assert_called_once()
+
     def test_identity_survives_unwrap_errors(self):
         import pytest
 

@@ -3,6 +3,7 @@
 import builtins
 import cmath
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -38,6 +39,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    is_portable_function_guard,
     is_portable_identity_guard,
     pickle_guards_state,
 )
@@ -63,7 +65,12 @@ from torch._dynamo.utils import (
 )
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -72,7 +79,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -254,7 +260,124 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
+_ALIAS = typing.List  # noqa: UP006
+
+
+class _Sentinel:
+    def __reduce__(self):
+        return "_SENTINEL"
+
+
+_SENTINEL = _Sentinel()
+
+
+# Pickled through the copyreg.dispatch_table entries the test registers.
+class _CopyregToItself:
+    pass
+
+
+class _CopyregToAnotherGlobal:
+    pass
+
+
+_COPYREG_TO_ITSELF = _CopyregToItself()
+_COPYREG_TO_ANOTHER_GLOBAL = _CopyregToAnotherGlobal()
+
+
+class _ReducesToAnotherGlobal:
+    def __reduce__(self):
+        return "_ALIAS"
+
+
+class _ReducesToAMissingName:
+    def __reduce__(self):
+        return "_EnumOwner.Missing"
+
+
+class _ReducesToACall:
+    def __reduce__(self):
+        return (_ReducesToACall, ())
+
+
+class _ReducesFromAMissingModule:
+    __module__ = "_not_imported"
+
+    def __reduce__(self):
+        return "_ReducesFromAMissingModule"
+
+
+# Module globals, so the identity check gets past its module-globals scan; the
+# last one is refused there anyway, since its __module__ is not imported.
+_REDUCES_TO_ANOTHER_GLOBAL = _ReducesToAnotherGlobal()
+_REDUCES_TO_A_MISSING_NAME = _ReducesToAMissingName()
+_REDUCES_TO_A_CALL = _ReducesToACall()
+_REDUCES_FROM_A_MISSING_MODULE = _ReducesFromAMissingModule()
+
+
+class _ModuleRaises:
+    def __reduce__(self):
+        return "_MODULE_RAISES"
+
+    @property
+    def __module__(self):
+        raise RuntimeError("no module")
+
+
+class _UnhashableModule:
+    __module__ = ["typing"]  # type: ignore[assignment]
+
+    def __reduce__(self):
+        return "_UNHASHABLE_MODULE"
+
+
+class _ReduceExByValue:
+    # Pickle calls __reduce_ex__, which here bypasses the __reduce__ name.
+    def __reduce__(self):
+        return "_REDUCE_EX_BY_VALUE"
+
+    def __reduce_ex__(self, protocol):
+        return (_ReduceExByValue, ())
+
+
+_REDUCE_EX_BY_VALUE = _ReduceExByValue()
+
+
+class _SentinelOwner:
+    class Sentinel:
+        def __reduce__(self):
+            return "_NESTED_SENTINEL"
+
+
+_NESTED_SENTINEL = _SentinelOwner.Sentinel()
+
+
+class _CountsReduces:
+    calls = 0
+
+    def __reduce__(self):
+        type(self).calls += 1
+        return "_CountsReduces"
+
+
+_MODULE_RAISES = _ModuleRaises()
+_UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
+
+
+@torch.library.custom_op("guard_serialization_test::triple", mutates_args=())
+def _custom_triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+_custom_triple.register_fake(torch.empty_like)
+
+
+@torch.library.custom_op("guard_serialization_test::halve", mutates_args=())
+def _custom_halve(x: torch.Tensor) -> torch.Tensor:
+    return x / 2
+
+
+_custom_halve.register_fake(torch.empty_like)
 
 
 class _TupleOwner:
@@ -303,6 +426,14 @@ def _wrapped_target(x):
 @functools.wraps(_wrapped_target)
 def _wraps_wrapper(x):
     return _wrapped_target(x)
+
+
+class _AllocatingLinear(torch.nn.Linear):
+    allocations = 0
+
+    def __new__(cls, *args, **kwargs):
+        _AllocatingLinear.allocations += 1
+        return super().__new__(cls)
 
 
 class UnpicklableDefault:
@@ -975,6 +1106,30 @@ class PlainMethods:
         return cls()
 
 
+class _DoubleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 2
+
+
+class _TripleFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 3
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 3
+
+
+# A builtin bound to a class: every read of _DoubleFn.apply makes a new object.
+double_apply = _DoubleFn.apply
+
+
 def _global_func_wrong_fqn(x):
     return x + 1
 
@@ -1184,6 +1339,8 @@ torch._library.opaque_object.register_custom_class(CustomConstantType, typ="cons
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         DynamoCache.clear()
@@ -1321,6 +1478,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
                 self._cached_f_code = self._frame_state.f_code
+                self._cached_saved_gm = check_fn_manager.guard_manager
                 self.assertIsNotNone(guards_state)
                 guards_state = torch._dynamo.package.load_guards_state(guards_state)
 
@@ -1408,6 +1566,8 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
 
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
@@ -1504,7 +1664,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             # The meta template is a plain tensor, not another fake carrying
             # the mode (without no_dispatch the dump still succeeds, with the
             # mode and its converters pickled along).
-            _, args = pickler.reducer_override(fake)
+            args = pickler.reducer_override(fake)[1]
             self.assertIs(type(args[0]), torch.Tensor)
             self.assertFalse(is_fake_tensor(args[0]))
             pickler.dump({"t": fake})
@@ -1543,6 +1703,53 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIsNotNone(keys)
             self.assertEqual(keys - fake_keys, torch._C._dispatch_keys(real))
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_loaded_fsdp_module_keeps_its_wrapper_type(self):
+        from torch.distributed.fsdp import FSDPModule
+        from torch.distributed.fsdp._fully_shard._fsdp_init import _apply_to_module
+        from torch.distributed.fsdp._fully_shard._fully_shard import (
+            _unimplemented_deepcopy,
+            disable_fsdp_module_new_init,
+            get_cls_to_fsdp_cls,
+        )
+
+        m = _AllocatingLinear(2, 2)
+        _apply_to_module(
+            (m,), get_cls_to_fsdp_cls(), FSDPModule, "FSDP", _unimplemented_deepcopy
+        )
+        fsdp_cls = type(m)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        allocations = _AllocatingLinear.allocations
+        loaded = load_guards_state(buf.getvalue())["m"]
+        # A TYPE_MATCH on the live module compares against the wrapper class.
+        self.assertIs(type(loaded), fsdp_cls)
+        self.assertEqual(loaded.reshard.__func__, FSDPModule.reshard)
+        self.assertEqual(_AllocatingLinear.allocations, allocations + 1)
+        # Outside a load, calling the wrapper class builds the original module,
+        # including in a thread that was already running when a load started.
+        self.assertIs(type(fsdp_cls(2, 2)), _AllocatingLinear)
+        built = []
+        errors = []
+        loading = threading.Event()
+
+        def build():
+            try:
+                loading.wait()
+                built.append(fsdp_cls(2, 2))
+            except Exception as e:
+                errors.append(e)
+
+        worker = threading.Thread(target=build)
+        worker.start()
+        with disable_fsdp_module_new_init():
+            loading.set()
+            worker.join()
+        if errors:
+            raise errors[0]
+        self.assertIs(type(built[0]), _AllocatingLinear)
+        self.assertEqual(built[0].weight.shape, (2, 2))
+
     def test_retained_grad_non_leaf_survives_pickle(self):
         # A plain non-leaf's .grad is None (and reading it warns), but a
         # RETAINED-grad non-leaf -- which torch.optim explicitly permits as a
@@ -1569,6 +1776,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
 
+    def test_a_custom_op_def_pickles_by_its_registered_name(self):
+        from torch._library.custom_ops import OPDEFS
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"op": _custom_triple})
+        self.assertIs(load_guards_state(buf.getvalue())["op"], _custom_triple)
+        self.assertTrue(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+        # Redefining the op under the same name replaces it in the registry.
+        with mock.patch.dict(OPDEFS, {_custom_triple._qualname: _custom_halve}):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+            with self.assertRaisesRegex(TypeError, "cannot pickle"):
+                GuardsStatePickler({}, {}, {}, {}, io.BytesIO()).dump(
+                    {"op": _custom_triple}
+                )
+        # A serving process that never imported the module defining the op.
+        with mock.patch.dict(OPDEFS):
+            del OPDEFS[_custom_triple._qualname]
+            with self.assertRaisesRegex(RuntimeError, "import the module"):
+                load_guards_state(buf.getvalue())
+
     def test_a_main_class_resolves_against_the_loading_main(self):
         main = sys.modules["__main__"]
         cls = type("_MainOnly", (), {"__module__": "__main__"})
@@ -1591,6 +1818,59 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
+
+    def test_literal_on_a_fake_tensor_owned_name_is_not_a_guard_read(self):
+        x = torch.randn(3)
+        x._is_param = True
+        x.constant = 2
+        # Unrelated guards on the same interned values.
+        tree = {id(v): v for v in (x, True, 2)}
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertIs(out._is_param, True)
+        self.assertIsNone(out.constant)
+
+    def test_fake_tensor_setter_names_are_owned(self):
+        x = torch.randn(3)
+        x.fake_device = torch.device("meta")
+        x.item_memo = [5]
+        buf = io.BytesIO()
+        GuardsStatePickler({id(x): x}, {}, {}, {}, buf).dump({"x": x})
+        out = load_guards_state(buf.getvalue())["x"]
+        self.assertEqual(out.fake_device, torch.device("cpu"))
+        self.assertIsNone(out.item_memo)
+        tree = {id(v): v for v in (x, x.item_memo)}
+        with self.assertRaisesRegex(PackageError, "reads 'item_memo' off a tensor"):
+            GuardsStatePickler(tree, {}, {}, {}, io.BytesIO()).dump({"x": x})
+
+    def test_tensor_attributes_carried_through_the_pickle(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(3)
+        x.me = x
+        x._cpu_copy = torch.randn(2)
+        x.gen = (i for i in range(3))
+        x._dynamo_dynamic_indices = {0}
+        x._dynamo_weak_dynamic_indices = {1}
+        fake = FakeTensorMode().from_tensor(torch.randn(3))
+        fake.scale = 2
+        tree = {
+            id(v): v for v in (x, x._cpu_copy, x._dynamo_weak_dynamic_indices, fake)
+        }
+        buf = io.BytesIO()
+        GuardsStatePickler(tree, {}, {}, {}, buf).dump({"x": x, "fake": fake})
+        state = load_guards_state(buf.getvalue())
+        out = state["x"]
+        self.assertIs(out.me, out)
+        self.assertEqual(out._cpu_copy.shape, (2,))
+        # The generator does not pickle; its name survives for a HASATTR guard.
+        self.assertIsInstance(out.gen, _Missing)
+        # An unregistered marking is dropped, not left as a _Missing.
+        self.assertFalse(hasattr(out, "_dynamo_dynamic_indices"))
+        self.assertEqual(out._dynamo_weak_dynamic_indices, {1})
+        self.assertEqual(state["fake"].scale, 2)
+        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
 
     def test_symbolic_scalars_are_refused_as_package_errors(self):
         # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
@@ -1879,6 +2159,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         buf = io.BytesIO()
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
+
+    def test_reduce_dict_keys_type(self):
+        dict_keys = type({}.keys())
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"t": dict_keys})
+        self.assertIs(load_guards_state(buf.getvalue())["t"], dict_keys)
 
     def test_rebuilt_function_keeps_an_empty_closure_cell(self):
         # A by-value rebuild of an fqn-mismatched wrapper carries its cells
@@ -2703,6 +2989,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_function_locals(self):
         def foo(x):
             return x + 1
@@ -3492,6 +3780,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # for precompile under FSDP+TP.
         self._test_check_fn(ref, loaded, {"w": base}, True)
 
+    def test_dict_keys_type_local(self):
+        def fn(x, t):
+            if t.__name__ == "dict_keys":
+                return x + 1
+            return x - 1
+
+        dict_keys = type({}.keys())
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, dict_keys)
+        self._test_check_fn(ref, loaded, {"x": x, "t": dict_keys}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "t": type({}.values())}, False)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
@@ -3623,6 +3923,34 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ):
             self._test_serialization("CLASS_MATCH", fn, torch.randn(3))
 
+    def test_class_match_on_a_builtin_class(self):
+        def fn(x):
+            for i, y in enumerate([x, x]):
+                x = x + y * i
+            return x
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("CLASS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(builtins, "enumerate", list):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_guard_on_an_attribute_of_a_builtin(self):
+        def fn(x):
+            return x + 1 if len.__name__ == "len" else x - 1
+
+        real_len = builtins.len
+
+        def renamed(obj):
+            return real_len(obj)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.object(builtins, "len", renamed):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_module_match(self):
         def fn(x):
             return x + math.sqrt(2)
@@ -3645,6 +3973,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_typing_alias(self):
+        def fn(x):
+            if _ALIAS is typing.List:  # noqa: UP006
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        # typing.List pickles as a reference to the typing.List global, so the
+        # guard survives serialization instead of being dropped.
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):  # noqa: UP006
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_id_match_on_a_member_of_a_nested_enum(self):
@@ -3684,6 +4027,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_custom_op_def(self):
+        def fn(x):
+            return _custom_triple(x) + 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_custom_triple": _custom_halve}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_portable_identity_guard_values(self):
         class Local:
             pass
@@ -3696,6 +4050,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_EnumOwner.Level.LOW, True),
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
+            # Its __reduce__ names the typing global it is.
+            (typing.List, True),  # noqa: UP006
+            (typing.Optional, True),
+            # A subscripted alias is not a global of typing.
+            (typing.List[int], False),  # noqa: UP006
+            (_REDUCES_TO_A_CALL, False),
+            (_SENTINEL, True),
+            (_COPYREG_TO_ITSELF, True),
+            # Each reduction names something other than the object itself.
+            (_COPYREG_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_A_MISSING_NAME, False),
+            (_REDUCES_FROM_A_MISSING_MODULE, False),
+            (_MODULE_RAISES, False),
+            (_UNHASHABLE_MODULE, False),
+            (_REDUCE_EX_BY_VALUE, False),
+            # The guard-state pickler refuses an instance of a nested class.
+            (_NESTED_SENTINEL, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
@@ -3709,13 +4081,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # instance's type and leads to a different object.
             (torch._C._get_tracing_state, False),
         ]
+        dispatch = {
+            _CopyregToItself: lambda _: "_COPYREG_TO_ITSELF",
+            _CopyregToAnotherGlobal: lambda _: "_ALIAS",
+        }
         for value, expected in cases:
-            with self.subTest(value=value):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(copyreg.dispatch_table, dispatch),
+            ):
                 self.assertEqual(
                     is_portable_identity_guard("ID_MATCH", (), value), expected
                 )
                 if expected and not isinstance(value, types.ModuleType):
-                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+                    buf = io.BytesIO()
+                    GuardsStatePickler({id(value): value}, {}, {}, {}, buf).dump(value)
+                    self.assertIs(load_guards_state(buf.getvalue()), value)
+
+    def test_identity_check_reduces_only_a_module_global(self):
+        # Reducing runs user code, so an instance that is not one of its
+        # module's globals is refused without it.
+        self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _CountsReduces()))
+        self.assertEqual(_CountsReduces.calls, 0)
 
     def test_class_match_on_a_named_tuple_nested_in_a_class(self):
         def fn(x):
@@ -3969,6 +4356,52 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ),
         ):
             self._test_serialization("CLOSURE_MATCH", fn, torch.randn(3))
+
+    def test_native_method_match(self):
+        def fn(x):
+            return double_apply(x)
+
+        self.assertTrue(is_portable_function_guard("ID_MATCH", double_apply))
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        # The capture process installs the same rewritten guard.
+        saved = self._cached_saved_gm
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"double_apply": _DoubleFn.apply}):
+            self.assertFalse(ref.check({"x": x}))
+            self.assertTrue(loaded.check({"x": x}))
+            self.assertTrue(saved.check({"x": x}))
+        with mock.patch.dict(globals(), {"double_apply": _TripleFn.apply}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            self.assertFalse(saved.check({"x": x}))
+        for gm in (loaded, saved):
+            # An object whose __eq__ always answers True is still rejected.
+            with mock.patch.dict(globals(), {"double_apply": mock.ANY}):
+                self.assertFalse(gm.check({"x": x}))
+            # A repeat of the last matched object is accepted without comparing.
+            self.assertTrue(gm.check({"x": x}))
+            with mock.patch(
+                "torch._dynamo.guards._native_method_matches",
+                side_effect=AssertionError,
+            ):
+                self.assertTrue(gm.check({"x": x}))
+
+    def test_native_method_match_needs_a_receiver_by_reference(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+        local_apply = LocalFn.apply
+
+        def fn(x):
+            return local_apply(x)
+
+        self.assertTrue(is_portable_function_guard("CLOSURE_MATCH", double_apply))
+        self.assertFalse(is_portable_function_guard("ID_MATCH", local_apply))
+        self.assertFalse(is_portable_function_guard("CLOSURE_MATCH", local_apply))
+        with self.assertRaises(PackageError):
+            self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
@@ -4570,7 +5003,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_fsdp_training_state(self):
         from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
         from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
@@ -4619,6 +5052,185 @@ class TestGuardSerialization(TestGuardSerializationBase):
         finally:
             torch.set_default_device(device)
 
+    def test_autograd_saved_tensors_hooks_compare_by_content(self):
+        def pack(x):
+            return x * 2
+
+        def unpack(x):
+            return x / 2
+
+        def other_unpack(x):
+            return x / 3
+
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        captured = trace(pack, unpack)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            ref, loaded = self._test_serialization(
+                "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
+            )
+        # A serving process installs its own copies of the hooks, so the ids
+        # the capturing process saw never recur.
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, unpack)):
+            self._test_check_fn(ref, ref, {"x": x}, False)
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, other_unpack)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+        self._test_check_fn(loaded, loaded, {"x": x}, False)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_autograd_saved_tensors_hooks_compare_user_cache_hash(self):
+        def fn(x):
+            return x + 1
+
+        def hooks(user_hash):
+            pack = torch.fx.symbolic_trace(lambda x: x * 2)
+            unpack = torch.fx.symbolic_trace(lambda x: x / 2)
+            next(iter(pack.graph.nodes)).meta["user_cache_hash"] = user_hash
+            return pack, unpack
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
+            ref, loaded = self._test_serialization(
+                "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
+            )
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_reuses_result_per_hook_set(self):
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(
+            *trace(lambda x: x * 2, lambda x: x / 2)
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        matching = trace(lambda x: x * 2, lambda x: x / 2)
+        other = trace(lambda x: x * 3, lambda x: x / 3)
+        for hooks, expected in ((matching, True), (other, False), (matching, True)):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                for _ in range(2):
+                    self._test_check_fn(loaded, loaded, {"x": x}, expected)
+
+    def test_autograd_saved_tensors_hooks_rejects_opaque_call(self):
+        def fn(x):
+            return x + 1
+
+        def hook_calling(target, user_hash=None):
+            graph = torch.fx.Graph()
+            node = graph.call_function(target, (graph.placeholder("x"),))
+            node.meta["is_wrapped"] = True
+            if user_hash is not None:
+                node.meta["user_cache_hash"] = user_hash
+            graph.output(node)
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def double():
+            def scale(x):
+                return x * 2
+
+            return scale
+
+        def triple():
+            def scale(x):
+                return x * 3
+
+            return scale
+
+        def hooks(target, user_hash=None):
+            return (
+                hook_calling(target, user_hash),
+                torch.fx.symbolic_trace(lambda x: x / 2),
+            )
+
+        x = torch.randn(3, 2)
+        self.assertEqual(hooks(double())[0].code, hooks(triple())[0].code)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double())):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        # The rendered code names scale but not its body, so nothing tells
+        # these two apart; the loaded guard accepts neither.
+        for target in (double(), triple()):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks(target)):
+                self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(triple(), "v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        # A target check_node_safe fails to introspect is unverifiable too, not
+        # an error at capture or guard evaluation.
+        with (
+            torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")),
+            mock.patch(
+                "torch._functorch._aot_autograd.autograd_cache.check_node_safe",
+                side_effect=AttributeError("__name__"),
+            ),
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_matches_traced_tensor_methods(self):
+        def fn(x):
+            return x + 1
+
+        def hooks(dtype):
+            return (
+                torch.fx.symbolic_trace(lambda x: x.to(dtype)),
+                torch.fx.symbolic_trace(lambda x: x.to(torch.float32)),
+            )
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.float16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_not_inlineable_at_capture(self):
+        def fn(x):
+            return x + 1
+
+        def hooks():
+            return (
+                torch.fx.symbolic_trace(lambda x: x * 2),
+                torch.fx.symbolic_trace(lambda x: x / 2),
+            )
+
+        def capture():
+            return self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+
+        def capture_under_python_hooks():
+            with torch.autograd.graph.saved_tensors_hooks(
+                lambda x: x * 2, lambda x: x / 2
+            ):
+                return capture()
+
+        x = torch.randn(3, 2)
+        for ref, loaded in (capture(), capture_under_python_hooks()):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch.autograd.graph.saved_tensors_hooks(
+                lambda x: x * 3, lambda x: x / 3
+            ):
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks()):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_shape_env(self):
         def fn(x):
             return x + 1
@@ -4642,6 +5254,133 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_guarded_tensor_attribute_round_trips(self):
+        def fn(x):
+            return x * x.scale
+
+        x = torch.randn(3)
+        x.scale = 2
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        same, other = torch.randn(3), torch.randn(3)
+        same.scale = 2
+        other.scale = 3
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": other}, False)
+
+    def test_hasattr_only_tensor_attribute_keeps_its_presence(self):
+        def fn(x):
+            return x + 1 if hasattr(x, "cfg") else x - 1
+
+        x = torch.randn(3)
+        x.cfg = object()
+        ref, loaded = self._test_serialization("HASATTR", fn, x)
+        with_cfg, without_cfg = torch.randn(3), torch.randn(3)
+        with_cfg.cfg = object()
+        self._test_check_fn(ref, loaded, {"x": with_cfg}, True)
+        self._test_check_fn(ref, loaded, {"x": without_cfg}, False)
+
+    def test_guard_reading_a_fake_tensor_owned_name_raises(self):
+        def fn(x):
+            return x * x.constant[0]
+
+        x = torch.randn(3)
+        x.constant = [2]
+        with self.assertRaisesRegex(PackageError, "reads 'constant' off a tensor"):
+            self._test_serialization("EQUALS_MATCH", fn, x)
+
+    def test_guard_reading_a_literal_fake_tensor_owned_name_warns(self):
+        def fn(x):
+            return x * x.constant
+
+        x = torch.randn(3)
+        x.constant = 2
+        with self.assertLogs("torch._dynamo.guards", "WARNING") as logs:
+            ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self.assertIn("'constant' attribute holds 2", "\n".join(logs.output))
+        # The loaded guard compares against the FakeTensor's own constant.
+        self.assertTrue(ref.check({"x": x}))
+        self.assertFalse(loaded.check({"x": x}))
+
+    def test_dim_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        subset, superset = torch.randn(4, 2), torch.randn(4, 2)
+        torch._dynamo.mark_dynamic(subset, 0)
+        torch._dynamo.mark_dynamic(superset, [0, 1])
+        self._test_check_fn(ref, loaded, {"x": subset}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": superset}, False)
+
+    def test_dim_marking_range_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=8)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same, wider = torch.randn(4, 2), torch.randn(4, 2)
+        torch._dynamo.mark_dynamic(same, 0, min=2, max=8)
+        torch._dynamo.mark_dynamic(wider, 0, min=2, max=9)
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": wider}, False)
+
+    def test_unbacked_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        def marked(**kwargs):
+            t = torch.randn(4, 2)
+            torch._dynamo.decorators.mark_unbacked(t, 0, **kwargs)
+            return t
+
+        x = marked(min=2, max=8, shape_id="s")
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same = marked(min=2, max=8, shape_id="s")
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        wider = marked(min=2, max=9, shape_id="s")
+        self._test_check_fn(ref, loaded, {"x": wider}, False)
+        renamed = marked(min=2, max=8, shape_id="t")
+        self._test_check_fn(ref, loaded, {"x": renamed}, False)
+
+    def test_weak_and_strict_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        marks = {
+            "maybe_mark_dynamic": torch._dynamo.maybe_mark_dynamic,
+            "strict_unbacked": functools.partial(
+                torch._dynamo.decorators.mark_unbacked, strict=True
+            ),
+        }
+        for name, mark in marks.items():
+            with self.subTest(name):
+                x = torch.randn(4, 2)
+                mark(x, 0)
+                ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+                same, superset = torch.randn(4, 2), torch.randn(4, 2)
+                mark(same, 0)
+                mark(superset, 0)
+                mark(superset, 1)
+                self._test_check_fn(ref, loaded, {"x": same}, True)
+                self._test_check_fn(ref, loaded, {"x": superset}, False)
+
+    def test_static_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_static(x, 1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same, superset = torch.randn(3, 2), torch.randn(3, 2)
+        torch._dynamo.mark_static(same, 1)
+        torch._dynamo.mark_static(superset, [0, 1])
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": superset}, False)
 
     def test_builtin_match(self):
         def fn(x):
@@ -4747,26 +5486,90 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
-            ddp_model = DDP(GlobalNestedModule())
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
 
             def foo(ddp, x):
                 return ddp(x)
 
-            unsupported = frozenset(
-                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            )
-            x = torch.randn(10)
-            package = CompilePackage(foo)
-            torch._dynamo.optimize(
-                package=package,
-                guard_filter_fn=lambda gs: [
-                    x.guard_type not in unsupported for x in gs
-                ],
-            )(foo)(ddp_model, x)
-            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
-            torch._dynamo.package.load_guards_state(
-                package._codes[foo.__code__].guarded_codes[0].guards_state
-            )
+            def guards_state(ddp_model, x, fn=foo):
+                package = CompilePackage(fn)
+                torch._dynamo.optimize(
+                    package=package,
+                    guard_filter_fn=lambda gs: [
+                        g.guard_type not in unsupported for g in gs
+                    ],
+                )(fn)(ddp_model, x)
+                self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
+                return torch._dynamo.package.load_guards_state(
+                    package._codes[fn.__code__].guarded_codes[0].guards_state
+                )
+
+            # DDP itself pickles only on the default process group. BatchNorm1d
+            # gives the module buffers, which DDP.forward syncs.
+            for process_group in (None, dist.new_group([0])):
+                for module in (
+                    GlobalNestedModule(),
+                    torch.nn.Sequential(
+                        torch.nn.Linear(10, 10), torch.nn.BatchNorm1d(10)
+                    ),
+                ):
+                    with self.subTest(
+                        default_group=process_group is None, module=type(module)
+                    ):
+                        torch._dynamo.reset()
+                        ddp_model = DDP(module, process_group=process_group)
+                        x = torch.randn(4, 10)
+                        with torch._dynamo.config.patch(nested_graph_breaks=False):
+                            state = guards_state(ddp_model, x)
+                        loaded = torch._dynamo.package.load_guard_manager(
+                            state, foo.__code__, foo.__globals__
+                        )
+                        self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
+                        y = torch.randn(4, 11)
+                        self.assertFalse(loaded.check({"ddp": ddp_model, "x": y}))
+
+                        # A frame resuming inside DDP.forward guards the type of
+                        # its C++ logger, which the state cannot carry: refused
+                        # at save (a bypass), not a load that fails.
+                        torch._dynamo.reset()
+                        with (
+                            torch._dynamo.config.patch(nested_graph_breaks=True),
+                            self.assertRaisesRegex(
+                                PackageError, "DistributedDataParallel.logger"
+                            ),
+                        ):
+                            guards_state(ddp_model, x)
+
+            # Delaying every parameter that needs a gradient returns from
+            # DDP.__init__ before the reducer and logger are built (and leaves
+            # DDP.forward unusable, so the frame calls the wrapped module). The
+            # frozen bias is what DDP's device check reads.
+            def bar(ddp, x):
+                return ddp.module(x)
+
+            for pg in (None, dist.new_group([0])):
+                with self.subTest(all_delayed=True, default_group=pg is None):
+                    torch._dynamo.reset()
+                    module = torch.nn.Sequential(torch.nn.Linear(10, 10))
+                    module[0].bias.requires_grad_(False)
+                    ddp_model = DDP(
+                        module,
+                        process_group=pg,
+                        delay_all_reduce_named_params=[("0.weight", module[0].weight)],
+                        param_to_hook_all_reduce=module[0].weight,
+                    )
+                    self.assertFalse(hasattr(ddp_model, "reducer"))
+                    # DDP's own pickling still refuses it, at dump not at load.
+                    with self.assertRaisesRegex(RuntimeError, "parameter is delayed"):
+                        pickle.dumps(ddp_model)
+                    x = torch.randn(4, 10)
+                    state = guards_state(ddp_model, x, bar)
+                    loaded = torch._dynamo.package.load_guard_manager(
+                        state, bar.__code__, bar.__globals__
+                    )
+                    self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
         finally:
             dist.destroy_process_group()
             tmpfile.close()
@@ -4890,19 +5693,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             "TENSOR_MATCH", foo, Inputs(x, weakref.ref(x))
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
-
-    def test_unused_stream(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
-        def foo(inputs):
-            return inputs.x + 1
-
-        x = torch.randn(3, 2)
-        ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
-        )
-        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist
@@ -5095,6 +5885,32 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+class TestGuardSerializationAccelerator(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch({"strict_precompile": True})
+    def test_unused_stream(self, device):
+        def foo(inputs):
+            return inputs.x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream(device=device))
+        )
+        self._test_check_fn(
+            ref, loaded, {"inputs": Inputs(x, torch.Stream(device=device))}, True
+        )
+
+
+instantiate_device_type_tests(
+    TestGuardSerializationAccelerator,
+    globals(),
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 
 class SimpleModule(torch.nn.Module):

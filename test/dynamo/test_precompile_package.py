@@ -92,6 +92,13 @@ _unregistered = types.ModuleType("_unregistered")
 _unregistered.SCALE = 1
 
 
+_ALIAS = typing.List  # noqa: UP006
+
+
+def _through_alias(x):
+    return x + 1 if _ALIAS is typing.List else x - 1  # noqa: UP006
+
+
 def _without_module_globals(fn):
     """A copy of fn whose globals no importable module owns, so a guard on it
     cannot be rebuilt by value in another process and the default filter drops
@@ -104,6 +111,12 @@ def _unportable_op(x):
 
 
 _unportable_op = _without_module_globals(_unportable_op)
+
+
+class _Doubling(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
 
 
 def _stack(*filenames):
@@ -354,6 +367,30 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 
+    def test_default_guard_filter_keeps_a_class_bound_builtin(self):
+        class LocalFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+        rows = [
+            ("ID_MATCH", _Doubling.apply, True),
+            ("CLOSURE_MATCH", _Doubling.apply, True),
+            ("ID_MATCH", LocalFn.apply, False),
+            ("CLOSURE_MATCH", LocalFn.apply, False),
+        ]
+        entries = [_entry(GlobalSource("apply"), v, t) for t, v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, _, k in rows])
+
+    def test_default_guard_filter_keeps_a_typing_alias(self):
+        # typing.List pickles as the global typing.List; typing.List[int] is
+        # not a global of typing, so it is dropped before any reduction.
+        rows = [(typing.List, True), (typing.List[int], False)]  # noqa: UP006
+        entries = [_entry(GlobalSource("_ALIAS"), v, "ID_MATCH") for v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, k in rows])
+
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):
             return _unportable_op(x) + len(x.shape)
@@ -495,15 +532,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             g.create_fn_name() for g in control_state.output_graph.guards
         )
         # pytree's classes are TreeSpec and typing.Any, which is a class only
-        # from Python 3.11 on.
-        class_matches = 2 if isinstance(pytree.Any, type) else 1
+        # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
+        # ID_MATCH that is kept because it pickles as the global typing.Any.
+        any_is_class = isinstance(pytree.Any, type)
+        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
         self.assertEqual(
             counts - control_counts,
             {
                 "DICT_KEYS_MATCH": 1,
                 "MODULE_MATCH": 1,
                 "CLASS_MATCH": class_matches,
-                "ID_MATCH": 2,
+                "ID_MATCH": id_matches,
                 "FUNCTION_CODE_MATCH": 4,
             },
         )
@@ -1463,8 +1502,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             and value.__name__ == name
             and not reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, name), value)
         ]
-        heap_types = ["ExceptionGroup"] if sys.version_info >= (3, 11) else []
-        self.assertEqual(refused, heap_types)
+        self.assertEqual(refused, ["ExceptionGroup"])
 
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
@@ -1802,8 +1840,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # stores the function under its own name, is pinned last.
         def minted(key, qualname):
             code = _user_op.__code__.replace(co_name=qualname.rpartition(".")[2])
-            if sys.version_info >= (3, 11):
-                code = code.replace(co_qualname=qualname)
+            code = code.replace(co_qualname=qualname)
             fn = types.FunctionType(code, globals(), "__annotate__")
             fn.__qualname__ = qualname
             return type("Cfg", (), {key: fn})
@@ -2208,6 +2245,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual([f.value for f in ordered], sorted(rendered))
 
     def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
+        from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
+
         fingerprint = precompile_package._saved_hooks_fingerprint
         self.assertEqual(fingerprint(), "hooks=None")
         # The guard stores None for hooks it cannot inline, so plain-Python
@@ -2222,10 +2261,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         unpack = torch.fx.symbolic_trace(identity)
         with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
             rendered = fingerprint()
-        # Named by rendered graph, never by address: two GraphModules with one
-        # code read the same here although the guard compares their ids.
-        digest = precompile_package._hash_text(pack.code)
+        digest = _saved_tensors_hooks_fingerprint((pack, unpack))[0][:12]
         self.assertEqual(rendered, f"hooks=({digest}, {digest})")
+        next(iter(pack.graph.nodes)).meta["user_cache_hash"] = "v2"
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            self.assertNotEqual(fingerprint(), rendered)
 
     def test_wont_generalize_cancels_pins_only_within_a_frame(self):
         from torch._dynamo.precompile_package import (
@@ -2569,6 +2609,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         kept = capture([_relu, _sigmoid])
         self.assertNotIn(slot, kept.dropped_guards)
         self.assertIn(slot, kept.kept_guards)
+
+    def test_an_identity_guard_on_a_typing_alias_is_kept(self):
+        # typing.List pickles as the global typing.List, so its ID_MATCH is
+        # serialized rather than dropped as a risky drop that trips the gate.
+        session = precompile_package.precompile_capture(_through_alias, backend="eager")
+        with session as call:
+            self.assertEqual(call(torch.ones(2)), torch.full((2,), 2.0))
+        summary = session.summary()
+        slot = ("ID_MATCH", "G['_ALIAS']")
+        self.assertIn(slot, summary.kept_guards)
+        self.assertNotIn(slot, summary.dropped_guards)
+        self.assertEqual(summary.risky_dropped_guards, ())
+        session.snapshot_artifact()
 
     @parametrize("backend", ["eager", "inductor"])
     def test_precompile_session_renders_behind_the_gates(self, backend):

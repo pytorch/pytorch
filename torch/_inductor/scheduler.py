@@ -504,23 +504,13 @@ class MixOrderReduction:
             # fully cached by L2
             size_thres = 5 * 2**20
 
-            # Call evaluate_expr rather than statically_known_geq since nrow can
-            # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
                 return False
 
         # Equal groups can be true square inner+outer reductions, but also
@@ -4822,6 +4812,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     has no data dependencies among them and can be executed in parallel.
     """
 
+    # Set when this node is derived from another foreach node; see __init__.
+    _strict_reduction: bool | None = None
+    _reduction: bool | None = None
+
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
     ) -> BaseSchedulerNode | None:
@@ -5053,6 +5047,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
             }
 
+            # Only one subnode changed, to prev_node_2, so these follow from the
+            # two nodes this one was built from. Recomputing them over every
+            # subnode after each of many fusions is quadratic.
+            self._strict_reduction = (
+                prev_node_1.has_strict_reduction() or prev_node_2.has_strict_reduction()
+            )
+            self._reduction = prev_node_1.is_reduction() or prev_node_2.is_reduction()
+
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
         if not device:
@@ -5061,6 +5063,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
         self.per_subkernel_blocks = per_subkernel_blocks
+
+    def has_strict_reduction(self) -> bool:
+        if self._strict_reduction is None:
+            self._strict_reduction = super().has_strict_reduction()
+        return self._strict_reduction
+
+    def is_reduction(self) -> bool:
+        if self._reduction is None:
+            self._reduction = super().is_reduction()
+        return self._reduction
 
     @classmethod
     def combinable_nodes(
@@ -5954,8 +5966,8 @@ class Scheduler:
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_real_name = {"buf0" : "buf1"}
-        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        # mutation_real_name = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
@@ -5964,8 +5976,8 @@ class Scheduler:
         #                   (changed once per mutation)
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
-        # mutation_renames = {"buf1" : "buf0"}
-        # in codegen we only use buf0, never buf1
+        # mutation_renames = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_renames: dict[str, str] = {}
 
         self.seen_template_fusions: OrderedSet[
@@ -7491,9 +7503,30 @@ class Scheduler:
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
             template_scheduler_node = node1 if consumer_fusion else node2
-            enabled_multi_inputs = _producer_fusion_enabled_inputs(
-                template_scheduler_node
+            # Computed for consumer fusion too: a producer may already have been
+            # fused into the template in an earlier fusion round.
+            template_input_names = OrderedSet(
+                typing.cast(ir.IRNode, input_node).get_name()
+                for input_node in multi_node.inputs
             )
+            required_producer_inputs = OrderedSet(
+                name
+                for fused_node in node_list_fused
+                for name in fused_node.get_buffer_names()
+                if name in template_input_names
+            )
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                # Choices can support different inputs, e.g. persistent+TMA
+                # templates cannot fuse producers into TMA-loaded inputs.
+                return required_producer_inputs <= _producer_fusion_enabled_inputs(
+                    template_scheduler_node, choice
+                )
+
             # Check for layout conflicts before committing to Triton template
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
@@ -7508,19 +7541,20 @@ class Scheduler:
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                        if not isinstance(
-                            choice,
-                            torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        if not choice_supports_fusion(choice):
                             continue
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
                         try:
-                            with multi_node.swap_as_triton_caller(choice):
+                            with multi_node.swap_as_triton_caller(triton_choice):
                                 future_choices.append(
                                     (
-                                        choice,
+                                        triton_choice,
                                         *self.compile_kernel(
                                             node_list_fused,
-                                            hint_override=choice.hint_override,
+                                            hint_override=triton_choice.hint_override,
                                         ),
                                     )
                                 )
@@ -7589,22 +7623,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # For producer fusion, the choice must support every input in
-                # the multi-template buffer's allowed set.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                return not (
-                    not consumer_fusion
-                    and hasattr(choice, "load_input_fusion_allowed_inputs")
-                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
-                    != enabled_multi_inputs
-                )
 
             def compile_without_benchmarking(
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -7698,17 +7716,7 @@ class Scheduler:
                 if is_nvgemm and not consumer_fusion:
                     continue
 
-                # For producer fusion, the choice must support every input in
-                # the multi-template buffer's allowed set.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    is_triton
-                    and not consumer_fusion
-                    and hasattr(choice, "load_input_fusion_allowed_inputs")
-                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
-                    != enabled_multi_inputs
-                ):
+                if is_triton and not choice_supports_fusion(choice):
                     continue
 
                 if benchmark_template_fusion and unfused_time >= ms1 + ms2:
@@ -12412,11 +12420,19 @@ class Scheduler:
                 and isinstance(snode._body, LoopBody)
             )
             remove_redundant_argreduce_indices(list(loop_bodies))
-            return (
-                self._codegen_partitions()
-                if torch._inductor.config.graph_partition
-                else self._codegen(self.nodes)
-            )
+            try:
+                return (
+                    self._codegen_partitions()
+                    if torch._inductor.config.graph_partition
+                    else self._codegen(self.nodes)
+                )
+            finally:
+                from .codegen.simd import SIMDScheduling
+
+                # candidate_tilings is a class-level cache keyed on scheduler
+                # nodes; once codegen is done, its entries would only keep this
+                # graph (IR, FX graph, and e.g. frozen constants) alive.
+                SIMDScheduling.candidate_tilings.cache_clear()
 
     def _codegen_partition_wrapper(
         self,
