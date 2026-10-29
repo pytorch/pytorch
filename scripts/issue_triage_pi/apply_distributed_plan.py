@@ -125,11 +125,19 @@ def plan_effects(
         effects.notes.append("no allowlisted sub-queue; flagging for review")
         labels = [label for label in labels if label != TRIAGED] + [TRIAGE_REVIEW]
 
-    keys = list(dict.fromkeys(plan.get("templates", [])))
-    repro_template = "needs_distributed_reproduction"
-    if decision == "needs_reproduction" and repro_template not in keys:
-        keys.insert(0, repro_template)
-    effects.comment, _ = template_comment(keys, templates, bot_comments, effects.notes)
+    template = {
+        "not_distributed": "not_distributed",
+        "needs_reproduction": "needs_distributed_reproduction",
+    }.get(decision)
+    keys = [template] if template else []
+    dropped = [key for key in plan.get("templates", []) if key not in keys]
+    if dropped:
+        effects.notes.append(
+            f"dropped templates inconsistent with {decision!r}: {dropped}"
+        )
+    effects.comment, effects.comment_templates, _ = template_comment(
+        keys, templates, bot_comments, effects.notes
+    )
 
     effects.add_labels = [
         label for label in dict.fromkeys(labels) if label not in existing_labels

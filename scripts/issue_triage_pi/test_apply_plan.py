@@ -14,6 +14,7 @@ from apply_plan import (
     main,
     plan_effects,
     publish,
+    summary_markdown,
 )
 from labels import load_templates, load_valid_labels, TRIAGE_SKILL
 
@@ -70,6 +71,33 @@ class PublishTest(unittest.TestCase):
                     )
                 else:
                     self.assertFalse(summary_file.exists())
+
+
+class SummaryTest(unittest.TestCase):
+    def test_summary_reports_only_comments_that_will_be_posted(self):
+        for decision, requested, posted, expected in (
+            ("close_question", [], [], "redirect_to_forum"),
+            ("request_info", [], [], "request_more_info"),
+            ("request_info", ["unknown"], [], "request_more_info"),
+            (
+                "request_info",
+                ["request_more_info"],
+                [TEMPLATES["request_more_info"]["comment"]],
+                "—",
+            ),
+        ):
+            with self.subTest(decision=decision, requested=requested, posted=posted):
+                result = effects(decision, templates=requested, bot_comments=posted)
+                summary = summary_markdown(
+                    "pytorch/ciforge",
+                    123,
+                    {"decision": decision, "templates": requested},
+                    result,
+                    "test",
+                    False,
+                    None,
+                )
+                self.assertIn(f"**Comment templates:** {expected} ·", summary)
 
 
 class PlanEffectsTest(unittest.TestCase):

@@ -104,6 +104,7 @@ class Effects:
 
     add_labels: list[str] = field(default_factory=list)
     comment: str = ""
+    comment_templates: list[str] = field(default_factory=list)
     close: bool = False
     redact_body: bool = False
     notes: list[str] = field(default_factory=list)
@@ -118,10 +119,10 @@ def template_comment(
     templates: dict[str, dict],
     bot_comments: list[str],
     notes: list[str],
-) -> tuple[str, bool]:
+) -> tuple[str, list[str], bool]:
     """Join the comments of the known `keys` the bot has not already posted.
 
-    Also returns whether any requested template was already posted, which
+    Also returns the included keys and whether any template was already posted, which
     counts as triage done: a rerun after a partial failure (comment posted,
     label call failed) still adds the bot marker.
     """
@@ -136,10 +137,9 @@ def template_comment(
     ]
     if posted:
         notes.append(f"already posted {posted}")
-    comment = "\n\n---\n\n".join(
-        templates[key]["comment"] for key in known if key not in posted
-    )
-    return comment, bool(posted)
+    pending = [key for key in known if key not in posted]
+    comment = "\n\n---\n\n".join(templates[key]["comment"] for key in pending)
+    return comment, pending, bool(posted)
 
 
 def fetch_issue(repo: str, number: int) -> tuple[dict, list[str]]:
@@ -254,7 +254,7 @@ def plan_effects(
         keys.insert(0, repro_template)
     if effects.close and CLOSING_TEMPLATES[decision] not in keys:
         keys.insert(0, CLOSING_TEMPLATES[decision])
-    effects.comment, posted = template_comment(
+    effects.comment, effects.comment_templates, posted = template_comment(
         keys, templates, bot_comments, effects.notes
     )
 
@@ -392,7 +392,7 @@ def summary_markdown(
         + ("" if applied else " (dry run)"),
         "",
         f"**Add labels:** {', '.join(f'`{label}`' for label in effects.add_labels) or '—'}",
-        f"**Comment templates:** {', '.join(plan.get('templates', [])) or '—'} · **Close:** {effects.close}",
+        f"**Comment templates:** {', '.join(effects.comment_templates) or '—'} · **Close:** {effects.close}",
     ]
     if effects.redact_body:
         lines.append("**Body:** redact external download links using the fixed policy")
