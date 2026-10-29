@@ -675,8 +675,8 @@ class TunableopModeValidationTest(TestCase):
         # persist; TUNING=0 is harmless because reuse never tunes.
         for var, value, warns in (
             ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
-            ("PYTORCH_TUNABLEOP_NEAREST_MATCH", "0", True),
-            ("PYTORCH_TUNABLEOP_RECORD_BORROWED", "0", True),
+            ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0", True),
+            ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0", True),
             ("PYTORCH_TUNABLEOP_TUNING", "0", False),
         ):
             with self.subTest(var=var):
