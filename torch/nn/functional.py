@@ -7486,15 +7486,18 @@ def scaled_grouped_mm(
     It supports bfloat16, float16, and float32 outputs.
 
     Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
-    1x128/1x128, 1x128/128x128, and 128x128/1x128 with float32 scales. Each group packs
+    1x128/1x128, 1x128/128x128, and 128x128/1x128 with float32 scales and two
+    ``float8_e4m3fn`` inputs. Each group packs
     its scales separately. For outer extent ``O`` (M for A, N for B), let ``L = ceil(K / 128)``.
     A 1x128 group stores ``O * L`` values with the outer dimension contiguous; a 128x128
     group stores ``round_up(L, 4) * ceil(O / 128)`` values with the padded K-block dimension
     contiguous. Scales are contiguous, with 16-byte-aligned group starts. A 3D operand uses
-    shape ``(groups, values_per_group)``; a 2D operand concatenates the flattened group scales
-    in offset order, covering only the groups selected by ``offs``. M and N must be multiples
+    shape ``(groups, values_per_group)``; a 2D operand uses a 1D tensor concatenating
+    the flattened group scales in offset order, covering only the groups selected by ``offs``. M and N must be multiples
     of 4. These recipes support bfloat16, float16, and float32 outputs and require
-    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``. Other scaling recipes require bfloat16 output.
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
+
+    Other scaling recipes require bfloat16 output.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
