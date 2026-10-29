@@ -1099,6 +1099,9 @@ class FakeTensorConfig:
 # required for testing version counter and epoch validity.
 class SymNumberMemoDescriptor:
     _name: str
+    _memo_name: str
+    _memo_vc_name: str
+    _memo_epoch_name: str
 
     # By default, SymInts in this memo are invalidated across versions/epochs.
     # nested_ints however are preserved across epochs and across versions.
@@ -1110,21 +1113,26 @@ class SymNumberMemoDescriptor:
     def __init__(self, *, is_nested_int: bool = False) -> None:
         self._is_nested_int = is_nested_int
 
-    def __set_name__(self, owner: str, name: str) -> None:
+    def __set_name__(self, owner: type, name: str) -> None:
         self._name = name
+        self._memo_name = f"_{name}"
+        self._memo_vc_name = f"_{name}_vc"
+        self._memo_epoch_name = f"_{name}_epoch"
+        # An unset memo reads as None, so a new tensor doesn't need to store one.
+        setattr(owner, self._memo_name, None)
 
     def _memo(self, obj: FakeTensor) -> str:
-        return f"_{self._name}"
+        return self._memo_name
 
     def _memo_vc(self, obj: FakeTensor) -> str:
-        return f"_{self._name}_vc"
+        return self._memo_vc_name
 
     # When we retrace, we need to invalidate all the memos so that we can
     # accurately identify the first time unbacked SymInts are allocated.
     # This is only relevant for inputs; for intermediates, they will get fresh
     # fake tensors so you won't have a memo anyway
     def _memo_epoch(self, obj: FakeTensor) -> str:
-        return f"_{self._name}_epoch"
+        return self._memo_epoch_name
 
     def __get__(
         self, obj: FakeTensor, objtype: type[FakeTensor] | None = None
@@ -1294,15 +1302,16 @@ class FakeTensor(Tensor):
         _is_param: bool = False,
         **state: Unpack[_FakeTensorConstructorIgnoredState],
     ) -> Self:
-        state_dict = cast(dict[str, object], state)
-        for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
-            state_dict.pop(attr_name, None)
-        if state_dict:
-            unexpected = next(iter(state_dict))
-            raise TypeError(
-                "FakeTensor.__new__() got an unexpected keyword argument "
-                f"{unexpected!r}"
-            )
+        if state:
+            state_dict = cast(dict[str, object], state)
+            for attr_name in _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS:
+                state_dict.pop(attr_name, None)
+            if state_dict:
+                unexpected = next(iter(state_dict))
+                raise TypeError(
+                    "FakeTensor.__new__() got an unexpected keyword argument "
+                    f"{unexpected!r}"
+                )
 
         if isinstance(fake_mode_or_elem, FakeTensorMode):
             if fake_mode is not None and fake_mode is not fake_mode_or_elem:
@@ -1331,16 +1340,23 @@ class FakeTensor(Tensor):
         if elem is None:
             raise TypeError("FakeTensor.__new__() missing required argument: 'elem'")
 
-        specified_devices = [
-            (name, FakeTensor._normalize_fake_device(torch.device(value)))
-            for name, value in (
-                ("device", device),
-                ("fake_device", fake_device),
-                ("_fake_device", _fake_device),
-            )
-            if value is not None
-        ]
-        if specified_devices:
+        if device is not None and fake_device is None and _fake_device is None:
+            device = FakeTensor._normalize_fake_device(torch.device(device))
+        else:
+            specified_devices = [
+                (name, FakeTensor._normalize_fake_device(torch.device(value)))
+                for name, value in (
+                    ("device", device),
+                    ("fake_device", fake_device),
+                    ("_fake_device", _fake_device),
+                )
+                if value is not None
+            ]
+            if not specified_devices:
+                raise TypeError(
+                    "FakeTensor.__new__() missing required argument: "
+                    "'device' (or 'fake_device')"
+                )
             first_name, resolved_device = specified_devices[0]
             for name, candidate_device in specified_devices[1:]:
                 if resolved_device != candidate_device:
@@ -1349,11 +1365,6 @@ class FakeTensor(Tensor):
                         f"{first_name}={resolved_device}, {name}={candidate_device}"
                     )
             device = resolved_device
-        else:
-            raise TypeError(
-                "FakeTensor.__new__() missing required argument: "
-                "'device' (or 'fake_device')"
-            )
 
         self = Tensor._make_subclass(
             cls,
@@ -1367,7 +1378,7 @@ class FakeTensor(Tensor):
         else:
             torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
-        if elem.device.type != "meta":
+        if not elem.is_meta:
             raise AssertionError(
                 f"elem.device.type must be 'meta', got {elem.device.type}"
             )
@@ -1383,7 +1394,8 @@ class FakeTensor(Tensor):
                 raise AssertionError(
                     "device.type must not be 'meta' when allow_meta is False"
                 )
-        self.fake_device = device
+        # device is already normalized, so skip the fake_device setter.
+        self._fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
         self.pytype = pytype
@@ -1391,11 +1403,6 @@ class FakeTensor(Tensor):
         if isinstance(real_tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
-        self.nonzero_memo = None
-        self.item_memo = None
-        self.unique_memo = None
-        self.unique_consecutive_memo = None
-        self.nested_int_memo = None
 
         if _is_param:
             self._is_param = _is_param
