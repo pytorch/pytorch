@@ -33,6 +33,7 @@ import io
 import itertools
 import logging
 import math
+import operator
 import pickle
 import sys
 import textwrap
@@ -1457,10 +1458,7 @@ def check_closure(value: object, metadata: Any) -> bool:
 
 def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
     # Most OrderedDicts retain storage order; avoid allocating a key-position map.
-    if all(
-        stored is linked
-        for stored, linked in zip(dict.keys(value), collections.OrderedDict.keys(value))
-    ):
+    if all(map(operator.is_, dict.keys(value), collections.OrderedDict.keys(value))):
         return tuple(range(dict.__len__(value)))
     positions = {id(key): index for index, key in enumerate(dict.keys(value))}
     return tuple(positions[id(key)] for key in collections.OrderedDict.keys(value))
@@ -3795,14 +3793,14 @@ class GuardBuilder(GuardBuilderBase):
         def guard_fn(
             value: collections.OrderedDict[Any, Any], expected: tuple[int, ...]
         ) -> bool:
+            if dict.__len__(value) != len(expected):
+                return False
+            keys, linked = dict.keys(value), collections.OrderedDict.keys(value)
             if storage_order:
-                return dict.__len__(value) == len(expected) and all(
-                    stored is linked
-                    for stored, linked in zip(
-                        dict.keys(value), collections.OrderedDict.keys(value)
-                    )
-                )
-            return _ordered_dict_order(value) == expected
+                return all(map(operator.is_, keys, linked))
+            return all(
+                map(operator.is_, map(tuple(keys).__getitem__, expected), linked)
+            )
 
         code = [f"___ordered_dict_order_matches({self.arg_ref(guard)}, {order!r})"]
         self.add_python_lambda_leaf_guard_to_root(
@@ -4995,9 +4993,14 @@ class GuardsStatePickler(FunctionPicklerBase):
         state: tuple[Any, tuple[int, ...]],
     ) -> None:
         attrs, order = state
-        if hasattr(value, "__setstate__"):
-            value.__setstate__(attrs)
-        else:
+        keys = list(dict.keys(value))
+        for index in order:
+            collections.OrderedDict.move_to_end(value, keys[index])
+        if attrs is None:
+            return
+        try:
+            setstate = cast(Any, value).__setstate__
+        except AttributeError:
             slots = None
             if isinstance(attrs, tuple):
                 attrs, slots = attrs
@@ -5009,9 +5012,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             if slots:
                 for name, item in slots.items():
                     setattr(value, name, item)
-        keys = list(dict.keys(value))
-        for index in order:
-            collections.OrderedDict.move_to_end(value, keys[index])
+        else:
+            setstate(attrs)
 
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
