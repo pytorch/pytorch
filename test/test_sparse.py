@@ -4394,6 +4394,8 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
@@ -5900,6 +5902,8 @@ instantiate_device_type_tests(TestSparseOnlyCPU, globals(), only_for="cpu")
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, except_for='meta')
+
+instantiate_device_type_tests(TestSparseOneOff, globals())
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
 
