@@ -723,12 +723,13 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
-        # Auto-functionalization supports operand mutation, but aliasing is still
-        # unsupported: input-input, input-output and output-output alike, matching the
-        # non-auto-functionalized path below. _check_alias_and_mutation is skipped on
-        # this path because it would also reject the mutation, so check aliasing only.
-        # This re-traces both branches; see the PR discussion for why the maps
-        # gen_schema already computed are not reused.
+        # Auto-functionalization supports operand mutation, but not aliasing that it
+        # does not repair: returning a mutated operand is fine, since the output then
+        # aliases the clone inserted for that base, while returning an operand that is
+        # not mutated leaves the output aliasing the caller's tensor.
+        # _check_alias_and_mutation is skipped on this path because it would also
+        # reject the mutation, so check aliasing only.  This re-traces both branches;
+        # see the PR discussion for why the maps gen_schema computed are not reused.
         unwrapped_inputs = ctx.unwrap_tensors(inputs)
         pre_dispatch = ctx.mode.pre_dispatch
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:

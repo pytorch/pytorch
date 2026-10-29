@@ -595,19 +595,24 @@ def _collect_fake_inputs(inputs):
 def _check_alias(
     graph_module, inputs_fake, name, pre_dispatch, *, allow_input_input_aliasing=False
 ):
-    """Raise if the graph has input-input, input-output or output-output aliasing.
+    """Raise for aliasing that auto-functionalization does not repair.
 
-    The aliasing half of :func:`_check_alias_and_mutation`. Auto-functionalization makes
-    input mutation supported, so that path must still reject aliasing but cannot use
-    :func:`_check_alias_and_mutation`, which rejects mutation as well.
+    The aliasing half of :func:`_check_alias_and_mutation`, which that path cannot use
+    because it rejects input mutation as well, minus the one case auto-functionalization
+    makes safe: an output aliasing a *mutated* input aliases the clone functionalization
+    inserts for that base, not the caller's tensor.  An output aliasing an input that is
+    not mutated gets no such clone, so its address stays undefined.
     """
-    aliases, _ = has_potential_input_alias_or_mutation(
-        graph_module,
-        inputs_fake,
-        pre_dispatch=pre_dispatch,
-        allow_input_input_aliasing=allow_input_input_aliasing,
-    )
-    if aliases:
+    (
+        (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(graph_module, inputs_fake, pre_dispatch)
+    mutated = set(inp_mutation)
+    if (
+        (len(inp_inp_alias_map) > 0 and not allow_input_input_aliasing)
+        or any(inp not in mutated for inp in inp_out_alias_map)
+        or len(out_out_alias_map) > 0
+    ):
         raise RuntimeError(f"{name} might be aliasing the input or the output!")
 
 
