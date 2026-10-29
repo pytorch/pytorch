@@ -12,6 +12,12 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_foreach_copy.h>
+#endif
+
 AOTITorchError aoti_torch_create_cuda_guard(
     int32_t device_index,
     CUDAGuardHandle* ret_guard // returns new reference
@@ -178,5 +184,17 @@ AOTITorchError aoti_torch_cuda_graph_replay(CUDAGraphHandle graph) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
     reinterpret_cast<at::cuda::CUDAGraph*>(graph)->replay();
+  });
+}
+
+AOTITorchError aoti_torch_cuda_foreach_copy_(
+    const AtenTensorHandle* dst,
+    const AtenTensorHandle* src,
+    int64_t num_tensors) {
+  using torch::aot_inductor::pointer_to_list;
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::_foreach_copy_(
+        pointer_to_list<at::Tensor>(dst, num_tensors),
+        pointer_to_list<at::Tensor>(src, num_tensors));
   });
 }

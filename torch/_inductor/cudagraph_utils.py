@@ -457,11 +457,21 @@ def check_aot_cudagraphs(graph: GraphLowering) -> None:
         if node := next(forbidden, None) or get_first_incompatible_cudagraph_node(gm):
             stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
             return with_stack_trace(f"incompatible op {node.target}", stack_trace)
+        # Random numbers aren't supported yet: concurrent replays race on the
+        # generator's offset.
+        tag = torch.Tag.nondeterministic_seeded
+        seeded = (n for n in gm.graph.nodes if tag in getattr(n.target, "tags", ()))
+        if node := next(seeded, None):
+            stack_trace = node.meta.get("stack_trace") or _get_use_stack_trace(node)
+            msg = f"it uses random numbers ({node.target})"
+            return with_stack_trace(msg, stack_trace)
         return None
 
     def find_reason() -> str | None:
         if "cuda" not in graph.device_types:
             return "it doesn't run on CUDA"
+        if torch.version.hip:
+            return "ROCm isn't supported yet, see https://github.com/ROCm/rocm-systems/issues/12677"
         graphs = list(_with_subgraphs(graph))
         for g in graphs:
             if g.disable_cudagraphs_reason:
