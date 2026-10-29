@@ -4,13 +4,14 @@ from typing import cast, NamedTuple, TypeAlias
 
 import torch
 
-from .blockscaled_tma_kernels import (
-    _compile_blockscaled_tma,
+from .blockscaled_tma_kernels import _compile_blockscaled_tma
+from .blockscaled_tma_plan import (
     _QUANT_ORIENTATION_DIM_K,
     _QUANT_ORIENTATION_DIM_KM,
     _QUANT_ORIENTATION_DIM_M,
+    BlockscaledTmaPlan,
+    select_blockscaled_tma_plan,
 )
-from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_plan
 from .utils import _ceil_div
 
 
@@ -94,13 +95,13 @@ def _validate_and_normalize_blockscaled_tma(
         normalized_dims.append(normalized)
     if normalized_dims not in ([(0, 1)], [(1, 0)], [(0, 1), (1, 0)]):
         raise ValueError(f"unsupported quantization dim order: {dim}")
-    # The TMA input is row-major; swap the matrix axes for transpose-contiguous views.
     input_transposed = not input.is_contiguous()
     if input_transposed:
         if not input.transpose(-2, -1).is_contiguous():
             raise ValueError(
                 "blockscaled TMA requires a contiguous or transpose-contiguous input"
             )
+        # The TMA input is row-major; swap logical axes for transpose-contiguous views.
         normalized_dims = [(1 - first, 1 - last) for first, last in normalized_dims]
     row_axis, col_axis = (
         (ndim - 1, ndim - 2) if input_transposed else (ndim - 2, ndim - 1)
@@ -214,8 +215,7 @@ def _prepare_blockscaled_tma_launch(
             spec.M,
             spec.K,
             input_dtype=input.dtype,
-            do_dim_k=spec.do_dim_k,
-            do_dim_m=spec.do_dim_m,
+            quant_orientation_id=spec.quant_orientation_id,
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (
