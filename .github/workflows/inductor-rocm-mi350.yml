@@ -16,7 +16,7 @@ on:
       hardware:
         type: choice
         default: mi350
-        options: [mi350, l4, both, mi350-boundary, mi350-amd-boundary]
+        options: [mi350, l4, both, mi350-boundary, mi350-amd-boundary, l4-ptxas]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -46,7 +46,7 @@ jobs:
       check_experiments: amd-dpx
 
   linux-noble-rocm-py3_11-inductor-build:
-    if: github.event.inputs.hardware != 'l4'
+    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas'
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -63,7 +63,7 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_11-inductor-test:
-    if: github.event.inputs.hardware != 'l4'
+    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas'
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_11-inductor-build
@@ -100,4 +100,20 @@ jobs:
       build-environment: ${{ needs.l4-abs-build.outputs.build-environment }}
       docker-image: ${{ needs.l4-abs-build.outputs.docker-image }}
       test-matrix: ${{ needs.l4-abs-build.outputs.test-matrix }}
+    secrets: inherit
+
+  l4-ptxas-controls:
+    if: github.event.inputs.hardware == 'l4-ptxas'
+    name: native-l4-ptxas-controls
+    uses: ./.github/workflows/_linux-test.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda13.4-py3.11-gcc11
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-6ce4e7e1f7fed4d82afb7c896fec3dd3ce7d6b17
+      artifact-run-id: '40865583043'
+      timeout-minutes: 90
+      test-matrix: |
+        { include: [
+          { config: "triton_pin_l4_ptxas_controls", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+        ]}
     secrets: inherit

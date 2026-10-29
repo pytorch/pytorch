@@ -2598,6 +2598,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_l4_controls" ]]; then
   exec python .ci/pytorch/triton_pin_l4_controls.py
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_l4_ptxas_controls" ]]; then
+  exec python .ci/pytorch/triton_pin_l4_ptxas_controls.py
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_s390_controls" ]]; then
   exec python .ci/pytorch/triton_pin_s390_controls.py
 fi

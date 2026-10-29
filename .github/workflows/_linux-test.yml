@@ -59,6 +59,11 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
+      artifact-run-id:
+        required: false
+        type: string
+        default: ""
+        description: Diagnostic native build artifact source run.
       dashboard-tag:
         required: false
         type: string
@@ -173,11 +178,12 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
+          run-id: ${{ inputs.artifact-run-id }}
 
       - name: Download TD artifacts
         continue-on-error: true

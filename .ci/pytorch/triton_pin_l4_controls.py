@@ -76,7 +76,7 @@ def main():
         log = (controls.REPORT / f"{label}-original-abs.log").read_text(
             errors="replace"
         )
-        assert results[label] in (0, 1) and ("1 passed" in log or "XPASS" in log), (
+        assert results[label] in (0, 1) and ("1 passed" in log or "forward now matches eager under strict numerics" in log), (
             f"Original abs case did not complete: {label}"
         )
         (controls.REPORT / "results.json").write_text(json.dumps(results, indent=2))
