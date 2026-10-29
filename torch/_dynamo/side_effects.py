@@ -193,6 +193,7 @@ def _manual_ordered_dict_update(
     items: tuple[tuple[Any, Any], ...],
     keys: tuple[Any, ...] | None,
     has_deleted_keys: bool,
+    has_reordered_keys: bool,
 ) -> None:
     if keys is None:
         for key, value in items:
@@ -210,7 +211,7 @@ def _manual_ordered_dict_update(
     for index, (key, value) in enumerate(items):
         if index >= len(previous) or previous[index][1] is not value:
             collections.OrderedDict.__setitem__(target, key, value)
-    if any(
+    if has_reordered_keys or any(
         old is not key for old, key in zip(collections.OrderedDict.keys(target), keys)
     ):
         for key in keys:
@@ -1873,8 +1874,9 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
     else:
         cg(variables.ConstantVariable.create(None))
     cg(variables.ConstantVariable.create(var.has_deleted_keys))
+    cg(variables.ConstantVariable.create(var.has_reordered_keys))
     ctx.suffixes.append(
-        [*create_call_function(4, False), create_instruction("POP_TOP")]
+        [*create_call_function(5, False), create_instruction("POP_TOP")]
     )
     ctx.log(var)
 

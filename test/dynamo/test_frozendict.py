@@ -41,6 +41,44 @@ parametrize_pytree_module = parametrize(
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("base", [dict, getattr(builtins, "frozendict", dict)])
+    @parametrize("operation", ["update", "copy", "frozendict"])
+    def test_merge_cross_owner_iteration_descriptor(self, base, operation):
+        class Mapping(base):
+            __iter__ = builtins.frozendict.__iter__ if base is dict else dict.__iter__
+
+            def keys(self):
+                return ["b"]
+
+            def __getitem__(self, key):
+                return 2
+
+        def fn(x, mapping):
+            if operation == "update":
+                result = {}
+                result.update(mapping)
+            elif operation == "copy":
+                result = base.copy(mapping)
+            else:
+                result = builtins.frozendict(mapping)
+            return x + 1, result
+
+        x, mapping = torch.ones(1), Mapping(a=1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    def test_input_subclass_inherited_get(self):
+        class Mapping(builtins.frozendict):
+            pass
+
+        def fn(x, mapping):
+            return x + mapping.get("a", 0)
+
+        x, mapping = torch.ones(1), Mapping(a=2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
     @parametrize("key_type", [float, complex, tuple, frozenset])
     def test_input_nan_key_identity_guard(self, key_type):
         def make_key():
@@ -969,6 +1007,29 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("value_type", [float, complex, tuple, frozenset])
+    @parametrize("use_key", [False, True])
+    def test_hash_nan_identity_guards(self, value_type, use_key):
+        def make_mapping():
+            value = float("nan")
+            value = (
+                value_type([value])
+                if value_type in (tuple, frozenset)
+                else value_type(value)
+            )
+            return builtins.frozendict({value: 1} if use_key else {"a": value})
+
+        def fn(x, mapping):
+            return x + 1, hash(mapping)
+
+        first, second = make_mapping(), make_mapping()
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for mapping in (first, second, first):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_hash_collisions_and_cache(self):
         class Key:
