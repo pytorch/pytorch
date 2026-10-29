@@ -5,13 +5,14 @@ from typing import cast, NamedTuple, TypeAlias
 
 import torch
 
-from .blockscaled_tma_kernels import (
-    _compile_blockscaled_tma,
+from .blockscaled_tma_kernels import _compile_blockscaled_tma
+from .blockscaled_tma_plan import (
     _QUANT_ORIENTATION_DIM_K,
     _QUANT_ORIENTATION_DIM_KM,
     _QUANT_ORIENTATION_DIM_M,
+    BlockscaledTmaPlan,
+    select_blockscaled_tma_plan,
 )
-from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_plan
 from .utils import _ceil_div
 
 
@@ -401,8 +402,7 @@ def _prepare_blockscaled_tma_launch(
             spec.M,
             spec.K,
             input_dtype=input.dtype,
-            do_dim_k=spec.do_dim_k,
-            do_dim_m=spec.do_dim_m,
+            quant_orientation_id=spec.quant_orientation_id,
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (
