@@ -834,6 +834,114 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
         self.assertEqual(result, expected)
 
+    def test_classmethod_super_attribute_binding(self):
+        class C:
+            @classmethod
+            def goo(cls):
+                return cls
+
+        class D(C):
+            pass
+
+        def fn():
+            d = D()
+            class_method = super(D, D).goo
+            instance_method = super(D, d).goo
+            return (
+                class_method.__self__ is D,
+                class_method() is D,
+                instance_method.__self__ is D,
+                instance_method() is D,
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_classmethod_noncallable_payload(self):
+        def fn():
+            meth = classmethod(1).__get__(1)
+            call_raises = False
+            try:
+                meth()
+            except TypeError:
+                call_raises = True
+            return meth.__self__ is int, meth.__func__ == 1, call_raises
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+        self.assertEqual(result, (True, True, True))
+
+    def test_classmethod_instance_state(self):
+        def fn():
+            def f(value: int = 1):
+                "f docstring"
+                return value
+
+            cm = classmethod(f)
+            metadata_keys = tuple(cm.__dict__)
+
+            cm.x = 42
+            attribute_values = cm.x, cm.__dict__["x"]
+            del cm.x
+
+            set_func_error = False
+            try:
+                cm.__func__ = 1
+            except AttributeError:
+                set_func_error = True
+
+            del_wrapped_error = False
+            try:
+                del cm.__wrapped__
+            except AttributeError:
+                del_wrapped_error = True
+
+            cm.__dict__["__func__"] = 123
+            cm.__dict__["__wrapped__"] = 456
+            return (
+                metadata_keys,
+                attribute_values,
+                hasattr(cm, "x"),
+                set_func_error,
+                del_wrapped_error,
+                cm.__func__ is f,
+                cm.__wrapped__ is f,
+                cm.__dict__["__func__"],
+                cm.__dict__["__wrapped__"],
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+        copied_attrs = ("__module__", "__name__", "__qualname__", "__doc__")
+        if sys.version_info < (3, 14):
+            copied_attrs += ("__annotations__",)
+        self.assertEqual(result[0], copied_attrs)
+
+    def test_classmethod_instance_state_reconstruct(self):
+        def fn():
+            def f():
+                pass
+
+            cm = classmethod(f)
+            attrs = cm.__dict__
+            del cm.__name__
+            attrs["__func__"] = "shadow"
+            cm.x = 42
+            cm.alias = cm
+            return cm, attrs, cm
+
+        cm, attrs, alias = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(cm, alias)
+        self.assertIs(cm.__dict__, attrs)
+        self.assertIs(cm.alias, cm)
+        self.assertNotIn("__name__", attrs)
+        self.assertEqual(attrs["__func__"], "shadow")
+        self.assertNotEqual(cm.__func__, "shadow")
+        self.assertEqual(cm.x, 42)
+
     def test_classmethod_wrapped_callable_name_differs_from_attr(self):
         """The bound method is sourced by the class attribute, not by the
         wrapped callable's name: functools.wraps makes them differ, and
