@@ -11960,7 +11960,7 @@ _GROUPED_MM_CASES = [
 # ROCm ck_tile picks the tile config with the lowest load cost, so only shapes with more output tiles than CUs select
 # the large ones. Together with _GROUPED_MM_CASES these select every gfx950 and gfx942 candidate config: 2d_3d cases
 # run forward (b row-major) and dX (b column-major) configs, 2d_2d cases dW configs. Contractions stay small. The
-# eight-wave configs see 1, 2, 3, 5 and 7 K tiles, covering each FourWaveTailCompV3 path: no hot loop with an Odd tail
+# eight-wave configs see 1 to 7 K tiles, covering each FourWaveTailCompV3 path: no hot loop with an Odd tail
 # (1 tile), no hot loop with an Even tail (2 tiles) and the hot loop (3 or more).
 _GROUPED_MM_CK_TILE_CASES = [
     subtest(((256, 64), (2, 1024, 64), [128, 256], False), name="ck_tile_2d_3d_n1024"),
@@ -11972,9 +11972,11 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((1536, 64), (2, 4864, 64), [768, 1536], False), name="ck_tile_2d_3d_n4864"),
     subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
     subtest(((2048, 32), (2, 8192, 32), [1024, 2048], False), name="ck_tile_2d_3d_k32"),
+    subtest(((2048, 128), (2, 8192, 128), [1024, 2048], False), name="ck_tile_2d_3d_k128"),
     subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
     subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
     subtest(((2048, 256), (4096, 256), [32, 256], False), name="ck_tile_2d_2d_n4096_k32"),
+    subtest(((2048, 320), (4096, 320), [128, 320], False), name="ck_tile_2d_2d_n4096_k128_k192"),
     subtest(((2048, 256), (2880, 256), [96, 256], False), name="ck_tile_2d_2d_n2880"),
 ]
 
