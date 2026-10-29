@@ -4315,7 +4315,12 @@ def _get_fake_value_impl(
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
-    except Unsupported:
+    except Unsupported as e:
+        # run_node and wrap_fake_exception graph-break on these.
+        fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
+        package = tx.output.package
+        if package is not None and isinstance(e.__cause__, fake_failures):
+            package.add_graph_break_op(node.target)
         raise
     except RuntimeError as e:
         cause: BaseException = e
@@ -4331,8 +4336,12 @@ def _get_fake_value_impl(
         if package is not None and isinstance(cause, graph_break_causes):
             # These graph-break below, and the op then runs eagerly; so do the
             # TypeError and pending fake impl branches.
-            package.add_graph_break_op(node.target)
-            package.add_graph_break_op(cause.func)
+            device_types = frozenset(
+                t.device.type
+                for t in pytree.tree_leaves((args, kwargs))
+                if isinstance(t, torch.Tensor)
+            )
+            package.add_graph_break_op(node.target, cause.func, device_types)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):

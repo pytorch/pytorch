@@ -2070,17 +2070,19 @@ _TORCH_OP_NAMESPACES = frozenset(
 )
 _TORCH_DIR = os.path.dirname(torch.__file__)
 # torch's helpers that build a Library for the caller's namespace record themselves,
-# so the torch modules defining ops through them are listed by namespace.
+# so the torch modules defining ops through them are listed by op.
 _TORCH_OP_HELPERS = tuple(
     os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
 )
 _TORCH_HELPER_OP_MODULES = MappingProxyType(
     {
-        "coor": "torch.fx.experimental.proxy_tensor",
-        "debugprims": "torch._prims",
-        "device_mesh": "torch.distributed._ops.device_mesh",
-        "onnx": "torch.onnx.ops._impl",
-        "pippy": "torch.distributed.pipelining._IR",
+        "coor::current_device": "torch.fx.experimental.proxy_tensor",
+        "coor::current_device_index": "torch.fx.experimental.proxy_tensor",
+        "debugprims::load_tensor": "torch._prims",
+        "device_mesh::_runtime_compute_coordinate_on_dim": "torch.distributed._ops.device_mesh",
+        "onnx::Attention": "torch.onnx.ops._impl",
+        "onnx::RotaryEmbedding": "torch.onnx.ops._impl",
+        "pippy::_pipe_split": "torch.distributed.pipelining._IR",
     }
 )
 # The modules defining prims with torch._prims._make_prim, which records itself.
@@ -2089,25 +2091,22 @@ _TORCH_PRIM_MODULES = (
     "torch._inductor.inductor_prims",
     "torch._dynamo.tensor_version_op",
 )
-# Torch namespaces defined only when a function runs, not by a module import, and
-# what must run on the serving host before the artifact loads.
-_TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
-    {
-        "triton": "CUDA initialization (torch.cuda.init())",
-        "_inductor_debug": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
-        # The op name comes from a process-global counter, so only the same call
-        # sequence reproduces it.
-        "_native": "a torch._native register_op_override call",
-        "semi_structured": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered() "
-        "or _ensure_cutlass_mm_registered()",
-    }
-)
-# The setup of the lazy ops whose setup is narrower than their namespace's.
+# Torch ops defined only when a function runs, not by a module import, and what
+# must run on the serving host before the artifact loads.
+_CUDA_INIT = "CUDA initialization (torch.cuda.init())"
 _TORCH_LAZY_OPS = MappingProxyType(
     {
+        "triton::_triton_bsr_dense_mm_out": _CUDA_INIT,
+        "triton::_triton_bsr_dense_addmm_out": _CUDA_INIT,
+        "_inductor_debug::check_memory_step": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
         "semi_structured::cusparselt_mm": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered()",
         "semi_structured::cutlass_mm": "torch.sparse.semi_structured._ensure_cutlass_mm_registered()",
     }
+)
+# The op names come from a process-global counter, so only the same call sequence
+# reproduces them.
+_TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
+    {"_native": "a torch._native register_op_override call"}
 )
 
 
@@ -2130,12 +2129,11 @@ def _library_op_module(
     the one a torch helper defines it from (listed in ``_TORCH_HELPER_OP_MODULES``),
     or the one creating the ``torch.library.Library`` that defines it.
     ``file_modules`` is ``_file_modules``."""
-    ns = op_name.split("::")[0]
     path = _registration_path(op_name, overload)
     if not path.endswith(".py"):
         return None
     if path.startswith(_TORCH_OP_HELPERS):
-        return _TORCH_HELPER_OP_MODULES.get(ns)
+        return _TORCH_HELPER_OP_MODULES.get(op_name)
     return file_modules().get(os.path.realpath(path))
 
 
@@ -2172,9 +2170,10 @@ def _op_registration(
     module registers, ``("torch", "")`` for one ``import torch`` registers from C++,
     and ``("unrecorded", "")`` otherwise."""
     ns = op_name.split("::")[0]
-    # Checked first: a lazy custom_op's module imports without defining it.
+    if op_name in _TORCH_LAZY_OPS:
+        return "lazy", _TORCH_LAZY_OPS[op_name]
     if ns in _TORCH_LAZY_OP_NAMESPACES:
-        return "lazy", _TORCH_LAZY_OPS.get(op_name, _TORCH_LAZY_OP_NAMESPACES[ns])
+        return "lazy", _TORCH_LAZY_OP_NAMESPACES[ns]
     if ns == "prims":
         # torch._prims._make_prim defines every prim from its own function.
         op = getattr(
@@ -2201,7 +2200,7 @@ class _CustomOpModules(NamedTuple):
     # The custom ops no importable module is known to register.
     unrecorded: tuple[tuple[str, str], ...]
     # The ops torch defines only at runtime, by the setup that defines them.
-    lazy: dict[str, tuple[str, ...]]
+    lazy: tuple[tuple[str, tuple[str, ...]], ...]
 
 
 def _custom_op_modules(
@@ -2223,7 +2222,7 @@ def _custom_op_modules(
             modules.add(value)
         elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
-    lazy_ops = {setup: tuple(sorted(ops)) for setup, ops in sorted(lazy.items())}
+    lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
     return _CustomOpModules(ordered, tuple(sorted(unrecorded)), lazy_ops)
 
@@ -2234,7 +2233,7 @@ def _warn_unregistered_ops(
     """Warns about the ops ``found`` says torch defines only at runtime or no
     module registers, naming the ``fallback_modules`` the artifact imports in case
     they register the latter."""
-    for setup, ops in sorted(found.lazy.items()):
+    for setup, ops in found.lazy:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
             "defines only inside %s, so serving this artifact is unsupported: it "
