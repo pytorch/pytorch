@@ -472,26 +472,6 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
     return None
 
 
-def maybe_get_fake_pytype_for_serialization(x: object) -> type[Tensor] | None:
-    # The Python type of the real tensor a fake stands for, which serialized
-    # guards check the real input against; a fake without a recorded pytype is
-    # a Parameter if it carries the Parameter marker. Guards built from a live
-    # fake (TENSOR_MATCH, TYPE_MATCH) check the fake itself and must use
-    # type(value) instead.
-    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        if x.pytype is not None:
-            return x.pytype
-        return torch.nn.Parameter if isinstance(x, torch.nn.Parameter) else Tensor
-    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        # A C++ fake's own type is the real type, but a C++ fake Parameter can
-        # be a plain Tensor carrying the marker.
-        t = type(x)
-        if t is Tensor and isinstance(x, torch.nn.Parameter):
-            return torch.nn.Parameter
-        return t
-    return None
-
-
 def maybe_to_real_tensor(t: T, shape_env: Any) -> T | Tensor | None:
     # Recover the real value shadowing a fake tensor / symbolic value under
     # propagate_real_tensors. Shared by FakeTensorMode._dispatch_impl and the
@@ -1104,7 +1084,9 @@ def in_kernel_invocation_manager(
     if meta_in_tls != prev_in_kernel:
         raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
 
-    with torch._C._DisableTorchDispatch():
+    # _FakeInKernelInvocation makes C++ fakes report meta here too, see Note
+    # [C++ fake in_kernel_invocation].
+    with torch._C._DisableTorchDispatch(), torch._C._FakeInKernelInvocation():
         fake_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)
