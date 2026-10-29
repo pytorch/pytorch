@@ -55,7 +55,8 @@ struct LogSoftMaxBackwardEpilogue {
     : sum(sum) {}
 
   __device__ __forceinline__ T operator()(OutT gradOutput, OutT output) const {
-    return static_cast<T>(gradOutput - std::exp(static_cast<AccumT>(output)) * sum);
+    return static_cast<T>(log_softmax_backward_element(
+        static_cast<AccumT>(gradOutput), static_cast<AccumT>(output), sum));
   }
 
   const AccumT sum;
