@@ -1208,19 +1208,6 @@ class TestPrecompile(TestCase):
             f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x), m(x))
 
-    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA for Triton autotuning")
-    @torch._inductor.config.patch({"triton.multi_kernel": 1})
-    def test_capture_with_multi_kernel(self):
-        # Capture forces triton.autotune_at_compile_time, so the multi-kernel
-        # defs must reach the Python wrapper and not only the autotune block.
-        def fn(x):
-            return torch.softmax(x, dim=-1) + x.sum(-1, keepdim=True)
-
-        x = torch.randn(64, 1024, device="cuda")
-        code, cache = _precompile_pair(fn, x)
-        self.assertIn("multi_kernel_0", code)
-        self.assertEqual(_load_pair(code, cache)(x), fn(x))
-
     def test_dtensor_subclass(self):
         import torch.distributed as dist
 
@@ -7597,6 +7584,54 @@ print("never-run backward phase ok:", phase)
 )
 
 
+_MULTI_KERNEL_MODULE = """
+def fn(x, w):
+    return x.softmax(-1) + x.sum(-1, keepdim=True)
+"""
+
+
+_MULTI_KERNEL_DRIVER = (
+    _FRESH_REPLAY_PRELUDE
+    + """
+from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+torch._inductor.config.triton.multi_kernel = 1
+benchmarked = []
+bench = CachingAutotuner.bench
+benchmark_sub_kernels = MultiKernelCall.benchmark_sub_kernels
+
+
+def recording_bench(self, *args, **kwargs):
+    benchmarked.append("config")
+    return bench(self, *args, **kwargs)
+
+
+def recording_benchmark_sub_kernels(self, *args, **kwargs):
+    benchmarked.append("sub-kernel")
+    return benchmark_sub_kernels(self, *args, **kwargs)
+
+
+CachingAutotuner.bench = recording_bench
+MultiKernelCall.benchmark_sub_kernels = recording_benchmark_sub_kernels
+x, w = inputs(0)
+if phase == "capture":
+    tracer = pc.DynamoTracer(require_no_risky_drops=False)
+    with pc.capture(fn, artifact_path=artifact, cache_path=cache, tracer=tracer) as cap:
+        cap(x, w)
+    print("capture benchmarked:", benchmarked)
+else:
+    FileCacheManager.put = recording_put
+    with pc.no_compilation():
+        out = pc.load(artifact, cache)(x, w)
+    torch.testing.assert_close(out, fn(x, w))
+    assert not writes, writes
+    assert not benchmarked, benchmarked
+print("multi-kernel phase ok:", phase)
+"""
+)
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
@@ -9225,6 +9260,13 @@ class TestPrecompileRuntimeCache(TestCase):
             _NEVER_RUN_BACKWARD_MODULE,
             _NEVER_RUN_BACKWARD_DRIVER,
             "never-run backward phase ok",
+        )
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_strict_replay_with_multi_kernel(self):
+        self._capture_and_replay(
+            _MULTI_KERNEL_MODULE, _MULTI_KERNEL_DRIVER, "multi-kernel phase ok"
         )
 
 
