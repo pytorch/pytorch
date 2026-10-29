@@ -1328,6 +1328,49 @@ class TestCustomOp(CustomOpTestCaseBase):
             self.assertEqual(torch._refs.abs(x), expected)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_mutated_version_bumps(self):
+        # Each mutated Tensor's version is bumped once, whether or not the op
+        # uses PyObject dispatch.
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_mutated", mutates_args={"y", "z", "w"}
+        )
+        def f(
+            x: Tensor,
+            y: Optional[Tensor],
+            z: List[Tensor],
+            w: List[Optional[Tensor]],
+        ) -> None:
+            return
+
+        def make_args():
+            tensors = [torch.randn(3) for _ in range(5)]
+            return (
+                tensors[0],
+                tensors[1],
+                [tensors[2], tensors[3]],
+                [tensors[4], None],
+            )
+
+        def versions(args):
+            return pytree.tree_map_only(torch.Tensor, lambda t: t._version, args)
+
+        results = []
+        for enabled in (True, False):
+            f._opoverload._enable_pyobj_dispatch(enabled)
+            args = make_args()
+            before = versions(args)
+            f(*args)
+            f(args[0], None, args[2], args[3])
+            after = versions(args)
+            results.append(
+                pytree.tree_map(
+                    lambda a, b: a - b if a is not None else None, after, before
+                )
+            )
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0], (0, 1, [2, 2], [2, None]))
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_torch_function_handoff(self):
         # __torch_function__ handlers must see the same call, and the caller
         # the same result, whether or not the op uses PyObject dispatch.
