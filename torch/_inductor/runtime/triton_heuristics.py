@@ -242,8 +242,26 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
-def _resolve_dims(dims, cfg_kwargs, constants):
-    """Resolve a list of block/shape/stride dims to concrete ints."""
+# Host-side TMA descriptor shapes and strides may name the kernel's own scalar
+# args (a dynamic size such as ks0); the launcher reads them at launch.
+HOST_TMA_SYMBOLIC_DIMS = True
+
+_HOST_TMA_DIM_EXPR = re.compile(r"[\w\s+\-*/()]+")
+_HOST_TMA_DIM_NAME = re.compile(r"[A-Za-z_]\w*")
+
+
+class _LaunchDim(str):
+    """A descriptor dim evaluated at launch: an integer expression over the
+    kernel's args, rendered into the launcher as code."""
+
+
+def _resolve_dims(dims, cfg_kwargs, constants, runtime_args=None):
+    """Resolve a list of block/shape/stride dims for a host-side TMA descriptor.
+
+    Dims resolve to ints where possible. With `runtime_args` (the kernel's arg
+    names), a dim that is an integer expression over those args, e.g. a dynamic
+    size `ks0`, resolves to a _LaunchDim for the launcher to evaluate.
+    """
     result = []
     for s in dims:
         if isinstance(s, int):
@@ -256,10 +274,22 @@ def _resolve_dims(dims, cfg_kwargs, constants):
             # Template descriptors render dims via texpr(), so a literal comes
             # through as a decimal string rather than an int.
             result.append(int(s))
+        elif (
+            isinstance(s, str)
+            and runtime_args is not None
+            and _HOST_TMA_DIM_EXPR.fullmatch(s)
+            and all(name in runtime_args for name in _HOST_TMA_DIM_NAME.findall(s))
+        ):
+            result.append(_LaunchDim(s))
         else:
             log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
             return None
     return result
+
+
+def _launcher_dims(dims) -> str:
+    """Launcher source for a resolved dim list; _LaunchDims stay code."""
+    return "[" + ", ".join(str(d) for d in dims) + "]"
 
 
 @functools.lru_cache(None)
@@ -1442,11 +1472,12 @@ class CachingAutotuner(KernelInterface):
                 block_shape_vals = _resolve_dims(
                     desc_info["block_shape"], cfg_kwargs, all_constants
                 )
+                kernel_args = compile_meta["signature"].keys()
                 shape_vals = _resolve_dims(
-                    desc_info["shape"], cfg_kwargs, all_constants
+                    desc_info["shape"], cfg_kwargs, all_constants, kernel_args
                 )
                 stride_vals = _resolve_dims(
-                    desc_info["strides"], cfg_kwargs, all_constants
+                    desc_info["strides"], cfg_kwargs, all_constants, kernel_args
                 )
                 if (
                     block_shape_vals is None
@@ -2989,8 +3020,12 @@ class CompileResult(Generic[_T]):
             block_shape_vals = _resolve_dims(
                 desc_info["block_shape"], cfg_kwargs, all_constants
             )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
+            shape_vals = _resolve_dims(
+                desc_info["shape"], cfg_kwargs, all_constants, call_args
+            )
+            stride_vals = _resolve_dims(
+                desc_info["strides"], cfg_kwargs, all_constants, call_args
+            )
             if block_shape_vals is None or shape_vals is None or stride_vals is None:
                 continue
             desc_var = f"{inner_name}_host_tma_desc"
@@ -3000,8 +3035,8 @@ class CompileResult(Generic[_T]):
                 f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
             )
             pre_runner_lines.append(
-                f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
-                f" {stride_vals}, {block_shape_vals})"
+                f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
+                f" {_launcher_dims(stride_vals)}, {block_shape_vals})"
             )
             runner_args = [desc_var if a == inner_name else a for a in runner_args]
         return pre_runner_lines, runner_args
@@ -3048,8 +3083,12 @@ class CompileResult(Generic[_T]):
             block_shape_vals = _resolve_dims(
                 desc_info["block_shape"], cfg_kwargs, all_constants
             )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
+            shape_vals = _resolve_dims(
+                desc_info["shape"], cfg_kwargs, all_constants, call_args
+            )
+            stride_vals = _resolve_dims(
+                desc_info["strides"], cfg_kwargs, all_constants, call_args
+            )
             if block_shape_vals is None or shape_vals is None or stride_vals is None:
                 continue
             idx = desc_names.index(inner_name) if desc_names else pos
@@ -3060,8 +3099,9 @@ class CompileResult(Generic[_T]):
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
-                f"{aligned_var}, {aligned_var} is {inner_name}, {shape_vals}, "
-                f"{stride_vals}, {block_shape_vals}, _tma_meta[{idx}])"
+                f"{aligned_var}, {aligned_var} is {inner_name}, "
+                f"{_launcher_dims(shape_vals)}, {_launcher_dims(stride_vals)}, "
+                f"{block_shape_vals}, _tma_meta[{idx}])"
             )
             runner_args = [
                 f"*{desc_var}" if a == inner_name else a for a in runner_args
