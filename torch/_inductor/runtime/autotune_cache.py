@@ -36,7 +36,7 @@ from typing_extensions import override
 
 import torch
 from torch._guards import CompileContext
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, extra_options_to_hashable
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -53,7 +53,7 @@ from ..remote_cache import (
     RemoteCache,
     RemoteCacheJsonSerde,
 )
-from .hints import InductorMeta
+from .hints import InductorMeta, KERNEL_CONFIGS_NAME
 from .triton_compat import Config, HAS_WARP_SPEC
 
 
@@ -67,7 +67,8 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton():
+    # CPU Triton artifacts also need a backend-specific cache key.
+    if has_triton(include_cpu=True):
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
@@ -126,7 +127,7 @@ class AutotuneCache:
     remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
     artifact_recorder: CacheArtifactRecorder | None = None
 
-    # Create a AutotuneCache. Returns None if none of the caches can be used.
+    # Create an AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
@@ -340,6 +341,10 @@ class AutotuneCache:
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
+        # Two configs can differ only in their register cap, so a cache entry
+        # without it would reload as the uncapped one.
+        if (maxnreg := getattr(config, "maxnreg", None)) is not None:
+            data["maxnreg"] = maxnreg
         # Save extra_options if present on the config. This allows third-party
         # backends to store custom tuned options alongside the standard config.
         if extra_options := getattr(config, "extra_options", None):
@@ -633,10 +638,16 @@ class AutotuneCacheBundler:
             bundler.put(basename, data)
 
 
+# The python wrapper's KERNEL_CONFIGS (see _KernelConfigs in codegen/wrapper.py): the
+# config each kernel's compile-time autotuning picked, which timing noise can change.
+_KERNEL_CONFIGS = re.compile(rf"(?m)^{KERNEL_CONFIGS_NAME} = \{{\n(?:    .*\n)*\}}$")
+
+
 # Remove the comments from the code (which include things like run ids and file
-# paths) and then hash the result.
+# paths) and the KERNEL_CONFIGS rows, and then hash the result.
 def _comment_stripped_hash(code: str) -> str:
     code = re.sub(r"#.*$", "", code, count=0, flags=re.MULTILINE)
+    code = _KERNEL_CONFIGS.sub(f"{KERNEL_CONFIGS_NAME} = {{}}", code)
     return torch._inductor.codecache.code_hash(code)
 
 
@@ -663,6 +674,7 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 def _reconstruct_triton_config(
     best_config: dict[str, Any],
     extra_options: JsonDataTy | None,
+    maxnreg: JsonDataTy = None,
 ) -> Config:
     num_warps = best_config.pop("num_warps")
     num_stages = best_config.pop("num_stages")
@@ -670,6 +682,8 @@ def _reconstruct_triton_config(
         "num_warps": num_warps,
         "num_stages": num_stages,
     }
+    if maxnreg is not None:
+        config_args["maxnreg"] = maxnreg
     if HAS_WARP_SPEC:
         config_args.update(
             {
@@ -708,6 +722,10 @@ def _load_cached_autotuning(
         "coordinate_descent_tuning"
     ) and best_config.pop("found_by_coordesc", False)
 
+    # Popped before matching, or it would be compared as (and later rebuilt
+    # into) a kernel kwarg.
+    maxnreg = best_config.pop("maxnreg", None)
+
     if not found_by_coordesc:
         matching_configs = [
             cfg
@@ -718,18 +736,26 @@ def _load_cached_autotuning(
             and cfg.num_warps == best_config.get("num_warps")
             # pyrefly: ignore [missing-attribute]
             and cfg.num_stages == best_config.get("num_stages")
+            and getattr(cfg, "maxnreg", None) == maxnreg
         ]
+        if len(matching_configs) > 1:
+            extra_options_key = extra_options_to_hashable(extra_options)
+            matching_configs = [
+                cfg
+                for cfg in matching_configs
+                if extra_options_to_hashable(getattr(cfg, "extra_options", None))
+                == extra_options_key
+            ]
         if len(matching_configs) == 1:
             matched_config = matching_configs[0]
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
             return matched_config
 
-    # Reconstruct Config from cached data. This handles both coordesc
-    # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
-    # that aren't in the original config list.
+    # Reconstruct Config when no unique candidate matches, or when the
+    # cached config was found by coordinate descent.
     best_config.pop("found_by_coordesc", None)
-    triton_config = _reconstruct_triton_config(best_config, extra_options)
+    triton_config = _reconstruct_triton_config(best_config, extra_options, maxnreg)
     if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import dataclasses
+import itertools
 import logging
 from typing import TYPE_CHECKING
 
@@ -19,6 +21,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -29,9 +32,11 @@ from ..utils import (
 from ..virtualized import ops, V
 from .mm_common import (
     _is_static_problem,
+    acc_type,
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -54,6 +59,12 @@ def bmm_grid(b, m, n, meta, *, cdiv, max):
     return (tiles, grid_y, grid_z)
 
 
+@SymbolicGridFn
+def bmm_shared_a_grid(b, m, n, meta, *, cdiv, max):
+    tiles = cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])
+    return (tiles, cdiv(b, meta["BLOCK_Q"]), 1)
+
+
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
 # (e.g. triton_bmm for templates/triton_bmm.py.jinja).
 # If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
@@ -63,6 +74,137 @@ bmm_template = TritonTemplate(
     source=load_kernel_template("triton_bmm"),
     cache_codegen_enabled_for_template=True,
 )
+
+# Specialisation for a left operand shared across the batch, i.e. an expanded A
+# whose batch stride is zero. The stock template re-fetches the same A tile once
+# per batch; this one reuses it across BLOCK_Q batches. See the jinja source.
+bmm_shared_a_template = TritonTemplate(
+    name="bmm_shared_a",
+    grid=bmm_shared_a_grid,
+    source=load_kernel_template("triton_bmm_shared_a"),
+)
+
+
+def _use_bmm_shared_a(mat1, mat2, layout) -> bool:
+    """Whether A is one matrix broadcast over the batch.
+
+    Only worth it when there are enough batches to group: with a handful of
+    batches the grouping just costs parallelism.
+    """
+    if not inductor_config.bmm_shared_a:
+        return False
+    sizevars = V.graph.sizevars
+    if not sizevars.statically_known_equals(mat1.get_stride()[0], 0):
+        return False
+    # Batch size only gates profitability, so a hint is enough: requiring it to
+    # be statically known would silently skip every model compiled with a
+    # dynamic batch, which is most of them.
+    batch_hint = sizevars.optimization_hint(mat2.get_size()[0], fallback=1)
+    if batch_hint < 64:
+        log.info("bmm_shared_a: declined, batch hint %s < 64", batch_hint)
+        return False
+    return True
+
+
+def _bmm_shared_a_configs(dtype):
+    """Hand-tuned config space for the shared-A template.
+
+    BLOCK_Q batches share one A tile and are laid side by side in the dot, so
+    BLOCK_N * BLOCK_Q is the real dot width and the accumulator is
+    BLOCK_M x BLOCK_N x BLOCK_Q floats; the bound below keeps that in registers.
+    """
+    acc = acc_type(dtype)
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+
+    for block_m, block_n, block_k, block_q, warps, stages in itertools.product(
+        (64, 128), (32, 64), (32, 64), (2, 4, 8), (4, 8), (1, 2, 3)
+    ):
+        if not 64 <= block_n * block_q <= 256:
+            continue
+        if block_m * block_n * block_q > 64 * 256:
+            continue
+        yield {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "BLOCK_K": block_k,
+            "BLOCK_Q": block_q,
+            "GROUP_M": 8,
+            "ACC_TYPE": acc,
+            "ALLOW_TF32": allow_tf32,
+            "num_stages": stages,
+            "num_warps": warps,
+        }
+
+
+@SymbolicGridFn
+def blackwell_bmm_grid(*args, cdiv, max, min):
+    # The BMM template supports both [B, M, N] and flattened [B * M, N]
+    # outputs.  Read the logical problem from its compile-time mapping instead
+    # of inferring it from the output layout passed before ``meta``.
+    # Flatten logical batches and matrix tiles into one global persistent queue.
+    meta = args[-1]
+    b = meta["BATCH_SIZE"]
+    m = meta["LOGICAL_M"]
+    n = meta["LOGICAL_N"]
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    if meta["TWO_CTAS"]:
+        grid_m = cdiv(grid_m, 2) * 2
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    # Under 2CTA both tiles and NUM_SMS are even, so every CTA has a partner.
+    # The kernel strides by NUM_SMS, so the grid must not round it further.
+    grid_x = min(meta["NUM_SMS"], tiles)
+    return (grid_x, 1, 1)
+
+
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
+    + load_kernel_template("triton_gemm_helpers"),
+    cache_codegen_enabled_for_template=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    num_warps: int
+    epilogue_subtile: int = 1
+    data_partition_factor: int = 1
+    separate_epilogue_store: bool = True
+    two_ctas: bool = False
+
+
+def is_blackwell_bmm_2cta_compatible(
+    *,
+    output_batch_rows: int,
+    block_m: int,
+    flatten_output: bool,
+    tma_store: bool,
+) -> bool:
+    """Whether the current paired-CTA output contract is safe.
+
+    The 2CTA template pairs adjacent M tiles. A flattened rank-2 output is safe
+    only when every physical batch contains complete CTA pairs; otherwise the
+    padded tile aliases the following batch. A rank-3 TMA output keeps the batch
+    boundary explicit and safely suppresses the padded partner tile.
+    """
+    return (
+        output_batch_rows > 1
+        and tma_store
+        and (not flatten_output or output_batch_rows % (2 * block_m) == 0)
+    )
+
+
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
+
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
@@ -96,6 +238,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     sizevars = V.graph.sizevars
     dtype = mat1.get_dtype()
     device_type = mat1.get_device().type
+    use_bf16x9 = is_bf16x9_matmul(device_type, dtype)
 
     def dim_is_one_or_hint(dim):
         # The mul+sum decomposition is valid for any M/N. The size-1 hint is
@@ -108,7 +251,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         return not sizevars.statically_known_gt(dim, threshold)
 
     if (
-        out_dtype is None
+        not use_bf16x9
+        and out_dtype is None
         and device_type in ("cuda", "xpu")
         and device_type == mat2.get_device().type
         and dtype == mat2.get_dtype()
@@ -128,7 +272,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
-            return L.sum_(L.mul(mat1, mat2), axis=2)
+            # L.sum_ promotes integers to int64 (mirroring torch.sum), but
+            # aten.bmm promises the input dtype (or out_dtype when one is
+            # given), so cast back to whichever the op promised.
+            return L.to_dtype(L.sum_(L.mul(mat1, mat2), axis=2), out_dtype or dtype)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
@@ -218,6 +365,20 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -239,6 +400,27 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    # The shared-A specialisation carries an extra BLOCK_Q dimension that the
+    # shared mm config heuristics do not know about, so its choices are added
+    # directly here. They autotune against aten and the stock template as usual.
+    if use_triton_template(layout, check_max_autotune=False) and _use_bmm_shared_a(
+        mat1, mat2, layout
+    ):
+        log.info(
+            "bmm_shared_a: offering specialised choices for bmm batch=%s m=%s n=%s k=%s",
+            mat2.get_size()[0],
+            m,
+            n,
+            k,
+        )
+        for config in _bmm_shared_a_configs(mat1.get_dtype()):
+            bmm_shared_a_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **config,
+            )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
@@ -279,6 +461,11 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -317,6 +504,19 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "baddbmm"
     # options to tune from
     choices: list[ChoiceCaller] = []
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_baddbmm],
+                name,
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -325,6 +525,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
 
     # Single unified call for all templates
     choices.extend(
