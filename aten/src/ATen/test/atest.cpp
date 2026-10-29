@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 
 #include <array>
@@ -230,14 +231,31 @@ TEST_F(atest, from_blob_empty_without_deleter) {
   EXPECT_EQ(t.sizes(), IntArrayRef({0}));
   EXPECT_EQ(t.numel(), 0);
   EXPECT_EQ(t.data_ptr(), nullptr);
+  EXPECT_EQ(t.storage().data_ptr().get_context(), nullptr);
   EXPECT_EQ(t.storage().nbytes(), 0);
   EXPECT_EQ(t.storage().allocator(), nullptr);
   EXPECT_FALSE(t.storage().resizable());
+
+  auto lazy_clone = at::_lazy_clone(t);
+  EXPECT_TRUE(lazy_clone.is_cpu());
+  EXPECT_EQ(lazy_clone.sizes(), t.sizes());
+  EXPECT_EQ(lazy_clone.const_data_ptr(), nullptr);
+  EXPECT_EQ(lazy_clone.storage().nbytes(), 0);
 }
 
 namespace {
 
 int from_blob_storage_factory_calls = 0;
+
+enum class FromBlobStorageFactoryMode { Default, WrappedContext, GuardedDataPtr };
+FromBlobStorageFactoryMode from_blob_storage_factory_mode =
+    FromBlobStorageFactoryMode::Default;
+int from_blob_wrapped_context_deletions = 0;
+
+void delete_from_blob_wrapped_context(void* context) {
+  delete static_cast<c10::DataPtr*>(context);
+  ++from_blob_wrapped_context_deletions;
+}
 
 c10::intrusive_ptr<c10::StorageImpl> make_from_blob_storage_impl(
     c10::StorageImpl::use_byte_size_t use_byte_size,
@@ -246,21 +264,66 @@ c10::intrusive_ptr<c10::StorageImpl> make_from_blob_storage_impl(
     c10::Allocator* allocator,
     bool resizable) {
   ++from_blob_storage_factory_calls;
-  return c10::make_intrusive<c10::StorageImpl>(
+  if (data_ptr == nullptr) {
+    return c10::make_intrusive<c10::StorageImpl>(
+        use_byte_size, std::move(size_bytes), allocator, resizable);
+  }
+  if (from_blob_storage_factory_mode ==
+      FromBlobStorageFactoryMode::WrappedContext) {
+    auto* context = new c10::DataPtr(std::move(data_ptr));
+    data_ptr = c10::DataPtr{
+        context->get(),
+        context,
+        &delete_from_blob_wrapped_context,
+        context->device()};
+  }
+  auto storage = c10::make_intrusive<c10::StorageImpl>(
       use_byte_size,
       std::move(size_bytes),
       std::move(data_ptr),
       allocator,
       resizable);
+  if (from_blob_storage_factory_mode ==
+      FromBlobStorageFactoryMode::GuardedDataPtr) {
+    storage->release_data_and_set_meta_custom_data_ptr_error_msg_(
+        "PrivateUse1 test storage access is guarded");
+  }
+  return storage;
 }
 
-} // namespace
-
-TEST_F(atest, from_blob_privateuse1_storage_factory) {
+void register_from_blob_storage_factory() {
   // Storage factories cannot be unregistered, so also support repeated tests.
   if (c10::GetStorageImplCreate(kPrivateUse1) == nullptr) {
     c10::SetStorageImplCreate(kPrivateUse1, &make_from_blob_storage_impl);
   }
+}
+
+class FromBlobRecordingAllocator final : public c10::Allocator {
+ public:
+  explicit FromBlobRecordingAllocator(Device device) : device_(device) {}
+
+  c10::DataPtr allocate(size_t /*nbytes*/) override {
+    ++allocation_calls_;
+    return {nullptr, device_};
+  }
+
+  void copy_data(void* dest, const void* src, size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+
+  int allocation_calls() const {
+    return allocation_calls_;
+  }
+
+ private:
+  Device device_;
+  int allocation_calls_ = 0;
+};
+
+} // namespace
+
+TEST_F(atest, from_blob_privateuse1_storage_factory) {
+  register_from_blob_storage_factory();
   ASSERT_EQ(
       c10::GetStorageImplCreate(kPrivateUse1), &make_from_blob_storage_impl);
 
@@ -294,6 +357,105 @@ TEST_F(atest, from_blob_privateuse1_storage_factory) {
   }
   EXPECT_EQ(deleter_calls, 1);
   EXPECT_EQ(deleted_pointer, data.data());
+}
+
+TEST_F(atest, from_blob_empty_privateuse1_storage_factory) {
+  register_from_blob_storage_factory();
+  ASSERT_EQ(
+      c10::GetStorageImplCreate(kPrivateUse1), &make_from_blob_storage_impl);
+
+  const Device device(kPrivateUse1, 1);
+  const auto calls_before = from_blob_storage_factory_calls;
+  auto t = for_blob(nullptr, {0})
+               .options(TensorOptions().dtype(kFloat).device(device))
+               .target_device(device)
+               .make_tensor();
+
+  EXPECT_EQ(from_blob_storage_factory_calls, calls_before + 1);
+  EXPECT_EQ(t.device(), device);
+  EXPECT_EQ(t.scalar_type(), kFloat);
+  EXPECT_EQ(t.sizes(), IntArrayRef({0}));
+  EXPECT_EQ(t.numel(), 0);
+  EXPECT_EQ(t.data_ptr(), nullptr);
+  EXPECT_EQ(t.storage().data_ptr().get_context(), nullptr);
+  EXPECT_EQ(t.storage().device(), device);
+  EXPECT_EQ(t.storage().nbytes(), 0);
+  EXPECT_EQ(t.storage().allocator(), nullptr);
+  EXPECT_FALSE(t.storage().resizable());
+}
+
+TEST_F(atest, from_blob_empty_with_allocator) {
+  register_from_blob_storage_factory();
+  ASSERT_EQ(
+      c10::GetStorageImplCreate(kPrivateUse1), &make_from_blob_storage_impl);
+
+  for (const auto device_type : {kCUDA, kPrivateUse1}) {
+    const Device device(device_type, 1);
+    SCOPED_TRACE(device);
+    // Simulate allocation on a different current device, without CUDA kernels.
+    FromBlobRecordingAllocator allocator(Device(device_type, 0));
+    const auto calls_before = from_blob_storage_factory_calls;
+    auto t = for_blob(nullptr, {0})
+                 .options(TensorOptions().dtype(kFloat).device(device))
+                 .target_device(device)
+                 .allocator(&allocator)
+                 .resizeable_storage()
+                 .make_tensor();
+
+    EXPECT_EQ(allocator.allocation_calls(), 0);
+    EXPECT_EQ(
+        from_blob_storage_factory_calls,
+        calls_before + (device_type == kPrivateUse1 ? 1 : 0));
+    EXPECT_EQ(t.device(), device);
+    EXPECT_EQ(t.scalar_type(), kFloat);
+    EXPECT_EQ(t.sizes(), IntArrayRef({0}));
+    EXPECT_EQ(t.numel(), 0);
+    EXPECT_EQ(t.data_ptr(), nullptr);
+    EXPECT_EQ(t.storage().data_ptr().get_context(), nullptr);
+    EXPECT_EQ(t.storage().device(), device);
+    EXPECT_EQ(t.storage().nbytes(), 0);
+    EXPECT_EQ(t.storage().allocator(), &allocator);
+    EXPECT_TRUE(t.storage().resizable());
+  }
+}
+
+TEST_F(atest, from_blob_empty_preserves_factory_storage) {
+  register_from_blob_storage_factory();
+  ASSERT_EQ(
+      c10::GetStorageImplCreate(kPrivateUse1), &make_from_blob_storage_impl);
+
+  const Device device(kPrivateUse1, 1);
+  for (const auto mode : {FromBlobStorageFactoryMode::WrappedContext,
+                         FromBlobStorageFactoryMode::GuardedDataPtr}) {
+    from_blob_storage_factory_mode = mode;
+    auto reset_mode = c10::make_scope_exit([] {
+      from_blob_storage_factory_mode = FromBlobStorageFactoryMode::Default;
+    });
+    const auto calls_before = from_blob_storage_factory_calls;
+    const auto deletions_before = from_blob_wrapped_context_deletions;
+    {
+      auto t = for_blob(nullptr, {0})
+                   .options(TensorOptions().dtype(kFloat).device(device))
+                   .target_device(device)
+                   .make_tensor();
+      EXPECT_EQ(from_blob_storage_factory_calls, calls_before + 1);
+      EXPECT_EQ(t.device(), device);
+      EXPECT_EQ(from_blob_wrapped_context_deletions, deletions_before);
+      if (mode == FromBlobStorageFactoryMode::WrappedContext) {
+        EXPECT_NE(t.storage().data_ptr().get_context(), nullptr);
+      } else {
+        EXPECT_THROW(t.storage().data_ptr(), c10::Error);
+        t.storage().unsafeGetStorageImpl()->clear_data_ptr_access_error_msg_();
+        EXPECT_EQ(t.storage().data_ptr().get_context(), nullptr);
+      }
+      EXPECT_EQ(t.const_data_ptr(), nullptr);
+      EXPECT_EQ(t.numel(), 0);
+    }
+    EXPECT_EQ(
+        from_blob_wrapped_context_deletions,
+        deletions_before +
+            (mode == FromBlobStorageFactoryMode::WrappedContext ? 1 : 0));
+  }
 }
 
 // TEST_CASE( "atest", "[]" ) {
