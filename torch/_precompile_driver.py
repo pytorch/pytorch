@@ -54,6 +54,10 @@ if TYPE_CHECKING:
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
+
+    # Section 0 of a multi-graph artifact that calls custom ops.
+    def _import_custom_op_modules() -> None: ...
+
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -470,6 +474,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
+    if "_import_custom_op_modules" in globals():
+        _import_custom_op_modules()
     # After the version checks: a torch without it fails them cleanly first.
     from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
@@ -784,6 +790,8 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    if "_import_custom_op_modules" in globals():
+        _import_custom_op_modules()
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
