@@ -3,6 +3,7 @@
 import json
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from apply_plan import (
     labels_before_triage,
     main,
     plan_effects,
+    publish,
 )
 from labels import load_templates, load_valid_labels, TRIAGE_SKILL
 
@@ -35,6 +37,39 @@ def effects(decision, labels=(), templates=(), existing=(), bot_comments=(), **e
         **extra,
     }
     return plan_effects(plan, set(existing), VALID, TEMPLATES, list(bot_comments))
+
+
+class PublishTest(unittest.TestCase):
+    def test_untrusted_summary_is_json_logged_without_changing_markdown(self):
+        summary = (
+            "## Plan\n::warning::untrusted\n::stop-commands::token\r\n##[warning]legacy"
+        )
+        for write_summary in (False, True):
+            with (
+                self.subTest(write_summary=write_summary),
+                tempfile.TemporaryDirectory() as temp,
+            ):
+                summary_file = Path(temp) / "summary.md"
+                env = (
+                    {"GITHUB_STEP_SUMMARY": str(summary_file)} if write_summary else {}
+                )
+                if write_summary:
+                    summary_file.write_text("Earlier summary\n")
+                with (
+                    patch.dict("os.environ", env, clear=True),
+                    patch("sys.stdout", new_callable=StringIO) as stdout,
+                ):
+                    publish(summary)
+                self.assertEqual(len(stdout.getvalue().splitlines()), 1)
+                self.assertNotIn("##[", stdout.getvalue())
+                self.assertEqual(json.loads(stdout.getvalue()), {"summary": summary})
+                if write_summary:
+                    self.assertEqual(
+                        summary_file.read_bytes(),
+                        ("Earlier summary\n" + summary + "\n").encode(),
+                    )
+                else:
+                    self.assertFalse(summary_file.exists())
 
 
 class PlanEffectsTest(unittest.TestCase):
