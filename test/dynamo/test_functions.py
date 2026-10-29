@@ -2586,6 +2586,25 @@ partial_fn = functools.partial(fn, scale=2)
         x = torch.ones(1)
         self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
 
+    def test_functools_wraps_name(self):
+        # https://github.com/pytorch/pytorch/issues/201123
+        def deco(func):
+            @functools.wraps(func)
+            def new_func(x):
+                return func(x)
+
+            return new_func
+
+        @deco
+        def add_(x):
+            return x + 1
+
+        def fn(x, method=add_):
+            return x + len(method.__name__) + len(method.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
