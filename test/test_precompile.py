@@ -10815,6 +10815,47 @@ class TestExportPython(TestCase):
         self.assertEqual(m.running_mean, ref.running_mean)
         self.assertEqual(m.running_var, ref.running_var)
 
+    def test_clobbered_non_artifact_source_raises_clean_error(self, device):
+        # A hand-edit that drops forward() names the path rather than raising a raw
+        # KeyError.
+        path = self._tmp_path("clobber.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run2(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no") as cm:
+            run2(x)
+        self.assertIn("hand-edit", str(cm.exception))
+
+        # Source this call just captured is precompile's own output, not a hand-edit.
+        from torch.compiler._export_python import ExportedPythonArtifact
+
+        fresh = self._tmp_path("fresh.py")
+
+        @torch.compiler.export_python(path=fresh, backend="eager")
+        def run3(inp):
+            return inp + 1
+
+        def save_no_forward(self, args):
+            return "x = 1\n"
+
+        cls = ExportedPythonArtifact
+        stub = mock.patch.object(cls, "_precompile_and_save", save_no_forward)
+        with stub, self.assertRaisesRegex(PrecompileError, "defines no forward") as cm:
+            run3(x)
+        self.assertNotIn("hand-edit", str(cm.exception))
+
     def test_kwargs_bound_positionally(self, device):
         path = self._tmp_path("kw.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
@@ -10954,6 +10995,91 @@ class TestExportPython(TestCase):
         self.assertEqual(run2(x), x + 1)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(f.read(), first)
+
+    def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
+        # The catch-all arm of _load: not a syntax/structure problem and not a failed
+        # import, but source that blows up while being exec'd.
+        path = self._tmp_path("raises.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        self.assertEqual(run(x), x + 1)
+        with open(path, encoding="utf-8") as f:
+            code = f.read()
+        # A KeyError raised by the file is not mistaken for a missing forward(), and a
+        # SyntaxError from another file it runs is not reported as the artifact's own.
+        cases = [
+            ("raise RuntimeError('boom')", "boom"),
+            ("raise KeyError('boom')", "boom"),
+            ("exec(compile('x = (', 'other.py', 'exec'))", "other.py"),
+        ]
+        for stmt, needle in cases:
+            with self.subTest(stmt):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"{stmt}\n" + code)
+
+                @torch.compiler.export_python(path=path, backend="eager")
+                def loaded(inp):
+                    return inp + 1
+
+                with self.assertRaisesRegex(PrecompileError, "unexpected error") as cm:
+                    loaded(x)
+                self.assertIn(needle, str(cm.exception))
+                self.assertNotIn("does not parse", str(cm.exception))
+
+    def test_artifact_deleted_between_gate_and_read_regenerates(self, device):
+        # A peer deleting the artifact to force a regenerate must not surface as a bare
+        # FileNotFoundError from behind the presence gate.
+        path = self._tmp_path("toctou.py")
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def seed(inp):
+            return inp + 1
+
+        self.assertEqual(seed(x), x + 1)
+
+        real_exists = os.path.exists
+
+        def exists_then_delete(p):
+            result = real_exists(p)
+            if p == path and result:
+                os.remove(p)
+            return result
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def racer(inp):
+            return inp + 1
+
+        with mock.patch.object(os.path, "exists", exists_then_delete):
+            self.assertEqual(racer(x), x + 1)
+        self.assertTrue(real_exists(path))
+
+    def test_path_naming_a_directory_is_a_clean_error(self, device):
+        path = self._tmp_path("adirectory.py")
+        os.makedirs(path)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "readable UTF-8 file rather"):
+            run(make_tensor((4,), device=device, dtype=torch.float32))
+
+    def test_artifact_that_is_not_utf8_is_a_clean_error(self, device):
+        path = self._tmp_path("latin1.py")
+        with open(path, "wb") as f:
+            f.write(b"# \xff\n")
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with self.assertRaisesRegex(PrecompileError, "readable UTF-8 file\\."):
+            run(make_tensor((4,), device=device, dtype=torch.float32))
 
     def test_none_and_nested_module_arguments_name_their_own_cause(self, device):
         x = make_tensor((4,), device=device, dtype=torch.float32)

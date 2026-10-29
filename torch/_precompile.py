@@ -667,6 +667,10 @@ class PrecompileError(RuntimeError):
     __module__ = "torch.compiler"
 
 
+class _NoForwardError(PrecompileError):
+    """Raised by ``_make_inlined_forward`` when the exec'd source binds no ``forward``."""
+
+
 @dataclasses.dataclass(frozen=True)
 class MakeFxTracer:
     """The ``make_fx`` capture front-end, passed as ``tracer=`` to a precompile capture.
@@ -3466,7 +3470,11 @@ def _make_inlined_forward(
     else:
         module_ns = {"__name__": "_precompiled_artifact", "__file__": filename}
         exec(compile(python_code, filename, "exec"), module_ns)
-    return cast("Callable[..., object]", module_ns["forward"])
+    forward = module_ns.get("forward")
+    if forward is None:
+        where = filename or "the precompile source"
+        raise _NoForwardError(f"precompile: {where} defines no forward().")
+    return cast("Callable[..., object]", forward)
 
 
 # The os.link failures that mean "this filesystem does not do hard links" (a
