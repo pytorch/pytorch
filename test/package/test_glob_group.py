@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 
 from torch.package import GlobGroup
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -14,6 +14,8 @@ except ImportError:
 
 
 class TestGlobGroup(PackageTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assertMatchesGlob(self, glob: GlobGroup, candidates: Iterable[str]):
         for candidate in candidates:
             self.assertTrue(glob.matches(candidate))
