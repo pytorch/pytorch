@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstdint>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
@@ -173,11 +172,11 @@ bool check_deepseek_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
-    ArrayRef<SwizzleType>,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b,
-    ArrayRef<SwizzleType>) {
+    ArrayRef<SwizzleType> swizzle_b) {
   // both types must be fp8
   if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
     return false;
@@ -187,6 +186,9 @@ bool check_deepseek_recipe(
   if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
     return false;
   }
+
+  if (!swizzle_a.empty() && swizzle_a[0] == SwizzleType::SWIZZLE_MNxK4) return false;
+  if (!swizzle_b.empty() && swizzle_b[0] == SwizzleType::SWIZZLE_MNxK4) return false;
 
   // Need expected recipe with float scales, or e8m0fnu scales (both must
   // match). e8m0fnu scales are used by DeepSeek-V4-Flash but only enabled
@@ -405,9 +407,12 @@ void validate_scaled_mm_v2_inputs(
       recipe_a, recipe_b, ScalingType::TensorWise, ScalingType::TensorWise);
   const bool is_rw = is_single_recipe(
       recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
-  const bool has_mnk4_swizzle =
-      std::find(swizzle_a.begin(), swizzle_a.end(), SwizzleType::SWIZZLE_MNxK4) != swizzle_a.end() ||
-      std::find(swizzle_b.begin(), swizzle_b.end(), SwizzleType::SWIZZLE_MNxK4) != swizzle_b.end();
+  bool has_mnk4_swizzle = false;
+  for (const auto swizzles : {swizzle_a, swizzle_b}) {
+    for (const auto swizzle : swizzles) {
+      has_mnk4_swizzle |= swizzle == SwizzleType::SWIZZLE_MNxK4;
+    }
+  }
   const bool is_mnk4_1x32 = has_mnk4_swizzle && is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
   const bool is_mnk4_1x128 = has_mnk4_swizzle && is_single_recipe(

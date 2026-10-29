@@ -1722,7 +1722,6 @@ void scaled_mm_cuda_v2_impl(
 
   check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
 
-
   ScaledGemmEpilogue epilogue;
   if (accumulator) {
     TORCH_CHECK_NOT_IMPLEMENTED(
@@ -1739,6 +1738,12 @@ void scaled_mm_cuda_v2_impl(
         gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
         gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
       _check_deepseek_support();
+    }
+    if (gemm_impl == ScaledGemmImplementation::MNK4_1x32 ||
+        gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
+#ifndef USE_ROCM
+      at::cuda::blas::detail::check_mnk4_support();
+#endif
     }
     epilogue.beta = beta.to<float>();
     epilogue.alpha = alpha.to<float>();

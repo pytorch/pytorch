@@ -429,22 +429,13 @@ def evaluate_platform_supports_cublaslt_fp8_grouped_gemm():
     )
 
 def evaluate_platform_supports_cublaslt_mnk4():
-    if not (TEST_CUDA and not TEST_WITH_ROCM
-            and torch.cuda.get_device_capability()[0] in (10, 11)
-            and _get_torch_cuda_version() >= (13, 4)):
-        return False
-    a = torch.ones(16, 128, device="cuda", dtype=torch.float8_e4m3fn)
-    scale = torch.ones(64, device="cuda").to(torch.float8_e8m0fnu)
-    recipe = torch.nn.functional.ScalingType.BlockWise1x32
-    swizzle = torch.nn.functional.SwizzleType.SWIZZLE_MNxK4
-    try:
-        torch.nn.functional.scaled_mm(a, a.t(), scale, recipe, scale, recipe,
-                                      swizzle_a=swizzle, swizzle_b=swizzle)
-    except NotImplementedError as error:
-        if "requires cuBLASLt >= 13.8.1" in str(error):
-            return False
-        raise
-    return True
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and torch.cuda.get_device_capability()[0] in (10, 11)
+        and _get_torch_cuda_version() >= (13, 4)
+        and int(dict(torch.cuda.tunable.get_validators())["CUBLASLT_VERSION"]) >= 130801
+    )
 
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
@@ -464,7 +455,7 @@ PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_CUBLASLT_MNK4: bool = LazyVal(evaluate_platform_supports_cublaslt_mnk4)
+PLATFORM_SUPPORTS_CUBLASLT_MNK4: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_mnk4())
 
 if TEST_NUMBA:
     try:
