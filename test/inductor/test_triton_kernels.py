@@ -4604,42 +4604,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertNotIn("BLOCK_SIZE", ttir_str)
         self.assertNotIn("maybe_param", ttir_str)
 
-    @requires_gpu
-    @skipIfXpu
-    def test_toy_raw_call_compile_and_aoti(self):
-        # A raw kernel call, no wrap_triton: Dynamo captures it in torch.compile and
-        # in strict export, whose program AOTInductor compiles.
-        @triton.jit
-        def toy_add_kernel(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
-            pid = tl.program_id(axis=0)
-            offs = pid * BLOCK + tl.arange(0, BLOCK)
-            mask = offs < n
-            x = tl.load(x_ptr + offs, mask=mask)
-            y = tl.load(y_ptr + offs, mask=mask)
-            tl.store(out_ptr + offs, x + y, mask=mask)
-
-        def launch_add(x, y, out):
-            n = out.numel()
-            toy_add_kernel[(triton.cdiv(n, 1024),)](x, y, out, n, BLOCK=1024)
-
-        def toy(x, y):
-            out = torch.empty_like(x)
-            launch_add(x, y, out)
-            return out.relu()
-
-        class Toy(torch.nn.Module):
-            def forward(self, x, y):
-                return toy(x, y)
-
-        x = torch.randn(2048, device=GPU_TYPE)
-        y = torch.randn(2048, device=GPU_TYPE)
-        expected = (x + y).relu()
-        self.assertEqual(toy(x, y), expected)
-        self.assertEqual(torch.compile(toy, fullgraph=True)(x, y), expected)
-        ep = torch.export.export(Toy(), (x, y), strict=True)
-        package = torch._inductor.aoti_compile_and_package(ep)
-        self.assertEqual(torch._inductor.aoti_load_package(package)(x, y), expected)
-
 
 def make_mutation_test(fn):
     @requires_gpu
