@@ -20,6 +20,7 @@ from torch._inductor.fx_passes.loops_ir_native_boundaries import (
     BoundaryMutation,
     BoundaryReport,
     BoundarySpec,
+    DropoutNativeBoundary,
     LoopsIrNativeBoundaryError,
     NativeBoundaryPreGradPass,
     SUPPORTED_BN_DTYPES,
@@ -295,16 +296,145 @@ class TestDropoutBoundarySemantics(TestCase):
         self.assertEqual(tuple(mask.shape), (2, 8))
         self.assertEqual(mask.dtype, torch.bool)
 
-    def test_p1_matches_eager_signed_zeros(self):
-        x = torch.randn(2, 8)
-        out, mask = torch.ops.loops_ir_native_dropout.dropout_fwd(x, 1.0, True)
-        eager_out, eager_mask = torch.ops.aten.native_dropout(x, 1.0, True)
-        self.assertTrue(bool((~mask).all()))
-        self.assertTrue(bool((~eager_mask).all()))
-        _assert_same_bytes(out, eager_out, "p=1")
+    def test_p1_rewrite_rejects_and_op_rejects(self):
+        # p == 1: eager F.dropout lowers to x * zeros({}) (sign/NaN
+        # propagating); aten.native_dropout takes a zeros_like path. The
+        # adapter leaves p == 1 for stock and the op itself rejects it.
+        import torch.fx as fx
 
-    def test_eval_and_p0_reject_loudly(self):
+        def f(x):
+            return torch.nn.functional.dropout(x, p=1.0, training=True)
+
+        gm = fx.symbolic_trace(f)
+        report = rewrite_dropout_boundaries(gm, numerics="strict_eager")
+        self.assertEqual(report.rewrites, 0)
+        self.assertTrue(any("p==1" in r for r in report.rejections))
         x = torch.randn(2, 8)
+        with self.assertRaises(Exception):
+            torch.ops.loops_ir_native_dropout.dropout_fwd(x, 1.0, True)
+
+    def test_dropout_exact_counts_and_idempotent(self):
+        import torch.fx as fx
+
+        def f1(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        def f2(x):
+            a = torch.nn.functional.dropout(x, p=0.5, training=True)
+            return torch.nn.functional.dropout(a, p=0.25, training=True)
+
+        def count_packets(gm):
+            return sum(
+                1
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and canonical_target_name(n.target)
+                == "loops_ir_native_dropout::dropout_fwd"
+            )
+
+        gm1 = fx.symbolic_trace(f1)
+        rep1 = rewrite_dropout_boundaries(gm1, numerics="strict_eager")
+        self.assertEqual(rep1.rewrites, 1)
+        self.assertEqual(count_packets(gm1), 1)
+        gm1.graph.lint()
+        gm2 = fx.symbolic_trace(f2)
+        rep2 = rewrite_dropout_boundaries(gm2, numerics="strict_eager")
+        self.assertEqual(rep2.rewrites, 2)
+        self.assertEqual(count_packets(gm2), 2)
+        gm2.graph.lint()
+        # Idempotent: a second pass must not match our own symbol.
+        rep3 = rewrite_dropout_boundaries(gm2, numerics="strict_eager")
+        self.assertEqual(rep3.rewrites, 0)
+        self.assertEqual(count_packets(gm2), 2)
+        gm2.graph.lint()
+        gm2.graph.eliminate_dead_code()
+        gm2.graph.lint()
+        self.assertEqual(count_packets(gm2), 2)
+
+    def test_dropout_generator_kwarg_rejects(self):
+        # A non-default Generator selects an unmodeled RNG source; the parse
+        # must reject without rewriting. Build the node directly (a Generator
+        # object cannot round-trip through symbolic_trace sourcegen).
+        import torch.fx as fx
+
+        gm = fx.GraphModule({}, fx.Graph())
+        x = gm.graph.placeholder("x")
+        node = gm.graph.call_function(
+            torch.nn.functional.dropout,
+            (x,),
+            {"p": 0.5, "training": True, "generator": torch.Generator()},
+        )
+        gm.graph.output(x)
+        adapter = DropoutNativeBoundary(numerics="strict_eager")
+        self.assertTrue(adapter.applies(node))
+        self.assertFalse(adapter.rewrite(gm, node))
+        self.assertTrue(adapter.rejections)
+
+    def test_native_dropout_requires_static_training_flag(self):
+        import torch.fx as fx
+
+        for value in ("dynamic", 1, "true"):
+            with self.subTest(value=value):
+                gm = fx.GraphModule({}, fx.Graph())
+                x = gm.graph.placeholder("x")
+                training = (
+                    gm.graph.placeholder("training") if value == "dynamic" else value
+                )
+                node = gm.graph.call_function(
+                    torch.ops.aten.native_dropout.default, (x, 0.5, training)
+                )
+                gm.graph.output(x)
+                adapter = DropoutNativeBoundary(numerics="strict_eager")
+                self.assertFalse(adapter.rewrite(gm, node))
+                self.assertTrue(adapter.rejections)
+                self.assertEqual(
+                    sum(
+                        n.op == "call_function"
+                        and canonical_target_name(n.target)
+                        == "loops_ir_native_dropout::dropout_fwd"
+                        for n in gm.graph.nodes
+                    ),
+                    0,
+                )
+
+        gm = fx.GraphModule({}, fx.Graph())
+        x = gm.graph.placeholder("x")
+        node = gm.graph.call_function(
+            torch.ops.aten.native_dropout.default, (x, 0.5, None)
+        )
+        gm.graph.output(x)
+        parsed = DropoutNativeBoundary(numerics="strict_eager")._parse(node)
+        self.assertIsNotNone(parsed)
+        self.assertIs(parsed[2], True)
+
+    def test_eval_and_p0_no_rng_no_alias(self):
+        # training=False / p == 0 must consume no RNG and create no tensor
+        # copies: compare RNG state and output identity (not just values).
+        _require_cuda()
+        x = torch.randn(4, 8, device="cuda")
+
+        def rng_state():
+            return torch.cuda.get_rng_state().clone()
+
+        import torch.fx as fx
+
+        def f_eval(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=False)
+
+        def f_p0(x):
+            return torch.nn.functional.dropout(x, p=0.0, training=True)
+
+        for f in (f_eval, f_p0):
+            gm = fx.symbolic_trace(f)
+            report = rewrite_dropout_boundaries(gm, numerics="strict_eager")
+            self.assertEqual(report.rewrites, 0)
+            torch.manual_seed(21)
+            torch.cuda.manual_seed_all(21)
+            before = rng_state()
+            out = gm(x)
+            self.assertTrue(bool((rng_state().float() == before.float()).all()))
+            self.assertIs(out, x)
+        # The op itself also rejects these profiles loudly.
         with self.assertRaises(Exception):
             torch.ops.loops_ir_native_dropout.dropout_fwd(x, 0.5, False)
         with self.assertRaises(Exception):
@@ -330,6 +460,32 @@ class TestDropoutBoundarySemantics(TestCase):
         torch.cuda.manual_seed_all(11)
         b, _ = torch.ops.loops_ir_native_dropout.dropout_fwd(x, 0.5, True)
         _assert_same_bytes(b, e, "single-call RNG")
+
+    def test_eager_f_dropout_continuation_bytes(self):
+        # Factory claim: boundary consumes exactly one eager-ordered RNG draw,
+        # so the NEXT native draw after boundary == after eager F.dropout.
+        _require_cuda()
+        x = torch.randn(4, 32, device="cuda")
+        for seed in (99, 100):
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            _ = torch.nn.functional.dropout(x, p=0.5, training=True)
+            n_e = torch.randn(4, device="cuda")
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            _ = torch.ops.loops_ir_native_dropout.dropout_fwd(x, 0.5, True)
+            n_c = torch.randn(4, device="cuda")
+            _assert_same_bytes(n_e, n_c, f"continuation seed={seed}")
+        # get_rng_state_after also byte-equal (exact reseed control).
+        torch.manual_seed(7)
+        torch.cuda.manual_seed_all(7)
+        _ = torch.nn.functional.dropout(x, p=0.25, training=True)
+        s_e = torch.cuda.get_rng_state().clone()
+        torch.manual_seed(7)
+        torch.cuda.manual_seed_all(7)
+        _ = torch.ops.loops_ir_native_dropout.dropout_fwd(x, 0.25, True)
+        s_c = torch.cuda.get_rng_state().clone()
+        _assert_same_bytes(s_e.float(), s_c.float(), "rng-state-after")
 
 
 class TestBatchNormGraphExecution(TestCase):
@@ -611,6 +767,96 @@ class TestBatchNormGraphExecution(TestCase):
         _assert_same_bytes(eager_mod.running_mean, compiled_mod.rm, "rm-2step")
         _assert_same_bytes(eager_mod.running_var, compiled_mod.rv, "rv-2step")
         self.assertEqual(eager_mod.num_batches_tracked.item(), compiled_mod.nbt.item())
+
+    def test_full_aot_dropout_two_sites_two_steps(self):
+        _require_cuda()
+        import torch.nn as nn
+        from functorch.compile import make_boxed_func
+        from torch._functorch.aot_autograd import aot_module
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x0 = torch.tensor([[-0.0, 0.0, -1.5, 2.0, 0.5, -0.5, 1.0, -1.0]], device="cuda")
+
+        def f(x):
+            a = torch.ops.aten.native_dropout(x, 0.5, True)[0]
+            return torch.ops.aten.native_dropout(a, 0.25, True)[0].sum()
+
+        gm = make_fx(f)(x0)
+        rep = rewrite_dropout_boundaries(gm, numerics="strict_eager")
+        self.assertEqual(rep.rewrites, 2)
+        n_pkts = sum(
+            1
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and canonical_target_name(n.target)
+            == "loops_ir_native_dropout::dropout_fwd"
+        )
+        self.assertEqual(n_pkts, 2)
+        gm.graph.lint()
+
+        class W(nn.Module):
+            def __init__(self, gm_):
+                super().__init__()
+                self.gm = gm_
+
+            def forward(self, x):
+                return self.gm(x)
+
+        fw_targets: list[str] = []
+        bw_targets: list[str] = []
+
+        def pf(gm_, ins):
+            for n in gm_.graph.nodes:
+                fw_targets.append(canonical_target_name(n.target) or str(n.target))
+            return make_boxed_func(gm_.forward)
+
+        def pb(gm_, ins):
+            for n in gm_.graph.nodes:
+                bw_targets.append(canonical_target_name(n.target) or str(n.target))
+            return make_boxed_func(gm_.forward)
+
+        Wmod = W(gm).cuda().train()
+        fcomp = aot_module(Wmod, fw_compiler=pf, bw_compiler=pb)
+        for step in range(2):
+            torch.manual_seed(100 + step)
+            torch.cuda.manual_seed_all(100 + step)
+            xe = x0.expand(4, 8).contiguous().requires_grad_(True)
+            le = f(xe)
+            le.backward()
+            torch.manual_seed(100 + step)
+            torch.cuda.manual_seed_all(100 + step)
+            xc = x0.expand(4, 8).contiguous().requires_grad_(True)
+            lc = fcomp(xc)
+            lc.backward()
+            _assert_same_bytes(le, lc, f"loss-step{step}")
+            _assert_same_bytes(xe.grad, xc.grad, f"grad-step{step}")
+            # RNG continuation: identical post-forward streams.
+            torch.manual_seed(300 + step)
+            torch.cuda.manual_seed_all(300 + step)
+            _ = f(x0.expand(4, 8).contiguous())
+            n_e = torch.randn(4, device="cuda")
+            torch.manual_seed(300 + step)
+            torch.cuda.manual_seed_all(300 + step)
+            _ = Wmod.gm(x0.expand(4, 8).contiguous())
+            n_c = torch.randn(4, device="cuda")
+            _assert_same_bytes(n_e, n_c, f"continuation-step{step}")
+        fw_text = "\n".join(fw_targets)
+        bw_text = "\n".join(bw_targets)
+        self.assertEqual(
+            fw_text.count("loops_ir_native_dropout::dropout_fwd.default"), 2
+        )
+        # NOTE (evidence for C, no edit here): the joint BW currently traces
+        # aten::native_dropout_backward (2 sites), which IS in the inductor
+        # decomp table as (grad*(mask*scale)).clone() -- a reassociation of
+        # the eager kernel's grad*mask*scale order. Identity-compiler AOT
+        # cannot show whether inductor codegen preserves bits; the pending
+        # GPU-codegen proof belongs to C's lane. If bits diverge there, the
+        # fix is to add "aten.native_dropout_backward.default" to C's
+        # exclusion set (C owns cpp_ir_strict.py), or register an opaque
+        # loops_ir_native_dropout::dropout_bwd symbol here.
+        self.assertEqual(bw_text.count("aten::native_dropout_backward.default"), 2)
+        for banned in ("rand_like", "bernoulli"):
+            self.assertNotIn(banned, bw_text)
 
 
 class TestNegativeScope(TestCase):
