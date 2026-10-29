@@ -26,6 +26,7 @@ struct ScaledMMParams {
   bool rowwise;
   bool has_bias;
   bool bias_bfloat16;
+  bool has_scale_result;
 };
 
 static_assert(

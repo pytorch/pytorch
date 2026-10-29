@@ -2,6 +2,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ScaledMM.h>
@@ -12,7 +13,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
+#include <ATen/ops/empty.h>
 #endif
 
 namespace at::native {
@@ -32,22 +35,17 @@ const std::array<scaled::ScaleKernelDispatchEntry, 2> scale_kernel_dispatch = {{
 } // namespace
 } // namespace mps
 
-TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
-(const Tensor& mat_a,
- const Tensor& mat_b,
- const at::ITensorListRef& scale_a_list,
- IntArrayRef scale_recipe_a,
- IntArrayRef swizzle_a,
- const at::ITensorListRef& scale_b_list,
- IntArrayRef scale_recipe_b,
- IntArrayRef swizzle_b,
- at::OptionalTensorRef bias,
- std::optional<c10::ScalarType> out_dtype,
- IntArrayRef contraction_dim,
- bool use_fast_accum,
- const Tensor& out) {
+// Shared by _scaled_mm and _scaled_mm_v2 once the scaling recipe is resolved.
+// scale_result multiplies the result before it is cast to a float8 output.
+static void scaled_mm_mps_impl(const Tensor& mat_a,
+                               const Tensor& mat_b,
+                               const Tensor& scale_a,
+                               const Tensor& scale_b,
+                               bool rowwise,
+                               const std::optional<Tensor>& bias,
+                               const std::optional<Tensor>& scale_result,
+                               const Tensor& out) {
   using namespace mps;
-  check_mm_shapes(mat_a, mat_b, "_scaled_mm_v2");
   const auto m = mat_a.size(0);
   const auto n = mat_b.size(1);
   const auto k = mat_a.size(1);
@@ -57,31 +55,8 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       mat_b.scalar_type() == kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3fn matrix got ", mat_b.scalar_type());
   const auto dtype = out.scalar_type();
   TORCH_CHECK_TYPE(dtype == kFloat || dtype == kHalf || dtype == kBFloat16 || dtype == kFloat8_e4m3fn,
-                   "MPS _scaled_mm_v2 supports Float, Half, BFloat16 and Float8_e4m3fn outputs, got ",
+                   "MPS _scaled_mm supports Float, Half, BFloat16 and Float8_e4m3fn outputs, got ",
                    dtype);
-  std::vector<Tensor> scale_a_vec(scale_a_list.begin(), scale_a_list.end());
-  std::vector<Tensor> scale_b_vec(scale_b_list.begin(), scale_b_list.end());
-  ArrayRef<Tensor> scale_a_ref(scale_a_vec);
-  ArrayRef<Tensor> scale_b_ref(scale_b_vec);
-  auto recipe_a = scaled::convert_int_to_enum<ScalingType>(scale_recipe_a);
-  auto recipe_b = scaled::convert_int_to_enum<ScalingType>(scale_recipe_b);
-  const auto swizzle_a_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_a);
-  const auto swizzle_b_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_b);
-  if (!swizzle_a_enum.empty() && !swizzle_b_enum.empty()) {
-    TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
-                      "MPS does not support swizzle.");
-  }
-  const auto gemm_impl = scaled::find_scaled_gemm_impl(
-      scale_kernel_dispatch, mat_a.scalar_type(), recipe_a, scale_a_ref, mat_b.scalar_type(), recipe_b, scale_b_ref);
-  TORCH_CHECK_VALUE(
-      gemm_impl != scaled::ScaledGemmImplementation::NONE,
-      "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
-      scale_recipe_a,
-      " and recipe_b=",
-      scale_recipe_b);
-  const auto& scale_a = scale_a_vec[0];
-  const auto& scale_b = scale_b_vec[0];
-  const bool rowwise = gemm_impl == scaled::ScaledGemmImplementation::ROWWISE_ROWWISE;
   if (rowwise) {
     TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
     TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
@@ -114,7 +89,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   }
   // Kernel index math is 64-bit; the uint32 params and the uint row/col/k arithmetic need each dim to fit int32.
   TORCH_CHECK_NOT_IMPLEMENTED(m <= INT32_MAX && n <= INT32_MAX && k <= INT32_MAX,
-                              "MPS _scaled_mm_v2 requires m, n and k to fit in int32");
+                              "MPS _scaled_mm requires m, n and k to fit in int32");
   assert_no_internal_overlap(out);
   if (k == 0) {
     out.zero_();
@@ -161,6 +136,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       .rowwise = rowwise,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
+      .has_scale_result = scale_result.has_value(),
   };
   using namespace std::string_view_literals;
   const auto type_str = scalarToMetalTypeString(dtype);
@@ -175,7 +151,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       getMPSProfiler().beginProfileKernel(pso, kernel_name, {mat_a, mat_b}, stream);
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params);
+      mtl_setArgs(encoder, mat_a, mat_b, out, scale_a, scale_b, bias_vec, params, scale_result);
       [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(n, cols_per_group),
                                                 few_rows ? 1 : c10::metal::ceil_div<int64_t>(m, scaled_mm_tile),
                                                 1)
@@ -183,6 +159,86 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
+}
+
+TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
+(const Tensor& mat_a,
+ const Tensor& mat_b,
+ const at::ITensorListRef& scale_a_list,
+ IntArrayRef scale_recipe_a,
+ IntArrayRef swizzle_a,
+ const at::ITensorListRef& scale_b_list,
+ IntArrayRef scale_recipe_b,
+ IntArrayRef swizzle_b,
+ at::OptionalTensorRef bias,
+ std::optional<c10::ScalarType> out_dtype,
+ IntArrayRef contraction_dim,
+ bool use_fast_accum,
+ const Tensor& out) {
+  using namespace mps;
+  check_mm_shapes(mat_a, mat_b, "_scaled_mm_v2");
+  std::vector<Tensor> scale_a_vec(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b_vec(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a_vec);
+  ArrayRef<Tensor> scale_b_ref(scale_b_vec);
+  auto recipe_a = scaled::convert_int_to_enum<ScalingType>(scale_recipe_a);
+  auto recipe_b = scaled::convert_int_to_enum<ScalingType>(scale_recipe_b);
+  const auto swizzle_a_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_a);
+  const auto swizzle_b_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_b);
+  if (!swizzle_a_enum.empty() && !swizzle_b_enum.empty()) {
+    TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
+                      "MPS does not support swizzle.");
+  }
+  const auto gemm_impl = scaled::find_scaled_gemm_impl(
+      scale_kernel_dispatch, mat_a.scalar_type(), recipe_a, scale_a_ref, mat_b.scalar_type(), recipe_b, scale_b_ref);
+  TORCH_CHECK_VALUE(
+      gemm_impl != scaled::ScaledGemmImplementation::NONE,
+      "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
+      scale_recipe_a,
+      " and recipe_b=",
+      scale_recipe_b);
+  const bool rowwise = gemm_impl == scaled::ScaledGemmImplementation::ROWWISE_ROWWISE;
+  const auto bias_opt = bias.has_value() ? std::make_optional(*bias) : std::nullopt;
+  scaled_mm_mps_impl(mat_a, mat_b, scale_a_vec[0], scale_b_vec[0], rowwise, bias_opt, std::nullopt, out);
+}
+
+Tensor& _scaled_mm_out_mps(const Tensor& mat_a,
+                           const Tensor& mat_b,
+                           const Tensor& scale_a,
+                           const Tensor& scale_b,
+                           const std::optional<Tensor>& bias,
+                           const std::optional<Tensor>& scale_result,
+                           std::optional<c10::ScalarType> out_dtype,
+                           bool use_fast_accum,
+                           Tensor& out) {
+  using namespace mps;
+  check_mm_shapes(mat_a, mat_b, "_scaled_mm");
+  TORCH_CHECK_VALUE(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
+  TORCH_CHECK_VALUE(scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+                    "scale_a and scale_b must be Float, got ",
+                    scale_a.scalar_type(),
+                    " and ",
+                    scale_b.scalar_type());
+  TORCH_CHECK_VALUE(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+                    "scale_result must be a float scalar");
+  const bool rowwise = scale_a.numel() != 1 || scale_b.numel() != 1;
+  resize_output(out, {mat_a.size(0), mat_b.size(1)});
+  // Like CUDA, scale_result only applies to float8 outputs
+  const auto out_scale = isFloat8Type(out.scalar_type()) ? scale_result : std::nullopt;
+  scaled_mm_mps_impl(mat_a, mat_b, scale_a, scale_b, rowwise, bias, out_scale, out);
+  return out;
+}
+
+Tensor _scaled_mm_mps(const Tensor& mat_a,
+                      const Tensor& mat_b,
+                      const Tensor& scale_a,
+                      const Tensor& scale_b,
+                      const std::optional<Tensor>& bias,
+                      const std::optional<Tensor>& scale_result,
+                      std::optional<c10::ScalarType> out_dtype,
+                      bool use_fast_accum) {
+  auto out = at::empty({0}, mat_a.options().dtype(out_dtype.value_or(mat_a.scalar_type())));
+  return _scaled_mm_out_mps(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
 
 } // namespace at::native

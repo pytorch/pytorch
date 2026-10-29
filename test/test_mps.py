@@ -7940,8 +7940,6 @@ class TestMPS(TestCaseMPS):
         y.backward(gradient=grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    # Test adaptive avg pool2d - when the input size is a multiple of output size
-    # Not testing for channels last right now
     def test_adaptive_avg_pool2d_simple(self):
         def helper(input_shape, out_shape, channels_last):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -7980,10 +7978,34 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 4, 4), (16, 16), False)
 
-        try:
-            helper((2, 2, 3, 3), (7, 7), False)
-        except Exception as e:
-            pass
+        helper((2, 2, 3, 3), (7, 7), False)
+
+        # Windows large enough for the simdgroup per output kernel
+        helper((2, 3, 100, 70), (3, 2), False)
+        helper((2, 3, 100, 70), (3, 2), True)
+
+        # Zero channels
+        helper((0, 4, 4), (2, 2), False)
+        helper((0, 2, 2), (4, 4), False)
+        helper((0, 4, 4), (3, 3), False)
+
+    @parametrize("pool,output_size", [
+        (F.adaptive_avg_pool2d, (2, 49999)),
+        (F.adaptive_max_pool2d, (2, 49999)),
+        (F.adaptive_avg_pool3d, (1, 2, 49999)),
+    ], name_fn=lambda pool, output_size: pool.__name__)
+    def test_adaptive_pool_large_sizes(self, pool, output_size):
+        # (in + 1) * (out + 1) overflows int32, which selects the 64-bit index kernels
+        cpu_x = torch.randn(1, 2, 3, 50000, requires_grad=True)
+        x = cpu_x.detach().to('mps').requires_grad_()
+        out = pool(x, output_size)
+        out_cpu = pool(cpu_x, output_size)
+        self.assertEqual(out, out_cpu)
+
+        cpu_grad = torch.randn(out_cpu.shape)
+        out.backward(cpu_grad.to('mps'))
+        out_cpu.backward(cpu_grad)
+        self.assertEqual(x.grad, cpu_x.grad)
 
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
@@ -14605,6 +14627,8 @@ class TestConsistency(TestCaseMPS):
         'acosh', 'asinh', 'asin',
         'masked.std',
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
+        # CPU accumulates in half precision, so MPS is closer to the float32 result
+        'nn.functional.adaptive_avg_pool3d',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
