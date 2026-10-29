@@ -57,12 +57,6 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
-#include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
-#include <torch/csrc/jit/passes/quantization/finalize.h>
-#include <torch/csrc/jit/passes/quantization/fusion_passes.h>
-#include <torch/csrc/jit/passes/quantization/insert_observers.h>
-#include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
-#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 #include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -314,90 +308,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_fuse_quantized_add_relu",
-          [](std::shared_ptr<Graph>& g) {
-            return FuseQuantizedAddRelu(g); // overload resolution
-          })
-      .def(
-          "_jit_pass_insert_observers",
-          [](Module& module,
-             const std::string& method_name,
-             const py::dict& qconfig_dict,
-             bool inplace,
-             int quant_type_int) {
-            auto dict = py::cast<std::unordered_map<
-                std::string,
-                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertObservers(
-                module, method_name, dict, inplace, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("qconfig_dict"),
-          py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_observer_method_for_ondevice_ptq",
-          [](Module& module,
-             const std::string& method_name,
-             const py::dict& qconfig_dict,
-             bool inplace,
-             int quant_type_int) {
-            auto dict = py::cast<std::unordered_map<
-                std::string,
-                std::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertObserversForOnDevicePTQ(
-                module, method_name, dict, inplace, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("qconfig_dict"),
-          py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_quant_dequant",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace,
-             bool debug,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(
-                module, method_name, inplace, debug, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("inplace"),
-          py::arg("debug"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_quant_dequant_for_ondevice_ptq",
-          [](Module& module,
-             const std::string& method_name,
-             bool inplace,
-             bool debug,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuantOnDevicePTQ(
-                module, method_name, inplace, debug, quant_type);
-          },
-          py::arg("module"),
-          py::arg("method_name"),
-          py::arg("inplace"),
-          py::arg("debug"),
-          py::arg("quant_type_int") = 1)
-      .def(
-          "_jit_pass_insert_prepack_unpack",
-          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
-      .def(
-          "_jit_pass_insert_prepack_unpack",
-          [](Module& module) { return InsertPrepackUnpack(module); })
-      .def(
-          "_jit_pass_quant_fusion",
-          [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def(
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
@@ -436,36 +346,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_fuse_add_relu",
           [](std::shared_ptr<Graph>& graph) { FuseAddRelu(graph); })
-      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
-      .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def(
-          "_jit_pass_quant_finalize",
-          [](Module& module,
-             int quant_type_int,
-             const std::vector<std::string>& preserved_attrs) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type, preserved_attrs);
-          },
-          py::arg("module"),
-          py::arg("quant_type_int") = 1,
-          py::arg("preserved_attrs") = std::vector<std::string>())
-      .def(
-          "_jit_pass_quant_finalize_for_ondevice_ptq",
-          [](Module& module,
-             int quant_type_int,
-             const std::string& method_name) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return FinalizeOnDevicePTQ(module, quant_type, method_name);
-          },
-          py::arg("module"),
-          py::arg("quant_type_int") = 1,
-          py::arg("preserved_attrs") = std::vector<std::string>())
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -1259,6 +1145,11 @@ void initJITBindings(PyObject* module) {
           "expect_true",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->expect_true(file, line);
+          })
+      .def(
+          "guard_size_oblivious",
+          [](const c10::SymNode& a, const char* file, int64_t line) {
+            return a->guard_size_oblivious(file, line);
           })
       .def(
             "guard_or_false",
