@@ -283,11 +283,51 @@ namespace at::hip::detail {
         struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::half_t>
             : CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::bf16_t> {};
 
+        // configs for fp32 inputs on gfx942. 64 KB of LDS caps (M_Tile + N_Tile) * K_Tile at 16K fp32 elements;
+        // 16x16x16 warp tiles (four 16x16x4 MFMAs) were the fastest measured for every GEMM type.
+        template <>
+        struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::fp32_t> {
+            // Pads M, N and K with 1-element C vectors, so it accepts every shape.
+            using AnyShape = CkTileGroupGemmConfig<128, 128, 16, 32, 32, 4, 2, 2, true, true, true, false, 0, 1>;
+
+            // Forward (2D x 3D, 3D x 3D): row-major A, column-major B
+            struct Forward {
+                using Candidates = std::tuple<
+                    CkTileGroupGemmConfig<128, 64, 64, 16, 16, 16, 2, 2, false, false, false>,
+                    CkTileGroupGemmConfig<128, 128, 32, 16, 16, 16, 2, 4, false, true, false>,
+                    CkTileGroupGemmConfig<256, 128, 32, 16, 16, 16, 2, 2, false, true, false>>;
+                using Unaligned = AnyShape;
+            };
+
+            // dX (2D x 3D, 3D x 3D): row-major A and B
+            struct GradInput {
+                using Candidates = std::tuple<
+                    CkTileGroupGemmConfig<128, 128, 16, 16, 16, 16, 2, 4, false, false, false>,
+                    CkTileGroupGemmConfig<128, 64, 32, 16, 16, 16, 2, 4, false, false, false>,
+                    CkTileGroupGemmConfig<256, 128, 16, 16, 16, 16, 4, 2, false, false, false>,
+                    CkTileGroupGemmConfig<256, 64, 32, 16, 16, 16, 2, 4, false, false, false>,
+                    CkTileGroupGemmConfig<128, 64, 32, 16, 16, 16, 2, 4, false, true, false>>;
+                using Unaligned = AnyShape;
+            };
+
+            // dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
+            struct GradWeight {
+                using Candidates = std::tuple<
+                    CkTileGroupGemmConfig<128, 128, 16, 16, 16, 16, 2, 4, false, false, true>,
+                    CkTileGroupGemmConfig<128, 128, 16, 16, 16, 16, 4, 2, true, true, true>>;
+                using Unaligned = AnyShape;
+            };
+
+            // Layouts none of the three cover, e.g. column-major A with jagged M or jagged N (3D x 2D)
+            using Fallback = AnyShape;
+        };
+
         static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t>>);
         static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>>);
         static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::fp32_t>>);
         static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::bf16_t>>);
         static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::half_t>>);
+        static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::fp32_t>>);
 
         // Host-side view of one launch, for picking a config. -1 marks the jagged dim.
         struct GemmProblem {
