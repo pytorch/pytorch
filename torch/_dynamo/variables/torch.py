@@ -83,6 +83,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -852,6 +853,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     ],
                 )
             if isinstance(annotation, variables.ConstDictVariable):
+                if annotation.source and not is_constant_source(annotation.source):
+                    if not isinstance(
+                        annotation,
+                        (variables.OrderedDictVariable, variables.DunderDictVariable),
+                    ):
+                        tx.output.guard_on_key_order.add(annotation.source)
+                    annotation.install_dict_keys_match_guard()
                 annotation_dict = {
                     k.vt.as_python_constant(): annotation_constant(v)
                     for k, v in annotation.items.items()
