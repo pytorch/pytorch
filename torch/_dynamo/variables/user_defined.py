@@ -3197,12 +3197,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if (
                 isinstance(method, types.MethodDescriptorType)
+                and method.__objclass__ is not object
                 and not is_torch_class(method.__objclass__)
                 and name not in self._slotdefs
                 and not trace_rules.is_polyfilled_callable(method)
             ):
-                # All inherited non-slot C methods without Torch/polyfill handling
-                # dispatch through their defining descriptor. This includes both
+                # Inherited non-slot C methods beyond object without Torch/polyfill
+                # handling dispatch through their defining descriptor. This includes
                 # ordinary inheritance and aliases such as `copy = dict.copy`.
                 return variables.MethodDescriptorVariable(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
