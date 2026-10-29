@@ -20,6 +20,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      artifact-run-id:
+        required: false
+        type: string
+        default: ''
+        description: Reuse an existing native diagnostic build.
       sync-tag:
         required: false
         type: string
@@ -145,9 +150,28 @@ jobs:
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
+        if: inputs.artifact-run-id == ''
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+
+      - name: Download native diagnostic build artifacts
+        if: inputs.artifact-run-id != ''
+        shell: bash
+        env:
+          PIN_ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
+          PIN_ARTIFACT_NAME: ${{ inputs.build-environment }}
+        run: |
+          python3 -m pip install boto3==1.35.42
+          python3 - <<'PY'
+          import os
+          import boto3
+          key = f"{os.environ['GITHUB_REPOSITORY']}/{os.environ['PIN_ARTIFACT_RUN_ID']}/{os.environ['PIN_ARTIFACT_NAME']}/artifacts.zip"
+          print('Downloading native diagnostic build', key)
+          boto3.client('s3', region_name='us-east-1').download_file('gha-artifacts', key, 'artifacts.zip')
+          PY
+          unzip -o artifacts.zip
+          rm artifacts.zip
 
       - name: Download TD artifacts
         continue-on-error: true

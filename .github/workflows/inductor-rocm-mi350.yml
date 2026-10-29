@@ -16,7 +16,7 @@ on:
       hardware:
         type: choice
         default: mi350
-        options: [mi350, l4, both, mi350-boundary, mi350-amd-boundary, l4-ptxas, l4-boundary]
+        options: [mi350, l4, both, mi350-boundary, mi350-amd-boundary, mi350-bisect, l4-ptxas, l4-boundary]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -46,7 +46,7 @@ jobs:
       check_experiments: amd-dpx
 
   linux-noble-rocm-py3_11-inductor-build:
-    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas' && github.event.inputs.hardware != 'l4-boundary'
+    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas' && github.event.inputs.hardware != 'l4-boundary' && github.event.inputs.hardware != 'mi350-bisect'
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -63,7 +63,7 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_11-inductor-test:
-    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas' && github.event.inputs.hardware != 'l4-boundary'
+    if: github.event.inputs.hardware != 'l4' && github.event.inputs.hardware != 'l4-ptxas' && github.event.inputs.hardware != 'l4-boundary' && github.event.inputs.hardware != 'mi350-bisect'
     name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_11-inductor-build
@@ -88,6 +88,22 @@ jobs:
       test-matrix: |
         { include: [
           { config: "triton_pin_l4_controls", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+        ]}
+    secrets: inherit
+
+  mi350-native-bisect:
+    if: github.event.inputs.hardware == 'mi350-bisect'
+    name: native-mi350-bisect
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-noble-rocm-n-py3.11-aac29703b520a9906ec6f0b4d3a07872b2601a25
+      artifact-run-id: '40865583043'
+      timeout-minutes: 300
+      test-matrix: |
+        { include: [
+          { config: "triton_pin_mi350_bisect", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 

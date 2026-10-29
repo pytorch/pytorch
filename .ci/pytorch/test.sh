@@ -2614,6 +2614,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_mi350_boundary" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_boundary.py
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_mi350_bisect" ]]; then
+  exec python .ci/pytorch/triton_pin_mi350_bisect.py
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_mi350_amd_boundary" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_boundary.py --amd
 fi

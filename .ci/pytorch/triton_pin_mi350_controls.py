@@ -102,10 +102,12 @@ def build_pin(label, repository, sha):
         "build-system"
     ]["requires"]
     run(
-        [str(python), "-m", "pip", "install", "build", *requirements],
+        [str(python), "-m", "pip", "install", "build", *requirements, "setuptools==78.1.1"],
         env=env,
         name=f"{label}-build-dependencies",
     )
+    run([str(python), '-c', 'import setuptools,setuptools.build_meta; print(setuptools.__version__,setuptools.__file__)'],
+        env=env, name=f'{label}-build-backend-preflight')
     run(
         [str(python), "-m", "build", "--wheel", "--no-isolation"],
         cwd=source,
@@ -195,8 +197,7 @@ def test_pin(label, site, sha, *, fusion=None):
         results[operation] = run(
             [
                 sys.executable,
-                "-m",
-                "pytest",
+                str(ROOT / '.ci/pytorch/triton_pin_trace_property.py'),
                 "-s",
                 "--tb=short",
                 "--reruns=0",

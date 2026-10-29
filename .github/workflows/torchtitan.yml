@@ -9,6 +9,11 @@ on:
     tags:
       - ciflow/torchtitan/*
   workflow_dispatch:
+    inputs:
+      artifact-run-id:
+        type: string
+        default: ''
+        description: Reuse an existing native diagnostic PyTorch/AO/comms build.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -54,7 +59,7 @@ jobs:
 
   build:
     name: torchtitan-x-pytorch-build
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'pytorch' && github.event.inputs.artifact-run-id == ''
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
@@ -89,6 +94,25 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       python-version: "3.12"
+      compiler: gcc11
+      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
+    secrets: inherit
+
+  test-reuse:
+    if: github.event.inputs.artifact-run-id != ''
+    name: native-torchtitan-controls-reuse
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [get-label-type, get-cuda-version]
+    with:
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3.12-gcc11-torchtitan
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-6ce4e7e1f7fed4d82afb7c896fec3dd3ce7d6b17
+      artifact-run-id: ${{ github.event.inputs.artifact-run-id }}
+      timeout-minutes: 180
+      test-matrix: |
+        { include: [
+          { config: "torchtitan_triton_pin_controls", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
+        ]}
+      python-version: '3.12'
       compiler: gcc11
       cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
