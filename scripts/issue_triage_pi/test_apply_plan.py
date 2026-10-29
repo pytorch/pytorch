@@ -246,6 +246,13 @@ class PlanEffectsTest(unittest.TestCase):
         self.assertTrue(result.close)
         self.assertEqual(result.comment, TEMPLATES["numerical_accuracy"]["comment"])
 
+    def test_review_decision_requires_review_even_if_model_omits_label(self):
+        result = effects("triage_review", ["module: sdpa", "triaged"])
+        self.assertEqual(
+            result.add_labels, ["module: sdpa", "triage review", "bot-triaged"]
+        )
+        self.assertFalse(result.close)
+
     def test_unknown_template_is_not_posted(self):
         result = effects("request_info", templates=["anything goes"])
         self.assertEqual(result.comment, TEMPLATES["request_more_info"]["comment"])
