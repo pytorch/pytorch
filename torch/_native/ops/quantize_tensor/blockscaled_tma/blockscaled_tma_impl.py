@@ -4,13 +4,14 @@ from typing import cast, NamedTuple, TypeAlias
 
 import torch
 
-from .blockscaled_tma_kernels import (
-    _compile_blockscaled_tma,
+from .blockscaled_tma_kernels import _compile_blockscaled_tma
+from .blockscaled_tma_plan import (
     _QUANT_ORIENTATION_DIM_K,
     _QUANT_ORIENTATION_DIM_KM,
     _QUANT_ORIENTATION_DIM_M,
+    BlockscaledTmaPlan,
+    select_blockscaled_tma_plan,
 )
-from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_plan
 from .utils import _ceil_div
 
 
@@ -85,7 +86,7 @@ def _validate_and_normalize_blockscaled_tma(
         normalized_dims.append(normalized)
     if normalized_dims not in ([(0, 1)], [(1, 0)], [(0, 1), (1, 0)]):
         raise ValueError(f"unsupported quantization dim order: {dim}")
-    # The TMA input is row-major; swap logical axes for transpose-contiguous views.
+    # TODO: Support batched inputs.
     if input.dim() != 2:
         raise ValueError(
             f"blockscaled TMA requires a 2D input; got {input.dim()} dimensions"
@@ -96,6 +97,7 @@ def _validate_and_normalize_blockscaled_tma(
             raise ValueError(
                 "blockscaled TMA requires a contiguous or transpose-contiguous input"
             )
+        # The TMA input is row-major; swap logical axes for transpose-contiguous views.
         normalized_dims = [(1 - first, 1 - last) for first, last in normalized_dims]
     row_axis, col_axis = (1, 0) if input_transposed else (0, 1)
     do_dim_k = (0, 1) in normalized_dims
@@ -116,7 +118,6 @@ def _validate_and_normalize_blockscaled_tma(
         if is_square_scaling:
             raise ValueError("compact scales do not support square scaling")
 
-    # TODO: Support batched inputs.
     if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
         raise ValueError("blockscaled TMA supports only bf16, fp16, and fp32 input")
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES != 0:
@@ -199,8 +200,7 @@ def _prepare_blockscaled_tma_launch(
             spec.M,
             spec.K,
             input_dtype=input.dtype,
-            do_dim_k=spec.do_dim_k,
-            do_dim_m=spec.do_dim_m,
+            quant_orientation_id=spec.quant_orientation_id,
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (
