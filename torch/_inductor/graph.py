@@ -1207,15 +1207,15 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_users_of(self, node_output: Iterable[ir.IRNode] | ir.IRNode) -> None:
-        def register(value: Iterable[ir.IRNode] | ir.IRNode) -> None:
-            if isinstance(value, (list, tuple)):
-                for x in value:
-                    register(x)
-            if isinstance(value, ir.TensorBox):
-                for read_name in value.get_read_names():
-                    self.name_to_users[read_name].append(value)
+        self._register_users_of_value(node_output)
 
-        register(node_output)
+    def _register_users_of_value(self, value: Iterable[ir.IRNode] | ir.IRNode) -> None:
+        if isinstance(value, (list, tuple)):
+            for x in value:
+                self._register_users_of_value(x)
+        if isinstance(value, ir.TensorBox):
+            for read_name in value.get_read_names():
+                self.name_to_users[read_name].append(value)
 
     def mark_buffer_mutated(self, name: str) -> None:
         """
