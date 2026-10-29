@@ -643,19 +643,30 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // management. capture_begin and capture_end use the current stream, which
 // must be on the pool's device; replay uses the current stream of the
 // capture's device. Captures are thread-local, and a graph captures once.
-// Callers must:
+// Under the cudaMallocAsync allocator backend, CUDAGraph ignores the pool and
+// allows only one capture at a time in the process. Callers must:
 // - capture on a cudaStreamNonBlocking stream;
-// - end every capture, even a failed one, with capture_end on its thread and
-//   stream before deleting the graph. On ROCm, a stream whose capture was
-//   invalidated rejects work until the next capture begins;
+// - end every capture whose capture_begin succeeded with capture_end, on its
+//   thread and stream, before deleting the graph, also when the captured work
+//   failed. On ROCm, a stream whose capture was invalidated rejects work
+//   until the next capture begins;
 // - use a pool and its graphs from one thread at a time, capture into a pool
 //   one graph at a time, and use a new pool once every graph that began a
 //   capture into it is deleted;
 // - not overlap replays of graphs sharing a pool, and use a replay's outputs
 //   before replaying another graph of the pool, unless replaying in capture
 //   order;
+// - not replay a graph that uses random numbers while other replays or eager
+//   random number work run on the same device: a replay advances the
+//   device's generator without taking its lock;
 // - order earlier work on the capture stream before a replay on another
-//   stream, and wait for a graph's replays before deleting it.
+//   stream, and wait for a graph's replays before deleting it;
+// - on ROCm, keep synchronous HIP copies and memsets out of the process
+//   while a capture is open: HIP fails them and invalidates every open
+//   capture, see https://github.com/ROCm/rocm-systems/issues/12677. Creating
+//   a hipBLASLt handle makes such a call and then ends or hangs the process;
+//   capture_begin and a thread's first hipBLASLt use, e.g. an eager matmul
+//   or convolution, can create one.
 struct CUDAMemPoolOpaque;
 using CUDAMemPoolHandle = CUDAMemPoolOpaque*;
 
@@ -687,6 +698,14 @@ aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_replay(CUDAGraphHandle graph);
+
+// torch._foreach_copy_(dst, src) on the current stream: copies each src
+// tensor into the dst tensor at the same index, fusing copies that share a
+// dtype, e.g. for a caller copying inputs into a graph's static buffers.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_foreach_copy_(
+    const AtenTensorHandle* dst,
+    const AtenTensorHandle* src,
+    int64_t num_tensors);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #endif // USE_CUDA

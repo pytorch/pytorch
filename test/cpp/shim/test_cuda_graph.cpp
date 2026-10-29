@@ -10,6 +10,7 @@
 
 #include <optional>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -185,6 +186,33 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
   ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
   graph_ = nullptr;
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
+}
+
+TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
+  auto longs = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
+  std::vector<at::Tensor> dst = {
+      at::empty({4}, at::kCUDA),
+      at::empty({2, 3}, at::kCUDA).t(),
+      at::empty({5}, longs)};
+  std::vector<at::Tensor> src = {
+      at::randn({4}, at::kCUDA),
+      at::randn({3, 2}, at::kCUDA),
+      at::randint(100, {5}, longs)};
+  std::vector<AtenTensorHandle> dst_handles, src_handles;
+  for (size_t i = 0; i < dst.size(); ++i) {
+    dst_handles.push_back(reinterpret_cast<AtenTensorHandle>(&dst[i]));
+    src_handles.push_back(reinterpret_cast<AtenTensorHandle>(&src[i]));
+  }
+  ASSERT_EQ(
+      aoti_torch_cuda_foreach_copy_(dst_handles.data(), src_handles.data(), 3),
+      AOTI_TORCH_SUCCESS);
+  for (size_t i = 0; i < dst.size(); ++i) {
+    EXPECT_TRUE(dst[i].equal(src[i]));
+  }
+  dst[0] = at::empty({3}, at::kCUDA);
+  EXPECT_EQ(
+      aoti_torch_cuda_foreach_copy_(dst_handles.data(), src_handles.data(), 3),
+      AOTI_TORCH_FAILURE);
 }
 
 TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
