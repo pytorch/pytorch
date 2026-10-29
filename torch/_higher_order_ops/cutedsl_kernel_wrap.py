@@ -390,8 +390,8 @@ def cutedsl_kernel_wrapper_mutation_functionalize(
             ),
             unwrapped_kwargs,
         ),
-        kwargs,
-        {"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+        hop_kwargs={"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+        kwargs=kwargs,
     )
     return None
 
@@ -407,10 +407,10 @@ def cutedsl_kernel_wrapper_functional_dense(
 ) -> dict[str, Any]:
     return functional_hop_dense(
         cutedsl_kernel_wrapper_mutation,
-        {"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
-        kwargs,
-        tensors_to_clone,
-        tensor_bases,
+        hop_kwargs={"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
     )
 
 
@@ -423,7 +423,9 @@ def cutedsl_kernel_wrapper_functional_fake_tensor_mode(
     tensors_to_clone: list[str],
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    return functional_hop_fake(kwargs, tensors_to_clone, tensor_bases)
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
 
 
 @cutedsl_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -463,10 +465,10 @@ def cutedsl_kernel_wrapper_functional_functionalize(
     return functionalize_functional_hop(
         ctx,
         cutedsl_kernel_wrapper_functional,
-        {"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
-        kwargs,
-        tensors_to_clone,
-        tensor_bases,
+        hop_kwargs={"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
     )
 
 
