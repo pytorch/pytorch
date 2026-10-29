@@ -25,6 +25,8 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
@@ -270,6 +272,9 @@ struct PyObjectDispatchFunc {
   PyObject_HEAD
   PyObject* cpp_dispatch_fn;
   PyObject* cpp_redispatch_fn;
+  // A weak reference to the OpOverload, which __torch_function__ handlers get
+  // as `func`. A strong one would be a cycle: the OpOverload holds this object.
+  PyObject* op_overload_ref;
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
@@ -367,6 +372,58 @@ static bool pyobject_dispatch_has_torch_function(
     }
   }
   return false;
+}
+
+// Hands a call to its __torch_function__ handlers, as the C++ entry point does
+// (_maybe_handle_torch_function in pybind_utils.cpp), but without converting
+// the arguments for pybind11 or looking the OpOverload up again. Returns a null
+// object if no handler applies after all or the OpOverload is gone; the caller
+// then uses the C++ entry point.
+static py::object pyobject_dispatch_handle_torch_function(
+    PyObjectDispatchFunc* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames) {
+  const Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  const auto num_args = static_cast<size_t>(nargs + nkwargs);
+  std::vector<PyObject*> overloaded_args;
+  for (const auto i : c10::irange(num_args)) {
+    is_tensor_and_append_overloaded(args[i], &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        args[i], &overloaded_args, num_args, /*throw_error=*/false);
+  }
+  if (overloaded_args.empty() && !at::impl::torch_function_mode_enabled()) {
+    return py::object();
+  }
+  PyObject* op_overload = nullptr;
+  TORCH_CHECK_PYTHON(
+      PyWeakref_GetRef(self->op_overload_ref, &op_overload) >= 0);
+  if (op_overload == nullptr) {
+    return py::object();
+  }
+  auto func = py::reinterpret_steal<py::object>(op_overload);
+  auto py_args = py::reinterpret_steal<py::object>(PyTuple_New(nargs));
+  TORCH_CHECK_PYTHON(py_args);
+  for (const auto i : c10::irange(nargs)) {
+    PyTuple_SET_ITEM(py_args.ptr(), i, Py_NewRef(args[i]));
+  }
+  py::dict py_kwargs;
+  for (const auto i : c10::irange(nkwargs)) {
+    TORCH_CHECK_PYTHON(
+        PyDict_SetItem(
+            py_kwargs.ptr(), PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) >=
+        0);
+  }
+  // With no names, errors name the op by func's __module__ and __name__.
+  PyObject* result = handle_torch_function_no_python_arg_parser(
+      overloaded_args,
+      py_args.ptr(),
+      py_kwargs.ptr(),
+      /*func_name=*/nullptr,
+      func.ptr(),
+      /*module_name=*/nullptr);
+  TORCH_CHECK_PYTHON(result != nullptr);
+  return py::reinterpret_steal<py::object>(result);
 }
 
 static PyObject* pyobject_dispatch_call_redispatch_cpp(
@@ -1110,6 +1167,10 @@ static PyObject* pyobject_dispatch_vectorcall(
   if (C10_UNLIKELY(
           !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
+    if (auto result = pyobject_dispatch_handle_torch_function(
+            self, args, nargs, kwnames)) {
+      return result.release().ptr();
+    }
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
@@ -1208,6 +1269,7 @@ static PyObject* pyobject_redispatch_vectorcall(
 static void pyobject_dispatch_dealloc(PyObjectDispatchFunc* self) {
   Py_XDECREF(self->cpp_dispatch_fn);
   Py_XDECREF(self->cpp_redispatch_fn);
+  Py_XDECREF(self->op_overload_ref);
   delete self->handle;
   delete self->schema_info;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
@@ -1232,15 +1294,20 @@ static PyObject* make_pyobject_dispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
+    PyObject* op_overload,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
   auto schema_info = make_pyobject_dispatch_schema(handle.schema());
+  auto op_overload_ref =
+      py::reinterpret_steal<py::object>(PyWeakref_NewRef(op_overload, nullptr));
+  TORCH_CHECK_PYTHON(op_overload_ref);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
+  result->op_overload_ref = op_overload_ref.release().ptr();
   result->handle = owned_handle.release();
   result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
@@ -1271,7 +1338,8 @@ static PyObject* make_pyobject_redispatch_func(
 static py::tuple make_pyobj_dispatch_fns(
     const py::object& py_handle,
     const py::object& cpp_dispatch_fn,
-    const py::object& cpp_redispatch_fn) {
+    const py::object& cpp_redispatch_fn,
+    const py::object& op_overload) {
   TORCH_CHECK(
       PyCallable_Check(cpp_dispatch_fn.ptr()),
       "cpp_dispatch_fn must be callable");
@@ -1283,6 +1351,7 @@ static py::tuple make_pyobj_dispatch_fns(
       handle,
       cpp_dispatch_fn.ptr(),
       cpp_redispatch_fn.ptr(),
+      op_overload.ptr(),
       pyobject_dispatch_vectorcall));
   auto make_redispatch = [&](bool below_autograd) {
     return py::reinterpret_steal<py::object>(make_pyobject_redispatch_func(
