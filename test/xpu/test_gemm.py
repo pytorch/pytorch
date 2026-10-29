@@ -1478,7 +1478,15 @@ class TestBasicGEMM(TestCase):
     @parametrize("out_dtype", [torch.float32, torch.bfloat16, torch.float16])
     @parametrize("use_bias", [True, False])
     def test_qlinear_w4a8_int(
-        self, device, m, k, n, q_group, act_dtype, out_dtype, use_bias
+        self,
+        device,
+        m,
+        k,
+        n,
+        q_group,
+        act_dtype,
+        out_dtype,
+        use_bias,
     ):
         inner_k_tiles = 2
         torch.manual_seed(1)

@@ -724,22 +724,20 @@ sycl::event scaled_matmul(
 static inline void set_quant_primitive_attr(
     primitive_attr& pattr,
     const Tensor& scale,
-    const Tensor& zp,
-    const int64_t group_size) {
-  // set scale and zero point for matmul args
+    const Tensor& zero_point,
+    const memory::dims& groups,
+    bool is_wei) {
+  const int arg = is_wei ? DNNL_ARG_WEIGHTS : DNNL_ARG_SRC;
   pattr.set_scales(
-      DNNL_ARG_WEIGHTS,
-      /* mask */ (1 << 0) + (1 << 1),
-      {group_size, 1},
-      get_onednn_dtype(scale));
+      arg, /* mask */ (1 << 0) + (1 << 1), groups, get_onednn_dtype(scale));
   pattr.set_zero_points(
-      DNNL_ARG_WEIGHTS,
+      arg,
       /* mask */ (1 << 0) + (1 << 1),
-      {group_size, 1},
-      memory::data_type::s8);
+      groups,
+      get_onednn_dtype(zero_point));
 }
 
-void matmul_int4_impl_cache(
+void matmul_int4(
     Tensor& result,
     const Tensor& mat1,
     const Tensor& mat2,
@@ -752,7 +750,7 @@ void matmul_int4_impl_cache(
   bool quantized_act = mat1_scale.has_value();
   TORCH_CHECK(
       quantized_act == mat1_zero_point.has_value(),
-      "matmul_int4_impl_cache: mat1_scale and mat1_zero_point must be defined together");
+      "matmul_int4: mat1_scale and mat1_zero_point must be defined together");
 
   auto a_sz = mat1.sizes();
   auto c_sz = result.sizes();
@@ -783,6 +781,10 @@ void matmul_int4_impl_cache(
     TORCH_INTERNAL_ASSERT(
         false, "Unsupported data type for int4 matmul: ", mat1.scalar_type());
   }
+  TORCH_CHECK(
+      quantized_act ==
+          (jd == joint_dtypes_t::s8_int4 || jd == joint_dtypes_t::u8_int4),
+      "matmul_int4: mat1_scale/mat1_zero_point must be provided if and only if mat1 is int8 or uint8");
 
   auto f_attr = [&](primitive_attr& pattr) {
     pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -793,19 +795,11 @@ void matmul_int4_impl_cache(
       pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
     }
 
-    set_quant_primitive_attr(pattr, mat2_scale, mat2_zero_point, group_size);
-
+    set_quant_primitive_attr(
+        pattr, mat2_scale, mat2_zero_point, {group_size, 1}, /* is_wei */ true);
     if (quantized_act) {
-      pattr.set_scales(
-          DNNL_ARG_SRC,
-          /* mask */ (1 << 0) + (1 << 1),
-          {1, k},
-          dnnl::memory::data_type::f32);
-      pattr.set_zero_points(
-          DNNL_ARG_SRC,
-          /* mask */ (1 << 0) + (1 << 1),
-          {1, k},
-          dnnl::memory::data_type::s32);
+      set_quant_primitive_attr(
+          pattr, *mat1_scale, *mat1_zero_point, {1, k}, /* is_wei */ false);
     }
 
 #if ONEDNN_SUPPORT_DETERMINISTIC
@@ -816,7 +810,6 @@ void matmul_int4_impl_cache(
 #endif
   };
 
-  int64_t zp_group_size = group_size;
   auto device_id = c10::xpu::current_device();
   auto& matmul_ext = matmul_primitive_create_and_cache(
       jd,
@@ -832,8 +825,7 @@ void matmul_int4_impl_cache(
       f_attr,
       mat2_scale.scalar_type(),
       get_onednn_dtype(result),
-      group_size,
-      zp_group_size);
+      group_size);
 
   auto& engine = GpuEngineManager::Instance().get_engine();
 
@@ -849,34 +841,25 @@ void matmul_int4_impl_cache(
       DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
       mat2_zero_point.data_ptr(),
       [&]() {
-        int num_groups = k / group_size;
-        memory zp_usr_m(
-            {{num_groups, n}, memory::data_type::s8, {n, 1}},
-            engine,
-            mat2_zero_point.data_ptr());
-        return zp_usr_m;
+        return make_onednn_memory(
+            get_onednn_md(mat2_zero_point), engine, mat2_zero_point.data_ptr());
       });
 
   if (quantized_act) {
     matmul_ext.set_attribute(
         DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, mat1_scale->data_ptr(), [&]() {
-          dnnl::memory::desc act_sc_md(
-              get_onednn_dims(*mat1_scale),
-              get_onednn_dtype(*mat1_scale),
-              get_onednn_strides(*mat1_scale));
-          return make_onednn_memory(act_sc_md, engine, mat1_scale->data_ptr());
+          return make_onednn_memory(
+              get_onednn_md(*mat1_scale), engine, mat1_scale->data_ptr());
         });
 
     matmul_ext.set_attribute(
         DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC,
         mat1_zero_point->data_ptr(),
         [&]() {
-          dnnl::memory::desc act_zp_md(
-              get_onednn_dims(*mat1_zero_point),
-              get_onednn_dtype(*mat1_zero_point),
-              get_onednn_strides(*mat1_zero_point));
           return make_onednn_memory(
-              act_zp_md, engine, mat1_zero_point->data_ptr());
+              get_onednn_md(*mat1_zero_point),
+              engine,
+              mat1_zero_point->data_ptr());
         });
   }
 
@@ -922,7 +905,7 @@ void woq_matmul_int4(
       cur_device == mat1_.device(),
       "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
 
-  matmul_int4_impl_cache(
+  matmul_int4(
       result,
       mat1_,
       mat2_,
