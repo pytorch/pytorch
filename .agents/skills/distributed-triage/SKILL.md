@@ -49,7 +49,7 @@ the `templates` to post, and your `reasoning`. The apply step enforces it:
 - Status comes from `decision`: uncertain/non-distributed/high-priority decisions require `triage review`, and `needs_reproduction` requires `needs reproduction`.
 - Confident decisions add `triaged` only with a valid sub-oncall (and a distributed module for parallelisms). Incomplete classifications go to `triage review`.
 - The apply step never adds `triaged` alongside `triage review` or `needs reproduction`; existing human labels are preserved.
-- `templates` are [templates.json](templates.json) keys posted verbatim; a template the bot already posted is not posted again.
+- Comments follow `decision`: `not_distributed` uses that template, `needs_reproduction` uses `needs_distributed_reproduction`, and other decisions post no comment. Conflicting requested templates are ignored. Templates from [templates.json](templates.json) are posted verbatim, without repeating an existing request.
 - `ptd-bot-triaged` is added automatically (except for `high_priority`); do not list it.
 - Nothing is ever closed.
 

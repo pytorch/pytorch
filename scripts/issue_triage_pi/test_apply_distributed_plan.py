@@ -209,11 +209,48 @@ class DistributedPlanEffectsTest(unittest.TestCase):
         existing = ROUTED | {"needs reproduction"}
         rerun = effects("needs_reproduction", existing=existing, bot_comments=[posted])
         self.assertEqual(rerun.comment, "")
+        self.assertEqual(rerun.comment_templates, [])
         self.assertEqual(rerun.add_labels, [MARKER])
         done = effects(
             "needs_reproduction", existing=existing | {MARKER}, bot_comments=[posted]
         )
         self.assertFalse(done.mutates)
+
+    def test_decision_selects_the_comment_template(self):
+        for decision, expected in (
+            ("not_distributed", "not_distributed"),
+            ("needs_reproduction", "needs_distributed_reproduction"),
+            ("classify", None),
+            ("route", None),
+            ("already_classified", None),
+            ("low_confidence", None),
+            ("high_priority", None),
+        ):
+            for requested in ([], list(TEMPLATES)):
+                with self.subTest(decision=decision, requested=requested):
+                    result = effects(
+                        decision,
+                        ["oncall: distributed parallelisms", "module: dtensor"],
+                        requested,
+                    )
+                    self.assertEqual(
+                        result.comment,
+                        TEMPLATES[expected]["comment"] if expected else "",
+                    )
+                    self.assertEqual(
+                        result.comment_templates, [expected] if expected else []
+                    )
+                    self.assertFalse(result.close)
+
+    def test_discarding_a_template_does_not_discard_review(self):
+        result = effects(
+            "classify",
+            ["oncall: distributed parallelisms", "module: dtensor", "triage review"],
+            ["not_distributed"],
+        )
+        self.assertEqual(result.comment, "")
+        self.assertIn("triage review", result.add_labels)
+        self.assertNotIn("triaged", result.add_labels)
 
     def test_classification_without_a_distributed_module_goes_to_review(self):
         for existing_modules, requested_modules in (
