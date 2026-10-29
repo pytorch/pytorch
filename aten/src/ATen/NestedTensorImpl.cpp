@@ -10,6 +10,7 @@
 #include <numeric>
 #include <functional>
 #include <utility>
+#include <c10/util/irange.h>
 
 namespace {
 inline void validate_nested_tensor_metadata(
@@ -115,7 +116,7 @@ at::Tensor construct_nested_strides(const at::Tensor& sizes) {
   at::Tensor strides = sizes.new_empty(sizes.sizes());
   const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
   int64_t* strides_ptr = strides.data_ptr<int64_t>();
-  for (int64_t i = 0; i < sizes.size(0); i++) {
+  for ([[maybe_unused]] const auto _ : c10::irange(sizes.size(0))) {
     strides_ptr[orig_dim - 1] = 1;
     int64_t product = sizes_ptr[orig_dim - 1];
     for (int64_t j = orig_dim - 2; j >= 0; j--) {

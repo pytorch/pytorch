@@ -8,6 +8,7 @@ import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -18,6 +19,8 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipUnless(TEST_CUTEDSL, "requires CuTeDSL")
 class TestInnerTreeCombineUnroll(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "unroll,rows",
         [(0, 1), (64, 33), (4096, 1)],
@@ -68,6 +71,8 @@ class TestInnerTreeCombineUnroll(TestCase):
     TEST_CUDA and SM90OrLater and TEST_CUTEDSL, "requires CUDA and CuTeDSL"
 )
 class TestInnerTreeCombineUnrollDevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_unaligned_partials_rejected_with_cached_plan(self, device):
         """Reject unaligned partials even when a compatible plan is already cached."""
         import cutlass

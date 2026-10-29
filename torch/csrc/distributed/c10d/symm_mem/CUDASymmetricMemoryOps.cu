@@ -21,6 +21,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
+#include <c10/util/irange.h>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -561,6 +562,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
       Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
       at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
+    // Finish staging before signaling peers.
+    __syncthreads();
   }
   // TODO make it sync with one block for no-copy case
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
@@ -823,7 +826,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
+  // Publish input writes before peer access.
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
@@ -838,7 +842,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     }
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + start + i);
-    for (size_t step = 0; step < world_size; ++step) {
+    for (const auto step : c10::irange(world_size)) {
       size_t remote_rank = (rank + step) % world_size;
       at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);
