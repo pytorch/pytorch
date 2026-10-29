@@ -1,4 +1,4 @@
-# This file is generated from OWNERSHIP.yaml by
+# DO NOT MODIFY THIS FILE DIRECTLY!! This file is generated from OWNERSHIP.yaml by
 # scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun
 # the script (or `lintrunner -a`) instead of editing this file.
 
@@ -25,12 +25,9 @@
 # - A label list identifies one ownership area, so each label list (compared
 #   as a set) appears on exactly one "# label:" line. When a list extends a
 #   sibling's, the shared labels come first and the distinguishing label last.
-# - Oncall queues are implied by module labels and are not repeated on label
-#   lines; a label line keeps an oncall only when none of its modules implies
-#   it:
-#     oncall: distributed: c10d, ddp, dtensor, fsdp, tensorpipe
-#     oncall: mobile: android, vulkan
-#     oncall: pt2: ProxyTensor, aotdispatch, compiled autograd, dynamic shapes, dynamo, fakeTensor, higher order operators, inductor
+# - A label line leaves out an oncall label when one of its module labels
+#   implies it; .github/label_to_label.yml records which modules imply which
+#   oncall.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
 #   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
@@ -41,9 +38,8 @@
 # Every tracked path resolves to one review surface. Every listed pattern must
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
-# ineffective patterns, and the "# label:" and "# owner:" rules: each label
-# list appears on one "# label:" line, which is directly followed by one
-# "# owner:" line, and an active rule's handles appear on its block's owner line.
+# ineffective patterns, and that an active rule's handles appear on its
+# block's owner line.
 #
 # Sections are kept temporarily so scripts/codeowners/owners.py keeps its
 # section-name fallback; ownership is recorded per label block, not per section.

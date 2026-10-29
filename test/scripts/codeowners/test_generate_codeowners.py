@@ -21,8 +21,6 @@ from generate_codeowners import load_ownership, render_codeowners, SECTION_MARKE
 
 
 OWNERSHIP = """\
-oncall_queues:
-  "oncall: pt2": ["module: dynamo"]
 planned_labels: ["module: tvm"]
 sections:
   - compiler_dynamo
@@ -89,7 +87,6 @@ class TestGenerateCodeowners(TestCase):
     def test_render(self):
         text = render(OWNERSHIP)
         header, sections = text.split(SECTION_MARKER + "\n")
-        self.assertIn("#     oncall: pt2: dynamo\n", header)
         self.assertIn("#   them until they exist): module: tvm\n", header)
         self.assertIn(
             "# - Sections: compiler_dynamo, python_nn_api, protected_codeownership\n",
@@ -150,14 +147,6 @@ class TestGenerateCodeowners(TestCase):
             "'dynamo' and 'tvm_dynamo' have the same labels": (
                 '["module: dynamo", "module: tvm"]',
                 '["module: dynamo"]',
-            ),
-            "oncall: pt2 is implied by its module labels": (
-                'labels: ["module: dynamo"]',
-                'labels: ["oncall: pt2", "module: dynamo"]',
-            ),
-            "oncall_queues lists labels no entry uses: module: inductor": (
-                '["module: dynamo"]\nplanned',
-                '["module: dynamo", "module: inductor"]\nplanned',
             ),
             "unknown keys \\['owner'\\]": (
                 "owners: [pearu]",

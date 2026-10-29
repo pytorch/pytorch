@@ -12,10 +12,6 @@
 # commented rule. `section` is the CODEOWNERS section the group's paths are
 # written under; it is kept temporarily for scripts/codeowners/owners.py.
 
-oncall_queues:
-  "oncall: distributed": ["module: c10d", "module: ddp", "module: dtensor", "module: fsdp", "module: tensorpipe"]
-  "oncall: mobile": ["module: android", "module: vulkan"]
-  "oncall: pt2": ["module: ProxyTensor", "module: aotdispatch", "module: compiled autograd", "module: dynamic shapes", "module: dynamo", "module: fakeTensor", "module: higher order operators", "module: inductor"]
 planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
 # CODEOWNERS section order (temporary, see above).
 sections:

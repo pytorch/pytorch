@@ -22,13 +22,7 @@ import yaml
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
-TOP_LEVEL_KEYS = {
-    "oncall_queues",
-    "planned_labels",
-    "sections",
-    "section_notes",
-    "ownership",
-}
+TOP_LEVEL_KEYS = {"planned_labels", "sections", "section_notes", "ownership"}
 GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
 
 
@@ -54,7 +48,6 @@ class LabelGroup:
 
 @dataclass(frozen=True)
 class OwnershipFile:
-    oncall_queues: dict[str, tuple[str, ...]]
     planned_labels: tuple[str, ...]
     sections: tuple[str, ...]
     section_notes: dict[str, tuple[str, ...]]
@@ -120,7 +113,7 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
 
 
 def check_consistency(ownership: OwnershipFile) -> None:
-    """Cross-entry rules: unique names and label sets, and a consistent oncall table."""
+    """Cross-entry rules: unique names and label sets."""
     names = [group.name for group in ownership.groups]
     duplicates = sorted({name for name in names if names.count(name) > 1})
     if duplicates:
@@ -134,27 +127,6 @@ def check_consistency(ownership: OwnershipFile) -> None:
                     f"entries {label_sets[key]!r} and {group.name!r} have the same labels"
                 )
             label_sets[key] = group.name
-
-    oncall_of = {}
-    for oncall, modules in ownership.oncall_queues.items():
-        for module in modules:
-            if module in oncall_of:
-                raise ValueError(f"{module!r} is listed under two oncall queues")
-            oncall_of[module] = oncall
-    used_labels = {label for group in ownership.groups for label in group.labels}
-    stale = sorted(set(oncall_of) - used_labels)
-    if stale:
-        raise ValueError(
-            f"oncall_queues lists labels no entry uses: {', '.join(stale)}"
-        )
-    for group in ownership.groups:
-        implied = {oncall_of[label] for label in group.labels if label in oncall_of}
-        redundant = sorted(implied & set(group.labels))
-        if redundant:
-            raise ValueError(
-                f"ownership entry {group.name!r}: {', '.join(redundant)} is implied by "
-                "its module labels; drop it (see oncall_queues)"
-            )
 
 
 def load_ownership(path: Path) -> OwnershipFile:
@@ -183,12 +155,6 @@ def load_ownership(path: Path) -> OwnershipFile:
     if not isinstance(document["ownership"], list):
         raise ValueError("ownership must be a list")
     ownership = OwnershipFile(
-        oncall_queues={
-            oncall: string_list(modules, where=f"oncall_queues {oncall}")
-            for oncall, modules in mapping(
-                document["oncall_queues"], where="oncall_queues"
-            ).items()
-        },
         planned_labels=string_list(document["planned_labels"], where="planned_labels"),
         sections=sections,
         section_notes=section_notes,
@@ -212,10 +178,6 @@ def render_rule(rule: PathRule) -> str:
 
 
 def render_header(ownership: OwnershipFile) -> list[str]:
-    oncall_map = [
-        f"#     {oncall}: {', '.join(m.removeprefix('module: ') for m in modules)}"
-        for oncall, modules in ownership.oncall_queues.items()
-    ]
     planned = (
         [
             "# - Labels planned but not yet created on GitHub (issues can't be routed to",
@@ -225,7 +187,7 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         else []
     )
     return [
-        "# This file is generated from OWNERSHIP.yaml by",
+        "# DO NOT MODIFY THIS FILE DIRECTLY!! This file is generated from OWNERSHIP.yaml by",
         "# scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun",
         "# the script (or `lintrunner -a`) instead of editing this file.",
         "",
@@ -252,10 +214,9 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# - A label list identifies one ownership area, so each label list (compared",
         '#   as a set) appears on exactly one "# label:" line. When a list extends a',
         "#   sibling's, the shared labels come first and the distinguishing label last.",
-        "# - Oncall queues are implied by module labels and are not repeated on label",
-        "#   lines; a label line keeps an oncall only when none of its modules implies",
-        "#   it:",
-        *oncall_map,
+        "# - A label line leaves out an oncall label when one of its module labels",
+        "#   implies it; .github/label_to_label.yml records which modules imply which",
+        "#   oncall.",
         *planned,
         "#",
         "# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.",
@@ -265,9 +226,8 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# Every tracked path resolves to one review surface. Every listed pattern must",
         "# match at least one committed path. The fast lintrunner set enforces these",
         "# rules, declared sections, valid owners, source order, no duplicate or",
-        '# ineffective patterns, and the "# label:" and "# owner:" rules: each label',
-        '# list appears on one "# label:" line, which is directly followed by one',
-        "# \"# owner:\" line, and an active rule's handles appear on its block's owner line.",
+        "# ineffective patterns, and that an active rule's handles appear on its",
+        "# block's owner line.",
         "#",
         "# Sections are kept temporarily so scripts/codeowners/owners.py keeps its",
         "# section-name fallback; ownership is recorded per label block, not per section.",
