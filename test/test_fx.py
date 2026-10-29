@@ -1863,6 +1863,8 @@ class TestFX(JitTestCase):
         # lazy_body2 from the globals of a child forward defined in another file.
         # Each body scripts a fresh function so torch.jit.script's per-function
         # cache cannot reuse lazy_body's compilation for lazy_body2.
+        # No CI runner has a PEP 690 interpreter, so this is skipped in CI and
+        # kept for manual runs on one.
         from fx import lazy_wrap_helper
 
         helper_src = inspect.getsource(lazy_wrap_helper)
@@ -1877,6 +1879,7 @@ class TestFX(JitTestCase):
         script = """
 import importlib, torch
 import lazy_wrap_helper, lazy_model
+# Load the helper so its torch.fx.wrap("scaled") registers before the trace.
 lazy_wrap_helper.__dict__
 m = lazy_model.M()
 assert importlib.is_lazy_import(lazy_model.__dict__, "lazy_body")
