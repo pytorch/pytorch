@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
+import shlex
 import subprocess
 
 import torch
@@ -82,9 +84,18 @@ def investigate(data, report, debug):
                                                    2, 0, False, [True, True])
     baseline = [torch.ops.aten.grid_sampler_2d_backward(cv, iv, gv, 2, 0, False, [True, True])
                 for iv, gv, cv in layouts]
-    flags = ["-O3", "-std=c++20", "-fno-math-errno", "-fno-trapping-math"]
+    configuration = torch.__config__.show()
+    match = re.search(r"\bCXX_FLAGS=(.*?)(?=, [A-Z][A-Z0-9_]*=|\n|$)", configuration)
+    assert match, configuration
+    # Preserve the wheel's Release definitions and global flags. CPU capability
+    # compilation adds -O3 and the vector flags after those global options.
+    flags = shlex.split(match.group(1)) + ["-O3", "-std=c++20"]
+    openmp = "USE_OPENMP=ON" in configuration
+    if openmp:
+        flags.append("-fopenmp")
     flags += (["-march=z15", "-mvx", "-mzvector", "-DCPU_CAPABILITY=ZVECTOR", "-DCPU_CAPABILITY_ZVECTOR"]
               if native else ["-mavx2", "-mfma", "-mf16c", "-DCPU_CAPABILITY=AVX2", "-DCPU_CAPABILITY_AVX2"])
+    print("S390_NATIVE_CODEGEN_FLAGS", json.dumps(flags), flush=True)
     results = {}
     for label, explicit, extra in [("original", False, []),
                                    ("contraction_off", False, ["-ffp-contract=off"]),
@@ -94,6 +105,7 @@ def investigate(data, report, debug):
         cpp = folder / "kernel.cpp"
         cpp.write_text(kernel_source(label, explicit))
         load(name="triton_pin_" + label, sources=[str(cpp)], extra_cflags=flags + extra,
+             extra_ldflags=["-fopenmp"] if openmp else [],
              build_directory=str(folder), is_python_module=False, verbose=True)
         op = getattr(torch.ops, "triton_pin_" + label).bicubic_backward
         outputs = [op(iv, gv, cv) for iv, gv, cv in layouts]
