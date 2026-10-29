@@ -100,7 +100,14 @@ def remove_no_ops(
 ):
     """
     Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+
+    Strict C++ path (experimental_cpp_ir): x*1 / x+0 / x-0 / x/1 change
+    signed-zero / NaN rounding, so retain them and only run the meta-tensor
+    output fixup below.
     """
+    from .cpp_ir_strict import keep_fp_neutral_op_elimination
+
+    strict_keep_neutrals = not keep_fp_neutral_op_elimination()
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
@@ -172,6 +179,9 @@ def remove_no_ops(
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
+            if strict_keep_neutrals:
+                # Strict: retain x+0 to preserve NaN / signed-zero bits.
+                continue
             if len(node.args) == 2:
                 if (
                     not any(
@@ -195,6 +205,9 @@ def remove_no_ops(
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
+            if strict_keep_neutrals:
+                # Strict: retain x-0 to preserve signed-zero bits.
+                continue
             if len(node.args) == 2:
                 if (
                     not (
@@ -208,6 +221,9 @@ def remove_no_ops(
                 replace_no_op(node, 0)
 
         for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
+            if strict_keep_neutrals:
+                # Strict: retain x*1 to preserve NaN payload / signed-zero bits.
+                continue
             if len(node.args) == 2:
                 if not any(
                     e in ones or (isScalarValue(e) and e == 1) for e in node.args
@@ -223,6 +239,9 @@ def remove_no_ops(
                 replace_no_op(node, replace_input_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
+            if strict_keep_neutrals:
+                # Strict: retain x/1 to preserve NaN / signed-zero bits.
+                continue
             if len(node.args) == 2 and (
                 node.args[1] in ones
                 or (isScalarValue(node.args[1]) and node.args[1] == 1)
@@ -561,6 +580,11 @@ def _remove_zero_bias_from_efficient_attention(
     uniform_values: dict[torch.fx.Node, Any],
 ) -> None:
     if config.numerics == "strict":
+        return
+    from .cpp_ir_strict import allow_zero_bias_removal
+
+    if not allow_zero_bias_removal():
+        # Strict C++ path: keep proven-zero bias (mask vs explicit add).
         return
 
     targets = (
@@ -1079,6 +1103,11 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    from .cpp_ir_strict import allow_bmm_to_mm
+
+    if not allow_bmm_to_mm():
+        # Strict C++ path: different kernel/accumulation order; keep bmm.
+        return
     # See Note [Preserving FlexGEMM body GEMMs].
     if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
         return
@@ -1179,6 +1208,12 @@ def _other_is_broadcasted_in_dim(match):
 
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
+    from .cpp_ir_strict import allow_scaled_softmax_stabilization
+
+    if not allow_scaled_softmax_stabilization():
+        # Strict C++ path: reordering scale/max changes rounding; keep original.
+        return
+
     def repl(inp, other):
         scaled = inp * other
         if dtype is not None:
@@ -1214,6 +1249,12 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
+    from .cpp_ir_strict import allow_scaled_softmax_stabilization
+
+    if not allow_scaled_softmax_stabilization():
+        # Strict C++ path: reordering scale/max changes rounding; keep original.
+        return
+
     def repl(inp, other):
         scaled = inp / other
         if dtype is not None:
