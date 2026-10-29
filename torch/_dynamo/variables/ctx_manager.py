@@ -1476,6 +1476,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
+    def supports_graph_breaks(self) -> bool:
+        return False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         unimplemented(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
