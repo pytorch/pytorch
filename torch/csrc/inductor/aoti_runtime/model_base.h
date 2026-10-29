@@ -1443,7 +1443,7 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs through this instance's
   // CudaGraphManager.
-  void run_with_cuda_graph(
+  void run_with_lazy_cuda_graphs(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
                          // are stolen; the array itself is borrowed
@@ -1453,8 +1453,7 @@ class AOTInductorModelBase {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
-      std::optional<int64_t> max_graphs,
-      std::mutex* capture_mutex) {
+      std::optional<int64_t> max_graphs) {
     AOTI_RUNTIME_CHECK(
         cudagraphs_,
         "Running as CUDA graphs requires compiling the model with "
@@ -1469,7 +1468,6 @@ class AOTInductorModelBase {
       if (max_graphs) {
         options.max_graphs = *max_graphs;
       }
-      options.capture_mutex = capture_mutex;
       cudagraph_manager_ =
           std::make_unique<CudaGraphManager>(device_idx_, options);
     }

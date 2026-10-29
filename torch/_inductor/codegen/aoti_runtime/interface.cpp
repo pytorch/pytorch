@@ -286,7 +286,7 @@ AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
   return AOTI_RUNTIME_SUCCESS;
 })
 
-AOTIRuntimeError AOTInductorModelContainerRunWithCudaGraph(
+AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed
@@ -307,7 +307,7 @@ AOTIRuntimeError AOTInductorModelContainerRunWithCudaGraph(
   auto stream =
       reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   AOTINoGradGuard guard;
-  container->run_with_cuda_graph(
+  container->run_with_lazy_cuda_graphs(
       input_handles, output_handles, stream, proxy_executor_handle);
   return AOTI_RUNTIME_SUCCESS;
 #else

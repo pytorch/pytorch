@@ -739,16 +739,18 @@ class AOTICompiledModel:
     def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return self._run(self.loader.boxed_run, args, kwargs)
 
-    def run_with_cuda_graph(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def run_with_lazy_cuda_graphs(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         """
-        Like calling the model, but runs it as CUDA graphs; requires a CUDA
+        Like calling the model, but runs it as CUDA graphs captured lazily,
+        on first use; requires a CUDA
         model compiled with ``aot_inductor.cudagraphs=True``. A new input
         layout runs eagerly first, is captured on its next call and replayed
         after that, up to ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8)
         graphs per model instance. Outputs are copies, and once a graph is
-        captured, the model's constants can't change.
+        captured, the model's constants can't change. Not supported on ROCm
+        yet; see https://github.com/ROCm/rocm-systems/issues/12677.
         """
-        return self._run(self.loader.run_with_cuda_graph, args, kwargs)
+        return self._run(self.loader.run_with_lazy_cuda_graphs, args, kwargs)
 
     def _run(self, run_fn, args, kwargs):  # type: ignore[no-untyped-def]
         call_spec = self.loader.get_call_spec()

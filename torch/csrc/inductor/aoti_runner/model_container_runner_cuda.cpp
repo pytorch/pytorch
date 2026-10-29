@@ -50,10 +50,11 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_impl(
       input_handles, stream_or_current(stream_handle));
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_graph_impl(
-    std::vector<AtenTensorHandle>& input_handles,
-    void* stream_handle) {
-  return AOTIModelContainerRunner::run_with_cuda_graph_impl(
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::
+    run_with_lazy_cuda_graphs_impl(
+        std::vector<AtenTensorHandle>& input_handles,
+        void* stream_handle) {
+  return AOTIModelContainerRunner::run_with_lazy_cuda_graphs_impl(
       input_handles, stream_or_current(stream_handle));
 }
 

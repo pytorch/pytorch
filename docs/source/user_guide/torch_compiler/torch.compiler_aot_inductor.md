@@ -193,9 +193,13 @@ Result from the second inference:
 ## Running as CUDA graphs
 
 A CUDA model compiled with `aot_inductor.cudagraphs=True` can run as CUDA graphs
-that the runtime captures and replays, which cuts the host overhead of launching
-kernels. The compile fails if the model can't be captured, e.g. because it runs
-ops on the CPU, syncs with the host, or has data-dependent shapes.
+that the runtime captures lazily, on first use, and replays, which cuts the host
+overhead of launching kernels. The compile fails if the model can't be
+captured, e.g. because it runs ops on the CPU, syncs with the host, or has
+data-dependent shapes. Models that use random numbers are rejected too, for
+now, and so is ROCm, where a capture can't yet run safely next to other GPU
+work in the process
+([ROCm/rocm-systems#12677](https://github.com/ROCm/rocm-systems/issues/12677)).
 
 ```python
 package_path = torch._inductor.aoti_compile_and_package(
@@ -203,10 +207,11 @@ package_path = torch._inductor.aoti_compile_and_package(
     inductor_configs={"aot_inductor.cudagraphs": True},
 )
 compiled = torch._inductor.aoti_load_package(package_path)
-out = compiled.run_with_cuda_graph(*example_inputs)
+out = compiled.run_with_lazy_cuda_graphs(*example_inputs)
 ```
 
-In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments as `run`.
+In C++, `AOTIModelPackageLoader::run_with_lazy_cuda_graphs` takes the same
+arguments as `run`.
 
 - A new input layout (shapes and strides) runs eagerly on its first call, is
   captured on its next call and replayed after that. A thread's first call on

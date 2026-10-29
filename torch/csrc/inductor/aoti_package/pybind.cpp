@@ -78,8 +78,8 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
       .def(
-          "run_with_cuda_graph",
-          &AOTIModelPackageLoaderPybind::run_with_cuda_graph,
+          "run_with_lazy_cuda_graphs",
+          &AOTIModelPackageLoaderPybind::run_with_lazy_cuda_graphs,
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr,
           py::call_guard<py::gil_scoped_release>())

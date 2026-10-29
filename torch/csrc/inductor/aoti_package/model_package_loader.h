@@ -30,8 +30,8 @@ class TORCH_API AOTIModelPackageLoader {
       void* stream_handle = nullptr);
 
   // Runs the model as CUDA graphs; see
-  // AOTInductorModelContainerRunWithCudaGraph.
-  std::vector<at::Tensor> run_with_cuda_graph(
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  std::vector<at::Tensor> run_with_lazy_cuda_graphs(
       const std::vector<at::Tensor>& inputs,
       void* stream_handle = nullptr);
 

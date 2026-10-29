@@ -170,14 +170,16 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
-// Like AOTInductorModelContainerRun, but runs the model as CUDA graphs. On
-// each model instance, a new input layout (shapes and strides) runs eagerly
-// first, as does a thread's first call, is captured on its next call and
-// replayed after that, up to AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs
-// (default 8); past that, new layouts run eagerly. Once a graph is captured,
-// the container's constants can't change. Requires a CUDA model compiled with
-// aot_inductor.cudagraphs=True.
-AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithCudaGraph(
+// Like AOTInductorModelContainerRun, but runs the model as CUDA graphs that
+// it captures lazily. On each model instance, a new input layout (shapes and
+// strides) runs eagerly first, as does a thread's first call, is captured on
+// its next call and replayed after that, up to
+// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs (default 8); past that, new layouts
+// run eagerly. Once a graph is captured, the container's constants can't
+// change. Requires a CUDA model compiled with aot_inductor.cudagraphs=True,
+// which ROCm doesn't support yet, see
+// https://github.com/ROCm/rocm-systems/issues/12677.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed

@@ -240,7 +240,7 @@ class AOTInductorModelContainer {
 
   // Callers can't capture this into a CUDA graph, e.g. with torch.cuda.graph,
   // since checking out an instance may query events of earlier calls. Use
-  // run_with_cuda_graph(), or capture run_single_threaded().
+  // run_with_lazy_cuda_graphs(), or capture run_single_threaded().
   void run(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
@@ -259,8 +259,8 @@ class AOTInductorModelContainer {
 
 #ifdef USE_CUDA
   // Like run(), but runs the model as CUDA graphs; see
-  // AOTInductorModelContainerRunWithCudaGraph.
-  void run_with_cuda_graph(
+  // AOTInductorModelContainerRunWithLazyCudaGraphs.
+  void run_with_lazy_cuda_graphs(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles
                          // are stolen; the array itself is borrowed
@@ -280,13 +280,12 @@ class AOTInductorModelContainer {
             }
           };
           try {
-            model->run_with_cuda_graph(
+            model->run_with_lazy_cuda_graphs(
                 input_handles,
                 output_handles,
                 stream,
                 proxy_executor,
-                max_graphs_env_.value,
-                capture_mutex());
+                max_graphs_env_.value);
           } catch (...) {
             mark_captured();
             throw;
@@ -961,7 +960,7 @@ class AOTInductorModelContainer {
   }
 
   // AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS, read once so every instance gets the
-  // same limit; a bad value fails run_with_cuda_graph().
+  // same limit; a bad value fails run_with_lazy_cuda_graphs().
   struct MaxGraphsEnv {
     std::optional<int64_t> value;
     std::string error;
@@ -994,17 +993,6 @@ class AOTInductorModelContainer {
         "graphs");
   }
   std::atomic<bool> captured_cuda_graphs_{false};
-
-  // Shared by the instances' managers on ROCm; see
-  // CudaGraphOptions::capture_mutex.
-  std::mutex* capture_mutex() {
-#ifdef USE_ROCM
-    return &capture_mutex_;
-#else
-    return nullptr;
-#endif // USE_ROCM
-  }
-  std::mutex capture_mutex_;
 
   // Folds the constants on the first call, then runs fn on a model instance
   // checked out of the pool and leaves the instance pending until its work

@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
+    skipIfRocm,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -959,17 +960,18 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(new_weights, True, False)
 
         # Leave too little memory for the 32 MB folded constant.
+        original_fraction = torch.cuda.get_per_process_memory_fraction()
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
         total = torch.cuda.get_device_properties(self.device).total_memory
-        torch.cuda.set_per_process_memory_fraction(
-            (torch.cuda.memory_reserved() + (8 << 20)) / total
-        )
+        fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
+        torch.cuda.set_per_process_memory_fraction(fraction)
         try:
             with self.assertRaises(RuntimeError):
                 runner.run_const_fold(True)
         finally:
-            torch.cuda.set_per_process_memory_fraction(1.0)
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(original_fraction)
         self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
@@ -10423,6 +10425,7 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
+    @skipIfRocm
     def test_aot_cudagraphs_accepts_capturable_model(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10432,12 +10435,29 @@ class AOTInductorTestsTemplate:
                 # Folded into a CUDA constant at compile time.
                 return x + torch.tensor([1.0, 2.0, 3.0, 4.0]).to(x.device)
 
+        @torch.compiler.nested_compile_region
+        def scale(x):
+            return x * 2
+
+        class NestedRegion(torch.nn.Module):
+            def forward(self, x):
+                return scale(x) + scale(x + 1)
+
+        class UnusedInput(torch.nn.Module):
+            def forward(self, x, y):
+                return x + 1
+
         x = torch.randn(4, 4, device=self.device)
         mlp = torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU())
-        for model in (mlp.to(self.device), CpuConstant()):
+        for model, inputs in (
+            (mlp.to(self.device), (x,)),
+            (CpuConstant(), (x,)),
+            (NestedRegion(), (x,)),
+            (UnusedInput(), (x, torch.randn(3, device=self.device))),
+        ):
             with self.subTest(type(model).__name__):
                 so_path = AOTIRunnerUtil.legacy_compile(
-                    model, (x,), options={"aot_inductor.cudagraphs": True}
+                    model, inputs, options={"aot_inductor.cudagraphs": True}
                 )
                 runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
                     so_path, 1, self.device
@@ -10445,12 +10465,23 @@ class AOTInductorTestsTemplate:
                 launches = []
                 for _ in range(3):
                     (out,), launched = run_profiled(
-                        lambda: runner.run_with_cuda_graph([x])
+                        lambda: runner.run_with_lazy_cuda_graphs(list(inputs))
                     )
-                    self.assertEqual(out, model(x))
+                    self.assertEqual(out, model(*inputs))
                     launches.append(launched)
                 # Warm-up, capture, replay.
                 self.assertEqual(launches, [False, True, True])
+
+    @runOnRocm
+    def test_aot_cudagraphs_rejects_rocm(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        with self.assertRaisesRegex(Exception, "ROCm isn't supported yet"):
+            AOTIRunnerUtil.compile(
+                torch.nn.Linear(4, 4).to(self.device),
+                (torch.randn(2, 4, device=self.device),),
+                inductor_configs={"aot_inductor.cudagraphs": True},
+            )
 
     def test_aot_cudagraphs_rejects_non_cuda_model(self):
         if self.device == "cuda":
@@ -10462,6 +10493,7 @@ class AOTInductorTestsTemplate:
                 inductor_configs={"aot_inductor.cudagraphs": True},
             )
 
+    @skipIfRocm
     def test_aot_cudagraphs_rejects_uncapturable_models(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10506,6 +10538,10 @@ class AOTInductorTestsTemplate:
                 torch.cuda.synchronize()
                 return y * 2
 
+        class Random(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand_like(x)
+
         class WhileLoop(torch.nn.Module):
             def forward(self, x):
                 return torch._higher_order_ops.while_loop(
@@ -10524,6 +10560,7 @@ class AOTInductorTestsTemplate:
             (SyncsEvent(), "incompatible op streams.synchronize_event", {}),
             (SyncsStream(), "incompatible op streams.synchronize_stream", {}),
             (SyncsDevice(), "incompatible op streams.synchronize_device", {}),
+            (Random(), r"it uses random numbers \(prims.inductor_seeds", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
@@ -10556,6 +10593,7 @@ class AOTInductorTestsTemplate:
                     inductor_configs={"aot_inductor.cudagraphs": True},
                 )
 
+    @skipIfRocm
     def test_aot_cudagraphs_checks_subgraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10587,6 +10625,7 @@ class AOTInductorTestsTemplate:
                         inductor_configs={"aot_inductor.cudagraphs": True},
                     )
 
+    @skipIfRocm
     @requires_multigpu()
     def test_aot_cudagraphs_rejects_multi_device_model(self):
         if self.device != "cuda":
@@ -10603,6 +10642,7 @@ class AOTInductorTestsTemplate:
                 inductor_configs={"aot_inductor.cudagraphs": True},
             )
 
+    @skipIfRocm
     def test_aot_cudagraphs_run_captures_and_replays(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10618,7 +10658,9 @@ class AOTInductorTestsTemplate:
 
         def launches_graph(runner, batch_size):
             x = torch.randn(batch_size, 16, device=self.device)
-            (out,), launched = run_profiled(lambda: runner.run_with_cuda_graph([x]))
+            (out,), launched = run_profiled(
+                lambda: runner.run_with_lazy_cuda_graphs([x])
+            )
             self.assertEqual(out, model(x))
             return launched
 
@@ -10645,8 +10687,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual([launches_graph(runner, 4) for _ in range(3)], [False] * 3)
         runner = new_runner({"AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS": "3x"})
         with self.assertRaisesRegex(RuntimeError, "must be a non-negative integer"):
-            runner.run_with_cuda_graph([torch.randn(4, 16, device=self.device)])
+            runner.run_with_lazy_cuda_graphs([torch.randn(4, 16, device=self.device)])
 
+    @skipIfRocm
     def test_aot_cudagraphs_run_rejects_constant_updates(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10669,9 +10712,9 @@ class AOTInductorTestsTemplate:
             return weights
 
         # A warm-up call captures nothing, so the constants can still change.
-        runner.run_with_cuda_graph([x])
+        runner.run_with_lazy_cuda_graphs([x])
         runner.update_constant_buffer(new_weights(), False, False)
-        (out,) = runner.run_with_cuda_graph([x])
+        (out,) = runner.run_with_lazy_cuda_graphs([x])
         self.assertEqual(out, model(x))
         # Now a graph exists.
         msg = "captured CUDA graphs"
@@ -10682,12 +10725,15 @@ class AOTInductorTestsTemplate:
             blob.flush()
             with self.assertRaisesRegex(RuntimeError, msg):
                 runner.update_constant_buffer_from_blob(blob.name)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            runner.run_const_fold(False)
         # The inactive buffer can still be updated, but not swapped in.
         weights = new_weights()
         runner.update_constant_buffer(weights, True, False)
         with self.assertRaisesRegex(RuntimeError, msg):
             runner.swap_constant_buffer()
 
+    @skipIfRocm
     def test_aot_cudagraphs_run_on_several_instances(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10712,13 +10758,13 @@ class AOTInductorTestsTemplate:
                     barrier.wait(timeout=60)
                     for _ in range(20):
                         x = torch.randn(4, 16, device=self.device)
-                        (out,) = runner.run_with_cuda_graph([x])
+                        (out,) = runner.run_with_lazy_cuda_graphs([x])
                         self.assertEqual(out, model(x))
             except Exception as e:
                 errors.append(e)
 
         def run_threads():
-            # run_with_cuda_graph releases the GIL, so the threads run concurrently.
+            # The call releases the GIL, so the threads run concurrently.
             threads = [threading.Thread(target=work) for _ in range(4)]
             for t in threads:
                 t.start()
@@ -10730,6 +10776,7 @@ class AOTInductorTestsTemplate:
             raise errors[0]
         self.assertTrue(launched)
 
+    @skipIfRocm
     def test_aot_cudagraphs_run_from_package(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -10743,7 +10790,7 @@ class AOTInductorTestsTemplate:
         compiled = torch._inductor.aoti_load_package(package_path)
         launches = []
         for _ in range(3):
-            out, launched = run_profiled(lambda: compiled.run_with_cuda_graph(x))
+            out, launched = run_profiled(lambda: compiled.run_with_lazy_cuda_graphs(x))
             self.assertEqual(out, model(x))
             launches.append(launched)
         self.assertEqual(launches, [False, True, True])
@@ -10758,7 +10805,7 @@ class AOTInductorTestsTemplate:
         )
         compiled = torch._inductor.aoti_load_package(package_path)
         with self.assertRaisesRegex(RuntimeError, "requires a CUDA model"):
-            compiled.run_with_cuda_graph(x)
+            compiled.run_with_lazy_cuda_graphs(x)
 
     def test_aot_cudagraphs_run_requires_flag(self):
         if self.device != "cuda":
@@ -10768,7 +10815,7 @@ class AOTInductorTestsTemplate:
         so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
         with self.assertRaisesRegex(RuntimeError, "aot_inductor.cudagraphs=True"):
-            runner.run_with_cuda_graph([x])
+            runner.run_with_lazy_cuda_graphs([x])
         # The rejected call captured nothing, so the constants can still change.
         state = model.state_dict()
         names = runner.get_constant_names_to_original_fqns()

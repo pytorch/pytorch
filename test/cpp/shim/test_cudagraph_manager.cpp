@@ -12,9 +12,7 @@
 #include <torch/csrc/inductor/aoti_runtime/cudagraph_manager.h>
 
 #include <array>
-#include <atomic>
-#include <chrono>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -72,7 +70,8 @@ at::Tensor affine(const at::Tensor& x) {
   return x * 2 + 1;
 }
 
-at::Tensor run(CudaGraphManager& manager, Region& region, at::Tensor x) {
+template <typename Fn>
+at::Tensor run(CudaGraphManager& manager, Fn& region, at::Tensor x) {
   auto input = reinterpret_cast<AtenTensorHandle>(&x);
   AtenTensorHandle output = nullptr;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
@@ -93,6 +92,24 @@ CudaGraphOptions no_warmup() {
   options.warmup_calls = 0;
   return options;
 }
+
+template <typename Fn>
+void expect_error(Fn&& fn, const std::string& message) {
+  try {
+    fn();
+    ADD_FAILURE() << "expected an error containing: " << message;
+  } catch (const std::exception& e) {
+    EXPECT_NE(std::string(e.what()).find(message), std::string::npos)
+        << e.what();
+  }
+}
+
+struct CollectWarnings : c10::WarningHandler {
+  std::vector<std::string> messages;
+  void process(const c10::Warning& warning) override {
+    messages.push_back(warning.msg());
+  }
+};
 
 class CudaGraphManagerTest : public ::testing::Test {
  protected:
@@ -172,47 +189,6 @@ TEST_F(CudaGraphManagerTest, NewThreadsWarmUpEvenWithAReusedId) {
   EXPECT_EQ(region.calls, 2);
 }
 
-TEST_F(CudaGraphManagerTest, WarmupsAndCapturesHoldTheCaptureMutex) {
-  std::mutex capture_mutex;
-  auto x = at::randn({8}, at::kCUDA);
-  // Runs a call on another thread while capture_mutex is held, and checks that
-  // the call waits for it.
-  auto expect_waits = [&](CudaGraphManager& manager, Region& region) {
-    std::unique_lock<std::mutex> held(capture_mutex);
-    std::atomic<bool> done{false};
-    std::thread caller([&] {
-      run(manager, region, x);
-      done = true;
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    EXPECT_FALSE(done);
-    held.unlock();
-    caller.join();
-  };
-  CudaGraphOptions options;
-  options.capture_mutex = &capture_mutex;
-  CudaGraphManager warming(0, options);
-  Region warming_region(affine);
-  expect_waits(warming, warming_region);
-  EXPECT_EQ(warming.num_graphs(), 0);
-
-  // A thread's first eager call, here past max_graphs, also waits.
-  CudaGraphOptions no_graphs = options;
-  no_graphs.max_graphs = 0;
-  CudaGraphManager eager(0, no_graphs);
-  Region eager_region(affine);
-  expect_waits(eager, eager_region);
-
-  options.warmup_calls = 0;
-  CudaGraphManager capturing(0, options);
-  Region region(affine);
-  expect_waits(capturing, region);
-  EXPECT_EQ(capturing.num_graphs(), 1);
-  // A replay doesn't take it.
-  std::lock_guard<std::mutex> held(capture_mutex);
-  EXPECT_TRUE(run(capturing, region, x).equal(affine(x)));
-}
-
 TEST_F(CudaGraphManagerTest, KeysOnShapes) {
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
@@ -265,7 +241,7 @@ TEST_F(CudaGraphManagerTest, HandlesOverlappingInputs) {
 }
 
 TEST_F(CudaGraphManagerTest, ReturnsDuplicateOutputs) {
-  CudaGraphManager manager(0, no_warmup());
+  CudaGraphManager manager(0);
   int calls = 0;
   auto region = [&](AtenTensorHandle* inputs,
                     AtenTensorHandle* outputs,
@@ -279,7 +255,8 @@ TEST_F(CudaGraphManagerTest, ReturnsDuplicateOutputs) {
   };
   auto x = at::randn({16}, at::kCUDA);
   auto input = reinterpret_cast<AtenTensorHandle>(&x);
-  for (int i = 0; i < 2; ++i) {
+  // A warm-up call, a capture, then a replay.
+  for (int i = 0; i < 3; ++i) {
     AtenTensorHandle outputs[2] = {nullptr, nullptr};
     manager.run(
         region,
@@ -294,7 +271,7 @@ TEST_F(CudaGraphManagerTest, ReturnsDuplicateOutputs) {
     aoti_torch_delete_tensor_object(outputs[0]);
     aoti_torch_delete_tensor_object(outputs[1]);
   }
-  EXPECT_EQ(calls, 1);
+  EXPECT_EQ(calls, 2);
 }
 
 TEST_F(CudaGraphManagerTest, ReplaysAdvanceRng) {
@@ -400,6 +377,58 @@ TEST_F(CudaGraphManagerTest, ResetWaitsForTheLastReplay) {
       cudaStreamQuery(at::cuda::getCurrentCUDAStream().stream()), cudaSuccess);
 }
 
+TEST_F(CudaGraphManagerTest, DestructorWaitsForTheLastReplay) {
+  Region region([](const at::Tensor& x) {
+    at::cuda::sleep(1 << 28);
+    return affine(x);
+  });
+  auto x = at::randn({16}, at::kCUDA);
+  {
+    CudaGraphManager manager(0, no_warmup());
+    run(manager, region, x);
+    c10::cuda::device_synchronize();
+    run(manager, region, x);
+  }
+  EXPECT_EQ(
+      cudaStreamQuery(at::cuda::getCurrentCUDAStream().stream()), cudaSuccess);
+}
+
+TEST_F(CudaGraphManagerTest, RunsConcurrently) {
+  // Threads on their own streams share one manager, then each use their own.
+  constexpr int kThreads = 4;
+  auto region = [](AtenTensorHandle* inputs,
+                   AtenTensorHandle* outputs,
+                   cudaStream_t stream) {
+    const at::Tensor& x = tensor_of(inputs[0]);
+    at::cuda::CUDAStreamGuard guard(
+        at::cuda::getStreamFromExternal(stream, x.get_device()));
+    outputs[0] = new_handle(affine(x));
+  };
+  CudaGraphManager shared(0);
+  std::vector<std::unique_ptr<CudaGraphManager>> own;
+  for (int t = 0; t < kThreads; ++t) {
+    own.push_back(std::make_unique<CudaGraphManager>(0));
+  }
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&, t] {
+      at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromPool());
+      for (int i = 0; i < 40; ++i) {
+        auto& manager = i < 20 ? shared : *own[t];
+        auto x = at::randn({8 << (i % 2)}, at::kCUDA);
+        EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+      }
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(shared.num_graphs(), 2);
+  for (const auto& manager : own) {
+    EXPECT_EQ(manager->num_graphs(), 2);
+  }
+}
+
 TEST_F(CudaGraphManagerTest, CaptureOnlyFailureRunsEagerly) {
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
@@ -434,26 +463,29 @@ TEST_F(CudaGraphManagerTest, InvalidatedCaptureRunsEagerly) {
   EXPECT_EQ(manager.num_graphs(), 1);
 }
 
-TEST_F(CudaGraphManagerTest, ForgetsUncapturableKeysPastLimit) {
+TEST_F(CudaGraphManagerTest, StopsCapturingAfterRepeatedFailures) {
+  CollectWarnings warnings;
+  c10::WarningUtils::WarningHandlerGuard guard(&warnings);
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
   region.fail_in_capture = true;
-  struct IgnoreWarnings : c10::WarningHandler {
-    void process(const c10::Warning& /*warning*/) override {}
-  } ignore_warnings;
-  c10::WarningUtils::WarningHandlerGuard guard(&ignore_warnings);
-  for (size_t n = 1; n <= CudaGraphManager::kMaxWarmupKeys + 1; ++n) {
-    run(manager, region, at::randn({static_cast<int64_t>(n)}, at::kCUDA));
+  constexpr int64_t kFailures = CudaGraphManager::kMaxCaptureFailures;
+  for (int64_t n = 1; n <= kFailures; ++n) {
+    run(manager, region, at::randn({n}, at::kCUDA));
   }
-  // The first shape was forgotten, so its capture is tried again.
-  int calls = region.calls;
-  run(manager, region, at::randn({1}, at::kCUDA));
-  EXPECT_EQ(region.calls - calls, 2);
-  // The last one wasn't, so it just runs eagerly.
-  calls = region.calls;
-  auto n = static_cast<int64_t>(CudaGraphManager::kMaxWarmupKeys + 1);
-  run(manager, region, at::randn({n}, at::kCUDA));
-  EXPECT_EQ(region.calls - calls, 1);
+  EXPECT_EQ(region.calls, 2 * kFailures);
+  // Once on the first failure, once on giving up.
+  EXPECT_EQ(warnings.messages.size(), 2);
+  // New keys now run eagerly without trying to capture.
+  region.fail_in_capture = false;
+  auto x = at::randn({kFailures + 1}, at::kCUDA);
+  EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+  EXPECT_EQ(region.calls, 2 * kFailures + 1);
+  EXPECT_EQ(manager.num_graphs(), 0);
+  // reset() starts over.
+  manager.reset();
+  EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
+  EXPECT_EQ(manager.num_graphs(), 1);
 }
 
 TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
@@ -465,24 +497,14 @@ TEST_F(CudaGraphManagerTest, RejectsADifferentOutputCount) {
   ASSERT_EQ(manager.num_graphs(), 1);
   auto input = reinterpret_cast<AtenTensorHandle>(&x);
   std::array<AtenTensorHandle, 2> outputs{};
-  EXPECT_THROW(
-      manager.run(
-          region,
-          &input,
-          1,
-          outputs.data(),
-          outputs.size(),
-          at::cuda::getCurrentCUDAStream().stream()),
-      std::runtime_error);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  expect_error(
+      [&] { manager.run(region, &input, 1, outputs.data(), 2, stream); },
+      "different number of outputs");
 }
 
 TEST_F(CudaGraphManagerTest, WarnsOnceWhenCaptureFails) {
-  struct CollectWarnings : c10::WarningHandler {
-    std::vector<std::string> messages;
-    void process(const c10::Warning& warning) override {
-      messages.push_back(warning.msg());
-    }
-  } warnings;
+  CollectWarnings warnings;
   c10::WarningUtils::WarningHandlerGuard guard(&warnings);
   CudaGraphManager manager(0, no_warmup());
   Region region(affine);
@@ -536,11 +558,11 @@ TEST_F(CudaGraphManagerTest, RejectsInputsOnOtherDevices) {
   CudaGraphManager manager(0);
   Region region(affine);
   // Even during warm-up, which would otherwise run the region eagerly.
-  EXPECT_THROW(run(manager, region, at::randn({8})), std::runtime_error);
+  const std::string message = "is not on the model's CUDA device";
+  expect_error([&] { run(manager, region, at::randn({8})); }, message);
   if (c10::cuda::device_count() >= 2) {
-    EXPECT_THROW(
-        run(manager, region, at::randn({8}, at::Device(at::kCUDA, 1))),
-        std::runtime_error);
+    auto x = at::randn({8}, at::Device(at::kCUDA, 1));
+    expect_error([&] { run(manager, region, x); }, message);
   }
   EXPECT_EQ(region.calls, 0);
 }
@@ -723,11 +745,15 @@ TEST_F(CudaGraphManagerTest, MaxGraphsRunsNewKeysEagerly) {
 TEST_F(CudaGraphManagerTest, RejectsNegativeOptions) {
   CudaGraphOptions negative_warmups;
   negative_warmups.warmup_calls = -1;
-  EXPECT_THROW(CudaGraphManager(0, negative_warmups), std::runtime_error);
+  expect_error(
+      [&] { CudaGraphManager(0, negative_warmups); },
+      "warmup_calls must be non-negative");
 
   CudaGraphOptions negative_max_graphs;
   negative_max_graphs.max_graphs = -1;
-  EXPECT_THROW(CudaGraphManager(0, negative_max_graphs), std::runtime_error);
+  expect_error(
+      [&] { CudaGraphManager(0, negative_max_graphs); },
+      "max_graphs must be non-negative");
 }
 
 TEST_F(CudaGraphManagerTest, ResetDropsGraphs) {

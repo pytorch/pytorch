@@ -2710,7 +2710,7 @@ class aot_inductor:
     use_runtime_constant_folding: bool = False
 
     # Fail the compile unless the whole model can be captured into a CUDA graph,
-    # so it can run through AOTInductorModelContainerRunWithCudaGraph.
+    # so it can run through AOTInductorModelContainerRunWithLazyCudaGraphs.
     cudagraphs: bool = False
 
     # flag to force weight to be appended to the shared library and mapped by the runtime
