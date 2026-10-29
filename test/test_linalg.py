@@ -9255,6 +9255,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for n in sorted(ns):
             self._check_ldl_factor_random(n, device, dtype)
 
+        # Non-finite inputs. At n = 64 they also go through the trailing GEMM, as
+        # ldl::panel_width gives nb <= 32 there.
+        factor = partial(torch.linalg.ldl_factor_ex, hermitian=True)
+        for n in (5, 64):
+            t = torch.randn(n, n, device=device, dtype=dtype)
+            A = t + t.mH
+
+            # The imaginary part of a Hermitian diagonal is ignored, even when it is inf.
+            # A's diagonal is already real, so A gives the expected result.
+            A_inf = A.clone()
+            A_inf.diagonal().imag.fill_(inf)
+            self.assertEqual(factor(A_inf), factor(A), atol=0, rtol=0)
+
+            # NaNs. The pivot search skips them, so in an all-NaN column it finds no row
+            # to swap with and returns -1. The kernel has to keep that column in place
+            # rather than swap it with row -1, out of bounds (see ilambda < 0 in
+            # ldl_diagonal_panel_fused_kernel). Every pivot then has to be a valid row,
+            # 1 <= |pivot| <= n. LAPACK pivots NaNs differently, so there is no CPU reference.
+            A_nan = A.repeat(3, 1, 1)
+            A_nan[0] = nan
+            A_nan[1, 0, :] = A_nan[1, :, 0] = nan
+            A_nan[2, n // 2, :] = A_nan[2, :, n // 2] = nan
+            pivots = factor(A_nan).pivots.abs()
+            self.assertTrue(((pivots >= 1) & (pivots <= n)).all())
+
         # cuSOLVER has no Hermitian LDL for complex inputs, so the cusolver backend
         # takes the custom kernel too, rather than raising
         torch.backends.cuda.preferred_linalg_library('cusolver')
