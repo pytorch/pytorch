@@ -4997,14 +4997,18 @@ class TestPrecompileDynamoCapture(TestCase):
     @skipIfCrossRef
     def test_a_frame_of_the_scripts_main_module_is_served_installed(self):
         # Only the entry's frame cannot be __main__: Model.forward's installs onto the
-        # serving script's own __main__.Model.
+        # serving script's own __main__.Model, and section 0 imports that __main__
+        # for the custom op it registers.
         script = os.path.join(self.dir, "app.py")
         with open(script, "w") as f:
             f.write(
                 "import sys, torch\nfrom torch.compiler.precompile import capture, load\n"
                 "sys.path.insert(0, sys.argv[1])\nx, (a, c, save) = torch.ones(2), sys.argv[3:]\n"
-                "single = __import__(sys.argv[2]).single\nclass Model(torch.nn.Module):\n"
-                "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return x.cos()\n"
+                "single = __import__(sys.argv[2]).single\n"
+                "@torch.library.custom_op('precompile_app::cos', mutates_args=())\n"
+                "def cos(x: torch.Tensor) -> torch.Tensor:\n    return x.cos()\n"
+                "cos.register_fake(torch.empty_like)\nclass Model(torch.nn.Module):\n"
+                "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
                 "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
                 "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
                 "    assert f.installed and f(Model(), x).equal(single(Model(), x))\n"
@@ -5014,6 +5018,13 @@ class TestPrecompileDynamoCapture(TestCase):
             cmd = [sys.executable, script, *argv]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
             self.assertEqual(out.returncode, 0, out.stderr)
+            if save:
+                with open(self.artifact) as f:
+                    python_code = f.read()
+                self.assertIn(
+                    "CUSTOM_OPS = (('precompile_app::cos', ''),)", python_code
+                )
+                self.assertRegex(python_code, r"\nSERVED_MODULES = \(.*'__main__'")
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
@@ -9959,6 +9970,8 @@ def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
 @instantiate_parametrized_tests
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
+        from torch._library.custom_ops import OPDEFS
+
         ns = f"precompile_recording_{uuid.uuid4().hex}"
 
         @torch.library.custom_op(f"{ns}::{name}", mutates_args=())
@@ -9966,6 +9979,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             return x.clone()
 
         self.addCleanup(op._lib._destroy)
+        self.addCleanup(OPDEFS.pop, f"{ns}::{name}", None)
         return op, f"{ns}::{name}"
 
     def test_op_names_include_ops_passed_to_higher_order_ops(self):
@@ -10338,9 +10352,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         for m in (module, other):
             m.__spec__ = importlib.machinery.ModuleSpec(m.__name__, None)
-            m.__file__ = os.path.join(tempfile.gettempdir(), f"{m.__name__}.py")
-        modules = {module.__name__: module, other.__name__: other}
-        self.enterContext(mock.patch.dict(sys.modules, modules))
+            self.enterContext(_replace_module(m.__name__, m))
         callers = op._backend_fn_callers
         op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         keys = ("CPU", "CUDA", "XPU", "CompositeExplicitAutograd")
@@ -10350,9 +10362,6 @@ class TestPrecompileCustomOpRecording(TestCase):
         def register(caller, device, kernel):
             code = f"torch.library.{helper}(qualname, device, kernel)"
             scope = {"qualname": qualname, "device": device, "kernel": kernel}
-            # impl registers at the caller's file, register_kernel by its name.
-            path = os.path.join(tempfile.gettempdir(), f"{caller}.py")
-            code = compile(code, path, "exec")
             exec(code, {"__name__": caller, "torch": torch}, scope)
             return _custom_op_modules({(qualname, ""): keys})
 
@@ -10382,7 +10391,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         # A spawn worker runs that __main__ again as __mp_main__.
         mp_main = types.ModuleType("__mp_main__")
         mp_main.__spec__ = spec
-        self.enterContext(mock.patch.dict(sys.modules, {"__mp_main__": mp_main}))
+        self.enterContext(_replace_module("__mp_main__", mp_main))
         found = register("__mp_main__", "cuda", in_module)
         self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
 
@@ -10396,7 +10405,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         for m in modules.values():
             m.__spec__ = importlib.machinery.ModuleSpec(m.__name__, None)
             m.__file__ = os.path.join(tempfile.gettempdir(), f"{m.__name__}.py")
-        self.enterContext(mock.patch.dict(sys.modules, modules))
+            self.enterContext(_replace_module(m.__name__, m))
         ops, utils, user = modules.values()
         callers = op._backend_fn_callers
         op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = ops.__name__
@@ -10425,26 +10434,90 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(found.modules, (ops.__name__, user.__name__))
         self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
 
+    @parametrize("replace", ("scoped_library", "thread"))
+    def test_a_replaced_register_kernel_kernel_is_not_its_callers(self, replace):
+        from torch._library.custom_ops import OPDEFS
+        from torch._precompile import _custom_op_modules
+
+        ns = f"precompile_recording_{uuid.uuid4().hex}"
+        module = types.ModuleType(f"precompile_ops_{uuid.uuid4().hex}")
+        module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
+        self.enterContext(_replace_module(module.__name__, module))
+        source = (
+            f"@torch.library.custom_op('{ns}::f', mutates_args=(), device_types='cpu')\n"
+            "def f(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n"
+        )
+        module.torch = torch
+        exec(source, vars(module))
+        op = module.f
+        self.addCleanup(op._lib._destroy)
+        self.addCleanup(OPDEFS.pop, op._qualname, None)
+        self.assertEqual(op._backend_fn_callers, {"CPU": module.__name__})
+        keys = {(op._qualname, ""): ("CPU",)}
+        self.assertEqual(_custom_op_modules(keys).unrecorded_kernels, ())
+        libs = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
+        self.addCleanup(lambda: [lib._destroy() for lib in libs])
+        if replace == "scoped_library":
+            lib = self.enterContext(torch.library._scoped_library(ns, "FRAGMENT"))
+            lib.impl("f", torch.neg, "CPU")
+            untracked = ()
+        else:
+            # A thread runs no module body, so its caller is unknown.
+            args = (op._qualname, "cpu", torch.neg)
+            thread = threading.Thread(target=torch.library.impl, args=args)
+            thread.start()
+            thread.join()
+            untracked = ((op._qualname, "CPU"),)
+        found = _custom_op_modules(keys)
+        self.assertEqual(found.modules, (module.__name__,))
+        self.assertEqual(found.unrecorded_kernels, ((op._qualname, ""),))
+        self.assertEqual(found.untracked_kernels, untracked)
+
+    def test_register_kernel_on_a_torch_custom_op_imports_the_calling_module(self):
+        from torch._functorch._aot_autograd.codegen import PySourceBuilder
+        from torch._precompile import _custom_op_modules, _write_custom_op_imports
+
+        op, qualname = self._op("torch_owned")
+        # As a custom_op a torch module defines.
+        callers = op._backend_fn_callers
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = (
+            "torch._precompile"
+        )
+        user = types.ModuleType(f"precompile_user_{uuid.uuid4().hex}")
+        user.__spec__ = importlib.machinery.ModuleSpec(user.__name__, None)
+        self.enterContext(_replace_module(user.__name__, user))
+        code = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
+        exec(code, {"__name__": user.__name__, "torch": torch}, {"qualname": qualname})
+        keys = {(qualname, ""): ("CPU",)}
+        modules = _custom_op_modules(keys).modules
+        self.assertEqual(set(modules), {"torch._precompile", user.__name__})
+        buf = PySourceBuilder()
+        _write_custom_op_imports(buf, modules, tuple(keys), keys, call=False)
+        namespace = {}
+        exec(buf.getvalue(), namespace)
+        overrides = {qualname: {"CPU": user.__name__}}
+        self.assertEqual(namespace["CUSTOM_OP_OVERRIDE_MODULES"], overrides)
+        # The load check accepts the kernel that call registered.
+        namespace["_import_custom_op_modules"]()
+
     def test_torch_library_define_records_the_module_whose_body_calls_it(self):
         from torch._precompile import _custom_op_modules
 
         ns = f"precompile_define_{uuid.uuid4().hex}"
         module = types.ModuleType(f"precompile_defining_{uuid.uuid4().hex}")
         module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
-        module.__file__ = os.path.join(tempfile.gettempdir(), f"{module.__name__}.py")
-        main = types.ModuleType("__main__")
-        main.__file__ = os.path.join(tempfile.gettempdir(), "precompile_main.py")
-        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        self.enterContext(_replace_module(module.__name__, module))
         libs = self.enterContext(mock.patch.object(torch.library, "_keep_alive", []))
         self.addCleanup(lambda: [lib._destroy() for lib in libs])
-        for m, name in ((module, "op"), (main, "main_op")):
+        for caller, name in ((module.__name__, "op"), ("__main__", "main_op")):
             code = f"torch.library.define('{ns}::{name}', '(Tensor x) -> Tensor')"
-            exec(compile(code, m.__file__, "exec"), {"torch": torch})
+            exec(code, {"__name__": caller, "torch": torch})
         found = _custom_op_modules({(f"{ns}::op", ""): (), (f"{ns}::main_op", ""): ()})
         self.assertEqual(found.modules, (module.__name__,))
         self.assertEqual(found.unrecorded, ((f"{ns}::main_op", ""),))
 
     def test_an_overloaded_custom_op_records_its_module_and_kernel_callers(self):
+        from torch._library.custom_ops import OPDEFS
         from torch._precompile import _custom_op_modules
 
         ns = f"precompile_recording_{uuid.uuid4().hex}"
@@ -10454,9 +10527,10 @@ class TestPrecompileCustomOpRecording(TestCase):
             return x.clone()
 
         self.addCleanup(op._lib._destroy)
+        self.addCleanup(OPDEFS.pop, op._qualname, None)
         module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
         module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
-        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        self.enterContext(_replace_module(module.__name__, module))
         callers = op._backend_fn_callers
         op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         code = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
@@ -10476,7 +10550,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         recorded, _ = self._op("recorded")
         module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
         module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
-        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        self.enterContext(_replace_module(module.__name__, module))
         recorded._init_fn.__module__ = module.__name__
         ns = f"precompile_library_{uuid.uuid4().hex}"
         lib = self.enterContext(torch.library._scoped_library(ns, "DEF"))
@@ -10556,6 +10630,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertNotIn("set_python_module", message)
 
     def test_a_user_op_in_a_lazy_torch_namespace_records_its_module(self):
+        from torch._library.custom_ops import OPDEFS
         from torch._precompile import _custom_op_modules, _CustomOpModules
 
         name = f"triton::precompile_{uuid.uuid4().hex}"
@@ -10565,9 +10640,10 @@ class TestPrecompileCustomOpRecording(TestCase):
             return x.clone()
 
         self.addCleanup(op._lib._destroy)
+        self.addCleanup(OPDEFS.pop, name, None)
         module = types.ModuleType(f"precompile_registering_{uuid.uuid4().hex}")
         module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
-        self.enterContext(mock.patch.dict(sys.modules, {module.__name__: module}))
+        self.enterContext(_replace_module(module.__name__, module))
         op._init_fn.__module__ = module.__name__
         found = _custom_op_modules({(name, ""): ("CPU",)})
         self.assertEqual(found, _CustomOpModules((module.__name__,), (), ()))
@@ -11036,7 +11112,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         python_code = self._capture_module(source, tracer=DynamoTracer())
         ops = tuple(sorted([(name, ""), (nested, "")]))
         self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
-        # Recording is best effort: a failure drops the record, not the graph break.
+        # A failing device walk still records the ops, checked on every kernel key.
         devices = mock.patch.object(
             torch._dynamo.symbolic_convert,
             "_tensor_device_types",
@@ -11045,7 +11121,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         with devices as raising:
             python_code = self._capture_module(source, tracer=DynamoTracer())
         self.assertTrue(raising.called)
-        self.assertNotIn("CUSTOM_OPS", python_code)
+        self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
@@ -11139,7 +11215,9 @@ class TestPrecompileCustomOpRecording(TestCase):
             "lib.impl('op', lambda x: x * 3, 'CPU')\n"
         )
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], mode, prelude
             )
@@ -11148,7 +11226,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         for module in (name, ops):
             sys.modules.pop(module).lib._destroy()
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             exec(python_code, {"__name__": "artifact"})
         for module in (name, ops):
             self.addCleanup(sys.modules[module].lib._destroy)
@@ -11205,7 +11285,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         prelude += f"lib = torch.library.Library({ns!r}, 'IMPL')\nlib.impl('op', lambda x: x * 2, 'CPU')\n"
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], prelude=prelude, then=(override,)
             )
@@ -11217,7 +11299,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         served.defs._destroy()
         sys.modules.pop(defs, None)
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings(
+                "ignore", message="Warning only once for all operators"
+            )
             exec(python_code, {"__name__": "artifact"})
         self.addCleanup(sys.modules[name].defs._destroy)
         self.addCleanup(sys.modules[name].lib._destroy)
@@ -11286,6 +11370,13 @@ class TestPrecompileCustomOpRecording(TestCase):
         ):
             code = python_code.replace(served, f"SERVED_MODULES = {modules!r}")
             with self.assertRaisesRegex(PrecompileError, error):
+                exec(code, {"__name__": "artifact"})
+        if mode == "installed":
+            # A __main__ entry is refused before section 0 checks the ops.
+            entry = f"ENTRY_MODULE = {name!r}"
+            self.assertIn(entry, python_code)
+            code = python_code.replace(entry, "ENTRY_MODULE = '__main__'")
+            with self.assertRaisesRegex(PrecompileError, "__main__ module"):
                 exec(code, {"__name__": "artifact"})
         version = f"TORCH_VERSION = {torch.__version__!r}"
         self.assertIn(version, python_code)

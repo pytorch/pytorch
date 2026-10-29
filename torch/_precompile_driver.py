@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     BACKEND: str = ""
     FN_NAME: str = ""
+    ENTRY_MODULE: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
     SERVED_MODULES: tuple[str, ...] = ()
@@ -111,7 +112,9 @@ def _import_custom_op_modules(served=(), import_served=None):
         # Not just ImportError: a module can raise anything while it registers ops.
         except Exception as e:
             import_errors[module] = e
-    # Refused before the op check, which would report such a module's ops missing.
+    # A served module that does not import fails the load here, not at the op
+    # check, which would report its ops missing. A __main__ entry is refused
+    # before section 0 runs.
     # find_spec imports a dotted name's parents, so this follows the ordered imports.
     for module in served:
         try:
@@ -136,24 +139,24 @@ def _import_custom_op_modules(served=(), import_served=None):
                 missing.append(f"{qualname} ({key} kernel)")
     # Another module's kernel under the same key would pass the check above, so
     # the active kernel must be registered from the overriding module's file, or
-    # be the custom_op's own, with the overriding module its register_kernel caller.
-    from torch._library import custom_ops
+    # by a register_kernel or torch.library.impl call from its body.
+    from torch._library.utils import kernel_callers
 
     overridden = []
     real = os.path.realpath
     override_errors = set()
     for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
         dump = torch._C._dispatch_dump(qualname)
-        callers = getattr(custom_ops.OPDEFS.get(qualname), "_backend_fn_callers", {})
+        callers = kernel_callers(qualname)
         for key, module in owners.items():
             pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
             active = re.search(pattern, dump, re.MULTILINE)
-            paths = [getattr(sys.modules.get(module), "__file__", None)]
-            if callers.get(key) == module:
-                paths.append(custom_ops.__file__)
+            path = getattr(sys.modules.get(module), "__file__", None)
             if module in import_errors:
                 override_errors.add(module)
-            elif not (active and real(active[1]) in {real(p) for p in paths if p}):
+            elif callers.get(key) != module and not (
+                active and path and real(active[1]) == real(path)
+            ):
                 overridden.append(f"{qualname} ({key} kernel of {module})")
     if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
@@ -898,6 +901,12 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
+    if ENTRY_MODULE == "__main__":
+        raise _PrecompileError(
+            "precompile: this artifact was captured from a function defined in the "
+            "capturing script's __main__ module, which no other process can import. "
+            "Regenerate the artifact from a function defined in an importable module."
+        )
     if "_import_custom_op_modules" in globals():
 
         def _import_served(module_name):
@@ -916,12 +925,6 @@ def _build_installed_forward():
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
-    if module_name == "__main__":
-        raise _PrecompileError(
-            "precompile: this artifact was captured from a function defined in the "
-            "capturing script's __main__ module, which no other process can import. "
-            "Regenerate the artifact from a function defined in an importable module."
-        )
     try:
         fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
     # Not just ImportError, as in section 0.
