@@ -1906,6 +1906,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "CUSTOM_OPS",
         "CUSTOM_OP_KERNELS",
         "CUSTOM_OP_OVERRIDE_MODULES",
+        "SERVED_MODULES",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2001,7 +2002,10 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
 
 def _registration_path(op_name: str, overload: str) -> str:
     """The file that defined ``op_name``, as recorded at build time ("" if none)."""
-    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    try:
+        debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    except RuntimeError:
+        return ""
     return debug.removeprefix("registered at ").rpartition(":")[0]
 
 
@@ -2032,7 +2036,11 @@ def _torch_cpp_op(op_name: str, overload: str) -> bool:
         return False
     root = _torch_source_root()
     path = _registration_path(op_name, overload)
-    if root is None or not path or path.endswith(".py"):
+    if path.endswith(".py"):
+        # A torch helper's Library records itself for any caller.
+        torch_file = path.startswith(os.path.join(_TORCH_DIR, ""))
+        return torch_file and not path.startswith(_TORCH_OP_HELPERS)
+    if root is None or not path:
         return True
     path = os.path.normcase(os.path.normpath(path))
     return path.startswith(os.path.normcase(os.path.join(root, "")))
@@ -2130,10 +2138,10 @@ def _kernel_modules(
 
 
 def _custom_op_modules(
-    op_names: Iterable[tuple[str, str]], keys: tuple[str, ...]
+    op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
-    """The modules registering the ops among ``op_names`` and their active kernels
-    for ``keys``, in the order their imports finished, so that importing them again
+    """The modules registering the ops in ``op_keys`` and their active kernels for
+    the op's keys, in the order their imports finished, so that importing them again
     registers any overriding kernel last; and the custom ops among them that no
     known module registers, or with a kernel for ``keys`` no known module registers
     (a torch helper's, a C++ extension's or ``__main__``'s)."""
@@ -2141,7 +2149,7 @@ def _custom_op_modules(
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
     unmapped: set[tuple[str, str]] = set()
-    for op_name, overload in op_names:
+    for (op_name, overload), keys in op_keys.items():
         module = _custom_op_module(op_name, overload)
         if module is None:
             module = _library_op_module(op_name, overload, file_modules)
@@ -2213,7 +2221,7 @@ def _write_custom_op_imports(
     buf: PySourceBuilder,
     modules: tuple[str, ...],
     ops: tuple[tuple[str, str], ...],
-    keys: tuple[str, ...],
+    keys: Mapping[tuple[str, str], tuple[str, ...]],
     call: bool = True,
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
@@ -2240,9 +2248,12 @@ def _write_custom_op_imports(
         # Despite its name, _dispatch_has_kernel only tests that the op exists,
         # which _dispatch_has_kernel_for_dispatch_key requires (it raises otherwise).
         op_exists = torch._C._dispatch_has_kernel(qualname)
-        if op_exists and (found := tuple(k for k in keys if has_kernel(qualname, k))):
+        op_keys = keys[name, overload]
+        if op_exists and (
+            found := tuple(k for k in op_keys if has_kernel(qualname, k))
+        ):
             kernels[qualname] = found
-            if owners := _kernel_modules(name, overload, keys, file_modules, True):
+            if owners := _kernel_modules(name, overload, op_keys, file_modules, True):
                 overrides[qualname] = owners
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
     # By op and key, the module registering a kernel the graph ran over another one
@@ -2270,8 +2281,8 @@ def _build_python_source(
     buf.writeline("")
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
-        keys = compiled._kernel_keys
-        _write_custom_op_imports(buf, _custom_op_modules(ops, keys)[0], ops, keys)
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        _write_custom_op_imports(buf, _custom_op_modules(keys)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2327,8 +2338,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline("")
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
-        keys = compiled._kernel_keys
-        _write_custom_op_imports(buf, _custom_op_modules(ops, keys)[0], ops, keys)
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        _write_custom_op_imports(buf, _custom_op_modules(keys)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2653,7 +2664,7 @@ def _build_multigraph_python_source(
     unreachable: list[str],
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
-    custom_op_keys: tuple[str, ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2811,7 +2822,7 @@ def _build_multigraph_artifact(
     *,
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
-    custom_op_keys: tuple[str, ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 

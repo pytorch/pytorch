@@ -2221,31 +2221,37 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
-        op_names = set(self._package.graph_break_op_names)
-        # Graph-break custom ops run eagerly on their inputs' devices, or on those
-        # of any compiled frame.
-        graph_break_ops = set(_custom_ops(op_names))
-        device_types = set(self._package._device_types if graph_break_ops else ())
-        device_types |= {
-            t for n, t in self._package.graph_break_op_devices if n in graph_break_ops
+        package = self._package
+        # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
+        # on those of any compiled frame, and a graph's ops on the graph's devices.
+        op_devices: dict[tuple[str, str], set[str]] = {
+            n: set(package._device_types) for n in package.graph_break_op_names
         }
+        for n, t in package.graph_break_op_devices:
+            op_devices.setdefault(n, set()).add(t)
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
-            op_names |= self._package.op_names.get(backend_id, set())
-            device_types |= self._package.device_types.get(backend_id, set())
+            names = set(package.op_names.get(backend_id, ()))
             if isinstance(artifact, BundledAOTAutogradCacheArtifact):
                 # Inductor's code also calls the ops a post-grad pass inserted,
                 # and those of the backward.
                 compiled = (artifact.content.compiled_fw, artifact.content.compiled_bw)
                 for result in (c.result for c in compiled if c is not None):
                     if isinstance(result, CompiledFxGraph):
-                        op_names |= _called_op_names(result.source_code)
+                        names |= _called_op_names(result.source_code)
+            for n in names:
+                op_devices.setdefault(n, set()).update(
+                    package.device_types.get(backend_id, ())
+                )
         entry = self._served_entry()[0]
-        ops = _custom_ops(op_names)
-        # No compiled graph names a device for graph-break ops to run on.
-        keys = _device_kernel_keys(device_types) if device_types else _KERNEL_KEYS
-        modules, unmapped = _custom_op_modules(ops, keys)
+        ops = _custom_ops(op_devices)
+        # An op no compiled graph names a device for is checked on every key.
+        keys = {
+            n: _device_kernel_keys(op_devices[n]) if op_devices[n] else _KERNEL_KEYS
+            for n in ops
+        }
+        modules, unmapped = _custom_op_modules(keys)
         if unmapped:
             # An op or kernel with no known module (torch.library.define, any
             # custom_op's kernels, which torch's helpers register, a C++ extension)
