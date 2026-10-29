@@ -1358,6 +1358,62 @@ class TestCustomOp(CustomOpTestCaseBase):
         out = torch.compile(lambda t: sin._op(t), backend="eager", fullgraph=True)(x)
         self.assertEqual(out, x.sin())
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_forward_inputs_stack(self):
+        # The autograd kernel hands forward the keyset and keyword-only args
+        # through a per-thread stack; every call must leave it as it was.
+        from torch._library.autograd import _forward_inputs
+
+        @torch.library.custom_op(f"{self.test_ns}::stack_scale", mutates_args=())
+        def scale(x: Tensor, *, k: int = 2) -> Tensor:
+            if k == 0:
+                raise ValueError("kernel error")
+            return x * k
+
+        def setup_context(ctx, inputs, keyword_only_inputs, output):
+            if keyword_only_inputs["k"] == 3:
+                raise ValueError("setup_context error")
+            ctx.k = keyword_only_inputs["k"]
+
+        scale.register_autograd(
+            lambda ctx, grad: grad * ctx.k, setup_context=setup_context
+        )
+
+        @torch.library.custom_op(f"{self.test_ns}::stack_square", mutates_args=())
+        def square(x: Tensor) -> Tensor:
+            return x * x
+
+        def square_backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * scale(x)  # recorded too, with create_graph=True
+
+        square.register_autograd(
+            square_backward,
+            setup_context=lambda ctx, inputs, output: ctx.save_for_backward(*inputs),
+        )
+
+        depth = len(_forward_inputs.stack)
+        x = torch.randn(3, requires_grad=True)
+        (gx,) = torch.autograd.grad(scale(x, k=4).sum(), x)
+        self.assertEqual(gx, torch.full_like(x, 4.0))
+        self.assertEqual(len(_forward_inputs.stack), depth)
+        for k in (0, 3):
+            with self.assertRaisesRegex(ValueError, "error"):
+                scale(x, k=k)
+            self.assertEqual(len(_forward_inputs.stack), depth)
+        # Under torch.func transforms, apply currently raises before forward
+        # runs, so the autograd kernel has to take its entry back.
+        try:
+            torch.func.grad(lambda t: scale(t).sum())(torch.randn(3))
+        except RuntimeError:
+            pass
+        self.assertEqual(len(_forward_inputs.stack), depth)
+        (g1,) = torch.autograd.grad(square(x).sum(), x, create_graph=True)
+        (g2,) = torch.autograd.grad(g1.sum(), x)
+        self.assertEqual(g1, 2 * x)
+        self.assertEqual(g2, torch.full_like(x, 2.0))
+        self.assertEqual(len(_forward_inputs.stack), depth)
+
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_mutated_version_bumps(self):
         # Each mutated Tensor's version is bumped once, whether or not the op
