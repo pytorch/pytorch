@@ -77,7 +77,6 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   dot_check(self, other);
 
   using namespace std::string_view_literals;
-  // Mirrors c10::metal::opmath_t, the type dot_reduce writes its partials in
   const auto acc_type = isIntegralType(dtype, false) ? (dtype == kLong ? kLong : kInt) : toOpMathType(dtype);
   const auto numel = self.numel();
   const auto num_partials =
