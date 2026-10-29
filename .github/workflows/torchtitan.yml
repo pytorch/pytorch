@@ -24,7 +24,7 @@ on:
         description: Compare native adjacent Triton commits around the FP fusion policy change.
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.inputs.artifact-run-id }}-${{ github.event.inputs.boundary-controls }}-${{ github.event.inputs.fusion-only }}
   cancel-in-progress: true
 
 permissions:
