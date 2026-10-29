@@ -112,7 +112,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.adaptive_avg_pool3d": None,
             "nn.functional.adaptive_max_pool1d": [
                 torch.int16,
                 torch.int32,
@@ -130,7 +129,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.adaptive_max_pool3d": None,
-            "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.local_response_norm": [
                 torch.int8,
@@ -265,9 +263,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
             ],
             "float_power": None,
-            # MPS: input sizes must be divisible by output sizes
-            "nn.functional.adaptive_avg_pool1d": None,
-            "nn.functional.adaptive_avg_pool2d": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
