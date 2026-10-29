@@ -82,9 +82,10 @@ if(WIN32)
 endif()
 add_dependencies(xpupti_compute xpupti_compute_ep)
 
-# Runtime tests: host code linking the kernel-only compute library. The library
-# is copied next to each test, where $ORIGIN (Linux) or the executable's
-# directory (Windows) finds it, so the tests run from wherever they are shipped.
+# Runtime tests: host code linking the kernel-only compute library.
+# The library is copied next to each test, where $ORIGIN (Linux)
+# or the executable's directory (Windows) finds it,
+# so the tests run from wherever they are shipped.
 function(add_sycl_test test_file)
   get_filename_component(test_name "${test_file}" NAME_WE)
   add_executable(${test_name} ${test_file} XpuptiTestUtilities.cpp)
