@@ -194,6 +194,9 @@ class FakeProcessGroup(dist.BackendBase):
         simulation].
         """
 
+        # Reject misspelled fields like the C++ binding did.
+        __slots__ = ("fake_option", "error_on_collective", "simulate_uniform_ranks")
+
         def __init__(self) -> None:
             super().__init__("fake")
             self.fake_option = 0

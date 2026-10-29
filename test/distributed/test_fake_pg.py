@@ -357,6 +357,11 @@ class TestFakePG(TestCase):
             ):
                 pg.split(FakeStore(), [0, 1], opts)
 
+    def test_options_rejects_unknown_attribute(self):
+        opts = FakeProcessGroup.Options()
+        with self.assertRaises(AttributeError):
+            opts.simulate_uniform_rank = True
+
     def test_split_base_options_inherit_fake_fields(self):
         parent_opts = FakeProcessGroup.Options()
         parent_opts.fake_option = 7
