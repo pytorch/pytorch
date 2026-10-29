@@ -29,10 +29,13 @@ from torch.utils._mode_utils import no_dispatch
 
 from ...utils._triton import has_triton
 from ..pattern_matcher import (
+    CallFunction,
     fwd_only,
     gen_register_replacement,
     joint_fwd_bwd,
+    KeywordArg,
     Match,
+    register_graph_pattern,
     ReplaceFn,
     SearchFn,
 )
@@ -109,6 +112,8 @@ def can_pad(
     # Can't pad if there is no static dims, we pad static dims only.
     def has_one_static_dim(t: Tensor) -> bool:
         """Return False if all dimensions are symbolic — nothing concrete to pad."""
+        if t.ndim == 0:
+            return op is aten.baddbmm
         for x in t.size():
             if isinstance(x, int):
                 return True
@@ -145,7 +150,7 @@ def can_pad(
             m = mat1.shape[0]
             k = mat1.shape[1]
             n = mat2.shape[1]
-        elif op is torch.ops.aten.bmm:
+        elif op in (torch.ops.aten.bmm, torch.ops.aten.baddbmm):
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
@@ -369,6 +374,8 @@ def should_pad_bench_key(
         input if input is None else tensor_key(input),
         fp32_precision,
     )
+    if op is aten.baddbmm:
+        key += (match.kwargs["alpha"], match.kwargs["beta"])
 
     key = str(key)
     if is_base_time_key:
@@ -412,6 +419,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
         aten.convolution_backward.default,
         aten.bmm.default,
         aten.addmm.default,
+        aten.baddbmm.default,
         aten._scaled_dot_product_flash_attention.default,
         aten._scaled_dot_product_efficient_attention.default,
     ]
@@ -531,7 +539,7 @@ def _should_pad(
             k_padded_length = get_padded_length(k, get_alignment_size(mat1))
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))
-        elif op is torch.ops.aten.bmm:
+        elif op in (torch.ops.aten.bmm, torch.ops.aten.baddbmm):
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
@@ -564,7 +572,7 @@ def _should_pad(
         if cached_pad is not None:
             return cached_pad
 
-        def realize_tensor(t):
+        def realize_tensor(t: Tensor) -> Tensor:
             if is_fake_tensor(t):
                 size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
@@ -586,14 +594,15 @@ def _should_pad(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
         ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
-        if ori_time is None and op is torch.ops.aten.addmm and input is not None:
-            # realize bias for addmm
+        if input is not None and (
+            op is aten.baddbmm or (ori_time is None and op is aten.addmm)
+        ):
             input = realize_tensor(input)
 
         mat1_pad = mat1
         mat2_pad = mat2
 
-        is_bmm = op is torch.ops.aten.bmm
+        is_bmm = op in (aten.bmm, aten.baddbmm)
 
         mat1_pre_padded = should_exclude_padding_time(match, "mat1")
         fns = []
@@ -646,6 +655,24 @@ def _should_pad(
                     mat2_pre_padded=mat2_pre_padded,
                 )
             )
+        elif op is aten.baddbmm:
+            baddbmm_input = input
+            if baddbmm_input is None:
+                raise AssertionError("expected input tensor for baddbmm")
+            fns.append(
+                lambda: pad_baddbmm(
+                    baddbmm_input,
+                    mat1_pad,
+                    mat2_pad,
+                    m_padded_length,
+                    k_padded_length,
+                    n_padded_length,
+                    beta=match.kwargs["beta"],
+                    alpha=match.kwargs["alpha"],
+                    mat1_pre_padded=mat1_pre_padded,
+                    mat2_pre_padded=mat2_pre_padded,
+                )
+            )
         elif op is torch.ops.aten.mm:
             fns.append(
                 lambda: pad_mm(
@@ -674,6 +701,14 @@ def _should_pad(
         def orig_bench_fn():
             if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
                 op(mat1, mat2)
+            elif op is aten.baddbmm:
+                op(
+                    input,
+                    mat1,
+                    mat2,
+                    beta=match.kwargs["beta"],
+                    alpha=match.kwargs["alpha"],
+                )
             else:
                 op(input, mat1, mat2)
 
@@ -946,9 +981,97 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
+def should_pad_baddbmm(match: Match) -> bool:
+    if any(isinstance(match.kwargs[name], torch.fx.Node) for name in ("alpha", "beta")):
+        return False
+    mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
+    return should_pad(match, mat1, mat2, aten.baddbmm, input=input)
+
+
+def pad_baddbmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+    mat1_pre_padded: bool = False,
+    mat2_pre_padded: bool = False,
+) -> Tensor:
+    if not mat1_pre_padded:
+        mat1 = pad_mat1(
+            mat1,
+            m_padded_length=m_padded_length,
+            k_padded_length=k_padded_length,
+            is_bmm=True,
+        )
+    if not mat2_pre_padded:
+        mat2 = pad_mat2(
+            mat2,
+            k_padded_length=k_padded_length,
+            n_padded_length=n_padded_length,
+            is_bmm=True,
+        )
+    # Preserve singleton dimensions so the bias still broadcasts.
+    if n_padded_length and input.ndim >= 1 and input.shape[-1] != 1:
+        input = pad_dim(input, n_padded_length, input.ndim - 1)
+    if m_padded_length and input.ndim >= 2 and input.shape[-2] != 1:
+        input = pad_dim(input, m_padded_length, input.ndim - 2)
+    res = aten.baddbmm(input, mat1, mat2, beta=beta, alpha=alpha)
+    if m_padded_length:
+        res = res[:, :-m_padded_length, :]
+    if n_padded_length:
+        res = res[:, :, :-n_padded_length]
+    if m_padded_length or n_padded_length:
+        # Preserve canonical strides for singleton axes and as_strided consumers.
+        res = res.clone(memory_format=torch.contiguous_format)
+    return res
+
+
+def baddbmm_replace(
+    input: Tensor, mat1: Tensor, mat2: Tensor, beta: float = 1.0, alpha: float = 1.0
+) -> Tensor:
+    return pad_baddbmm(
+        input,
+        mat1,
+        mat2,
+        get_padded_length(mat1.shape[1], get_alignment_size(mat1)),
+        get_padded_length(mat1.shape[2], get_alignment_size(mat1)),
+        get_padded_length(mat2.shape[2], get_alignment_size(mat2)),
+        beta,
+        alpha,
+    )
+
+
+@functools.cache
+def _pad_baddbmm_init() -> None:
+    from .joint_graph import patterns
+
+    @register_graph_pattern(
+        CallFunction(
+            aten.baddbmm.default,
+            KeywordArg("input"),
+            KeywordArg("mat1"),
+            KeywordArg("mat2"),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+        ),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+        extra_check=should_pad_baddbmm,
+    )
+    def pad_baddbmm_pattern(match, input, mat1, mat2, beta, alpha):
+        # Keep the original backward graph; its BMMs can be padded independently.
+        match.replace_by_example(baddbmm_replace, [input, mat1, mat2, beta, alpha])
+
+
 @functools.cache
 def _pad_mm_init(input_device: torch.device | None = None) -> None:
     from .joint_graph import patterns
+
+    _pad_baddbmm_init()
 
     if input_device:
         device = str(input_device)

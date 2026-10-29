@@ -5,7 +5,7 @@ This module provides reusable encoder functions that convert function parameters
 into JSON-serializable dictionaries for caching purposes.
 """
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch import Tensor
@@ -33,6 +33,8 @@ class ShouldPadEncodedParams(TypedDict):
     mat1_exclude_padding_time: bool
     mat2_exclude_padding_time: bool
     fp32_precision: str
+    alpha: NotRequired[float | int]
+    beta: NotRequired[float | int]
 
 
 def should_pad_params_encoder(
@@ -62,7 +64,7 @@ def should_pad_params_encoder(
     # Import here to avoid circular dependency
     from torch._inductor.fx_passes.pad_mm import should_exclude_padding_time
 
-    return ShouldPadEncodedParams(
+    encoded = ShouldPadEncodedParams(
         mat1=_encode_tensor(mat1),
         mat2=_encode_tensor(mat2),
         op=str(op),
@@ -71,3 +73,7 @@ def should_pad_params_encoder(
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
         fp32_precision=get_matmul_precision_for_cache(mat1),
     )
+    if op is torch.ops.aten.baddbmm:
+        encoded["alpha"] = match.kwargs["alpha"]
+        encoded["beta"] = match.kwargs["beta"]
+    return encoded
