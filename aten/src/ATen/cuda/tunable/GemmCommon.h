@@ -126,18 +126,18 @@ inline std::string MaybeWildcardInt(int64_t value, bool wildcard) {
 // torch/cuda/tunable.py and ROCm/TheRock#5553.
 inline bool ShouldWildcardLda(char transa, bool dynamic_m, bool dynamic_k,
                               int64_t lda, int64_t m, int64_t k) {
-  return UsesMForLda(transa) ? (dynamic_m && lda == m)
-                             : (dynamic_k && lda == k);
+  return UsesMForLda(transa) ? (dynamic_m && IsTight(lda, m))
+                             : (dynamic_k && IsTight(lda, k));
 }
 
 inline bool ShouldWildcardLdb(char transb, bool dynamic_n, bool dynamic_k,
                               int64_t ldb, int64_t n, int64_t k) {
-  return UsesKForLdb(transb) ? (dynamic_k && ldb == k)
-                             : (dynamic_n && ldb == n);
+  return UsesKForLdb(transb) ? (dynamic_k && IsTight(ldb, k))
+                             : (dynamic_n && IsTight(ldb, n));
 }
 
 inline bool ShouldWildcardLdc(bool dynamic_m, int64_t ldc, int64_t m) {
-  return dynamic_m && ldc == m;
+  return dynamic_m && IsTight(ldc, m);
 }
 
 inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
