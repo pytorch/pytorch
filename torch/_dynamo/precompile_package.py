@@ -29,6 +29,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import os
 import re
 import site
@@ -1612,9 +1613,10 @@ class _CapturePackage(CompilePackage):
         # code or falls back to eager, so a bypassed compile's ops are dropped like
         # its backend graphs.
         self._compile_graph_break_op_names: set[tuple[str, str]] = set()
-        # The device types of the graph-break ops' inputs, kept like their names.
-        self.graph_break_device_types: set[str] = set()
-        self._compile_graph_break_device_types: set[str] = set()
+        # Each graph-break op's name with the device type of each of its inputs,
+        # kept like the names.
+        self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
+        self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
 
     def note_compute(self) -> None:
@@ -1642,8 +1644,6 @@ class _CapturePackage(CompilePackage):
         from torch._precompile import _overload_names
 
         names = _overload_names(op)
-        self._compile_graph_break_op_names |= names
-        self._compile_graph_break_device_types |= device_types
         has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
         backend_keys = [torch._C._dispatch_key_for_device(t) for t in device_types]
 
@@ -1656,16 +1656,20 @@ class _CapturePackage(CompilePackage):
 
         # Eagerly, op calls failed_op only if it decomposes into it; otherwise
         # only op's fake impl does.
-        if names and all(runs_own_kernel(f"{n}.{o}" if o else n) for n, o in names):
-            return
-        self._compile_graph_break_op_names |= _overload_names(failed_op)
+        qualnames = [f"{n}.{o}" if o else n for n, o in names]
+        if not qualnames or not all(map(runs_own_kernel, qualnames)):
+            names |= _overload_names(failed_op)
+        self._compile_graph_break_op_names |= names
+        self._compile_graph_break_op_devices |= set(
+            itertools.product(names, device_types)
+        )
 
     @contextlib.contextmanager
     def code_context(
         self, code: types.CodeType, global_scope: dict[str, object] | None = None
     ) -> Iterator[None]:
         self._compile_graph_break_op_names = set()
-        self._compile_graph_break_device_types = set()
+        self._compile_graph_break_op_devices = set()
         self._compile_graph_break_code = code
         with super().code_context(code, global_scope):
             yield
@@ -1675,7 +1679,7 @@ class _CapturePackage(CompilePackage):
     ) -> None:
         super().add_guarded_code(guards_state, dynamo_code)
         self.graph_break_op_names |= self._compile_graph_break_op_names
-        self.graph_break_device_types |= self._compile_graph_break_device_types
+        self.graph_break_op_devices |= self._compile_graph_break_op_devices
 
     def record_eager_fallback(self, code: types.CodeType) -> None:
         super().record_eager_fallback(code)
@@ -1683,9 +1687,9 @@ class _CapturePackage(CompilePackage):
         # bypassed compile of another frame left behind.
         if code is self._compile_graph_break_code:
             self.graph_break_op_names |= self._compile_graph_break_op_names
-            self.graph_break_device_types |= self._compile_graph_break_device_types
+            self.graph_break_op_devices |= self._compile_graph_break_op_devices
         self._compile_graph_break_op_names = set()
-        self._compile_graph_break_device_types = set()
+        self._compile_graph_break_op_devices = set()
         self._compile_graph_break_code = None
 
     def add_resume_function(
@@ -2217,10 +2221,13 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         op_names = set(self._package.graph_break_op_names)
-        # Graph-break ops run eagerly on their inputs' devices, or on those of any
-        # compiled frame.
-        device_types = set(self._package._device_types if op_names else ())
-        device_types |= self._package.graph_break_device_types
+        # Graph-break custom ops run eagerly on their inputs' devices, or on those
+        # of any compiled frame.
+        graph_break_ops = set(_custom_ops(op_names))
+        device_types = set(self._package._device_types if graph_break_ops else ())
+        device_types |= {
+            t for n, t in self._package.graph_break_op_devices if n in graph_break_ops
+        }
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.

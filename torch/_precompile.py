@@ -2035,7 +2035,8 @@ def _torch_cpp_op(op_name: str, overload: str) -> bool:
     path = _registration_path(op_name, overload)
     if root is None or not path or path.endswith(".py"):
         return True
-    return path.startswith(os.path.join(root, ""))
+    path = os.path.normcase(os.path.normpath(path))
+    return path.startswith(os.path.normcase(os.path.join(root, "")))
 
 
 # Torch's namespaces defined from C++.
@@ -2069,6 +2070,7 @@ _TORCH_OP_NAMESPACES = frozenset(
         "metal_prepack",
         "vulkan_quantized",
         "_nnapi",
+        "_native_aot",
     }
 )
 _TORCH_DIR = os.path.dirname(torch.__file__)
@@ -2096,11 +2098,9 @@ _TORCH_PRIM_MODULES = (
 )
 # Torch ops defined only when a function runs, not by a module import, and what
 # must run on the serving host before the artifact loads.
-_CUDA_INIT = "CUDA initialization (torch.cuda.init())"
+_CUDA_INIT = "CUDA initialization (torch.cuda.init()) with the triton package installed"
 _TORCH_LAZY_OPS = MappingProxyType(
     {
-        "triton::_triton_bsr_dense_mm_out": _CUDA_INIT,
-        "triton::_triton_bsr_dense_addmm_out": _CUDA_INIT,
         "_inductor_debug::check_memory_step": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
         "semi_structured::cusparselt_mm": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered()",
         "semi_structured::cutlass_mm": "torch.sparse.semi_structured._ensure_cutlass_mm_registered()",
@@ -2174,9 +2174,11 @@ def _op_registration(
     defined only once ``setup`` runs, ``("module", name)`` for one an importable
     module registers, ``("torch", "")`` for one ``import torch`` registers from C++,
     and ``("unrecorded", "")`` otherwise."""
-    ns = op_name.split("::")[0]
+    ns, _, name = op_name.partition("::")
     if op_name in _TORCH_LAZY_OPS:
         return "lazy", _TORCH_LAZY_OPS[op_name]
+    if ns == "triton" and any(k == name for k, _ in torch._TritonLibrary.ops_table):
+        return "lazy", _CUDA_INIT
     if ns in _TORCH_LAZY_OP_NAMESPACES:
         return "lazy", _TORCH_LAZY_OP_NAMESPACES[ns]
     if ns == "prims":
