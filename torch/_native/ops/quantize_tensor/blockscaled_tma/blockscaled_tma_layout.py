@@ -5,7 +5,13 @@ from typing import cast, NamedTuple, TypeAlias
 
 import torch
 
-from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_plan
+from .blockscaled_tma_plan import (
+    _QUANT_ORIENTATION_DIM_K,
+    _QUANT_ORIENTATION_DIM_KM,
+    _QUANT_ORIENTATION_DIM_M,
+    BlockscaledTmaPlan,
+    select_blockscaled_tma_plan,
+)
 
 
 _SingleQuantDim: TypeAlias = tuple[int, int]
@@ -16,9 +22,6 @@ _BlockscaledTmaOutput: TypeAlias = (
 )
 
 
-_QUANT_ORIENTATION_DIM_K = 0
-_QUANT_ORIENTATION_DIM_M = 1
-_QUANT_ORIENTATION_DIM_KM = 2
 _CUDA_GRID_X_MAX = 2**31 - 1
 _CUDA_GRID_Y_MAX = 2**16 - 1
 _CUDA_GRID_Z_MAX = 2**16 - 1
@@ -166,8 +169,7 @@ def _checked_blockscaled_tma_plan(
             spec.M,
             spec.K,
             input_dtype=input.dtype,
-            do_dim_k=spec.do_dim_k,
-            do_dim_m=spec.do_dim_m,
+            quant_orientation_id=spec.quant_orientation_id,
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (

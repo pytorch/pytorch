@@ -19,7 +19,7 @@ if Version(cutlass.__version__) >= Version("4.8.0"):
 else:
     from cutlass.utils import SmemAllocator
 
-from .blockscaled_tma_layout import (
+from .blockscaled_tma_plan import (
     _QUANT_ORIENTATION_DIM_K,
     _QUANT_ORIENTATION_DIM_KM,
     _QUANT_ORIENTATION_DIM_M,
