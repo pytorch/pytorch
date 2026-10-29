@@ -8,8 +8,11 @@ name: In Progress PR Review Run
 #
 #   prepare  authenticate the Stage-1 artifact, re-derive pr_number/base_sha,
 #            fetch the PR conversation
+#   announce marks the newest automated review in progress (GITHUB_TOKEN with
+#            pull-requests: write only; no AWS, no environment, no PR code)
 #   review   reads UNTRUSTED code; Bedrock + PutObject on the trace prefix only
-#   publish  verdict JSON -> S3, then posts it as a PR review; never runs PR code
+#   publish  verdict JSON -> S3, then posts it as a PR review, or puts back the
+#            review `announce` marked; never runs PR code
 #
 # Nothing here changes a label. Dr. CI reads the verdict row and decides
 # `ready for review` from it together with CI status.
@@ -498,6 +501,35 @@ jobs:
               --phase terminal --status skipped_too_large --out terminal.json
           aws s3 cp terminal.json \
             "s3://${S3_BUCKET}/${S3_PREFIX}/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_terminal.json"
+
+  announce:
+    needs: prepare
+    # Marks the PR's newest automated review in progress, so its verdict is not
+    # read as current while this run reviews. `publish` replaces it or puts it
+    # back. Same condition as `review`. GITHUB_TOKEN only: no environment, no
+    # AWS role, no pull-request code.
+    if: needs.prepare.outputs.fresh == 'true' && needs.prepare.outputs.too_large != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mark the previous automated review in progress
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+          RUN_ID: ${{ github.run_id }}
+          OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
+        run: python3 scripts/pr_review/post_review.py --mark-pending
 
   review:
     needs: prepare
@@ -1086,7 +1118,7 @@ jobs:
           if-no-files-found: warn
 
   publish:
-    needs: [prepare, review]
+    needs: [prepare, announce, review]
     # `too_large` excluded for the same reason `review` is: prepare already
     # wrote the terminal row on that path, and `always()` would otherwise run
     # this job against an artifact the skipped review never uploaded.
@@ -1184,4 +1216,15 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+          OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
         run: python3 scripts/pr_review/post_review.py --row-file terminal.json
+
+      - name: Put back the previous review if this run did not replace it
+        # `always()`: a failed step above must not leave the mark standing.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          RUN_ID: ${{ github.run_id }}
+        run: python3 scripts/pr_review/post_review.py --restore-pending
