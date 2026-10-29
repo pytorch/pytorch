@@ -11063,8 +11063,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         callers = op._backend_fn_callers
         op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = module.__name__
         with self.assertNoLogs("torch._precompile", level="WARNING"):
-            line, _, _ = self._render_with_ops([(qualname, "")])
-        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module.__name__,)!r}")
+            line, name, _ = self._render_with_ops([(qualname, "")])
+        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(module.__name__, name)!r}")
         register = "torch.library.register_kernel(qualname, 'cpu', torch.neg)"
         exec(register, {"__name__": "__main__", "torch": torch}, {"qualname": qualname})
         # As under python -m, where __main__ has a spec.
