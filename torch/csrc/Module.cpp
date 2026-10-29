@@ -3651,11 +3651,11 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
-  // See Note [in_kernel_invocation].
+  // See Note [C++ fake in_kernel_invocation].
   torch::impl::py_context_manager<c10::impl::FakeInKernelInvocationGuard>(
-      py_module, "_CppFakeInKernelInvocation");
+      py_module, "_FakeInKernelInvocation");
 
-  py_module.def("_cpp_fake_in_kernel_invocation", []() {
+  py_module.def("_in_kernel_invocation", []() {
     return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
   });
 

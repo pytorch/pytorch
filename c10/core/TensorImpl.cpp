@@ -208,7 +208,7 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // we can just set it upon FakeTensor creation
   // and determine in device_custom() which device to return
   // (based on FakeTensorModeTLS::in_kernel_invocation(), see
-  // Note [in_kernel_invocation])
+  // Note [C++ fake in_kernel_invocation])
   get_extra_meta().fake_device_ = fake_device;
   key_set_ = key_set_.add(DispatchKey::Fake);
 
