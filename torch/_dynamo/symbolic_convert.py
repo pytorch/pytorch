@@ -1119,12 +1119,16 @@ def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None
                 log.debug("precompile: dropped a graph-break item", exc_info=True)
         elif isinstance(vt, BaseTorchVariable):
             leaves.append(vt.value)
-    # Served, an op with no recorded device is checked on every kernel key.
+    # With no recorded device, the op is checked on the compiled frames' devices.
     devices = frozenset[str]()
     if devices_known:
         try:
+            # isinstance(TensorVariable) would realize a lazy item.
+            tensors = [v for v in vts if not isinstance(v, LazyVariableTracker)]
             known = {
-                v.device.type for v in vts if isinstance(v, TensorVariable) and v.device
+                v.device.type
+                for v in tensors
+                if isinstance(v, TensorVariable) and v.device
             }
             devices = _tensor_device_types(leaves) | (known - {"meta"})
         except Exception:
