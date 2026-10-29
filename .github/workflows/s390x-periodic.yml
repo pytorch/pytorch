@@ -15,6 +15,9 @@ on:
       pin-controls:
         type: boolean
         default: false
+      verify-fix:
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
@@ -91,6 +94,6 @@ jobs:
       timeout-minutes: 90
       test-matrix: |
         { include: [
-          { config: "triton_pin_s390_controls", shard: 1, num_shards: 1, runner: "linux.s390x" },
+          { config: "${{ github.event.inputs.verify-fix == 'true' && 'triton_pin_s390_verify' || 'triton_pin_s390_controls' }}", shard: 1, num_shards: 1, runner: "linux.s390x" },
         ]}
     secrets: inherit

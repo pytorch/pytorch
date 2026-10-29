@@ -249,7 +249,7 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           REQUIREMENTS_FILE=.ci/docker/requirements-ci.txt
-          if [[ $TEST_CONFIG == 'triton_pin_s390_controls' ]]; then
+          if [[ $TEST_CONFIG == triton_pin_s390_* ]]; then
             REQUIREMENTS_FILE=.ci/pytorch/triton_pin_s390_requirements.txt
           fi
 
@@ -283,13 +283,15 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Preserve native s390x codegen controls
-        if: always() && matrix.config == 'triton_pin_s390_controls'
+        if: always() && startsWith(matrix.config, 'triton_pin_s390_')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-s390x-codegen-${{ github.run_id }}
           path: |
             test/debug/triton-pin-s390-controls/**/*
             test/test-reports/triton-pin-s390-controls/**/*
+            test/debug/triton-pin-s390-verify/**/*
+            test/test-reports/triton-pin-s390-verify/**/*
           retention-days: 14
           if-no-files-found: error
 

@@ -2618,6 +2618,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_s390_controls" ]]; then
   exec python .ci/pytorch/triton_pin_s390_controls.py
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_s390_verify" ]]; then
+  exec python .ci/pytorch/triton_pin_s390_verify.py
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_mi350_boundary" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_boundary.py
 fi
