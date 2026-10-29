@@ -2141,6 +2141,12 @@ def _library_op_module(
     return file_modules().get(os.path.realpath(path))
 
 
+def _kernel_paths(qualname: str) -> dict[str, str]:
+    """The files registering the active kernels of ``qualname``, by key."""
+    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+):\d+ ::"
+    return dict(re.findall(pattern, torch._C._dispatch_dump(qualname), re.MULTILINE))
+
+
 def _kernel_modules(
     op_name: str,
     overload: str,
@@ -2154,16 +2160,16 @@ def _kernel_modules(
     another if ``shadowing``. A kernel registered through another module's Library
     records that module, not the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
-    dump = torch._C._dispatch_dump(qualname)
     if shadowing:
         # A replaced kernel's line reads "CPU (inactive): registered at ...".
         inactive = r"^(\w+)(?:\[alias\])? \(inactive\):"
-        replaced = re.findall(inactive, dump, re.MULTILINE)
+        replaced = re.findall(inactive, torch._C._dispatch_dump(qualname), re.MULTILINE)
         keys = tuple(k for k in keys if k in replaced)
-    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+\.py):\d+ ::"
-    found = re.findall(pattern, dump, re.MULTILINE)
+    found = _kernel_paths(qualname).items()
     modules = {
-        k: file_modules().get(os.path.realpath(p)) for k, p in found if k in keys
+        k: file_modules().get(os.path.realpath(p))
+        for k, p in found
+        if k in keys and p.endswith(".py")
     }
     return {k: m for k, m in modules.items() if m and m.partition(".")[0] != "torch"}
 
@@ -2215,23 +2221,22 @@ class _CustomOpModules(NamedTuple):
     # register (a torch helper's, a C++ extension's or __main__'s).
     unrecorded_kernels: tuple[tuple[str, str], ...] = ()
     # The ``(op, key)`` of those kernels registered from __main__, by a C++
-    # extension, or by a custom_op's register_kernel outside the op's module. Other
-    # kernels registered through a torch helper may be the op's module's own.
+    # extension, or by a custom_op's register_kernel called from __main__ or a
+    # module that is not importable. Other kernels registered through a torch
+    # helper may be the op's module's own.
     untracked_kernels: tuple[tuple[str, str], ...] = ()
 
 
 def _custom_op_kernel_modules(op_name: str) -> dict[str, str]:
-    """The modules of the functions a ``torch.library.custom_op`` op's
-    ``register_kernel`` kernels run, by key."""
+    """The modules that called a ``torch.library.custom_op`` op's
+    ``register_kernel``, by key."""
     from torch._library.custom_ops import OPDEFS
 
     if (opdef := OPDEFS.get(op_name)) is None:
         return {}
     modules: dict[str, str] = {}
-    for device_type, wrapped in opdef._backend_fns.items():
-        # register_kernel stores a wrapper closing over the registered function.
-        fn = inspect.getclosurevars(inspect.unwrap(wrapped)).nonlocals.get("fn")
-        if (module := getattr(fn, "__module__", None)) is None:
+    for device_type, module in opdef._backend_fn_modules.items():
+        if module is None:
             continue
         key = "CompositeExplicitAutograd"
         if device_type is not None:
@@ -2272,17 +2277,21 @@ def _custom_op_modules(
         if not missing:
             continue
         unrecorded_kernels.add((op_name, overload))
-        pattern = r"^(\w+)(?:\[alias\])?: registered at (.+):\d+ ::"
-        dump = torch._C._dispatch_dump(qualname)
-        paths = dict(re.findall(pattern, dump, re.MULTILINE))
-        fn_modules = _custom_op_kernel_modules(op_name)
+        paths = _kernel_paths(qualname)
+        callers = _custom_op_kernel_modules(op_name)
         for k in (k for k in missing if k in paths):
-            fn_module = fn_modules.get(k, value)
-            foreign = fn_module != value and fn_module.partition(".")[0] != "torch"
             # Taken as registered by the C++ extension the op's module loads.
             if kind == "module" and not paths[k].endswith(".py"):
                 continue
-            if foreign or not os.path.realpath(paths[k]).startswith(torch_dir):
+            caller = callers.get(k, value)
+            if not os.path.realpath(paths[k]).startswith(torch_dir):
+                untracked_kernels.add((op_name, k))
+            elif caller == value or caller.partition(".")[0] == "torch":
+                continue
+            elif getattr(sys.modules.get(caller), "__spec__", None) is not None:
+                # An importable module adding a kernel to another module's op.
+                modules.add(caller)
+            else:
                 untracked_kernels.add((op_name, k))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
@@ -2337,9 +2346,9 @@ def _warn_unregistered_ops(
         log.warning(
             "torch.compiler.precompile: the captured graphs run the kernels %s, "
             "which no recorded module is known to register: registered from "
-            "__main__, by a C++ extension, or by register_kernel outside the op's "
-            "module. %s Register the kernel in the op's module, or load the "
-            "extension in it, before loading the artifact.",
+            "__main__ or a module that is not importable, or by a C++ extension. "
+            "%s Register the kernel in an importable module, or load the extension "
+            "in the op's module, before loading the artifact.",
             ", ".join(kernels),
             serves,
         )
