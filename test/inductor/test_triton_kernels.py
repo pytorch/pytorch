@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import unittest
+from typing import NamedTuple
 from unittest import mock
 
 import torch
@@ -33,6 +34,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import (
     fresh_cache,
     run_and_get_code,
+    run_and_get_kernels,
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
@@ -60,6 +62,12 @@ from torch.utils._triton import (
     has_triton_package,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+# Module-level NamedTuple for CPU unit tests of #192288 (no GPU/triton needed).
+class ModuleLevelStrides(NamedTuple):
+    batch: int
+    token: int
 
 
 requires_cuda_tma = unittest.skipIf(
@@ -138,6 +146,27 @@ if HAS_GPU:
                 bitwidth=x.dtype.primitive_bitwidth, signed=True
             )
             return x.to(idtype, bitcast=True)
+
+    # Module-level NamedTuple + kernel for #192288 (avoid local classes so FX
+    # graph cache can pickle the cache key).
+    class MatrixStrides(NamedTuple):
+        batch: int
+        token: int
+
+    @triton.jit
+    def copy_first_row_namedtuple_kernel(
+        x_ptr,
+        out_ptr,
+        N: tl.constexpr,
+        X_STRIDES: tl.constexpr,
+        BLOCK: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK)
+        values = tl.load(
+            x_ptr + 0 * X_STRIDES.batch + offsets * X_STRIDES.token,
+            mask=offsets < N,
+        )
+        tl.store(out_ptr + offsets, values, mask=offsets < N)
 
     # Kernel with dunder name for name-mangling regression test (issue #170398).
     @triton.jit
@@ -247,6 +276,340 @@ class KernelTests(torch._inductor.test_case.TestCase):
             return f"launchKernel({kernel_name}" in code
         return f"{kernel_name}.run(" in code
 
+    def test_codegen_namedtuple_defs_for_triton_meta(self):
+        # NamedTuple constexpr values stringify as TypeName(...); the generated
+        # Triton module must define those types so triton_meta={...!r} can eval.
+        # See https://github.com/pytorch/pytorch/issues/192288
+        import pickle
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        class LocalStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: LocalStrides
+
+        strides = _sanitize_for_repr(LocalStrides(batch=8, token=1))
+        strides_type = namedtuple_type("LocalStrides", ("batch", "token"))
+        strides_alias = strides_type.__qualname__
+        defs = codegen_namedtuple_defs({"X_STRIDES": strides})
+        self.assertIn(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type",
+            defs,
+        )
+        self.assertIn(
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            defs,
+        )
+        # Never import the user's defining module (remote cache / non-importable).
+        self.assertNotIn("import LocalStrides", defs)
+        self.assertNotIn("collections.namedtuple", defs)
+
+        # Round-trip: defs + repr(value) must eval without the original type.
+        ns: dict = {}
+        exec(defs, ns)
+        reconstructed = eval(repr(strides), ns)
+        self.assertEqual(reconstructed.batch, 8)
+        self.assertEqual(reconstructed.token, 1)
+        self.assertEqual(reconstructed[0], 8)
+        self.assertIsInstance(reconstructed, tuple)
+
+        # Reconstructed instances must pickle (compile-worker return path).
+        pickled = pickle.loads(pickle.dumps(reconstructed))
+        self.assertEqual(pickled.batch, 8)
+        self.assertEqual(pickled.token, 1)
+        self.assertIs(
+            type(pickled),
+            namedtuple_type("LocalStrides", ("batch", "token")),
+        )
+
+        nested = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        nested_defs = codegen_namedtuple_defs({"X": nested})
+        self.assertIn(
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            nested_defs,
+        )
+        self.assertIn(
+            f"{type(nested).__qualname__} = namedtuple_type('Nested', ('outer', 'strides'))",
+            nested_defs,
+        )
+        exec(nested_defs, ns)
+        self.assertEqual(eval(repr(nested), ns), nested)
+
+        # Plain tuples need no defs (already self-contained under ``repr``).
+        self.assertEqual(codegen_namedtuple_defs({"t": (8, 1)}), "")
+
+        # Same __name__ + same fields: emit once (structurally interchangeable).
+        import collections
+
+        DupA = collections.namedtuple("DupStrides", ["batch", "token"])
+        DupB = collections.namedtuple("DupStrides", ["batch", "token"])
+        dup_defs = codegen_namedtuple_defs(
+            {
+                "a": DupA(batch=1, token=2),
+                "b": DupB(batch=3, token=4),
+            }
+        )
+        self.assertEqual(dup_defs.count(" = namedtuple_type"), 1)
+
+        # Same __name__ + different fields: use distinct structural aliases.
+        Conflict = collections.namedtuple("DupStrides", ["token", "batch"])
+        values = _sanitize_for_repr(
+            {"a": DupA(batch=1, token=2), "b": Conflict(token=3, batch=4)}
+        )
+        conflict_defs = codegen_namedtuple_defs(values)
+        self.assertEqual(conflict_defs.count(" = namedtuple_type"), 2)
+        exec(conflict_defs, ns)
+        rebuilt = eval(repr(values), ns)
+        self.assertEqual(rebuilt["a"].batch, 1)
+        self.assertEqual(rebuilt["b"].batch, 4)
+
+        # Module-level NamedTuple also uses namedtuple_type (never user import).
+        module_defs = codegen_namedtuple_defs(
+            {"X_STRIDES": ModuleLevelStrides(batch=8, token=1)}
+        )
+        self.assertIn(
+            " = namedtuple_type('ModuleLevelStrides', ('batch', 'token'))",
+            module_defs,
+        )
+        self.assertNotIn("import ModuleLevelStrides", module_defs)
+
+    def test_add_namedtuple_types_to_launcher_scope(self):
+        # Heuristics inlines constexprs via repr; Nested field types must be bound.
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        class LocalStrides(NamedTuple):
+            batch: int
+            token: int
+
+        class Nested(NamedTuple):
+            outer: int
+            strides: LocalStrides
+
+        strides = LocalStrides(batch=8, token=1)
+        scope: dict = {}
+        _add_namedtuple_types_to_scope({"X": Nested(outer=2, strides=strides)}, scope)
+        sanitized = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        self.assertIs(scope[type(sanitized).__qualname__], type(sanitized))
+        self.assertIs(
+            scope[type(sanitized.strides).__qualname__], type(sanitized.strides)
+        )
+        self.assertEqual(eval(repr(sanitized), scope).strides.batch, 8)
+
+    def test_namedtuple_constexpr_collisions_and_nested_values(self):
+        import collections
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            get_importable_constexpr_types,
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        first = collections.namedtuple("Strides", ("x", "y"), module="module_a")
+        second = collections.namedtuple("Strides", ("x", "z"), module="module_b")
+        module = types.ModuleType("_inductor_namedtuple_collision_test")
+        config_type = dataclasses.make_dataclass("Strides", [("nested", object)])
+        config_type.__module__ = module.__name__
+        module.Strides = config_type
+        values = {
+            "first": first(1, 2),
+            "second": second(3, 4),
+            "config": config_type(first(5, 6)),
+            "mapping": {second(7, 8): first(9, 10)},
+        }
+        reserved = (
+            "tl",
+            "triton",
+            "torch",
+            "DeviceProperties",
+            "TensorDescriptor",
+            "bin",
+            "runner",
+            "namedtuple_type",
+            "math",
+        )
+        for name in reserved:
+            values[name] = collections.namedtuple(name, ("x",))(11)
+        values = _sanitize_for_repr(values)
+        self.assertIs(_sanitize_for_repr(values), values)
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            defs = codegen_namedtuple_defs(values)
+            for launcher in (False, True):
+                with self.subTest(launcher=launcher):
+                    sentinels = {name: object() for name in reserved}
+                    scope = dict(sentinels)
+                    if launcher:
+                        _add_namedtuple_types_to_scope(values, scope)
+                    else:
+                        exec(defs, scope)
+                    # The helper import intentionally binds namedtuple_type.
+                    for name in reserved:
+                        if name != "namedtuple_type" or launcher:
+                            self.assertIs(scope[name], sentinels[name])
+                    imports = get_importable_constexpr_types(values.values())
+                    self.assertEqual(len(imports), 1)
+                    exec(f"from {module.__name__} import Strides", scope)
+                    rebuilt = eval(repr(values), scope)
+                    self.assertEqual(rebuilt["first"].y, 2)
+                    self.assertEqual(rebuilt["second"].z, 4)
+                    self.assertEqual(rebuilt["config"].nested.y, 6)
+                    key = next(iter(rebuilt["mapping"]))
+                    self.assertEqual(key.z, 8)
+                    self.assertEqual(rebuilt["mapping"][key].y, 10)
+
+    @parametrize(
+        "container",
+        ["dataclass", "attrs", "pydantic", "mapping_key", "set", "frozenset"],
+    )
+    @parametrize("launcher", [False, True])
+    def test_namedtuple_constexpr_repr_containers(self, container, launcher):
+        import collections
+
+        from triton_constexpr_configs import (
+            UserDefinedAttrsLikeConfig,
+            UserDefinedPydanticLikeConfig,
+            UserDefinedTritonKernelNestedConfig,
+        )
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+
+        strides = ModuleLevelStrides(8, 1)
+        hidden = collections.namedtuple("HiddenStrides", ("unused",))(9)
+        values = {
+            "dataclass": UserDefinedTritonKernelNestedConfig(strides),
+            "attrs": UserDefinedAttrsLikeConfig(strides, hidden),
+            "pydantic": UserDefinedPydanticLikeConfig(strides, hidden),
+            "mapping_key": collections.OrderedDict([(strides, 3)]),
+            "set": {strides},
+            "frozenset": frozenset({strides}),
+        }
+        expected_type = namedtuple_type("ModuleLevelStrides", ("batch", "token"))
+        prepared_strides = sanitize_constexpr_for_repr(strides)
+        raw = values[container]
+        prepared = sanitize_constexpr_for_repr(raw)
+        scope = {}
+        if launcher:
+            _add_namedtuple_types_to_scope(raw, scope)
+        else:
+            defs = codegen_namedtuple_defs({"X": prepared})
+            self.assertEqual(defs.count(" = namedtuple_type"), 1)
+            exec(defs, scope)
+        self.assertIs(scope[expected_type.__qualname__], expected_type)
+        self.assertEqual(eval(repr(prepared_strides), scope), strides)
+        # Only repr-visible children need bindings. Hidden fields must not
+        # introduce unrelated NamedTuple definitions.
+        self.assertNotIn("HiddenStrides", scope)
+        self.assertNotIn(
+            namedtuple_type("HiddenStrides", ("unused",)).__qualname__, scope
+        )
+
+    def test_namedtuple_constexpr_reserved_alias_import(self):
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import get_importable_constexpr_types
+
+        pair_type = namedtuple_type("Strides", ("x",))
+        module = types.ModuleType("_inductor_namedtuple_alias_test")
+        config_type = dataclasses.make_dataclass(
+            pair_type.__qualname__, [("nested", object)]
+        )
+        config_type.__module__ = module.__name__
+        setattr(module, pair_type.__qualname__, config_type)
+        # This import would replace the alias emitted for the NamedTuple.
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            with self.assertRaisesRegex(ImportError, "reserved by generated Triton"):
+                get_importable_constexpr_types([pair_type(5), config_type(3)])
+
+    def test_namedtuple_constexpr_legacy_source_and_pickle(self):
+        import pickle
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        # Previously cached source still calls the original two-argument API.
+        scope = {}
+        exec(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type\n"
+            "Legacy = namedtuple_type('Legacy', ('x',))\n"
+            "value = Legacy(x=3)\n",
+            scope,
+        )
+        value = scope["value"]
+        sanitized = _sanitize_for_repr(value)
+        self.assertEqual(type(sanitized).__name__, "Legacy")
+        self.assertEqual(repr(sanitized), repr(value))
+        self.assertEqual(repr(_sanitize_for_repr(sanitized)), repr(value))
+        defs = codegen_namedtuple_defs({"x": value})
+        self.assertEqual(defs, codegen_namedtuple_defs({"x": sanitized}))
+        launcher_scope = {}
+        _add_namedtuple_types_to_scope(value, launcher_scope)
+        self.assertEqual(eval(repr(value), launcher_scope).x, 3)
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            rebuilt = pickle.loads(pickle.dumps(value, protocol=protocol))
+            self.assertIs(type(rebuilt), type(value))
+            self.assertEqual(repr(rebuilt), repr(value))
+
+    def test_namedtuple_constexpr_preserves_device_metadata(self):
+        from torch._inductor.codegen.wrapper import (
+            _sanitize_for_repr,
+            codegen_namedtuple_defs,
+        )
+        from torch._inductor.runtime.hints import DeviceProperties
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+
+        device = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=1, cc=80, warp_size=32
+        )
+
+        class Strides(NamedTuple):
+            x: int
+
+        for constants in ({}, {"strides": Strides(3)}):
+            with self.subTest(constants=constants):
+                meta = {"device": device, "constants": constants}
+                meta["constants"] = sanitize_constexpr_for_repr(meta["constants"])
+                sanitized = _sanitize_for_repr(meta)
+                self.assertIs(sanitized["device"], device)
+                self.assertIs(type(sanitized["device"]), DeviceProperties)
+                self.assertEqual(sanitized["device"].warp_size_or_default, 32)
+                self.assertEqual(repr(sanitized["device"]), repr(device))
+                scope = {"DeviceProperties": DeviceProperties}
+                exec(codegen_namedtuple_defs(sanitized["constants"]), scope)
+                rebuilt = eval(repr(sanitized), scope)
+                self.assertIs(type(rebuilt["device"]), DeviceProperties)
+                self.assertEqual(rebuilt["device"].warp_size_or_default, 32)
+
     def _run_and_get_triton_compile_options(self, fn, *args):
         # TestCase already gives each test a fresh compile cache. This patch
         # only keeps compilation in-process while the triton.compile mock is
@@ -314,6 +677,46 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+    @requires_gpu
+    @parametrize("cfg", ["normal", "cpp_wrapper"])
+    def test_triton_kernel_namedtuple_constexpr(self, cfg):
+        # Regression test for https://github.com/pytorch/pytorch/issues/192288
+        # NamedTuple tl.constexpr args must compile under torch.compile(fullgraph=True).
+        # Keep MatrixStrides / kernel at module scope (see above) so FX graph
+        # cache pickling works.
+        config_kwargs = {"cpp_wrapper": cfg == "cpp_wrapper"}
+
+        def copy_first_row(x):
+            out = torch.empty_like(x[0])
+            copy_first_row_namedtuple_kernel[(1,)](
+                x,
+                out,
+                N=x.shape[1],
+                X_STRIDES=MatrixStrides(
+                    batch=x.stride(0),
+                    token=x.stride(1),
+                ),
+                BLOCK=16,
+            )
+            return out
+
+        x = torch.arange(16, device=GPU_TYPE).reshape(2, 8)
+        expected = x[0].clone()
+        eager = copy_first_row(x)
+        self.assertEqual(eager, expected)
+
+        with inductor_config.patch(**config_kwargs):
+            compiled = torch.compile(copy_first_row, fullgraph=True)
+            compiled_result, (code,) = run_and_get_code(compiled, x)
+            self.assertEqual(compiled_result, expected)
+            kernel_name = "copy_first_row_namedtuple_kernel_0"
+            self.assertTrue(self._kernel_launched_in_code(kernel_name, code))
+            # Python wrapper embeds triton_meta via !r (also present under
+            # cpp_wrapper in the Python compile path). Reconstruct via the
+            # pickle-safe helper, never via a user-module import.
+            self.assertIn(" = namedtuple_type('MatrixStrides',", code)
+            self.assertNotIn("import MatrixStrides", code)
 
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
@@ -2344,9 +2747,8 @@ def forward(self, x_1, output_1):
 
         n = 8
         eager_out = f(n)
-        compiled_out, (triton_code,) = run_and_get_code(
-            torch.compile(f, fullgraph=True), n
-        )
+        compiled_out, kernels = run_and_get_kernels(torch.compile(f, fullgraph=True), n)
+        triton_code = "\n".join(kernels)
 
         # Verify the generated code has proper imports
         self.assertIn("from triton.language.core import dtype as dtype", triton_code)
@@ -4020,7 +4422,8 @@ def forward(self, arg0_1, arg1_1):
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_with_docstring(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_docstring(self, quotes, cpp_wrapper):
         kernel = (
             kernel_with_docstring_single_quotes
             if quotes == "single"
@@ -4036,12 +4439,18 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            # Only a wrapper that consumes string kernels carries the escaped block.
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    def test_kernel_with_backslash_in_docstring(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_backslash_in_docstring(self, cpp_wrapper):
         # https://github.com/pytorch/pytorch/issues/183420
         # Backslash escapes in the kernel source text must be doubled before
         # the source is spliced into the generated triple-quoted wrapper,
@@ -4055,8 +4464,12 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @skipIfXpu(
@@ -4065,7 +4478,8 @@ def forward(self, arg0_1, arg1_1):
     )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, quotes):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_inline_asm(self, quotes, cpp_wrapper):
         if torch.version.cuda:
             kernel = (
                 kernel_inline_asm_single_quotes
@@ -4090,8 +4504,12 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.randn(345, device=GPU_TYPE)
         actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, inp)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
@@ -6208,7 +6626,7 @@ def add_kernel(
     in_ptr1,
     out_ptr,
     n_elements,
-    BLOCK_SIZE: "tl.constexpr",
+    BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
@@ -6227,7 +6645,7 @@ def autotuned_add_kernel(
     in_ptr1,
     out_ptr,
     n_elements,
-    BLOCK_SIZE: "tl.constexpr",
+    BLOCK_SIZE: tl.constexpr,
 ):
     pid = tl.program_id(axis=0)
     block_start = pid * BLOCK_SIZE
@@ -6706,6 +7124,57 @@ else:
             f(x, increment)
 
         self.assertEqual(y + increment, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_reset_to_zero_restore_value_with_prune_configs_by(
+        self, backend
+    ):
+        def noop_prune(configs, named_args, **kwargs):
+            return configs
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            reset_to_zero=["acc_ptr"],
+            restore_value=["counter_ptr"],
+            prune_configs_by={"early_config_prune": noop_prune},
+        )
+        @triton.jit
+        def accumulate_kernel(
+            in_ptr0,
+            acc_ptr,  # accumulated into, so reset to zero before every config
+            counter_ptr,  # updated in place, so restored after every config
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.atomic_add(acc_ptr + offsets, x, mask=mask)
+            counter = tl.load(counter_ptr + offsets, mask=mask)
+            tl.store(counter_ptr + offsets, counter + 1, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, counter):
+            acc = torch.zeros_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            accumulate_kernel[grid](x, acc, counter, n_elements=n_elements)
+            return acc
+
+        x = torch.rand(4, device=GPU_TYPE)
+        counter = torch.zeros(4, device=GPU_TYPE)
+
+        # The autotuner rebuilt after pruning must keep reset_to_zero and
+        # restore_value, or every benchmarking run leaks into acc and counter.
+        self.assertEqual(f(x, counter), x)
+        self.assertEqual(counter, torch.ones_like(counter))
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
