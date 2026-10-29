@@ -147,6 +147,7 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _tensor_device_types,
     counters,
     FrameState,
     get_fake_value,
@@ -1206,8 +1207,14 @@ def break_graph_if_unsupported(
                 # The instruction runs eagerly, so the ops it calls or passes must be
                 # registered when it is served.
                 popped = self.stack[len(self.stack) - (int(push) - stack_effect) :]
-                tensors = [v for v in popped if isinstance(v, TensorVariable)]
-                devices = frozenset(v.device.type for v in tensors if v.device)
+                vts: list[VariableTracker] = []
+                VariableTracker.visit(vts.append, popped)
+                devices = frozenset[str]()
+                for v in vts:
+                    if isinstance(v, LazyVariableTracker):
+                        devices |= _tensor_device_types(v.peek_value())
+                    elif isinstance(v, TensorVariable) and v.device:
+                        devices |= {v.device.type}
                 for vt in popped:
                     if isinstance(vt, BaseTorchVariable):
                         package.add_graph_break_op(vt.value, device_types=devices)
