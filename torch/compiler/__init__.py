@@ -817,11 +817,6 @@ class _LegacyCompilerModule(types.ModuleType):
             )
         super().__setattr__(name, value)
 
-    def __delattr__(self, name: str) -> None:
-        if name in _LEGACY_FLAG_NAMES:
-            return
-        super().__delattr__(name)
-
 
 sys.modules[__name__].__class__ = _LegacyCompilerModule
 
