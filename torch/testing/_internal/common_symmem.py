@@ -136,6 +136,10 @@ def gated_signal_pad_order(
     # gated one waits on the host before the gate can open.
     if os.environ.get("CUDA_LAUNCH_BLOCKING") == "1":
         raise unittest.SkipTest("deadlocks with CUDA_LAUNCH_BLOCKING=1")
+    # With one hardware queue, every stream, the gate opener's included, waits
+    # behind the closed gate.
+    if os.environ.get("CUDA_DEVICE_MAX_CONNECTIONS") == "1":
+        raise unittest.SkipTest("deadlocks with CUDA_DEVICE_MAX_CONNECTIONS=1")
     from cuda.bindings import driver as drv
 
     from torch.cuda._utils import _check_cuda_bindings_driver as check
