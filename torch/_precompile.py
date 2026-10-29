@@ -1907,6 +1907,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "CUSTOM_OPS",
         "CUSTOM_OP_KERNELS",
         "CUSTOM_OP_OVERRIDE_MODULES",
+        "SERVED_MODULES",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2009,7 +2010,10 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
 
 def _registration_path(op_name: str, overload: str) -> str:
     """The file that defined ``op_name``, as recorded at build time ("" if none)."""
-    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    try:
+        debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    except RuntimeError:
+        return ""
     return debug.removeprefix("registered at ").rpartition(":")[0]
 
 
@@ -2040,7 +2044,11 @@ def _torch_cpp_op(op_name: str, overload: str) -> bool:
         return False
     root = _torch_source_root()
     path = _registration_path(op_name, overload)
-    if root is None or not path or path.endswith(".py"):
+    if path.endswith(".py"):
+        # A torch helper's Library records itself for any caller.
+        torch_file = path.startswith(os.path.join(_TORCH_DIR, ""))
+        return torch_file and not path.startswith(_TORCH_OP_HELPERS)
+    if root is None or not path:
         return True
     path = os.path.normcase(os.path.normpath(path))
     return path.startswith(os.path.normcase(os.path.join(root, "")))
@@ -2150,27 +2158,26 @@ def _kernel_paths(qualname: str) -> dict[str, str]:
 
 
 def _kernel_modules(
-    op_name: str,
-    overload: str,
+    qualname: str,
+    paths: dict[str, str],
     keys: tuple[str, ...],
     file_modules: Callable[[], dict[str, str]],
     shadowing: bool = False,
 ) -> dict[str, str]:
     """The modules outside torch that constructed a ``torch.library.Library``
-    registering the active kernel of ``op_name`` for each of ``keys``, by key, often
+    registering the active kernel of ``qualname`` for each of ``keys``, by key, often
     not the module defining the op, and only for the keys where that kernel replaced
-    another if ``shadowing``. A kernel registered through another module's Library
-    records that module, not the one calling ``impl``."""
-    qualname = f"{op_name}.{overload}" if overload else op_name
+    another if ``shadowing``. ``paths`` is ``_kernel_paths(qualname)``. A kernel
+    registered through another module's Library records that module, not the one
+    calling ``impl``."""
     if shadowing:
         # A replaced kernel's line reads "CPU (inactive): registered at ...".
         inactive = r"^(\w+)(?:\[alias\])? \(inactive\):"
         replaced = re.findall(inactive, torch._C._dispatch_dump(qualname), re.MULTILINE)
         keys = tuple(k for k in keys if k in replaced)
-    found = _kernel_paths(qualname).items()
     modules = {
         k: file_modules().get(os.path.realpath(p))
-        for k, p in found
+        for k, p in paths.items()
         if k in keys and p.endswith(".py")
     }
     return {k: m for k, m in modules.items() if m and m.partition(".")[0] != "torch"}
@@ -2229,11 +2236,11 @@ class _CustomOpModules(NamedTuple):
 
 
 def _custom_op_modules(
-    op_names: Iterable[tuple[str, str]], keys: tuple[str, ...]
+    op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> _CustomOpModules:
-    """What registers the ops among ``op_names`` and their active kernels for
-    ``keys``; pass it to ``_warn_unregistered_ops``."""
-    from torch._library.utils import kernel_callers
+    """What registers the ops in ``op_keys`` and their active kernels for the op's
+    keys; pass it to ``_warn_unregistered_ops``."""
+    from torch._library.custom_ops import OPDEFS
 
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     modules: set[str] = set()
@@ -2243,12 +2250,14 @@ def _custom_op_modules(
     torch_dir = os.path.join(os.path.realpath(_TORCH_DIR), "")
     lazy: dict[str, set[str]] = {}
     file_modules = functools.cache(_file_modules)
-    for op_name, overload in op_names:
+    for (op_name, overload), keys in op_keys.items():
         kind, value = _op_registration(op_name, overload, file_modules)
         if kind == "lazy":
             lazy.setdefault(value, set()).add(op_name)
             continue
-        kernels = _kernel_modules(op_name, overload, keys, file_modules)
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        paths = _kernel_paths(qualname)
+        kernels = _kernel_modules(qualname, paths, keys, file_modules)
         modules.update(kernels.values())
         if kind == "module":
             modules.add(value)
@@ -2257,20 +2266,23 @@ def _custom_op_modules(
         # torch registers the kernels of its own ops.
         if kind == "torch" or value.partition(".")[0] == "torch":
             continue
-        qualname = f"{op_name}.{overload}" if overload else op_name
-        missing = [k for k in keys if k not in kernels and has_kernel(qualname, k)]
-        if not missing:
-            continue
-        unrecorded_kernels.add((op_name, overload))
-        paths = _kernel_paths(qualname)
-        callers = kernel_callers.get(qualname, {})
-        for k in (k for k in missing if k in paths):
-            # Taken as registered by the C++ extension the op's module loads.
-            if kind == "module" and not paths[k].endswith(".py"):
+        opdef = OPDEFS.get(qualname)
+        callers = opdef._backend_fn_callers if opdef is not None else {}
+        for k in keys:
+            if k in kernels or not has_kernel(qualname, k):
                 continue
-            caller = callers.get(k) or value
-            if not os.path.realpath(paths[k]).startswith(torch_dir):
+            caller = callers.get(k)
+            if k not in paths:
+                unrecorded_kernels.add((op_name, overload))
+            elif kind == "module" and not paths[k].endswith(".py"):
+                # Taken as registered by the C++ extension the op's module loads.
+                unrecorded_kernels.add((op_name, overload))
+            elif not os.path.realpath(paths[k]).startswith(torch_dir):
                 untracked_kernels.add((op_name, k))
+                unrecorded_kernels.add((op_name, overload))
+            elif caller is None:
+                # Through a Library torch made, as _scoped_library's.
+                unrecorded_kernels.add((op_name, overload))
             elif caller == value or caller.partition(".")[0] == "torch":
                 continue
             elif _importable_module(caller):
@@ -2278,6 +2290,7 @@ def _custom_op_modules(
                 modules.add(caller)
             else:
                 untracked_kernels.add((op_name, k))
+                unrecorded_kernels.add((op_name, overload))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
     return _CustomOpModules(
@@ -2389,7 +2402,7 @@ def _write_custom_op_imports(
     buf: PySourceBuilder,
     modules: tuple[str, ...],
     ops: tuple[tuple[str, str], ...],
-    keys: tuple[str, ...],
+    keys: Mapping[tuple[str, str], tuple[str, ...]],
     call: bool = True,
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
@@ -2416,9 +2429,13 @@ def _write_custom_op_imports(
         # Despite its name, _dispatch_has_kernel only tests that the op exists,
         # which _dispatch_has_kernel_for_dispatch_key requires (it raises otherwise).
         op_exists = torch._C._dispatch_has_kernel(qualname)
-        if op_exists and (found := tuple(k for k in keys if has_kernel(qualname, k))):
+        op_keys = keys[name, overload]
+        if op_exists and (
+            found := tuple(k for k in op_keys if has_kernel(qualname, k))
+        ):
             kernels[qualname] = found
-            if owners := _kernel_modules(name, overload, keys, file_modules, True):
+            paths = _kernel_paths(qualname)
+            if owners := _kernel_modules(qualname, paths, op_keys, file_modules, True):
                 overrides[qualname] = owners
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
     # By op and key, the module registering a kernel the graph ran over another one
@@ -2446,8 +2463,8 @@ def _build_python_source(
     buf.writeline("")
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
-        keys = compiled._kernel_keys
-        found = _custom_op_modules(ops, keys)
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        found = _custom_op_modules(keys)
         _warn_unregistered_ops(found)
         _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
@@ -2505,8 +2522,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline("")
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
-        keys = compiled._kernel_keys
-        found = _custom_op_modules(ops, keys)
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        found = _custom_op_modules(keys)
         _warn_unregistered_ops(found)
         _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
@@ -2833,7 +2850,7 @@ def _build_multigraph_python_source(
     unreachable: list[str],
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
-    custom_op_keys: tuple[str, ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2991,7 +3008,7 @@ def _build_multigraph_artifact(
     *,
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
-    custom_op_keys: tuple[str, ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -3259,15 +3276,8 @@ class PrecompiledModule(PrecompiledRunnable):
         #
         # _frozen_kernel_config() is the Triton config shared with the Dynamo capture
         # (and may log its "precompile capture overrides ..." warnings here). Its
-        # multi_kernel=0 and multi_kernel_hints=[] are load-bearing on this path: under
-        # autotune_at_compile_time, _write_multi_kernel_defs emits multi-kernel defs only
-        # into the compile-time autotune block, so the module would raise NameError on
-        # multi_kernel_N. Its autotune_at_compile_time is redundant (inductor's
-        # compile_to_python already patches it) and is passed only so the two tracers
-        # cannot drift.
-        # TODO: drop the multi-kernel overrides here once
-        # PythonWrapperCodegen._write_multi_kernel_defs emits multi-kernel defs outside
-        # the compile-time autotune block too.
+        # autotune_at_compile_time is redundant (inductor's compile_to_python already
+        # patches it) and is passed only so the two tracers cannot drift.
         options: dict[str, object] = {"size_asserts": True, **_frozen_kernel_config()}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
@@ -4007,15 +4017,13 @@ def capture(
     into a captured graph is likewise tuned on random tensors
     (``torch._inductor.config.triton.autotune_with_sample_inputs`` defaults to
     False), and the config it picks ships in the artifact.
-    ``triton.multi_kernel`` and ``multi_kernel_hints`` are turned off, with a
-    warning, while each captured graph lowers (user code between captured calls
-    keeps the ambient config): the compile-time tuning above does not yet emit
-    multi-kernel definitions into the generated module, and with
-    ``triton.multi_kernel=1`` a multi-kernel picks its sub-kernel by
-    benchmarking at first launch, which the artifact cannot record. A
-    :class:`DynamoTracer` capture with grad enabled lowers each backward while
-    the forward's tensors are still live, so peak device memory during the
-    capture grows by roughly the backward's working set.
+    ``triton.multi_kernel=1`` is turned off, with a warning, while each
+    captured graph lowers (user code between captured calls keeps the ambient
+    config): such a multi-kernel picks its sub-kernel by benchmarking at first
+    launch, which the artifact cannot record. A :class:`DynamoTracer` capture
+    with grad enabled lowers each backward while the forward's tensors are
+    still live, so peak device memory during the capture grows by roughly the
+    backward's working set.
 
     .. note::
 

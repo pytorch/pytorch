@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unittest
+import unittest.mock
 from types import SimpleNamespace
 
 import torch
@@ -21,6 +22,7 @@ from torch._inductor.codegen.wrapper import (
     EnterDeviceContextManagerWithStreamInfoLine,
     ExitCudaStreamContextLine,
     ExitDeviceContextManagerWithStreamInfoLine,
+    PythonWrapperCodegen,
     SubgraphPythonWrapperCodegen,
 )
 from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
@@ -435,8 +437,23 @@ class TestUserStreamCompile(InductorTestCase):
             torch.cuda.current_stream().wait_stream(s)
             return x * 2 + y
 
+        from torch._inductor.utils import run_and_get_code
+
+        blocks = []
+        run_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def spy(self):
+            blocks.append(self.kernel_autotune_calls.getvalue())
+            return run_block(self)
+
         x = torch.randn(1024, device="cuda")
-        self.assertEqual(torch.compile(fn)(x), fn(x))
+        with unittest.mock.patch.object(
+            PythonWrapperCodegen, "generate_and_run_autotune_block", spy
+        ):
+            result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
+        self.assertIn("raw_stream = get_raw_stream(", "".join(blocks))
 
     def test_multiple_stream_contexts(self):
         """Test compilation with multiple stream context switches."""
