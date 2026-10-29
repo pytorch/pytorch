@@ -4731,6 +4731,13 @@ def single(model, x):
     return model(x).sum(dim=0)
 
 
+def reads_version(model, x):
+    # Dynamo records the _version read as prims::_tensor_version.
+    y = model(x) + 0
+    y.add_(1)
+    return y * y._version
+
+
 def reads_unregistered(model, x):
     return model(x).sum(dim=0) * unregistered.SCALE
 
@@ -5266,6 +5273,23 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         # Nothing of dispatch needs installing: it runs as plain Python.
         self._serve_in_fresh_process([((self.x2, 1), {}, eager)])
+
+    @skipIfCrossRef
+    @parametrize("backend", ["inductor", "eager"])
+    def test_a_graph_calling_a_prim_imports_and_checks_it_in_a_fresh_process(
+        self, backend
+    ):
+        fn = self.mod.reads_version
+        with self._capture(fn, backend=backend) as cap:
+            y = cap(self.model, self.x2)
+        self.assertEqual(y, fn(self.model, self.x2))
+        with open(self.artifact) as f:
+            python_code = f.read()
+        self.assertIn("CUSTOM_OPS = (('prims::_tensor_version', ''),)", python_code)
+        self.assertIn(
+            "CUSTOM_OP_MODULES = ('torch._dynamo.tensor_version_op',)", python_code
+        )
+        self._serve_in_fresh_process([((self.x2,), {}, y)])
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(nested_graph_breaks=False)
