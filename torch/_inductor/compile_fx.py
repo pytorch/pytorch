@@ -1017,6 +1017,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
+    cudagraphs_forced_by_annotation: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -1035,6 +1036,7 @@ def compile_fx_inner(
     compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
+    """Compile an AOT-produced FX graph into an OutputCode with Inductor."""
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -1051,6 +1053,11 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # compile_fx re-applies torch.compile options inside inner_compile, so
+        # options={"triton.cudagraphs": False} would undo override_cudagraphs.
+        forced = kwargs.pop("cudagraphs_forced_by_annotation", False)
+        if forced and kwargs["cudagraphs"] is not None:
+            stack.enter_context(cudagraph_annotation_context(kwargs["cudagraphs"]))
         # When cpp_wrapper is enabled, ensure the required triton config
         # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
         # needed because lazy backward compilation may run after the
@@ -2765,6 +2772,7 @@ class CompilerConfigExtra:
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+    cudagraphs_forced_by_annotation: bool = False
 
 
 def create_compiler_config_extra(
@@ -2780,6 +2788,7 @@ def create_compiler_config_extra(
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     cudagraphs_bwd_override: bool | None = None
+    cudagraphs_forced_by_annotation = False
 
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
@@ -2791,6 +2800,7 @@ def create_compiler_config_extra(
     ):
         if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
+            cudagraphs_forced_by_annotation = annotation.fwd
             if annotation.fwd:
                 cudagraphs_log.info(
                     "enabling cudagraphs due to override_cudagraphs annotation"
@@ -2828,6 +2838,7 @@ def create_compiler_config_extra(
         forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_cudagraph_partitioned=forward_is_cudagraph_partitioned,
+        cudagraphs_forced_by_annotation=cudagraphs_forced_by_annotation,
     )
 
 
@@ -2962,6 +2973,7 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
+    forced = compiler_config_extra.cudagraphs_forced_by_annotation
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
         result = inner_compile(
             gm,
@@ -2971,6 +2983,7 @@ def compile_fx_forward(
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
+            cudagraphs_forced_by_annotation=forced,
         )
 
         if (
@@ -3017,6 +3030,7 @@ def compile_fx_backward(
 
         # Check if cudagraphs should be overridden for backward via annotation
         cudagraphs = compiler_config_extra.cudagraphs
+        forced = compiler_config_extra.cudagraphs_forced_by_annotation
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
@@ -3062,6 +3076,7 @@ def compile_fx_backward(
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device_index,
+                cudagraphs_forced_by_annotation=forced and cudagraphs.value,
             )
 
 
