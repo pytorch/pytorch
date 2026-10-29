@@ -158,7 +158,7 @@ void raise_unsupported_grouped_scaling(
       "- TensorWise/TensorWise or RowWise/RowWise: float8 inputs, one float32 scale per input; swizzle metadata is ignored.\n"
       "- Hopper block scaling: two float8_e4m3fn inputs, float32 scales packed per group, NO_SWIZZLE; "
       "1x128 is outer-major; 128x128 is K-major with K-block count padded to 4. "
-      "3D inputs use (groups, scale_size); 2D inputs concatenate group scales. "
+      "3D inputs use (groups, scale_size); 2D inputs concatenate group scales in a 1D tensor. "
       "Recipe pairs: 1x128/1x128, 1x128/128x128, or 128x128/1x128.\n"
       "- Packed MNxK4: matching BlockWise1x32 or BlockWise1x128 recipes, float8_e4m3fn/e5m2 inputs "
       "with at least one e4m3fn input, one float8_e8m0fnu scale per input, SWIZZLE_MNxK4.\n"
@@ -173,6 +173,12 @@ void raise_unsupported_grouped_scaling(
 }
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
+bool is_hopper_block_impl(ScaledGemmImplementation impl) {
+  return impl == ScaledGemmImplementation::BLOCK_1x128_1x128 ||
+      impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
+      impl == ScaledGemmImplementation::BLOCK_128x128_1x128;
+}
+
 void _check_cublaslt_grouped_inputs(
     ScaledGemmImplementation impl,
     const Tensor& mat_a,
@@ -180,9 +186,7 @@ void _check_cublaslt_grouped_inputs(
     ScalarType out_dtype,
     int64_t batch_count) {
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
-  const bool hopper = impl == ScaledGemmImplementation::BLOCK_1x128_1x128 ||
-      impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
-      impl == ScaledGemmImplementation::BLOCK_128x128_1x128;
+  const bool hopper = is_hopper_block_impl(impl);
   if (impl == ScaledGemmImplementation::MNK4_1x32 || impl == ScaledGemmImplementation::MNK4_1x128) {
     at::cuda::blas::detail::check_mnk4_support();
   }
@@ -214,12 +218,10 @@ void _check_cublaslt_grouped_inputs(
 }
 #endif
 
-void _check_mslk_grouped_inputs(
+void _check_mslk_grouped_support(
     ScaledGemmImplementation impl,
     const Tensor& mat_a,
-    const Tensor& mat_b,
-    ScalarType out_dtype,
-    int64_t batch_count) {
+    const Tensor& mat_b) {
   const bool mx8 = impl == ScaledGemmImplementation::MXFP8_MXFP8;
   const auto recipe = mx8 ? "MXFP8" : impl == ScaledGemmImplementation::NVFP4_NVFP4 ? "NVFP4" : "MXFP4";
   // MXFP8/NVFP4/MXFP4 use CUDA-only MSLK APIs. Rowwise has a separate ROCm MSLK path.
@@ -234,27 +236,37 @@ void _check_mslk_grouped_inputs(
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MSLK ", recipe, " grouped GEMM requires CUDA >= 12.8");
 #endif
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK_VALUE(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       scaled_mm_arch_allowed(/*sm90_only*/ false, /*sm100_only*/ true),
       "MSLK ", recipe, " grouped GEMM requires SM10.x; got SM", dprops->major, ".", dprops->minor);
-  // MSLK's mx8mx8bf16_grouped_common.cuh and f4f4bf16_grouped_common.cuh
-  // launch one setup thread per group in a single block (CUDA limit: 1024 threads).
-  TORCH_CHECK_VALUE(
-      batch_count >= 1 && batch_count <= 1024,
-      "MSLK ", recipe, " grouped GEMM batchCount must be in [1, 1024], got ", batch_count);
-  TORCH_CHECK_VALUE(
-      mat_a.dim() == 2 && (mat_b.dim() == 2 || mat_b.dim() == 3),
-      "MSLK ", recipe, " grouped GEMM requires 2D/2D or 2D/3D inputs, got ",
-      mat_a.dim(), "D/", mat_b.dim(), "D with shapes ", mat_a.sizes(), " and ", mat_b.sizes());
-  TORCH_CHECK_VALUE(
-      out_dtype == kBFloat16,
-      "MSLK ", recipe, " grouped GEMM requires BFloat16 output, got ", out_dtype);
   if (mx8) {
     TORCH_CHECK_VALUE(
         mat_a.scalar_type() == kFloat8_e4m3fn && mat_b.scalar_type() == kFloat8_e4m3fn,
         "MSLK MXFP8 grouped GEMM requires two float8_e4m3fn inputs, got ",
         mat_a.scalar_type(), " and ", mat_b.scalar_type());
   }
+}
+
+void _check_mslk_grouped_kernel_inputs(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<Tensor>& offs,
+    const Tensor& out,
+    const char* recipe) {
+  TORCH_CHECK_VALUE(
+      mat_a.dim() == 2 && (mat_b.dim() == 2 || mat_b.dim() == 3),
+      "MSLK ", recipe, " grouped GEMM requires 2D/2D or 2D/3D inputs, got ",
+      mat_a.dim(), "D/", mat_b.dim(), "D with shapes ", mat_a.sizes(), " and ", mat_b.sizes());
+  TORCH_CHECK_VALUE(offs.has_value(), "MSLK ", recipe, " grouped GEMM requires offsets");
+  const auto batch_count = offs->size(0);
+  // MSLK's mx8mx8bf16_grouped_common.cuh and f4f4bf16_grouped_common.cuh
+  // launch one setup thread per group in a single block (CUDA limit: 1024 threads).
+  TORCH_CHECK_VALUE(
+      batch_count >= 1 && batch_count <= 1024,
+      "MSLK ", recipe, " grouped GEMM batchCount must be in [1, 1024], got ", batch_count);
+  TORCH_CHECK_VALUE(
+      out.scalar_type() == kBFloat16,
+      "MSLK ", recipe, " grouped GEMM requires BFloat16 output, got ", out.scalar_type());
 }
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
@@ -393,6 +405,13 @@ void check_cublaslt_grouped_scale_storage(
           scale_size,
           "), got ",
           scale.sizes());
+    } else if (layout == CublasGroupedScaleLayout::Vec128F32 ||
+               layout == CublasGroupedScaleLayout::Block128x128F32) {
+      TORCH_CHECK_VALUE(
+          scale.dim() == 1,
+          name,
+          " blockwise scale for a 2D Hopper grouped GEMM operand must be a 1D tensor, got ",
+          scale.sizes());
     }
   }
 }
@@ -480,6 +499,8 @@ bool should_use_cublaslt_scaled_grouped_gemm(
 #endif
 }
 
+void _check_scales_blocked(const Tensor& mat, const Tensor& scale, int dim, int arg_idx);
+
 // 2d-2d and 2d-3d
 // scaling=MXFP8
 // CUDA-only
@@ -493,7 +514,9 @@ _mx8_mx8_bf16_grouped_mm_mslk(
         const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
-    TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
+    _check_mslk_grouped_kernel_inputs(mat_a, mat_b, offs, out, "MXFP8");
+    _check_scales_blocked(mat_a, scale_a, 0, 0);
+    _check_scales_blocked(mat_b, scale_b, 1, 1);
     // MXFP8 expects float8_e8m0fnu scales.
     TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu,
         "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
@@ -634,6 +657,10 @@ _f4_f4_bf16_grouped_mm_mslk(
       const std::optional<Tensor>& offs,
       const std::optional<Tensor>& bias,
       Tensor& out) {
+  const auto recipe = scale_a.scalar_type() == kFloat8_e8m0fnu ? "MXFP4" : "NVFP4";
+  _check_mslk_grouped_kernel_inputs(mat_a, mat_b, offs, out, recipe);
+  _check_scales_blocked(mat_a, scale_a, 0, 0);
+  _check_scales_blocked(mat_b, scale_b, 1, 1);
 #if !defined(USE_ROCM) && defined(USE_MSLK)
   // Typing checks
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2,
@@ -856,17 +883,15 @@ static void scaled_grouped_mm_cublaslt(
   _check_cublaslt_grouped_inputs(gemm_impl, mat_a, mat_b, out.scalar_type(), batchCount);
   const auto scaling_a = recipe_a[0];
   const auto scaling_b = recipe_b[0];
-  // NO_SWIZZLE is a placeholder for omitted metadata, not a claim that scales
-  // are unswizzled. Their storage layout is determined by gemm_impl.
-  const bool hopper = gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128 ||
-      gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128 ||
-      gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128;
+  const bool hopper = is_hopper_block_impl(gemm_impl);
   if (hopper) {
     TORCH_CHECK_VALUE(
         (swizzle_a.empty() || (swizzle_a.size() == 1 && swizzle_a[0] == SwizzleType::NO_SWIZZLE)) &&
             (swizzle_b.empty() || (swizzle_b.size() == 1 && swizzle_b[0] == SwizzleType::NO_SWIZZLE)),
         "Hopper grouped block scaling requires swizzle_a/swizzle_b to be empty or NO_SWIZZLE");
   }
+  // For non-Hopper recipes, omitted swizzles use NO_SWIZZLE as a placeholder;
+  // gemm_impl determines the storage layout.
   const auto swizzle_a_value = swizzle_a.empty() ? SwizzleType::NO_SWIZZLE : swizzle_a[0];
   const auto swizzle_b_value = swizzle_b.empty() ? SwizzleType::NO_SWIZZLE : swizzle_b[0];
   const auto [layout_a, layout_b] = get_cublaslt_grouped_scale_layouts(gemm_impl, scale_a[0], scale_b[0]);
@@ -1020,7 +1045,6 @@ _scaled_grouped_mm_cuda(
 #endif
 
   if (is_mx8mx8bf16) {
-    TORCH_CHECK_VALUE(a_is_2d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
     // Note: Passing implied SwizzleType here, correctness of scale previously checked
     //       in `check_scale` call
     return _mx8_mx8_bf16_grouped_mm_mslk(
@@ -1030,7 +1054,7 @@ _scaled_grouped_mm_cuda(
         SwizzleType::SWIZZLE_32_4_4,
         scale_b,
         SwizzleType::SWIZZLE_32_4_4,
-        offs.value(),
+        offs,
         out);
   }
 
@@ -1156,7 +1180,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       TORCH_CHECK_VALUE(
           out.scalar_type() == kBFloat16,
           "Rowwise grouped GEMM requires BFloat16 output, got ", out.scalar_type());
-      TORCH_CHECK_VALUE(
+      TORCH_CHECK_NOT_IMPLEMENTED(
           scaled_mm_arch_allowed(/*sm90_only*/ true, /*sm100_only*/ true),
           "Rowwise grouped GEMM is only supported on CUDA devices with "
           "compute capability = [9.0, 10.0], or ROCm MI300+");
@@ -1175,10 +1199,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       return;
     }
     case ScaledGemmImplementation::MXFP4_MXFP4: {
-      _check_mslk_grouped_inputs(gemm_impl, mat_a, mat_b, out.scalar_type(), batch_count);
-      // scale shape checks
-      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      _check_mslk_grouped_support(gemm_impl, mat_a, mat_b);
       _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
@@ -1216,10 +1237,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
             scale_b_ref, scale_recipe_b_enum, swizzle_b_enum, offs_opt, use_fast_accum, batch_count, out_mut);
         return;
       }
-      _check_mslk_grouped_inputs(gemm_impl, mat_a, mat_b, out.scalar_type(), batch_count);
-      // scale shape checks
-      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
-      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      _check_mslk_grouped_support(gemm_impl, mat_a, mat_b);
       if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
         _f4_f4_bf16_grouped_mm_mslk(
             mat_a, mat_b, scale_a[0], scale_a[1], scale_b[0], scale_b[1], offs_opt, std::nullopt, out_mut);
