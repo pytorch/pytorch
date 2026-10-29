@@ -468,6 +468,14 @@ class DeviceTypeTestBase(TestCase):
         self._tls.rel_tol = prec
 
     @classmethod
+    def _resolved_device_type(cls):
+        # PrivateUse1TestBase.device_type stays "privateuse1" until its first
+        # setUpClass(), which runs after the first variant is parametrized.
+        if cls.device_type == "privateuse1":
+            return torch._C._get_privateuse1_backend_name()
+        return cls.device_type
+
+    @classmethod
     def _apply_class_overrides(cls, info_dict, class_overrides):
         """Stamps each class_overrides decorator's device_type to this test
         base's device type and appends it to the matching entry of info_dict
@@ -475,10 +483,7 @@ class DeviceTypeTestBase(TestCase):
         """
         for name, decorators in class_overrides.items():
             for decorator in decorators:
-                if cls.device_type == "privateuse1":
-                    decorator.device_type = torch._C._get_privateuse1_backend_name()
-                else:
-                    decorator.device_type = cls.device_type
+                decorator.device_type = cls._resolved_device_type()
                 # name may not be in info_dict if @ops()/@modules() has
                 # restricted the list to a smaller set than overrides covers.
                 if name in info_dict:
@@ -801,11 +806,7 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            cls_device_type = (
-                cls.device_type
-                if cls.device_type != "privateuse1"
-                else torch._C._get_privateuse1_backend_name()
-            )
+            cls_device_type = cls._resolved_device_type()
             device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
@@ -1589,11 +1590,22 @@ class ops(_TestParametrizer):
                 "instantiate_parametrized_tests()"
             )
 
+        if not self.op_list:
+            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
+            # per-test op lists legitimately become empty -don't fail collection.
+            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
+                return
+            raise ValueError(
+                f"{test.__name__}: An empty op_list was passed to @ops. "
+                "Note that this may result from reuse of a generator."
+            )
+
         # Order matters: op_allowlist filters first, then op_overrides adds decorators
         # This ensures op_overrides only applies to ops that passed the op_allowlist filter
         op_list = device_cls._apply_op_allowlist(self.op_list)
         op_list = device_cls._apply_op_overrides(op_list, test)
-        op = check_exhausted_iterator = object()
+
+        device_type = device_cls._resolved_device_type()
         for op in op_list:
             # Determine the set of dtypes to use.
             dtypes: set[torch.dtype] | set[None]
@@ -1601,22 +1613,20 @@ class ops(_TestParametrizer):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
                 dtypes = set(get_all_dtypes()).difference(
-                    op.supported_backward_dtypes(device_cls.device_type)
+                    op.supported_backward_dtypes(device_type)
                 )
             elif self.opinfo_dtypes == OpDTypes.supported_backward:
-                dtypes = op.supported_backward_dtypes(device_cls.device_type)
+                dtypes = op.supported_backward_dtypes(device_type)
             elif self.opinfo_dtypes == OpDTypes.unsupported:
                 dtypes = set(get_all_dtypes()).difference(
-                    op.supported_dtypes(device_cls.device_type)
+                    op.supported_dtypes(device_type)
                 )
             elif self.opinfo_dtypes == OpDTypes.supported:
-                dtypes = set(op.supported_dtypes(device_cls.device_type))
+                dtypes = set(op.supported_dtypes(device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
-                supported = set(op.supported_dtypes(device_cls.device_type))
-                supported_backward = op.supported_backward_dtypes(
-                    device_cls.device_type
-                )
+                supported = set(op.supported_dtypes(device_type))
+                supported_backward = op.supported_backward_dtypes(device_type)
                 supported_both = supported.intersection(supported_backward)
                 dtype_set = supported_both if len(supported_both) > 0 else supported
                 for dtype in ANY_DTYPE_ORDER:
@@ -1654,7 +1664,7 @@ class ops(_TestParametrizer):
                 sample_skips_and_xfails = [
                     rule
                     for rule in sample_skips_and_xfails
-                    if rule.op_match_fn(device_cls.device_type, op)
+                    if rule.op_match_fn(device_type, op)
                 ]
 
             for dtype in dtypes:
@@ -1702,7 +1712,7 @@ class ops(_TestParametrizer):
                         op.get_decorators,
                         generic_cls.__name__,
                         test.__name__,
-                        device_cls.device_type,
+                        device_type,
                         dtype,
                     )
 
@@ -1714,15 +1724,6 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     log.info("Failed to instantiate %s for op %s", test_name, op.name)
                     raise ex
-        if op is check_exhausted_iterator:
-            # When OPINFO_RESTRICT_TO_DSL narrows op_db to a DSL subset, many
-            # per-test op lists legitimately become empty -don't fail collection.
-            if os.environ.get("OPINFO_RESTRICT_TO_DSL"):
-                return
-            raise ValueError(
-                "An empty op_list was passed to @ops. "
-                "Note that this may result from reuse of a generator."
-            )
 
 
 # Decorator that skips a test if the given condition is true.
