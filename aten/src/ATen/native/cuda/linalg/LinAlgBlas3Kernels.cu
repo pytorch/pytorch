@@ -42,6 +42,7 @@
 
 */
 
+#ifndef USE_ROCM
 
 namespace at::native {
 
@@ -1509,3 +1510,5 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
 }
 
 } // at::native
+
+#endif
