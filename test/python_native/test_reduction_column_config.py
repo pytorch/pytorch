@@ -68,9 +68,9 @@ class TestColumnConfig(TestCase):
     def test_partitions_keep_int32_partial_indices(self):
         """Cap default partitions at Int32 partial indices; reject explicit overflow."""
         cfg = self.select(rows=1 << 20, columns=1 << 20)
-        self.assertEqual(cfg.npar, (1 << 31) >> 20)
+        self.assertEqual(cfg.npar, 2047)
         with self.assertRaisesRegex(ValueError, "overflows Int32"):
-            self.select(rows=1 << 20, columns=1 << 20, npar=4096)
+            self.select(rows=1 << 20, columns=1 << 20, npar=2048)
 
     @parametrize(
         "dtype,size,columns,key,fields,rule",
