@@ -246,6 +246,8 @@ def plan_effects(
     effects.redact_body = decision == "request_reproduction"
     if effects.redact_body:
         labels = [label for label in labels if label != "triaged"]
+    if decision == "request_info" and "request_more_info" not in keys:
+        keys.insert(0, "request_more_info")
     repro_template = "request_self_contained_reproduction"
     if effects.redact_body and repro_template not in keys:
         keys.insert(0, repro_template)
