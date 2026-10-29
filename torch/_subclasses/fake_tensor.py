@@ -151,13 +151,30 @@ def _pin_device_index(device: torch.device) -> torch.device:
     return torch.device(device.type, 0)
 
 
+# Backend availability cannot change within a process, cache it to keep
+# _targets_unavailable_device cheap on the FakeTensorMode hot path.
+_target_device_availability: dict[str, bool] = {}
+
+
 def _is_target_device_available(device_type: str) -> bool:
     if device_type in ("cpu", "meta"):
         return True
-    try:
-        return torch.get_device_module(device_type).is_available()
-    except (RuntimeError, AttributeError):
-        return False
+    cached = _target_device_availability.get(device_type)
+    if cached is None:
+        try:
+            cached = torch.get_device_module(device_type).is_available()
+        except (RuntimeError, AttributeError):
+            cached = False
+        _target_device_availability[device_type] = cached
+    return cached
+
+
+def _is_unavailable_device(device: Any) -> bool:
+    return (
+        isinstance(device, torch.device)
+        and device.type not in ("cpu", "meta")
+        and not _is_target_device_available(device.type)
+    )
 
 
 def _targets_unavailable_device(
@@ -169,17 +186,13 @@ def _targets_unavailable_device(
     and a ``device`` keyword argument, so ops synthesized inside fake
     computation (e.g. empty_strided from prim meta impls) are caught too.
     """
-    devices = [a for a in args if isinstance(a, torch.device)]
     device = kwargs.get("device")
     if device is not None:
         if isinstance(device, str):
             device = torch.device(device)
-        if isinstance(device, torch.device):
-            devices.append(device)
-    return any(
-        d.type not in ("cpu", "meta") and not _is_target_device_available(d.type)
-        for d in devices
-    )
+        if _is_unavailable_device(device):
+            return True
+    return any(_is_unavailable_device(a) for a in args)
 
 
 # Small helper that increments recursion count, and
