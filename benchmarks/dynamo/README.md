@@ -203,6 +203,18 @@ accelerator, `-dcpu` supports TP diagnostics with `--backend=eager` or
 all-gathers can corrupt memory; this was reproduced without a model or
 compilation and is not specific to Qwen3.5.
 
+The periodic `inductor_huggingface_tp` CI job checks accuracy and measures
+performance for both phases with `--tp-size=2` and full-graph compilation on a
+multi-GPU A10G runner. Accuracy checks require exactly one result matching the
+baseline for each supported model. Update both phase baselines with
+`python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <commit-sha>`.
+Its performance CSV names end in `_tp2_<phase>`.
+Use the numeric periodic run ID with `perf_cli.py summary` or `repro`; branch
+discovery and `launch` still select the nightly workflows. Automatic baseline
+selection requires a successful TP job on the same runner hardware. Comparisons
+pair the same hardware, phase, TP degree, model, batch size, prompt length, and
+decode length. Reproduction commands preserve those workload dimensions.
+
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```
 ./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
