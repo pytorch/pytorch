@@ -1073,6 +1073,12 @@ class TestProfiler(TestCase):
             with prof:
                 torch.ones(1)
 
+    def test_with_modules_deprecated_when_disabled(self):
+        # Callers that disable the profiler still break once with_modules is
+        # removed, so they must be warned too.
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
+            _profile(enabled=False, with_modules=False)
+
     @parametrize("autograd_profiler", [False, True])
     def test_with_modules_omitted_does_not_warn(self, autograd_profiler):
         # Both profilers warn on any with_modules value other than None, so

@@ -239,6 +239,8 @@ class profile:
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
         _profiler_extensions: dict[str, str] | None = None,
     ):
+        if with_modules is not None:
+            warn(_WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -267,8 +269,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if with_modules is not None:
-            warn(_WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
