@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import gc
+import io
 import re
 import sys
 import types
 import unittest
 import weakref
+from functools import partial
 from unittest.mock import patch
 
 import torch
@@ -27,6 +29,7 @@ from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -3891,6 +3894,1185 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 1)
 
+    @parametrize("barrier", ("sync", "wait_stream"))
+    def test_stream_barrier_reuses_graph_across_stream_handles(self, device, barrier):
+        def fn(x, side):
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                torch.accelerator.current_stream(device).wait_stream(side)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        streams = [torch.Stream(device=device) for _ in range(10)]
+        x = torch.zeros(8, device=device)
+        torch.accelerator.synchronize()
+        for stream in streams:
+            result = compiled(x, stream)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.ones_like(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("sync", "wait_stream", "event"))
+    def test_cross_device_barrier_rechecks_live_stream(self, device, backend, barrier):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, side, observed, event):
+            with side:
+                x.add_(1)
+            if barrier == "sync":
+                observed.synchronize()
+            elif barrier == "wait_stream":
+                torch.accelerator.current_stream(device).wait_stream(observed)
+            else:
+                event.record(observed)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(8, device=device)
+        side = torch.Stream(device=device)
+        other_index = 1 if x.device.index == 0 else 0
+        observed = torch.Stream(device=f"cuda:{other_index}")
+        torch.cuda.synchronize(x.device)
+        torch.cuda.synchronize(other_index)
+        result = compiled(x, side, observed, torch.Event(device=observed.device))
+        torch.cuda.synchronize(x.device)
+        torch.cuda.synchronize(other_index)
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.full_like(x, 2))
+
+        x.zero_()
+        torch.cuda.synchronize(x.device)
+        error = (
+            "input mutation write-back"
+            if barrier != "event"
+            else "An event was recorded"
+        )
+        with self.assertRaisesRegex(RuntimeError, error):
+            compiled(x, side, side, torch.Event(device=device))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    @torch._inductor.config.patch(compile_threads=1)
+    def test_supplied_mutation_stream_preserves_rank_relative_device(
+        self, device, backend
+    ):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, side):
+            with side:
+                x.add_(1)
+            return x
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for index in (0, 1):
+            with torch.cuda.device(index):
+                x = torch.zeros(8, device="cuda")
+                side = torch.Stream(device="cuda")
+                torch.cuda.synchronize()
+                result = compiled(x, side)
+                torch.cuda.synchronize()
+                self.assertEqual(x, torch.ones_like(x))
+                self.assertEqual(result, x)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_nonmatching_stream_device_change_rechecks_input_mutation(self, device):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, side):
+            with side:
+                x.add_(1)
+            side.synchronize()
+            return x + 1
+
+        x = torch.zeros(8, device=device)
+        other_index = 1 if x.device.index == 0 else 0
+        side = torch.Stream(device=f"cuda:{other_index}")
+        torch.cuda.synchronize(x.device)
+        torch.cuda.synchronize(other_index)
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        result = compiled(x, side)
+        torch.cuda.synchronize(x.device)
+        torch.cuda.synchronize(other_index)
+        self.assertEqual(result, torch.full_like(x, 2))
+        self.assertEqual(x, torch.ones_like(x))
+
+        x.zero_()
+        side = torch.Stream(device=device)
+        torch.cuda.synchronize(x.device)
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            compiled(x, side)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_foreign_stream_becomes_local_after_rank_change(self, device):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, side):
+            with side:
+                x.add_(1)
+            side.synchronize()
+            return x + 1
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with torch.cuda.device(0):
+            x = torch.zeros(8, device="cuda")
+            side = torch.Stream(device="cuda:1")
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            result = compiled(x, side)
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            self.assertEqual(result, torch.full_like(x, 2))
+            self.assertEqual(x, torch.ones_like(x))
+
+        with torch.cuda.device(1):
+            x = torch.zeros(8, device="cuda")
+            torch.cuda.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x, side)
+            self.assertEqual(x, torch.zeros_like(x))
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("sync_device", (0, 1))
+    @torch._inductor.config.patch(compile_threads=1)
+    def test_device_barrier_rechecks_rank_relative_mutation(
+        self, device, backend, sync_device
+    ):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x):
+            x.add_(1)
+            torch.cuda.synchronize(sync_device)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with torch.cuda.device(1 - sync_device):
+            x = torch.zeros(8, device="cuda")
+            torch.cuda.synchronize()
+            result = compiled(x)
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(result, torch.full_like(x, 2))
+
+        with torch.cuda.device(sync_device):
+            x = torch.zeros(8, device="cuda")
+            torch.cuda.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x)
+            self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @torch._inductor.config.patch(compile_threads=1)
+    def test_serialized_device_barrier_preserves_target(self, device, backend):
+        from torch._dynamo.aot_compile import AOTCompiledFunction
+
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x):
+            x.add_(1)
+            torch.cuda.synchronize(1)
+            return x + 1
+
+        with torch.cuda.device(0):
+            x = torch.zeros(8, device="cuda")
+            torch.cuda.synchronize()
+            compiled = torch.compile(fn, backend=backend, fullgraph=True).aot_compile(
+                ((x,), {})
+            )
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+            compiled = torch.compiler.load_compiled_function(io.BytesIO(data))
+            result = compiled(x)
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(result, torch.full_like(x, 2))
+
+        with torch.cuda.device(1):
+            x = torch.zeros(8, device="cuda")
+            torch.cuda.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x)
+            self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("barrier", ("sync", "event"))
+    @parametrize("mutation", ("data", "storage"))
+    @parametrize("mixed", (False, True))
+    @parametrize("reordered", (False, True))
+    @parametrize("explicit", (False, True))
+    def test_opaque_aot_callable_input_mutation(
+        self, device, barrier, mutation, mixed, reordered, explicit
+    ):
+        from torch._functorch.aot_autograd import (
+            _get_input_mutation_barriers,
+            aot_function,
+        )
+        from torch._functorch.compilers import nop
+
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        def backend(gm, inputs):
+            def adapted(a, b):
+                return gm(b, a) if reordered else gm(a, b)
+
+            options = {}
+            if explicit:
+                barriers = _get_input_mutation_barriers(gm)
+                if reordered:
+                    barriers = tuple(
+                        b._replace(inputs=tuple(1 - i for i in b.inputs))
+                        for b in barriers
+                    )
+                options["_input_mutation_barriers"] = barriers
+            compiled = aot_function(
+                adapted, nop, keep_inference_input_mutations=True, **options
+            )
+            return lambda a, b: compiled(b, a) if reordered else compiled(a, b)
+
+        @torch.compiler.allow_in_graph
+        def mutate(x):
+            with torch.no_grad():
+                if mutation == "storage":
+                    x.set_(torch.zeros_like(x))
+                x.add_(1)
+
+        def fn(x, y):
+            out = torch.zeros_like(y)
+            with side:
+                mutate(x)
+            if mixed:
+                y.add_(1)
+            if barrier == "sync":
+                side.synchronize()
+            else:
+                event.record(side)
+            return x, out
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if mutation == "data" or (mixed and not explicit):
+            with self.assertRaisesRegex(
+                RuntimeError, "runtime epilogue|input mutation write-back"
+            ):
+                compiled(x, y)
+            self.assertEqual(x, torch.zeros_like(x))
+            self.assertEqual(y, torch.zeros_like(y))
+        else:
+            result = compiled(x, y)
+            torch.accelerator.synchronize()
+            expected = (torch.ones_like(x), torch.zeros_like(y))
+            self.assertEqual(result, expected)
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(y, torch.full_like(y, int(mixed)))
+
+    @parametrize("keyword", (False, True))
+    def test_aot_export_input_mutation(self, device, keyword):
+        from torch._functorch.aot_autograd import aot_export_module
+
+        def backend(gm, inputs):
+            names = [str(n.target) for n in gm.graph.nodes if n.op == "placeholder"]
+            kwargs = dict(reversed(list(zip(names, inputs)))) if keyword else {}
+            aot_export_module(
+                gm, () if keyword else inputs, kwargs=kwargs, trace_joint=False
+            )
+            return gm.forward
+
+        def fn(x, y):
+            side = torch.Stream(device=device)
+            with side:
+                y.add_(1)
+            event = side.record_event()
+            event.wait()
+            return x + y
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "runtime epilogue"):
+            compiled(x, y)
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+
+    @parametrize("entry_point", ("export", "function", "module", "partial"))
+    @parametrize("nested", (False, True, "dict", "reversed_dict"))
+    def test_aot_export_flat_graph_input_mutation(self, device, nested, entry_point):
+        from torch._functorch.aot_autograd import (
+            aot_export_module,
+            aot_function,
+            aot_module,
+        )
+
+        ambient = torch.accelerator.current_stream(device)
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        class Model(torch.nn.Module):
+            def forward(self, values, value, z):
+                with side:
+                    y = (
+                        value["y"]
+                        if isinstance(nested, str)
+                        else value[1]
+                        if nested
+                        else value
+                    )
+                    y.add_(1)
+                event.record(side)
+                event.wait()
+                return (y * 2 + z + values[0] + values[1],)
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        z = torch.zeros_like(x)
+        value = {"x": x, "y": y} if isinstance(nested, str) else [x, y] if nested else y
+        torch.accelerator.synchronize()
+        gm, _ = torch._dynamo.export(Model())([0, 0], value, z)
+        if nested == "reversed_dict":
+            value = {"y": y, "x": x}
+        # Standalone AOT calls need the ambient stream registry entry.
+        graph_bytecode_inputs.set_external_object_by_index(
+            CURRENT_STREAM_INDEX, ambient
+        )
+        with self.assertRaisesRegex(RuntimeError, "runtime epilogue"):
+            if entry_point == "export":
+                aot_export_module(gm, ([0, 0], value, z), trace_joint=False)
+            else:
+                options = dict(fw_compiler=lambda graph, _: graph)
+                args = ([0, 0], value, z)
+                if entry_point == "partial":
+                    compiled = aot_function(partial(gm, [0, 0]), **options)
+                    args = (value, z)
+                else:
+                    compiled = (
+                        aot_function(gm, **options)
+                        if entry_point == "function"
+                        else aot_module(gm, **options).forward
+                    )
+                compiled(*args)
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+        self.assertEqual(z, torch.zeros_like(z))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("observed", ("forward", "backward", "unrelated"))
+    @parametrize("backward_mutation", (False, True))
+    @parametrize("barrier", ("sync", "event"))
+    def test_autograd_backward_mutation_does_not_join_forward(
+        self, device, backend, observed, backward_mutation, barrier
+    ):
+        forward_stream = torch.Stream(device=device)
+        backward_stream = torch.Stream(device=device)
+        other = torch.Stream(device=device)
+        stream = {
+            "forward": forward_stream,
+            "backward": backward_stream,
+            "unrelated": other,
+        }[observed]
+
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                with forward_stream:
+                    x.add_(1)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                if backward_mutation:
+                    with backward_stream:
+                        x.add_(1)
+                return grad * x.cos()
+
+        def fn(x, event):
+            out = Function.apply(x)
+            if barrier == "sync":
+                stream.synchronize()
+            else:
+                event.record(stream)
+            return out.detach()
+
+        x = torch.ones(8, device=device, requires_grad=True)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if observed == "forward":
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, event)
+            self.assertEqual(x, torch.ones_like(x))
+        else:
+            result = compiled(x, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(x, torch.full_like(x, 2))
+            self.assertEqual(result, torch.full_like(x, 2).sin())
+            self.assertFalse(result.requires_grad)
+            self.assertIsNone(x.grad)
+
+    @parametrize("entry_point", ("function", "method", "module", "partial"))
+    @parametrize("call", ("positional", "keywords", "reversed", "mixed"))
+    @parametrize("mutation", ("data", "storage"))
+    @parametrize("structured", (False, True))
+    def test_aot_input_mutation_keyword_order(
+        self, device, entry_point, call, mutation, structured
+    ):
+        import operator
+
+        from torch._functorch.aot_autograd import aot_function, aot_module
+        from torch._functorch.compilers import nop
+
+        @torch.compiler.allow_in_graph
+        def mutate(y):
+            with torch.no_grad():
+                if mutation == "storage":
+                    y.set_(torch.zeros_like(y))
+                y.add_(1)
+
+        graphs = []
+
+        def capture(gm, inputs):
+            graphs.append(gm)
+            return gm
+
+        side = torch.Stream(device=device)
+
+        def fn(x, y):
+            out = x + 1
+            with side:
+                mutate(y)
+            side.synchronize()
+            return out + y
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        torch.accelerator.synchronize()
+        torch.compile(fn, backend=capture, fullgraph=True)(x, y)
+        torch.accelerator.synchronize()
+        y.zero_()
+        gm = graphs[0]
+        first = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        if structured:
+            with gm.graph.inserting_after(first):
+                leaf = gm.graph.call_function(operator.getitem, (first, 0))
+                leaf.meta = first.meta.copy()
+            first.replace_all_uses_with(leaf)
+            leaf.args = (first, 0)
+            gm.recompile()
+        first_arg = [x, x.clone()] if structured else x
+        names = [
+            str(node.target) for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        if entry_point == "module":
+            if structured:
+                gm.register_buffer("extra", torch.zeros_like(x))
+            compiled = aot_module(gm, nop, keep_inference_input_mutations=True)
+        else:
+            target = gm.forward if entry_point == "method" else gm
+            compiled = aot_function(target, nop, keep_inference_input_mutations=True)
+        args, kwargs = (), {}
+        if call == "positional":
+            args = (first_arg, y)
+        elif call == "mixed":
+            args, kwargs = (first_arg,), {names[1]: y}
+        else:
+            kwargs = {names[0]: first_arg, names[1]: y}
+            if call == "reversed":
+                kwargs = dict(reversed(tuple(kwargs.items())))
+        if entry_point == "partial":
+            target = partial(gm)
+            if call == "positional":
+                fixed = [0, 0] if structured else 0
+                target, args = partial(gm, fixed), (y,)
+            elif call == "mixed":
+                target = partial(gm, **{names[0]: first_arg})
+                args = ()
+            compiled = aot_function(target, nop, keep_inference_input_mutations=True)
+        if mutation == "data":
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(*args, **kwargs)
+            self.assertEqual(y, torch.zeros_like(y))
+        else:
+            result = compiled(*args, **kwargs)
+            torch.accelerator.synchronize()
+            self.assertEqual(result[0], torch.full_like(x, 2))
+            self.assertEqual(y, torch.ones_like(y))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("entry_point", ("simplified", "function", "module", "backend"))
+    @parametrize("fast", (False, True))
+    @parametrize("local", (False, True))
+    def test_aot_flattened_graph_input_mutation(self, device, entry_point, fast, local):
+        import operator
+
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import flatten_graph_inputs
+        from torch._functorch.aot_autograd import (
+            aot_function,
+            aot_module,
+            aot_module_simplified,
+        )
+        from torch._functorch.compilers import nop
+
+        graphs = []
+        side = torch.Stream(device=device)
+
+        def capture(gm, inputs):
+            graphs.append(gm)
+            return gm
+
+        def fn(x, y):
+            out = x + 1
+            with side:
+                z = y.clone() if local else y
+                z.add_(1)
+            side.synchronize()
+            return out + z
+
+        def compiler(gm, inputs):
+            if entry_point == "backend":
+                return aot_autograd(fw_compiler=nop)(gm, inputs)
+            if entry_point == "simplified":
+                return aot_module_simplified(gm, inputs, nop)
+            compiled = (
+                aot_function(gm, nop)
+                if entry_point == "function"
+                else aot_module(gm, nop)
+            )
+            return lambda args: compiled(*args)
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        torch.accelerator.synchronize()
+        torch.compile(fn, backend=capture, fullgraph=True)(x, y)
+        torch.accelerator.synchronize()
+        y.zero_()
+        gm = graphs[0]
+        first = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        with gm.graph.inserting_after(first):
+            leaf = gm.graph.call_function(operator.getitem, (first, 0))
+            leaf.meta = first.meta.copy()
+        first.replace_all_uses_with(leaf)
+        leaf.args = (first, 0)
+        first.meta["steal_arg"] = True
+        gm.recompile()
+        inputs = [[x, x.clone()], y]
+        with patch("torch._dynamo.compiled_autograd.in_compiled_autograd_region", fast):
+            if local:
+                compiled = flatten_graph_inputs(gm, inputs, compiler)
+                result = compiled(*inputs)
+                torch.accelerator.synchronize()
+                self.assertEqual(result[0], torch.full_like(x, 2))
+            else:
+                with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                    flatten_graph_inputs(gm, inputs, compiler)(*inputs)
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    @parametrize("wrapped", (False, True))
+    def test_aot_wrapped_graph_buffer_mutation(self, device, wrapped):
+        from torch._dynamo.utils import GmWrapper
+        from torch._functorch.aot_autograd import aot_module_simplified
+        from torch._functorch.compilers import nop
+
+        graphs = []
+        side = torch.Stream(device=device)
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.zeros(8, device=device))
+
+            def forward(self, x):
+                out = x + 1
+                with side:
+                    self.buffer.add_(1)
+                side.synchronize()
+                return out + self.buffer
+
+        def capture(gm, inputs):
+            graphs.append((gm, inputs))
+            return gm
+
+        module = Module()
+        x = torch.zeros(8, device=device)
+        torch.accelerator.synchronize()
+        torch.compile(module, backend=capture, fullgraph=True)(x)
+        torch.accelerator.synchronize()
+        module.buffer.zero_()
+        gm, inputs = graphs[0]
+        if wrapped:
+            gm = GmWrapper(gm, lambda args: args)
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            aot_module_simplified(gm, inputs, nop)
+        self.assertEqual(module.buffer, torch.zeros_like(module.buffer))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    def test_aot_cache_preserves_classified_mutation_barriers(self, device):
+        from torch._dynamo.graph_bytecode_inputs import store_user_object_weakrefs
+        from torch._dynamo.utils import counters
+        from torch._guards import InputMutationBarrier
+        from torch._inductor.compile_fx import compile_fx
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x, y):
+            x.add_(1)
+            return x + y
+
+        side = torch.Stream(device=device)
+        other = torch.Stream(device=device)
+
+        def backend(gm, inputs):
+            # Stream operations bypass this cache, so supply its input contract directly.
+            gm.meta["input_mutation_barrier_provenance"] = False
+            gm.meta["input_mutation_barriers"] = (
+                InputMutationBarrier(
+                    0, 1, None, "input mutation write-back", (source,)
+                ),
+            )
+            store_user_object_weakrefs(side, observed)
+            # This synthetic contract supplies its own table during AOT capture.
+            with patch(
+                "torch._functorch.aot_autograd.install_active_registry",
+                lambda: store_user_object_weakrefs(side, observed),
+            ):
+                compiled = compile_fx(gm, inputs)
+
+            def run(*args):
+                store_user_object_weakrefs(side, observed)
+                return compiled(*args)
+
+            return run
+
+        with (
+            fresh_cache(),
+            torch._functorch.config.patch(
+                enable_autograd_cache=True, strict_autograd_cache=True
+            ),
+            torch._inductor.config.patch(fx_graph_cache=True),
+        ):
+            for source, observed in ((0, other), (0, other), (1, side), (0, side)):
+                torch._dynamo.reset()
+                x = torch.zeros(8, device=device)
+                y = torch.ones_like(x)
+                torch.accelerator.synchronize()
+                compiled = torch.compile(fn, backend=backend, fullgraph=True)
+                if source == 0 and observed is side:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "input mutation write-back"
+                    ):
+                        compiled(x, y)
+                    torch.accelerator.synchronize()
+                    self.assertEqual(x, torch.zeros_like(x))
+                else:
+                    result = compiled(x, y)
+                    torch.accelerator.synchronize()
+                    self.assertEqual(result, torch.full_like(x, 2))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+
+    @parametrize(
+        "entry_point", ("function", "method", "module", "lambda", "partial", "copy")
+    )
+    @parametrize("disable_functionalization", (False, True))
+    @parametrize("barrier", ("sync", "event"))
+    def test_custom_aot_backend_rechecks_input_mutation(
+        self, device, entry_point, disable_functionalization, barrier
+    ):
+        from torch._functorch.aot_autograd import (
+            aot_function,
+            aot_module,
+            aot_module_simplified,
+        )
+        from torch._functorch.compilers import nop
+
+        def backend(gm, inputs):
+            if entry_point == "copy":
+                return aot_module_simplified(
+                    torch.fx.GraphModule(gm, gm.graph),
+                    inputs,
+                    nop,
+                    disable_functionalization=disable_functionalization,
+                )
+            if entry_point == "module":
+                return aot_module(
+                    gm, nop, disable_functionalization=disable_functionalization
+                )
+            target = gm.forward if entry_point == "method" else gm
+            if entry_point == "lambda":
+                target = lambda *args: gm(*args)  # noqa: E731
+            elif entry_point == "partial":
+                target = partial(gm)
+            return aot_function(
+                target, nop, disable_functionalization=disable_functionalization
+            )
+
+        def fn(x, side, observed, event):
+            with side:
+                x.add_(1)
+            if barrier == "sync":
+                observed.synchronize()
+            else:
+                event.record(observed)
+                torch.accelerator.current_stream(device).wait_event(event)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(8, device=device)
+        side = torch.Stream(device=device)
+        unrelated = torch.Stream(device=device)
+        event = torch.Event(device=device)
+        torch.accelerator.synchronize()
+        result = compiled(x, side, unrelated, event)
+        torch.accelerator.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.full_like(x, 2))
+
+        x.zero_()
+        torch.accelerator.synchronize()
+        if disable_functionalization:
+            result = compiled(x, side, side, event)
+            torch.accelerator.synchronize()
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(result, torch.full_like(x, 2))
+        else:
+            error = (
+                "input mutation write-back"
+                if barrier == "sync"
+                else "An event was recorded"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, side, side, event)
+            self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("fast", (False, True))
+    @parametrize("index", (0, 1))
+    @parametrize("mutation", ("data", "storage"))
+    @parametrize("barrier", ("sync", "event"))
+    def test_aot_boxed_graph_input_mutation(
+        self, device, fast, index, mutation, barrier
+    ):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.utils import set_locals_to_steal
+        from torch._functorch.compilers import nop
+
+        graph = torch.fx.Graph()
+        inputs = graph.placeholder("inputs")
+        graph.output(inputs)
+        gm = torch.fx.GraphModule({}, graph)
+        gm.side = torch.Stream(device=device)
+        gm.event = torch.Event(device=device)
+        set_locals_to_steal(gm, ["inputs"])
+
+        @torch.compiler.allow_in_graph
+        def replace(value):
+            with torch.no_grad():
+                value.set_(value.clone())
+                value.add_(1)
+
+        def forward(module, inputs):
+            inputs[1 - index].add_(1)
+            with module.side:
+                if mutation == "storage":
+                    replace(inputs[index])
+                else:
+                    inputs[index].add_(1)
+                if barrier == "event":
+                    module.event.record()
+            if barrier == "sync":
+                module.side.synchronize()
+            else:
+                module.event.synchronize()
+            return inputs[index] + 1
+
+        type(gm).forward = forward
+        backend = aot_autograd(fw_compiler=nop, keep_inference_input_mutations=True)
+        values = [torch.zeros(8, device=device) for _ in range(2)]
+        torch.accelerator.synchronize()
+        with patch("torch._dynamo.compiled_autograd.in_compiled_autograd_region", fast):
+            compiled = torch.compile(gm, backend=backend, fullgraph=True)
+            if mutation == "data":
+                error = (
+                    "An event was recorded"
+                    if barrier == "event"
+                    else "input mutation write-back"
+                )
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(values[:])
+                for value in values:
+                    self.assertEqual(value, torch.zeros_like(value))
+            else:
+                result = compiled(values[:])
+                torch.accelerator.synchronize()
+                self.assertEqual(result, torch.full_like(result, 2))
+                for value in values:
+                    self.assertEqual(value, torch.ones_like(value))
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_fixed_device_local_mutation_under_coor(self, device):
+        if torch.device(device).type != "cuda" or torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, side):
+            with side:
+                y = x.to("cuda:1")
+                y.add_(1)
+            side.synchronize()
+            return y + 1
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        side = torch.Stream(device="cuda:1")
+        for index in (0, 0, 1):
+            with torch.cuda.device(index):
+                x = torch.zeros(8, device="cuda")
+                torch.cuda.synchronize()
+                result = compiled(x, side)
+                torch.cuda.synchronize(1)
+                self.assertEqual(result, torch.full_like(result, 2))
+                self.assertEqual(x, torch.full_like(x, index))
+                self.assertEqual(counter.frame_count, index + 1)
+
+    @parametrize(
+        "variadic",
+        (
+            "args",
+            "kwargs",
+            "kwargs_reversed",
+            "dict",
+            "dict_reversed",
+            "sequence_mapping",
+            "typed_tuple",
+        ),
+    )
+    @parametrize("bound", (False, True))
+    @parametrize("unsafe", (False, True))
+    def test_aot_variadic_input_mutation(self, device, variadic, bound, unsafe):
+        import operator
+        from collections import namedtuple
+
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        class TensorValues(namedtuple("TensorValues", ("y", "z"))):
+            __slots__ = ()
+
+            def __new__(cls, y, z):
+                if not isinstance(y, torch.Tensor) or not isinstance(z, torch.Tensor):
+                    raise TypeError("TensorValues requires tensor leaves")
+                return super().__new__(cls, y, z)
+
+        side = torch.Stream(device=device)
+        observed = side if unsafe else torch.Stream(device=device)
+
+        def fn(x, y, z):
+            with side:
+                z.add_(1)
+            observed.synchronize()
+            return x + y + z * 0
+
+        def backend(gm, inputs):
+            nodes = [n for n in gm.graph.nodes if n.op == "placeholder"]
+            named = {str(n.target): n for n in nodes}
+            x, y, z = [named[f"L_{name}_"] for name in ("x", "y", "z")]
+            graph = torch.fx.Graph()
+            first = graph.placeholder("x")
+            first.meta = x.meta.copy()
+            kwargs_call = variadic.startswith("kwargs")
+            values = graph.placeholder(
+                "*values"
+                if variadic == "args"
+                else "**values"
+                if kwargs_call
+                else "values"
+            )
+            leaves = [n.meta["example_value"] for n in (y, z)]
+            values.meta["example_value"] = (
+                TensorValues(*leaves)
+                if variadic == "typed_tuple"
+                else tuple(leaves)
+                if variadic in ("args", "sequence_mapping", "typed_tuple")
+                else dict(zip(("y", "z"), leaves))
+            )
+            mapping = {x: first}
+            for index, node in enumerate((y, z)):
+                key = (
+                    index
+                    if variadic in ("args", "sequence_mapping", "typed_tuple")
+                    else ("y", "z")[index]
+                )
+                leaf = graph.call_function(operator.getitem, (values, key))
+                leaf.meta = node.meta.copy()
+                mapping[node] = leaf
+            for node in gm.graph.nodes:
+                if node not in nodes:
+                    mapping[node] = graph.node_copy(node, mapping.__getitem__)
+            gm.graph = graph
+            gm.recompile()
+            target = gm
+            if bound:
+                target = (
+                    partial(gm, 0, 0)
+                    if variadic == "args"
+                    else partial(gm, 0, y=0)
+                    if kwargs_call
+                    else partial(gm, 0)
+                )
+            compiled = aot_function(target, nop)
+
+            def call(*args):
+                inputs = dict(zip(nodes, args))
+                if variadic == "args":
+                    args = (inputs[z],) if bound else (inputs[x], inputs[y], inputs[z])
+                    return compiled(*args)
+                values = (
+                    TensorValues(inputs[y], inputs[z])
+                    if variadic == "typed_tuple"
+                    else {0: inputs[y], 1: inputs[z]}
+                    if variadic == "sequence_mapping"
+                    else {"y": inputs[y], "z": inputs[z]}
+                )
+                if variadic.endswith("reversed"):
+                    values = dict(reversed(tuple(values.items())))
+                elif bound and kwargs_call:
+                    del values["y"]
+                args = () if bound else (inputs[x],)
+                return (
+                    compiled(*args, **values)
+                    if kwargs_call
+                    else compiled(*args, values)
+                )
+
+            return call
+
+        x, y, z = [torch.zeros(8, device=device) for _ in range(3)]
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if unsafe:
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x, y, z)
+        else:
+            result = compiled(x, y, z)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.zeros_like(x))
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+        self.assertEqual(z, torch.full_like(z, int(not unsafe)))
+
+    @decorateIf(
+        unittest.expectedFailure,
+        # AOT rejects the backward copy_ destination after synchronization.
+        lambda p: p["backend"] != "eager"
+        and p["barrier"] == "sync"
+        and p["ordering"] == "before"
+        and not p["local"],
+    )
+    @parametrize("backend", ("aot_eager", "inductor", "eager"))
+    @parametrize("barrier", ("event", "sync"))
+    @parametrize("ordering", ("before", "after", "unrelated"))
+    @parametrize("local", (False, True))
+    def test_autograd_backward_input_mutation_barrier(
+        self, device, backend, barrier, ordering, local
+    ):
+        side = torch.Stream(device=device)
+        observed = torch.Stream(device=device) if ordering == "unrelated" else side
+        event = torch.Event(device=device)
+
+        def join():
+            if barrier == "event":
+                event.record(observed)
+            else:
+                observed.synchronize()
+
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, buf):
+                ctx.save_for_backward(buf)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                (buf,) = ctx.saved_tensors
+                with side:
+                    dest = buf.clone() if local else buf
+                    if ordering == "before":
+                        join()
+                    dest.add_(1)
+                    if ordering != "before":
+                        join()
+                return grad * 2 + dest * 0, None
+
+        def fn(x, buf):
+            return Function.apply(x, buf)
+
+        x = torch.ones(8, device=device, requires_grad=True)
+        buf = torch.zeros_like(x, requires_grad=False)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if backend != "eager" and ordering == "after" and not local:
+            error = (
+                "(?s)An event was recorded.*after the backward call returns"
+                if barrier == "event"
+                else "input mutation write-back.*compiled forward or backward call"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x, buf)
+        else:
+            out = compiled(x, buf)
+            self.assertEqual(buf, torch.zeros_like(buf))
+            out.sum().backward()
+            torch.accelerator.synchronize()
+            self.assertEqual(out, torch.full_like(out, 2))
+            self.assertEqual(x.grad, torch.full_like(x, 2))
+        mutated = not local and (backend == "eager" or ordering != "after")
+        self.assertEqual(buf, torch.full_like(buf, int(mutated)))
+
+    @parametrize("entry_point", ("function", "module", "partial"))
+    @parametrize("nested", (False, True))
+    @parametrize("local", (False, True))
+    @parametrize("barrier", ("sync", "event"))
+    def test_aot_bytecode_export_subclass_input_mutation(
+        self, device, entry_point, nested, local, barrier
+    ):
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        from torch._functorch.aot_autograd import aot_function, aot_module
+        from torch._functorch.compilers import nop
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        side = torch.Stream(device=device)
+        event = torch.Event(device=device)
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                with side:
+                    y = x.clone() if local else x
+                    inner = y.a.a if nested else y.a
+                    inner.add_(1)
+                    if barrier == "event":
+                        event.record(side)
+                if barrier == "sync":
+                    side.synchronize()
+                return inner * 2
+
+        a, b, c = [torch.zeros(8, device=device) for _ in range(3)]
+        x = TwoTensor(TwoTensor(a, b), c) if nested else TwoTensor(a, b)
+        torch.accelerator.synchronize()
+        gm = dynamo_graph_capture_for_export(Module())(x)
+        if entry_point == "module":
+            compiled = aot_module(gm, nop)
+        else:
+            target = partial(gm) if entry_point == "partial" else gm
+            compiled = aot_function(target, nop)
+        if local:
+            result = compiled(x)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.full_like(a, 2))
+        else:
+            error = (
+                "An event was recorded"
+                if barrier == "event"
+                else "input mutation write-back"
+            )
+            with self.assertRaisesRegex(RuntimeError, error):
+                compiled(x)
+        for value in (a, b, c):
+            self.assertEqual(value, torch.zeros_like(value))
+
+    @parametrize("entry_point", ("simplified", "function", "module", "lambda", "copy"))
+    @parametrize("mutation", ("storage", "data"))
+    @parametrize("mixed", (False, True))
+    @parametrize("assignment", ("method", "index"))
+    def test_aot_checks_only_deferred_data_mutations(
+        self, device, entry_point, mutation, mixed, assignment
+    ):
+        from torch._functorch.aot_autograd import (
+            _get_input_mutation_barriers,
+            aot_function,
+            aot_module,
+            aot_module_simplified,
+        )
+
+        @torch.compiler.allow_in_graph
+        def wrapped(x):
+            with torch.no_grad():
+                if mutation == "storage":
+                    x.set_(torch.zeros_like(x))
+                if assignment == "method":
+                    x.add_(1)
+            return x
+
+        def backend(gm, inputs):
+            options = dict(
+                fw_compiler=lambda graph, _: graph, keep_inference_input_mutations=True
+            )
+            if entry_point == "simplified":
+                return aot_module_simplified(gm, inputs, **options)
+            if entry_point == "module":
+                return aot_module(gm, **options).forward
+            if entry_point == "copy":
+                gm = torch.fx.GraphModule(gm, gm.graph)
+                return aot_module_simplified(gm, inputs, **options)
+            if entry_point == "lambda":
+                options["_input_mutation_barriers"] = _get_input_mutation_barriers(gm)
+            fn = (lambda *args: gm(*args)) if entry_point == "lambda" else gm.forward
+            return aot_function(fn, **options)
+
+        def fn(x, y, side, other):
+            with side:
+                out = wrapped(x)
+                if assignment == "index":
+                    with torch.no_grad():
+                        out[:] = 1
+            if mixed:
+                with other:
+                    y.add_(1)
+            side.synchronize()
+            return out
+
+        x = torch.zeros(8, device=device)
+        y = torch.zeros_like(x)
+        side = torch.Stream(device=device)
+        other = torch.Stream(device=device)
+        torch.accelerator.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if mutation == "data":
+            with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+                compiled(x, y, side, other)
+            self.assertEqual(x, torch.zeros_like(x))
+            self.assertEqual(y, torch.zeros_like(y))
+        else:
+            result = compiled(x, y, side, other)
+            torch.accelerator.synchronize()
+            self.assertEqual(result, torch.ones_like(x))
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(y, torch.full_like(y, int(mixed)))
+
 
 instantiate_device_type_tests(
     TestStreams, globals(), allow_xpu=True, except_for=("cpu",)
@@ -4790,6 +5972,258 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend=backend, fullgraph=True)(x, side, alias, event)
         torch.cuda.synchronize()
         self.assertEqual(x, torch.zeros_like(x))
+
+    def test_aot_allows_precomputed_value_mutated_after_device_sync(self) -> None:
+        """A tensor dependency before the barrier is not an input mutation."""
+        from torch._functorch._aot_autograd.streams import assign_epilogue_copy_streams
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.zeros(8, device="cuda:0")
+        updated = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        updated.meta["val"] = torch.ones_like(inp.meta["val"])
+        graph.call_function(torch.ops.streams.synchronize_device.default, ("cuda", 0))
+        writeback = graph.call_function(torch.ops.aten.copy_.default, (inp, updated))
+        writeback.meta["val"] = updated.meta["val"]
+        graph.output(writeback)
+        gm = torch.fx.GraphModule({}, graph)
+
+        assign_epilogue_copy_streams(gm)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_cross_device_operand_sync_does_not_join_input_mutation(
+        self, backend
+    ) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, z, source_stream, mutation_stream):
+            with torch.cuda.stream(source_stream):
+                value = z + 1
+                # The cross-device copy also reads value on CUDA:0, so keep
+                # its producer stream current until the copy is enqueued.
+                with torch.cuda.stream(mutation_stream):
+                    x.add_(value.to(x.device))
+            source_stream.synchronize()
+            return z + 2
+
+        x = torch.ones(8, device="cuda:1")
+        z = torch.zeros(8, device="cuda:0")
+        source_stream = torch.cuda.Stream(device="cuda:0")
+        mutation_stream = torch.cuda.Stream(device="cuda:1")
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, z, source_stream, mutation_stream
+        )
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.full_like(x, 2))
+        self.assertEqual(result, torch.full_like(z, 2))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_discarded_mutation_sync_on_another_device_errors(self, backend) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small):
+            x.zero_()
+            torch.cuda.synchronize(x.device)
+            x.fill_(3)
+            return small + 1
+
+        x = torch.ones(8, device="cuda:1")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize(1)
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "input mutation write-back after a user stream barrier",
+            ):
+                torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_device_sync_does_not_observe_other_device_mutation(self, backend) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small, side):
+            with side:
+                x.zero_()
+            torch.cuda.synchronize()
+            return small + 1
+
+        side = torch.cuda.Stream(device="cuda:1")
+        x = torch.ones(8, device="cuda:1")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize(1)
+        with torch.cuda.device(0):
+            result = torch.compile(fn, backend=backend, fullgraph=True)(x, small, side)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("device_sync", "current_stream_sync"))
+    def test_current_stream_input_mutation_before_sync_errors(
+        self, backend, barrier
+    ) -> None:
+        def fn(x, small):
+            x.add_(1)
+            if barrier == "device_sync":
+                torch.cuda.synchronize()
+            else:
+                torch.cuda.current_stream().synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_input_mutation_preserves_rank_relative_current_stream(self) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x):
+            x.add_(1)
+            return x
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for index in range(torch.cuda.device_count()):
+            with torch.cuda.device(index):
+                compiled(torch.zeros(8, device="cuda"))
+                torch.cuda.synchronize()
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_created_mutation_stream_rechecks_pooled_handle(self, backend):
+        def fn(x, observed):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            observed.synchronize()
+            return x + 1
+
+        observed = torch.cuda.Stream()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for _ in range(64):
+            x = torch.zeros(8, device="cuda")
+            try:
+                compiled(x, observed)
+            except RuntimeError as error:
+                self.assertIn("input mutation write-back", str(error))
+                torch.cuda.synchronize()
+                self.assertEqual(x, torch.zeros_like(x))
+                return
+            torch.cuda.synchronize()
+        self.fail("Expected CUDA's stream pool to reuse the observed handle")
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("roundtrips", (1, 2))
+    def test_serialized_input_mutation_rechecks_pooled_handle(
+        self, backend, roundtrips
+    ):
+        from torch._dynamo.aot_compile import AOTCompiledFunction
+
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            torch.cuda.current_stream().synchronize()
+            return small + 1
+
+        observed = torch.cuda.Stream()
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        with observed:
+            compiled = torch.compile(fn, backend=backend, fullgraph=True).aot_compile(
+                ((x, small), {})
+            )
+            for _ in range(roundtrips):
+                data = AOTCompiledFunction.serialize(compiled).serialized_data
+                compiled = torch.compiler.load_compiled_function(io.BytesIO(data))
+            for _ in range(64):
+                x = torch.zeros_like(x)
+                torch.cuda.synchronize()
+                try:
+                    compiled(x, small)
+                except RuntimeError as error:
+                    self.assertIn("input mutation write-back", str(error))
+                    torch.cuda.synchronize()
+                    self.assertEqual(x, torch.zeros_like(x))
+                    return
+                torch.cuda.synchronize()
+        self.fail("Expected CUDA's stream pool to reuse the current stream handle")
+
+    def test_nested_device_mutation_rechecks_matching_stream(self):
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, lower, upper, observed):
+            with lower:
+                with upper:
+                    x.add_(1)
+            observed.synchronize()
+            return x + 1
+
+        lower = torch.cuda.Stream(device="cuda:0")
+        upper = torch.cuda.Stream(device="cuda:1")
+        observed = torch.cuda.Stream(device="cuda:0")
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.zeros(8, device="cuda:0")
+        compiled(x, lower, upper, observed)
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        x.zero_()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            compiled(x, observed, upper, observed)
+        torch.cuda.synchronize(0)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_other_device_current_stream_change_rechecks_input_mutation(
+        self, backend
+    ) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small, side):
+            x.zero_()
+            side.synchronize()
+            return small + 1
+
+        side = torch.cuda.Stream(device="cuda:1")
+        small = torch.zeros(8, device="cuda:1")
+        torch.cuda.synchronize(1)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.cuda.device(0):
+            first = torch.ones_like(small)
+            result = compiled(first, small, side)
+            torch.cuda.synchronize(1)
+            self.assertEqual(first, torch.zeros_like(first))
+            self.assertEqual(result, torch.ones_like(result))
+
+            changed = torch.ones_like(small)
+            with torch.cuda.stream(side):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "input mutation write-back after a user stream barrier",
+                ):
+                    compiled(changed, small, side)
+            torch.cuda.synchronize(1)
+            self.assertEqual(changed, torch.ones_like(changed))
 
 
 instantiate_parametrized_tests(TestStreamsCUDASpecific)
