@@ -2252,11 +2252,11 @@ class PrecompileSession(Generic[_P, _R]):
             for n in ops
         }
         modules, unmapped = _custom_op_modules(keys)
-        if unmapped:
-            # An op or kernel with no known module (torch.library.define, any
-            # custom_op's kernels, which torch's helpers register, a C++ extension)
-            # may be registered by a module the frames run in, which the driver
-            # imports only after the ops are checked. Torch's own ops skip this.
+        if unmapped or any(m.partition(".")[0] != "torch" for m in modules):
+            # A module the frames run in, which the driver imports only after the ops
+            # are checked, may register a kernel over an override's, or an op or kernel
+            # with no known module (torch.library.define, any custom_op's kernels,
+            # which torch's helpers register, a C++ extension). Torch's ops skip this.
             served = _served_modules(_multigraph_frames(entry))
             wanted = {*modules, *served} - {"__main__"}
             modules = tuple(m for m in sys.modules if m in wanted)
