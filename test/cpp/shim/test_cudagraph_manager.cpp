@@ -75,8 +75,14 @@ at::Tensor affine(const at::Tensor& x) {
 at::Tensor run(CudaGraphManager& manager, Region& region, at::Tensor x) {
   auto input = reinterpret_cast<AtenTensorHandle>(&x);
   AtenTensorHandle output = nullptr;
-  manager.run(
-      region, &input, 1, &output, 1, at::cuda::getCurrentCUDAStream().stream());
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  try {
+    manager.run(region, &input, 1, &output, 1, stream);
+  } catch (...) {
+    // A failed call leaves no outputs behind.
+    EXPECT_EQ(output, nullptr);
+    throw;
+  }
   at::Tensor result = tensor_of(output);
   aoti_torch_delete_tensor_object(output);
   return result;
@@ -151,6 +157,19 @@ TEST_F(CudaGraphManagerTest, ThreadIsWarmOnlyAfterASuccessfulCall) {
     EXPECT_TRUE(run(manager, region, x).equal(affine(x)));
     EXPECT_EQ(manager.num_graphs(), 1);
   }).join();
+}
+
+TEST_F(CudaGraphManagerTest, NewThreadsWarmUpEvenWithAReusedId) {
+  CudaGraphManager manager(0);
+  Region region(affine);
+  auto x = at::randn({16}, at::kCUDA);
+  std::thread([&] { run(manager, region, x); }).join();
+  // The new thread often gets the exited one's std::thread::id.
+  std::thread([&] {
+    run(manager, region, x);
+    EXPECT_EQ(manager.num_graphs(), 0);
+  }).join();
+  EXPECT_EQ(region.calls, 2);
 }
 
 TEST_F(CudaGraphManagerTest, WarmupsAndCapturesHoldTheCaptureMutex) {
@@ -364,6 +383,21 @@ TEST_F(CudaGraphManagerTest, OrdersReplaysOnDifferentStreams) {
   EXPECT_EQ(region.calls, 1);
   EXPECT_TRUE(a_out.equal(affine(a)));
   EXPECT_TRUE(b_out.equal(affine(b)));
+}
+
+TEST_F(CudaGraphManagerTest, ResetWaitsForTheLastReplay) {
+  CudaGraphManager manager(0, no_warmup());
+  Region region([](const at::Tensor& x) {
+    at::cuda::sleep(1 << 28);
+    return affine(x);
+  });
+  auto x = at::randn({16}, at::kCUDA);
+  run(manager, region, x);
+  c10::cuda::device_synchronize();
+  run(manager, region, x);
+  manager.reset();
+  EXPECT_EQ(
+      cudaStreamQuery(at::cuda::getCurrentCUDAStream().stream()), cudaSuccess);
 }
 
 TEST_F(CudaGraphManagerTest, CaptureOnlyFailureRunsEagerly) {

@@ -12,6 +12,7 @@
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h>
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -19,7 +20,6 @@
 #include <mutex>
 #include <set>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -123,12 +123,12 @@ class CudaGraphManager {
     auto it = graphs_.find(key);
     if (it == graphs_.end()) {
       if (uncapturable_.count(key) > 0) {
-        run_eagerly(fn, inputs, outputs, stream);
+        run_eagerly(fn, inputs, outputs, num_outputs, stream);
         return;
       }
       if (graphs_.size() >= static_cast<size_t>(options_.max_graphs)) {
         warn_max_graphs();
-        run_eagerly(fn, inputs, outputs, stream);
+        run_eagerly(fn, inputs, outputs, num_outputs, stream);
         return;
       }
       if (warmup_counts_.size() >= kMaxWarmupKeys &&
@@ -136,11 +136,11 @@ class CudaGraphManager {
         warmup_counts_.clear();
       }
       int64_t& warmups = warmup_counts_[key];
-      bool thread_warm = options_.warmup_calls == 0 ||
-          warm_threads_.count(std::this_thread::get_id()) > 0;
+      bool thread_warm =
+          options_.warmup_calls == 0 || warm_threads_.count(thread_token()) > 0;
       if (warmups < options_.warmup_calls || !thread_warm) {
         ++warmups;
-        run_eagerly(fn, inputs, outputs, stream, /*warmup=*/true);
+        run_eagerly(fn, inputs, outputs, num_outputs, stream, /*warmup=*/true);
         return;
       }
       warmup_counts_.erase(key);
@@ -150,7 +150,7 @@ class CudaGraphManager {
       } catch (const std::exception& e) {
         // A failed capture ran nothing, so run eagerly; an error here is the
         // caller's.
-        run_eagerly(fn, inputs, outputs, stream);
+        run_eagerly(fn, inputs, outputs, num_outputs, stream);
         mark_uncapturable(std::move(key), e.what());
         return;
       }
@@ -162,6 +162,8 @@ class CudaGraphManager {
   // Drops all graphs; the next capture starts a new pool.
   void reset() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // The last replay may still be using the graphs' buffers.
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(last_replay_));
     graphs_.clear();
     warmup_counts_.clear();
     uncapturable_.clear();
@@ -355,20 +357,27 @@ class CudaGraphManager {
       Fn& fn,
       AtenTensorHandle* inputs,
       AtenTensorHandle* outputs,
+      size_t num_outputs,
       cudaStream_t stream,
       bool warmup = false) {
     // Warm-up and first calls may create library handles; see
     // CudaGraphOptions::capture_mutex.
     std::unique_lock<std::mutex> capture_lock;
-    if (warmup || warm_threads_.count(std::this_thread::get_id()) == 0) {
+    if (warmup || warm_threads_.count(thread_token()) == 0) {
       capture_lock = lock_captures();
     }
-    fn(inputs, outputs, stream);
+    std::fill(outputs, outputs + num_outputs, nullptr);
+    try {
+      fn(inputs, outputs, stream);
+    } catch (...) {
+      delete_outputs(outputs, num_outputs);
+      throw;
+    }
     // Only a call that succeeded did the thread's lazy setup.
     if (warm_threads_.size() >= kMaxWarmupKeys) {
       warm_threads_.clear();
     }
-    warm_threads_.insert(std::this_thread::get_id());
+    warm_threads_.insert(thread_token());
   }
 
   void mark_uncapturable(std::vector<int64_t> key, const char* error) {
@@ -396,6 +405,25 @@ class CudaGraphManager {
         ", so calls with new input shapes run eagerly";
     aoti_torch_warn(
         __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
+  }
+
+  // std::thread::id values are reused once a thread exits, so a new thread
+  // could look warm.
+  static uint64_t thread_token() {
+    static std::atomic<uint64_t> next_token{0};
+    thread_local uint64_t token = ++next_token;
+    return token;
+  }
+
+  // Deletes each distinct output once and nulls every slot.
+  static void delete_outputs(AtenTensorHandle* outputs, size_t num_outputs) {
+    for (size_t i = 0; i < num_outputs; ++i) {
+      if (outputs[i] != nullptr &&
+          std::find(outputs, outputs + i, outputs[i]) == outputs + i) {
+        (void)aoti_torch_delete_tensor_object(outputs[i]);
+      }
+    }
+    std::fill(outputs, outputs + num_outputs, nullptr);
   }
 
   // Takes ownership of each distinct output once; generated code can write
@@ -545,12 +573,7 @@ class CudaGraphManager {
         }
       }
     } catch (...) {
-      for (size_t i = 0; i < num_outputs; ++i) {
-        if (outputs[i] != nullptr) {
-          (void)aoti_torch_delete_tensor_object(outputs[i]);
-          outputs[i] = nullptr;
-        }
-      }
+      delete_outputs(outputs, num_outputs);
       // Later calls must still wait for whatever this one enqueued.
       (void)cudaEventRecord(last_replay_, stream);
       throw;
@@ -571,7 +594,7 @@ class CudaGraphManager {
   bool warned_max_graphs_ = false;
   std::map<std::vector<int64_t>, int64_t> warmup_counts_;
   std::set<std::vector<int64_t>> uncapturable_;
-  std::set<std::thread::id> warm_threads_;
+  std::set<uint64_t> warm_threads_;
   std::map<std::vector<int64_t>, std::unique_ptr<Graph>> graphs_;
 };
 
