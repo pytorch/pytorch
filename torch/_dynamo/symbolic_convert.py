@@ -204,12 +204,7 @@ from .variables.lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .variables.misc import (
-    CellVariable,
-    NullVariable,
-    PythonModuleVariable,
-    UnknownVariable,
-)
+from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_delitem,
@@ -2593,26 +2588,36 @@ class InstructionTranslatorBase(
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
     # translator, as the decorator was, and written only past the alias check.
-    def import_source(self, module_name: str) -> GlobalSource:
+    def import_source(
+        self, module_name: str, module: types.ModuleType | None = None
+    ) -> GlobalSource:
         """Create an alias to a module for use in guards"""
-        if (memo := self._import_source_memo.get(module_name)) is not None:
+        f_globals = self.output.global_scope
+        if (memo := self._import_source_memo.get(module_name)) is not None and (
+            module is None or f_globals[memo.global_name] is module
+        ):
             return memo
 
         if "torch_package" in module_name:
-            value = torch.package.package_importer._package_imported_modules[
+            cached_value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
+            cached_value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        value = cached_value if module is None else module
+        if module is not None and (
+            value is not cached_value or f_globals.get(alias, value) is not value
+        ):
+            alias = self.output.install_global_by_id(alias, value)
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals = self.output.global_scope
         if not (alias not in f_globals or f_globals[alias] is value):
             raise AssertionError(
                 "expected alias not in f_globals or f_globals[alias] is value to be true"
@@ -2620,7 +2625,8 @@ class InstructionTranslatorBase(
         f_globals[alias] = value
         self.output.update_co_names(alias)
         source = GlobalSource(alias)
-        self._import_source_memo[module_name] = source
+        if value is cached_value:
+            self._import_source_memo[module_name] = source
         return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
@@ -2715,16 +2721,16 @@ class InstructionTranslatorBase(
             # returned. Therefore, we set the source correctly here.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, value)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, value)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name, bad-argument-type]
-        self.push(PythonModuleVariable(value, source=source))
+        # pyrefly: ignore [unbound-name]
+        self.push(VariableTracker.build(self, value, source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
