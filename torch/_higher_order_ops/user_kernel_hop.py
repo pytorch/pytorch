@@ -14,16 +14,28 @@ from collections.abc import Callable
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
+import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
+from torch._prims_common import (
+    clone_preserve_strides,
+    is_non_overlapping_and_dense_or_false,
+)
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
+from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
     from torch._guards import Source
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
-    from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
 KernelT = TypeVar("KernelT")
@@ -95,7 +107,6 @@ def store_non_graphable_args(
     Some args cannot be stored in the FX graph.
     Put them in the side table.
     """
-    import torch.fx as fx
 
     def is_graphable(val: object) -> bool:
         return isinstance(val, (fx.node.base_types, fx.Node))
@@ -135,15 +146,10 @@ class UserKernelWrapperHOP(HigherOrderOperator):
 
 
 def trace_user_kernel_wrapper(
-    proxy_mode: "ProxyTorchDispatchMode",
+    proxy_mode: ProxyTorchDispatchMode,
     func_overload: Callable[..., Any],
     node_args: dict[str, Any],
 ) -> dict[str, Any] | None:
-    from torch.fx.experimental.proxy_tensor import (
-        disable_proxy_modes_tracing,
-        track_tensor_tree,
-    )
-
     with disable_proxy_modes_tracing():
         out = func_overload(**node_args)
 
@@ -173,12 +179,6 @@ def clone_mutated_arg(
     storage_offset, or gaps between val's elements -- part of the read lies outside
     val, which a backend that realizes val as a buffer sized to val cannot supply.
     """
-    from torch._prims_common import (
-        clone_preserve_strides,
-        is_non_overlapping_and_dense_or_false,
-    )
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     if is_non_overlapping_and_dense_or_false(val):
         if guard_or_false(val.storage_offset() == 0):
             # storage_offset + span is exactly val's numel, so nothing outside val
@@ -198,8 +198,9 @@ def functionalize_mutation_hop(
     ctx: "BaseFunctionalizeAPI",
     functional_hop: HigherOrderOperator,
     get_mutated_tensors: Callable[[dict[str, Any]], list[str]],
-    kwargs: dict[str, Any],
+    *,
     hop_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
 ) -> None:
     """Functionalize rule of a mutation HOP: call the functional HOP on clones of the
     written arguments (``get_mutated_tensors`` names them, given the unwrapped kwargs),
@@ -252,6 +253,7 @@ def functionalize_mutation_hop(
 
 def functional_hop_dense(
     mutation_hop: HigherOrderOperator,
+    *,
     hop_kwargs: dict[str, Any],
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
@@ -276,6 +278,7 @@ def functional_hop_dense(
 
 
 def functional_hop_fake(
+    *,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
     tensor_bases: dict[str, Tensor] | None,
@@ -294,6 +297,7 @@ def functional_hop_fake(
 def functionalize_functional_hop(
     ctx: "BaseFunctionalizeAPI",
     functional_hop: HigherOrderOperator,
+    *,
     hop_kwargs: dict[str, Any],
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
@@ -317,12 +321,6 @@ def register_user_kernel_hop_dispatch(
     mutation_hop: HigherOrderOperator, functional_hop: HigherOrderOperator
 ) -> None:
     """Dispatch keys a user-kernel HOP pair falls through, plus SAC support."""
-    from torch._higher_order_ops.utils import redirect_to_mode
-    from torch.utils.checkpoint import (
-        _CachedTorchDispatchMode,
-        _CachingTorchDispatchMode,
-    )
-
     for hop in (mutation_hop, functional_hop):
         hop.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
         hop.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
