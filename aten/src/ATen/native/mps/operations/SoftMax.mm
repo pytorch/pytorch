@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
@@ -45,11 +46,11 @@ static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& para
 template <typename... Tensors>
 static void run_softmax(MPSStream* stream,
                         const std::string& kernel,
-                        const Tensor& self,
                         bool use_u32,
                         MTLSize grid,
                         MTLSize group,
                         const SoftmaxParams<uint64_t>& params,
+                        const Tensor& self,
                         const Tensors&... tensors) {
   auto encoder = stream->commandEncoder();
   auto pso =
@@ -57,17 +58,19 @@ static void run_softmax(MPSStream* stream,
   getMPSProfiler().beginProfileKernel(pso, kernel, {self}, stream);
   [encoder setComputePipelineState:pso];
   if (use_u32) {
-    mtl_setArgs(encoder, tensors..., narrow_params(params));
+    mtl_setArgs(encoder, self, tensors..., narrow_params(params));
   } else {
-    mtl_setArgs(encoder, tensors..., params);
+    mtl_setArgs(encoder, self, tensors..., params);
   }
   [encoder dispatchThreadgroups:grid threadsPerThreadgroup:group];
   getMPSProfiler().endProfileKernel(pso, stream);
 }
 
-static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float, const Tensor& out, bool log_softmax) {
-  const std::string kernel = log_softmax ? "log_softmax" : "softmax";
-  TORCH_CHECK(!half_to_float, kernel, " with half to float conversion is not supported on MPS");
+static void softmax_mps_impl(const std::string& kernel,
+                             const Tensor& self,
+                             int64_t dim,
+                             const Tensor& out,
+                             const std::optional<Tensor>& aux = std::nullopt) {
   if (self.numel() == 0) {
     return;
   }
@@ -133,21 +136,21 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
         constexpr auto rows_per_group = kSoftmaxThreads / c10::metal::simdgroup_size;
         const auto grid = MTLSizeMake(ceil_div(num_rows, uint64_t(rows_per_group)), 1, 1);
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
-        run_softmax(stream, kernel + "_row", self, use_u32, grid, group, params, self_, output);
+        run_softmax(stream, kernel + "_row", use_u32, grid, group, params, self_, aux, output);
       } else if (use_split) {
         const auto grid = MTLSizeMake(n_chunks, num_rows, 1);
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
-        run_softmax(stream, "softmax_partial", self, use_u32, grid, group, params, self_, partials);
-        run_softmax(stream, kernel + "_finalize", self, use_u32, grid, group, params, self_, output, partials);
+        run_softmax(stream, kernel + "_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_finalize", use_u32, grid, group, params, self_, aux, output, partials);
       } else if (use_strided_split) {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_softmax(stream, "softmax_strided_partial", self, use_u32, grid, group, params, self_, partials);
-        run_softmax(stream, kernel + "_strided_finalize", self, use_u32, grid, group, params, self_, output, partials);
+        run_softmax(stream, kernel + "_strided_partial", use_u32, grid, group, params, self_, aux, partials);
+        run_softmax(stream, kernel + "_strided_finalize", use_u32, grid, group, params, self_, aux, output, partials);
       } else {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, 1);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
-        run_softmax(stream, kernel, self, use_u32, grid, group, params, self_, output);
+        run_softmax(stream, kernel, use_u32, grid, group, params, self_, aux, output);
       }
     }
   });
@@ -158,12 +161,24 @@ static void softmax_mps_impl(const Tensor& self, int64_t dim, bool half_to_float
 
 TORCH_IMPL_FUNC(softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
-  softmax_mps_impl(self, dim, half_to_float, out, false);
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("softmax", self, dim, out);
 }
 
 TORCH_IMPL_FUNC(log_softmax_mps_out)
 (const Tensor& self, const int64_t dim, const bool half_to_float, const Tensor& out) {
-  softmax_mps_impl(self, dim, half_to_float, out, true);
+  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on MPS");
+  softmax_mps_impl("log_softmax", self, dim, out);
+}
+
+TORCH_IMPL_FUNC(log_softmax_backward_mps_out)
+(const Tensor& grad, const Tensor& output, int64_t dim, ScalarType input_dtype, const Tensor& grad_input) {
+  TORCH_CHECK(grad_input.scalar_type() == grad.scalar_type() && output.scalar_type() == grad.scalar_type(),
+              "log_softmax_backward with mixed dtypes is not supported on MPS");
+  const bool same_strides = grad.strides() == output.strides();
+  const auto grad_ = same_strides ? grad : grad.contiguous();
+  const auto output_ = same_strides ? output : output.contiguous();
+  softmax_mps_impl("log_softmax_backward", grad_, dim, grad_input, output_);
 }
 
 TORCH_IMPL_FUNC(softmax_backward_mps_out)
