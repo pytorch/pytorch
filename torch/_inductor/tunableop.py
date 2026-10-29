@@ -20,7 +20,6 @@ import threading
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
 import torch
-
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
