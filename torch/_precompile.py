@@ -2171,10 +2171,11 @@ def _op_registration(
 
 def _custom_op_modules(
     op_names: Iterable[tuple[str, str]],
-) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
-    """The modules registering the ops among ``op_names``, and the custom ops among
-    them that no importable module is known to register. Warns about the ops torch
-    defines only at runtime; callers warn about the unrecorded ones."""
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], dict[str, tuple[str, ...]]]:
+    """The modules registering the ops among ``op_names``, the custom ops among
+    them that no importable module is known to register, and the ops torch defines
+    only at runtime grouped by the setup that defines them. Pass the last two to
+    ``_warn_unregistered_ops``."""
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
     lazy: dict[str, set[str]] = {}
@@ -2189,22 +2190,26 @@ def _custom_op_modules(
             modules.add(value)
         elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
+    lazy_ops = {setup: tuple(sorted(ops)) for setup, ops in sorted(lazy.items())}
+    return tuple(sorted(modules)), tuple(sorted(unrecorded)), lazy_ops
+
+
+def _warn_unregistered_ops(
+    lazy: dict[str, tuple[str, ...]],
+    unrecorded: Iterable[tuple[str, str]],
+    fallback_modules: Sequence[str] = (),
+) -> None:
+    """Warns about the ops ``_custom_op_modules`` found torch defines only at
+    runtime (``lazy``) or found no module for (``unrecorded``), naming the
+    ``fallback_modules`` the artifact imports in case they register the latter."""
     for setup, ops in sorted(lazy.items()):
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
             "defines only inside %s, so serving this artifact is unsupported: it "
             "fails to load on a host where that has not run.",
-            ", ".join(sorted(ops)),
+            ", ".join(ops),
             setup,
         )
-    return tuple(sorted(modules)), tuple(sorted(unrecorded))
-
-
-def _warn_unrecorded(
-    unrecorded: Iterable[tuple[str, str]], fallback_modules: Sequence[str] = ()
-) -> None:
-    """Warns about the ops ``_custom_op_modules`` found no module for, naming the
-    ``fallback_modules`` the artifact imports in case they register them."""
     if not (names := sorted({op_name for op_name, _ in unrecorded})):
         return
     serves = (
@@ -2356,8 +2361,8 @@ def _build_python_source(
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(compiled._gm)
-        modules, unrecorded = _custom_op_modules(ops)
-        _warn_unrecorded(unrecorded)
+        modules, unrecorded, lazy = _custom_op_modules(ops)
+        _warn_unregistered_ops(lazy, unrecorded)
         _write_custom_op_imports(buf, modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
@@ -2415,8 +2420,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(gm)
-        modules, unrecorded = _custom_op_modules(ops)
-        _warn_unrecorded(unrecorded)
+        modules, unrecorded, lazy = _custom_op_modules(ops)
+        _warn_unregistered_ops(lazy, unrecorded)
         _write_custom_op_imports(buf, modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")

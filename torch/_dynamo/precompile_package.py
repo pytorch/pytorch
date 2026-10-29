@@ -2173,7 +2173,7 @@ class PrecompileSession(Generic[_P, _R]):
             _custom_ops,
             _multigraph_frames,
             _served_modules,
-            _warn_unrecorded,
+            _warn_unregistered_ops,
         )
 
         summary = self._gated_summary(
@@ -2195,14 +2195,15 @@ class PrecompileSession(Generic[_P, _R]):
                         op_names |= _called_op_names(result.source_code)
         entry = self._served_entry()[0]
         ops = _custom_ops(op_names)
-        modules, unmapped = _custom_op_modules(ops)
+        modules, unmapped, lazy = _custom_op_modules(ops)
+        served: set[str] = set()
         if unmapped:
             # An op with no known module (torch.library.define, a C++ extension's
             # load_library) is likely registered by a module the frames run in,
             # which the driver imports only after the ops are checked.
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
             modules += tuple(sorted(served - set(modules)))
-            _warn_unrecorded(unmapped, sorted(served))
+        _warn_unregistered_ops(lazy, unmapped, sorted(served))
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, modules, ops
         )
