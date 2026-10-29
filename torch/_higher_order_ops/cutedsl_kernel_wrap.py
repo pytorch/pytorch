@@ -92,6 +92,10 @@ class CuteDSLHostFnInfo:
     annotated with a cutlass Numeric type such as cutlass.Int32, or a Python
     int/float/bool for an unannotated parameter, which the DSL converts to
     Int32/Float32/Boolean.
+
+    ``defaults`` are the parameters' defaults as written: like a passed value, a
+    default that is a runtime scalar goes through python_scalar at launch, and any
+    other default reaches the DSL unchanged.
     """
 
     params: tuple[str, ...]
@@ -163,9 +167,7 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
             )
         params.append(p.name)
         if p.default is not p.empty:
-            # A cutlass Numeric default (cutlass.Float32(0.5)) as its Python value,
-            # which generated code can print.
-            defaults[p.name] = python_scalar(p.default)
+            defaults[p.name] = p.default
         if inspect.isclass(ann) and issubclass(ann, cuda.CUstream):
             streams.append(p.name)
         elif is_arg_spec_constexpr(ann, p.name, i, inner):
@@ -314,44 +316,68 @@ def get_cutedsl_mutated_tensors(
     return [name for name in names if isinstance(kwargs.get(name), Tensor)]
 
 
-def _same_memory(a: Tensor, b: Tensor) -> bool:
-    """Whether two tensors are the same memory: the same tensor, or identical views."""
-    if a is b:
-        return True
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+def _same_storage(a: Tensor, b: Tensor) -> bool:
     from torch.multiprocessing.reductions import StorageWeakRef
 
     try:
-        if StorageWeakRef(a.untyped_storage()) != StorageWeakRef(b.untyped_storage()):
-            return False
-    except (NotImplementedError, RuntimeError):  # a tensor without a storage
+        a_storage, b_storage = a.untyped_storage(), b.untyped_storage()
+    except RuntimeError:  # no storage (NotImplementedError is a RuntimeError)
         return False
-    return (
-        a.dim() == b.dim()
-        and statically_known_true(a.storage_offset() == b.storage_offset())
-        and all(statically_known_true(p == q) for p, q in zip(a.shape, b.shape))
-        and all(statically_known_true(p == q) for p, q in zip(a.stride(), b.stride()))
+    return StorageWeakRef(a_storage) == StorageWeakRef(b_storage)
+
+
+def _may_overlap(a: Tensor, b: Tensor) -> bool:
+    """Whether two tensors may share memory: the same tensor, or two on one storage
+    whose byte ranges are not provably disjoint (so views that interleave without
+    overlapping count as overlapping). Bytes, not elements: views of one storage can
+    differ in dtype."""
+    if a is b:
+        return True
+    if not _same_storage(a, b):
+        return False
+    from torch._prims_common import compute_required_storage_length
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def byte_range(t: Tensor) -> tuple[Any, Any]:
+        offset, itemsize = t.storage_offset(), t.element_size()
+        end = compute_required_storage_length(t.shape, t.stride(), offset)
+        return offset * itemsize, end * itemsize
+
+    (a_start, a_end), (b_start, b_end) = byte_range(a), byte_range(b)
+    return not (
+        statically_known_true(a_end <= b_start)
+        or statically_known_true(b_end <= a_start)
     )
 
 
-def check_written_args_distinct(
-    kernel_idx: int, written: list[str], kwargs: dict[str, Any]
+def check_written_args_disjoint(
+    kernel_idx: int, written: list[str], kwargs: dict[str, Any], wrapped: dict[str, Any]
 ) -> list[str]:
-    """``written``, after checking that no two of those arguments are the same tensor.
-    The functional HOP clones each written argument and writes each clone back on its
-    own, so the same tensor passed to two written parameters (an in-place call under
-    mutates_args="unknown") would lose one of the writes. Distinct views of one base
-    are fine."""
+    """``written``, after checking that no two of those arguments may overlap in
+    memory. The functional HOP clones each written argument and writes each clone
+    back on its own, in kwargs order, so where two written arguments overlap the
+    later write-back overwrites the earlier one: an in-place call under
+    mutates_args="unknown" (the same tensor twice), or overlapping views of one base,
+    would lose a write.
+
+    ``kwargs`` holds the values unwrapped from the functional tensors in
+    ``wrapped``. Functional tensors that alias share a storage; where their
+    unwrapped values do not, functionalization copied the views
+    (torch.func.functionalize with remove="mutations_and_views"), and the copies do
+    not show where the views sit, so they count as overlapping."""
     for i, later in enumerate(written):
         for earlier in written[:i]:
-            if _same_memory(kwargs[earlier], kwargs[later]):
+            a, b = kwargs[earlier], kwargs[later]
+            aliases = _same_storage(wrapped[earlier], wrapped[later])
+            if _may_overlap(a, b) or (aliases and not _same_storage(a, b)):
                 kernel = cutedsl_kernel_side_table.get_kernel(kernel_idx)
                 raise RuntimeError(
                     f"CuTeDSL kernel {kernel.name}: {earlier!r} and {later!r} are the "
-                    "same tensor and both count as written (mutates_args="
-                    f"{kernel.mutates_args!r}), which PT2 cannot functionalize: one "
-                    "write would be lost. Give mutates_args naming only the parameters "
-                    "the kernel writes."
+                    "same tensor or views that may overlap, and both count as written "
+                    f"(mutates_args={kernel.mutates_args!r}), which PT2 cannot "
+                    "functionalize: one write would be lost. Pass tensors that do not "
+                    "overlap, or give mutates_args naming only the parameters the "
+                    "kernel writes."
                 )
     return written
 
@@ -366,12 +392,13 @@ def cutedsl_kernel_wrapper_mutation_functionalize(
     functionalize_mutation_hop(
         ctx,
         cutedsl_kernel_wrapper_functional,
-        lambda unwrapped_kwargs: check_written_args_distinct(
+        lambda unwrapped_kwargs: check_written_args_disjoint(
             kernel_idx,
             get_cutedsl_mutated_tensors(
                 kernel_idx, constant_args_idx, unwrapped_kwargs
             ),
             unwrapped_kwargs,
+            kwargs,
         ),
         hop_kwargs={"kernel_idx": kernel_idx, "constant_args_idx": constant_args_idx},
         kwargs=kwargs,

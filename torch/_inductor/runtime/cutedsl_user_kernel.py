@@ -16,7 +16,9 @@ import torch
 
 
 # host function -> {argument signature -> compiled function}
-_compiled: "weakref.WeakKeyDictionary[Callable[..., Any], dict[tuple[Any, ...], Any]]" = weakref.WeakKeyDictionary()
+_compiled: weakref.WeakKeyDictionary[
+    Callable[..., Any], dict[tuple[Any, ...], Any]
+] = weakref.WeakKeyDictionary()
 
 
 def _launch_device(fn: Callable[..., Any], args: Mapping[str, Any]) -> torch.device:
@@ -29,8 +31,8 @@ def _launch_device(fn: Callable[..., Any], args: Mapping[str, Any]) -> torch.dev
         return torch.device("cuda", torch.cuda.current_device())
     if len(devices) > 1 or devices[0].type != "cuda":
         raise ValueError(
-            f"CuTeDSL kernel {getattr(fn, '__name__', fn)}: tensor arguments must be on "
-            f"one CUDA device, got {', '.join(map(str, devices))}"
+            f"CuTeDSL kernel {getattr(fn, '__name__', fn)}: tensor arguments must be "
+            f"on one CUDA device, got {', '.join(map(str, devices))}"
         )
     return devices[0]
 
