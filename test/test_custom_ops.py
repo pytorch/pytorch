@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import inspect
 import io
 import itertools
 import os
@@ -716,6 +717,332 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(calls, ["custom"])
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_records_profiler_events(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_profiled", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = self.ns().pyobject_dispatch_profiled.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+        with torch.profiler.profile() as prof:
+            f(torch.randn(3))
+        names = {e.name for e in prof.events()}
+        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+
+    @skipIfTorchDynamo("Checks which dispatcher kernels run in eager")
+    def test_skip_autograd_kernel_if_no_grad(self):
+        lib = self.lib()
+        lib.define("skip_if_no_grad(Tensor x, Tensor[] ys) -> Tensor")
+        op = self.ns().skip_if_no_grad.default
+        calls = []
+
+        def autograd_kernel(keyset, x, ys):
+            calls.append("autograd")
+            with torch._C._AutoDispatchBelowAutograd():
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x, ys)
+
+        lib.impl("skip_if_no_grad", lambda x, ys: x + 1, "CPU")
+        lib.impl(
+            "skip_if_no_grad",
+            autograd_kernel,
+            "Autograd",
+            with_keyset=True,
+            _skip_if_no_grad=True,
+        )
+        x = torch.zeros(2)
+        xg = torch.zeros(2, requires_grad=True)
+        for pyobj_dispatch in (True, False):
+            op._enable_pyobj_dispatch(pyobj_dispatch)
+            calls.clear()
+            self.assertEqual(op(x, [x]), x + 1)
+            with torch.no_grad():
+                op(xg, [xg])
+            self.assertEqual(calls, [])
+            op(xg, [x])
+            op(x, [xg])
+            self.assertEqual(calls, ["autograd", "autograd"])
+
+        with self.assertRaisesRegex(RuntimeError, "only supported for Autograd"):
+            lib.impl("skip_if_no_grad", lambda x, ys: x, "CPU", _skip_if_no_grad=True)
+
+    @skipIfTorchDynamo("Checks eager autograd behavior")
+    def test_custom_op_kernel_runs_below_autograd_without_grad(self):
+        w = torch.randn(3, requires_grad=True)
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::uses_captured_param", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x * w
+
+        for pyobj_dispatch in (True, False):
+            f._opoverload._enable_pyobj_dispatch(pyobj_dispatch)
+            self.assertFalse(f(torch.randn(3)).requires_grad)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_calls_cpp_kernels(self):
+        # aten ops with only Tensor arguments, whose kernel for the dispatch
+        # key set is a C++ kernel.
+        a, b = torch.randn(3, 3), torch.randn(3, 3)
+        cases = [
+            (torch.ops.aten.mul.Tensor, (a, b)),
+            (torch.ops.aten.neg.default, (a,)),
+            (torch.ops.aten.mm.default, (a, b)),
+            (torch.ops.aten.where.self, (a > 0, a, b)),
+            (torch.ops.aten.mm.default, (a, torch.randn(2, 2))),
+        ]
+        ops = {op for op, _ in cases} | {torch.ops.aten.mul_.Tensor}
+
+        def call(op, args):
+            try:
+                return op(*args)
+            except RuntimeError as e:
+                return str(e).splitlines()[0]
+
+        try:
+            for op, args in cases:
+                op._enable_pyobj_dispatch(False)
+                expected = call(op, args)
+                op._enable_pyobj_dispatch(True)
+                self.assertEqual(call(op, args), expected)
+
+            x = torch.randn(3, requires_grad=True)
+            torch.ops.aten.mul.Tensor(x, b[0]).sum().backward()
+            self.assertEqual(x.grad, b[0])
+
+            mul_ = torch.ops.aten.mul_.Tensor
+            mul_._enable_pyobj_dispatch(True)
+            c = a.clone()
+            version = c._version
+            self.assertIs(mul_(c, b), c)
+            self.assertGreater(c._version, version)
+            self.assertEqual(c, a * b)
+        finally:
+            for op in ops:
+                op._enable_pyobj_dispatch(False)
+
+        # Below Autograd, a custom op under functionalization reaches the C++
+        # Functionalize kernel.
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_functionalized", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        self.assertEqual(torch.func.functionalize(f)(a), a + 1)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_args(self):
+        # What a Python kernel receives, and any error, must not depend on
+        # whether the op was dispatched through the PyObject fast path.
+        lib = self.lib()
+        seen = []
+
+        def kernel(*args, **kwargs):
+            seen.append((args, kwargs))
+            return torch.zeros(1)
+
+        def strict_kernel(x):  # has no parameter for the defaulted argument
+            seen.append(((x,), {}))
+            return torch.zeros(1)
+
+        def describe(value):
+            if isinstance(value, torch.Tensor):
+                return ("Tensor", id(value))
+            if isinstance(value, (list, tuple)):
+                return (type(value).__name__, [describe(v) for v in value])
+            if isinstance(value, dict):
+                return {k: describe(v) for k, v in value.items()}
+            if isinstance(value, torch.device):
+                return ("device", str(value))
+            return (type(value).__name__, value)
+
+        x, y = torch.randn(2), torch.randn(2)
+        cases = {
+            "a": (
+                "(Tensor x, int n) -> Tensor",
+                [((x, 3), {}), ((x,), {"n": 3}), ((), {"x": x, "n": 3}),
+                 ((x, True), {}), ((x, 3.0), {}), ((x, 2**70), {}), ((x,), {})],
+            ),
+            "b": (
+                "(Tensor x, int n=1, float s=0.5) -> Tensor",
+                [((x,), {}), ((x, 1), {}), ((x, 2), {}), ((x, 1, 0.5), {}),
+                 ((x, 1, 0.25), {}), ((x,), {"s": 0.5}), ((x,), {"s": 0.25}),
+                 ((x, 1, 1), {})],
+            ),
+            "c": (
+                "(Tensor x, *, int k=3, bool flag=False) -> Tensor",
+                [((x,), {}), ((x,), {"k": 3}), ((x,), {"k": 4}),
+                 ((x,), {"flag": True, "k": 3}), ((x, 3), {}), ((x,), {"bogus": 1})],
+            ),
+            "d": (
+                "(Tensor x, Tensor? y=None, str mode='sum') -> Tensor",
+                [((x,), {}), ((x, None), {}), ((x, y), {}), ((x, y, "sum"), {}),
+                 ((x, None, "mean"), {}), ((x,), {"mode": "max"})],
+            ),
+            "e": (
+                "(Tensor[] xs, int[] dims=[0], ScalarType? dtype=None) -> Tensor",
+                [(([x, y],), {}), (((x, y),), {}), (([x], [0]), {}), (([x], (0,)), {}),
+                 (([x], [1, 2], torch.float32), {}), (([x], [0], None), {}),
+                 (([x, 1],), {})],
+            ),
+            "f": (
+                "(Tensor x, Scalar alpha=1, Layout? layout=None, Device? device=None) -> Tensor",
+                [((x,), {}), ((x, 1), {}), ((x, 2.5), {}), ((x, True), {}),
+                 ((x, 1, torch.strided), {}), ((x, 1, None, torch.device("cpu")), {}),
+                 ((x, 1, None, "cpu"), {})],
+            ),
+            "g": (
+                "(Tensor x, SymInt n, float[] fs, Tensor?[] ys) -> Tensor",
+                [((x, 3, [1.0, 2.0], [x, None]), {}), ((x, 3, (1.0,), (None,)), {}),
+                 ((x, 3, [1, 2], [x]), {})],
+            ),
+            "h": ("(Tensor x, int n=1) -> Tensor", [((x,), {}), ((x, 1), {}), ((x, 2), {})]),
+        }  # fmt: skip
+        for name, (schema, calls) in cases.items():
+            opname = f"normalize_args_{name}"
+            lib.define(opname + schema)
+            lib.impl(opname, strict_kernel if name == "h" else kernel, "CPU")
+            lib.impl(opname, torch.library.fallthrough_kernel, "Autograd")
+            op = getattr(self.ns(), opname).default
+            for args, kwargs in calls:
+                results = []
+                for pyobj_dispatch in (False, True):
+                    op._enable_pyobj_dispatch(pyobj_dispatch)
+                    seen.clear()
+                    try:
+                        op(*args, **kwargs)
+                        results.append(describe(seen))
+                    except Exception as e:
+                        results.append((type(e), str(e).splitlines()[0]))
+                self.assertEqual(
+                    results[0], results[1], msg=f"{schema} with {args!r}, {kwargs!r}"
+                )
+
+        # Calls like these take the fast path: the kernel gets the caller's own
+        # float, where the C++ Dispatcher would make a new one.
+        lib.define("normalize_args_fast(Tensor x, float s, *, int k=0) -> Tensor")
+        lib.impl("normalize_args_fast", kernel, "CPU")
+        lib.impl("normalize_args_fast", torch.library.fallthrough_kernel, "Autograd")
+        op = self.ns().normalize_args_fast.default
+        op._enable_pyobj_dispatch(True)
+        s = float("0.75")
+        for args, kwargs in [((x, s), {}), ((x,), {"s": s}), ((x, s), {"k": 1})]:
+            seen.clear()
+            op(*args, **kwargs)
+            self.assertIs(seen[0][0][1], s)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_copies_list_defaults(self):
+        # A kernel may mutate a default it's passed without changing the
+        # default for later calls.
+        lib = self.lib()
+        lib.define(
+            "pyobject_dispatch_list_default(Tensor x, int[] dims=[0], int n=1) -> Tensor"
+        )
+        seen = []
+
+        def kernel(x, dims, n=1):
+            seen.append(list(dims))
+            dims.append(1)
+            return x.clone()
+
+        lib.impl("pyobject_dispatch_list_default", kernel, "CPU")
+        lib.impl(
+            "pyobject_dispatch_list_default",
+            torch.library.fallthrough_kernel,
+            "Autograd",
+        )
+        op = self.ns().pyobject_dispatch_list_default.default
+        op._enable_pyobj_dispatch(True)
+        x = torch.ones(2)
+        for _ in range(2):
+            op(x, n=2)
+        self.assertEqual(seen, [[0], [0]])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_normalizes_results(self):
+        # What a caller gets back, and any error, must not depend on whether
+        # the op was dispatched through the PyObject fast path.
+        lib = self.lib()
+        x, y = torch.randn(2), torch.randn(2)
+        cases = {
+            "t": ("(Tensor x) -> Tensor", [x, None, 3]),
+            "ot": ("(Tensor x) -> Tensor?", [x, None]),
+            "l": ("(Tensor x) -> Tensor[]", [[x, y], (x, y), [x, 3], x]),
+            "tt": ("(Tensor x) -> (Tensor, Tensor)", [(x, y), [x, y], (x,), (x, None)]),
+            "tl": ("(Tensor x) -> (Tensor, Tensor[])", [(x, [y]), (x, (y,))]),
+            "i": ("(Tensor x) -> int", [3, True, 3.5, 2**70]),
+            "f": ("(Tensor x) -> float", [0.5, 1, True]),
+            "b": ("(Tensor x) -> bool", [True, 1]),
+            "s": ("(Tensor x) -> str", ["hi", 3]),
+            "n": ("(Tensor x) -> ()", [None, x]),
+            "dt": ("(Tensor x) -> ScalarType", [torch.float32]),
+            "sc": ("(Tensor x) -> Scalar", [1, 2.5, True]),
+        }
+        returned = {}
+
+        def describe(value):
+            if isinstance(value, torch.Tensor):
+                return ("Tensor", id(value))
+            if isinstance(value, (list, tuple)):
+                return (type(value).__name__, [describe(v) for v in value])
+            return (type(value).__name__, value)
+
+        for name, (schema, values) in cases.items():
+            opname = f"normalize_result_{name}"
+            lib.define(opname + schema)
+            lib.impl(opname, lambda x, name=name: returned[name], "CPU")
+            lib.impl(opname, torch.library.fallthrough_kernel, "Autograd")
+            op = getattr(self.ns(), opname).default
+            for value in values:
+                returned[name] = value
+                results = []
+                for pyobj_dispatch in (False, True):
+                    op._enable_pyobj_dispatch(pyobj_dispatch)
+                    try:
+                        results.append(describe(op(x)))
+                    except Exception as e:
+                        results.append((type(e), str(e).splitlines()[0]))
+                self.assertEqual(
+                    results[0], results[1], msg=f"{schema} returning {value!r}"
+                )
+
+    def test_custom_op_call_has_fn_signature(self):
+        @torch.library.custom_op(f"{self.test_ns}::call_signature", mutates_args=())
+        def f(x: Tensor, y: Tensor, n: int = 2, *, scale: float = 1.0) -> Tensor:
+            return (x + y) * n * scale
+
+        @f.register_fake
+        def _(x, y, n=2, *, scale=1.0):
+            return torch.empty_like(x)
+
+        self.assertEqual(
+            list(inspect.signature(f).parameters), ["x", "y", "n", "scale"]
+        )
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(f(x, y), (x + y) * 2)
+        self.assertEqual(f(x, y=y, n=3), (x + y) * 3)
+        self.assertEqual(f(y=y, x=x, scale=0.5), (x + y))
+        with self.assertRaisesRegex(
+            TypeError, "missing 1 required positional argument: 'y'"
+        ):
+            f(x)
+
+        # An explicit schema keeps the generic (*args, **kwargs) __call__.
+        @torch.library.custom_op(
+            f"{self.test_ns}::call_explicit_schema",
+            mutates_args=(),
+            schema="(Tensor x, int n) -> Tensor",
+        )
+        def g(*args):
+            return args[0] * args[1]
+
+        self.assertEqual(g(x, 3), x * 3)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
         @torch.library.custom_op(
             f"{self.test_ns}::pyobject_dispatch_custom_op_autograd",
@@ -769,7 +1096,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         f.register_autograd(backward, setup_context=setup_context)
 
         op = self.ns().pyobject_dispatch_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2, requires_grad=True)
         sizes = torch.tensor([1, 2, 3])
@@ -819,7 +1146,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                 return self.list_module([input_embs[0]])[0]
 
         op = self.ns().pyobject_dispatch_module_tensor_list_output.default
-        self.assertFalse(op._is_pyobj_dispatcher_enabled())
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
 
         x = torch.randn(6, 2)
         sizes = torch.tensor([1, 2, 3])
@@ -5534,6 +5861,25 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.sin())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_multi_types_register_kernel_for_one(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
         called_f1 = 0
@@ -6075,6 +6421,17 @@ Please use `add.register_fake` to add an fake impl.""",
                 ([x.t()], x + 1),
             )
         )
+        # A single output may be passed without a tuple.
+        self.assertTrue(test_fn((x,), {}, x.t()))
+        self.assertFalse(test_fn((x,), {}, y))
+        self.assertTrue(test_fn((x,), {}, [y, x.view(-1)]))
+        # Outputs may not alias each other.
+        self.assertTrue(test_fn((x,), {}, (y, y.view(-1))))
+        self.assertTrue(test_fn((x,), {}, ([y, y.t()],)))
+        xs = [torch.randn(1) for _ in range(100)]
+        ys = [torch.randn(1) for _ in range(100)]
+        self.assertFalse(test_fn((xs,), {}, (ys,)))
+        self.assertTrue(test_fn((xs,), {}, (ys + [xs[57].view(-1)],)))
 
     def test_library_get_kernel(self):
         """Test registering a custom kernel, using it, then deregistering and verifying error."""
