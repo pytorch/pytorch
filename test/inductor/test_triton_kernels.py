@@ -1042,6 +1042,89 @@ def forward(self, x_1, output_1):
         )
 
     @requires_gpu
+    @common_utils.parametrize("folder", ["export", "inductor"])
+    def test_constant_folding_skips_every_user_kernel(self, folder):
+        # Folding a user kernel is wrong (see the TODO in both folders), so every
+        # functional HOP stays unknown to the folder, not only the first one: the
+        # first node is named triton_kernel_wrapper_functional_proxy, the next ones
+        # triton_kernel_wrapper_functional_proxy_1, ...
+        from torch._export.passes import constant_folding as export_folding
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor import constant_folding as inductor_folding
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        constant_fold = {
+            "export": export_folding.constant_fold,
+            "inductor": inductor_folding.constant_fold,
+        }[folder]
+        # Each kernel gets its own constants, each used once, so folding the second
+        # kernel (the old behavior) also leaves its constants unused and removed.
+        x1, y1, out1, x2, y2, out2 = (torch.randn(16, device=GPU_TYPE) for _ in range(6))
+        kernel_idx = kernel_side_table.add_kernel(add_kernel)
+        constant_args_idx = kernel_side_table.add_constant_args(
+            {"n_elements": 16, "BLOCK_SIZE": 16}
+        )
+
+        def add(a, b, out):
+            return triton_kernel_wrapper_functional(
+                kernel_idx=kernel_idx,
+                constant_args_idx=constant_args_idx,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"in_ptr0": a, "in_ptr1": b, "out_ptr": out},
+                tensors_to_clone=["out_ptr"],
+            )["out_ptr"]
+
+        def f(z):
+            # The tensors are closed over, so make_fx stores them as graph constants
+            # and both kernels see only constant inputs.
+            return add(x1, y1, out1) + z, add(x2, y2, out2) + z
+
+        gm = make_fx(f)(torch.zeros(16, device=GPU_TYPE))
+
+        def kernel_nodes():
+            return gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_functional
+            )
+
+        self.assertEqual(
+            [n.name for n in kernel_nodes()],
+            [
+                "triton_kernel_wrapper_functional_proxy",
+                "triton_kernel_wrapper_functional_proxy_1",
+            ],
+        )
+        constant_fold(gm)
+        self.assertEqual(len(kernel_nodes()), 2)
+        z = torch.randn(16, device=GPU_TYPE)
+        self.assertEqual(gm(z), (x1 + y1 + z, x2 + y2 + z))
+
+    @requires_gpu
+    @inductor_config.patch(freezing=True)
+    def test_freezing_keeps_every_user_kernel(self):
+        # Freezing turns the parameters into constants and runs Inductor's constant
+        # folding; both kernels on them must still be launched.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.randn(16, device=GPU_TYPE))
+                self.y = torch.nn.Parameter(torch.randn(16, device=GPU_TYPE))
+
+            def forward(self, z):
+                out1 = self.x.clone()
+                add_kernel[(1,)](self.x, self.y, out1, 16, BLOCK_SIZE=16)
+                out2 = self.y.clone()
+                add_kernel[(1,)](self.y, self.y, out2, 16, BLOCK_SIZE=16)
+                return out1 + z, out2 + z
+
+        m = M()
+        z = torch.randn(16, device=GPU_TYPE)
+        with torch.no_grad():
+            out, (code,) = run_and_get_code(torch.compile(m), z)
+            self.assertEqual(out, (m.x + m.y + z, m.y + m.y + z))
+        FileCheck().check_count("add_kernel_0.run(", 2, exactly=True).run(code)
+
+    @requires_gpu
     def test_triton_kernel_mutation_type(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.fake_tensor import FakeTensorMode
