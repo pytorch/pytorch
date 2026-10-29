@@ -3284,6 +3284,7 @@ class PrecompiledModule(PrecompiledRunnable):
         # save_cache_artifacts bundle that primes the inductor cache on load, or None
         # for uncacheable graphs).
         import torch._inductor.config as _ind_config
+        from torch._dynamo.precompile_package import _frozen_kernel_config
         from torch._functorch import aot_autograd
         from torch._inductor.exc import InductorError
         from torch._inductor.standalone_compile import NoRunnableInductorModuleError
@@ -3306,7 +3307,12 @@ class PrecompiledModule(PrecompiledRunnable):
         # ShapeEnv through automatically, so there is no dynamic_shapes knob to pass and
         # no manual TracingContext to install: a static capture specializes to the
         # example shapes, an unbacked capture keeps the symbols.
-        options: dict[str, object] = {"size_asserts": True}
+        #
+        # _frozen_kernel_config() is the Triton config shared with the Dynamo capture
+        # (and may log its "precompile capture overrides ..." warnings here). Its
+        # autotune_at_compile_time is redundant (inductor's compile_to_python already
+        # patches it) and is passed only so the two tracers cannot drift.
+        options: dict[str, object] = {"size_asserts": True, **_frozen_kernel_config()}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True
         try:
@@ -4037,6 +4043,20 @@ def capture(
     re-runs at serve time through the live autograd engine, accumulating
     ``.grad`` like eager); serve the artifact under the grad mode it was
     captured in.
+
+    An ``"inductor"`` capture tunes every kernel while its graph lowers, since
+    the artifact replays each kernel with one frozen config: Inductor's
+    kernels, forward included, are tuned on synthetic inputs at the size
+    hints, not on the block's real calls. A ``@triton.autotune`` kernel traced
+    into a captured graph is likewise tuned on random tensors, and the config
+    it picks ships in the artifact. A nonzero ``triton.multi_kernel`` is turned
+    off, with a warning, while each captured graph lowers (user code between
+    captured calls keeps the ambient config): a multi-kernel picks its
+    sub-kernel when the loaded module runs, by benchmarking at first launch or
+    from the serving process's own ``triton.multi_kernel``, which the artifact
+    cannot record. A :class:`DynamoTracer` capture with grad enabled lowers
+    each backward while the forward's tensors are still live, so peak device
+    memory during the capture grows by roughly the backward's working set.
 
     .. note::
 
