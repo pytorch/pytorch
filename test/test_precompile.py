@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import ast
 import contextlib
 import copy
 import errno
@@ -9367,6 +9368,15 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)
+            if entry == "fn":
+                (ops_line,) = [
+                    line
+                    for line in python_code.splitlines()
+                    if line.startswith("CUSTOM_OPS = ")
+                ]
+                ops = ast.literal_eval(ops_line.removeprefix("CUSTOM_OPS = "))
+                self.assertIn((f"{ns}::bump", ""), ops)
+                self.assertIn((f"{ns}::triple", ""), ops)
 
     def test_inductor_records_the_custom_ops_its_code_calls(self):
         from torch._inductor import decomposition
