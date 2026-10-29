@@ -219,6 +219,15 @@ def forward(self, token, obj_attr, x, n):
             """pop(__torch__.torch.classes._TorchScriptTesting._TensorQueue _0) -> Tensor _0""",
         )
 
+    def test_fake_script_object_no_kernel_for_dispatch_key(self):
+        # takes_foo_cia has only a CompositeImplicitAutograd kernel, so a fake
+        # script object reaches a key (CPU) with no kernel
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_foo = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, foo)
+        with self.assertRaisesRegex(RuntimeError, "no python implementation is found"):
+            torch.ops._TorchScriptTesting.takes_foo_cia(fake_foo, torch.ones(2, 3))
+
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
         class MyModule(torch.nn.Module):
