@@ -764,6 +764,19 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
         )
         yield SampleInput(a, b, driver=driver)
 
+    # Empty systems, which have no singular values, and systems without right-hand sides
+    empty_shapes = ((0, 0, 2), (3, 3, 0))
+    if len(deltas) > 1:
+        empty_shapes += ((0, 3, 2), (3, 0, 2), (4, 3, 0), (3, 4, 0))
+    for batch, driver, (m, n, k) in product(((), (3,)), drivers, empty_shapes):
+        a = make_tensor(
+            batch + (m, n), dtype=dtype, device=device, requires_grad=requires_grad
+        )
+        b = make_tensor(
+            batch + (m, k), dtype=dtype, device=device, requires_grad=requires_grad
+        )
+        yield SampleInput(a, b, driver=driver)
+
 
 def error_inputs_lstsq(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -970,9 +983,7 @@ def sample_inputs_linalg_pinv_hermitian(
         yield o
 
 
-def sample_inputs_linalg_solve(
-    op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs
-):
+def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates always solvable input for torch.linalg.solve
     We sample a fullrank square matrix (i.e. invertible) A
@@ -989,11 +1000,6 @@ def sample_inputs_linalg_solve(
         (1,) - same as () but explicit
         (3,) - solve for 3 vectors.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
-    'vector_rhs_allowed' controls whether to include nrhs = () to the list of SampleInputs.
-    torch.solve / triangular_solve / cholesky_solve (opposed to torch.linalg.solve) do not allow
-    1D tensors (vectors) as the right-hand-side.
-    Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
-    'vector_rhs_allowed' may be removed here as well.
     """
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_a = partial(
@@ -1005,10 +1011,7 @@ def sample_inputs_linalg_solve(
 
     batches = [(), (0,), (2,), (2, 2)]
     ns = [5, 0]
-    if vector_rhs_allowed:
-        nrhs = [(), (1,), (3,)]
-    else:
-        nrhs = [(1,), (3,)]
+    nrhs = [(), (1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
         yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
@@ -1094,29 +1097,6 @@ def sample_inputs_linalg_solve_triangular(
             args=(B.requires_grad_(requires_grad),),
             kwargs={"upper": upper, "unitriangular": uni, "left": left},
         )
-
-
-def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
-    """
-    This function generates always solvable input for legacy solve functions
-    (the ones that are not in torch.linalg module).
-    The difference from sample_inputs_linalg_solve is that here the right-hand-side of A x = b equation
-    should have b.ndim >= 2, vectors are not allowed.
-    Also the arguments order is swapped.
-    """
-    out = sample_inputs_linalg_solve(
-        op_info, device, dtype, requires_grad=requires_grad, vector_rhs_allowed=False
-    )
-
-    def out_fn(output):
-        return output[0]
-
-    # Reverses tensor order
-    for sample in out:
-        sample.input, sample.args = sample.args[0], (sample.input,)
-        if op_info.name == "solve":
-            sample.output_process_fn_grad = out_fn
-        yield sample
 
 
 def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -1619,7 +1599,7 @@ op_db: list[OpInfo] = [
             # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
             DecorateInfo(
                 unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_vmapvjpvjp",
                 device_type="cuda",
                 dtypes=(torch.float32,),
@@ -1974,14 +1954,6 @@ op_db: list[OpInfo] = [
             # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
             # kernel, hence the skip is scoped to CUDA only).
             DecorateInfo(skipIfNoNvmath, device_type="cuda"),
-            # The gradient goes through SVD/eigh, whose MPS results differ
-            # slightly between contiguous and non-contiguous inputs.
-            DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=3e-4, rtol=2e-3)}),
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
         ],
     ),
     OpInfo(
@@ -2633,14 +2605,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
-            ),
-            # torch-xpu-ops/issues/4313
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_numpy_ref",
-                device_type="xpu",
-                dtypes=(torch.float64,),
             ),
             # The test is flaky on AMX with Inductor
             DecorateInfo(

@@ -1,4 +1,0 @@
-perfetto
-tabulate
-numpy
-requests

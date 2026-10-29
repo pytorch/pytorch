@@ -22,7 +22,6 @@ from itertools import count
 from operator import attrgetter
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
-from unittest import mock
 
 import torch._inductor.async_compile
 import torch.fx
@@ -103,6 +102,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -132,7 +132,7 @@ from .fx_passes.post_grad import (
 )
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -472,7 +472,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
+    if torch.cuda.is_available() and torch.cuda.is_tf32_supported():
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -965,7 +965,7 @@ def fake_tensor_prop(
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
-                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+                else allow_non_fake_inputs_temporarily(fake_mode)
             )
             with ctx:  # type: ignore[attr-defined]
                 FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
@@ -1601,7 +1601,7 @@ class _InProcessFxCompile(FxCompile):
 
             # lift the maximum depth of the Python interpreter stack
             # to adapt large/deep models
-            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 3000))
 
             _step_logger()(
                 logging.INFO,
@@ -1768,6 +1768,9 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
+                # Shared so the const graph's proxy-executor calls get indices
+                # distinct from the main graph's in the one serialized list.
+                extern_kernel_nodes: list[ExternKernelNode] = []
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1798,7 +1801,7 @@ class _InProcessFxCompile(FxCompile):
                     )
                     with (
                         V.set_graph_handler(const_graph),
-                        V.set_extern_kernel_nodes([]),
+                        V.set_extern_kernel_nodes(extern_kernel_nodes),
                     ):
                         if not cpp_wrapper:
                             raise AssertionError("AOT mode only supports C++ wrapper")
@@ -1839,7 +1842,7 @@ class _InProcessFxCompile(FxCompile):
                 graph.freeze_runtime_asserts()
                 with (
                     V.set_graph_handler(graph),
-                    V.set_extern_kernel_nodes([]),
+                    V.set_extern_kernel_nodes(extern_kernel_nodes),
                     distributed_autotune.graph_context(),
                 ):
                     graph.run(*example_inputs)
@@ -2374,7 +2377,10 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
+    num_rng_states = max(
+        8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
+    )
+    graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
@@ -2591,7 +2597,7 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with allow_non_fake_inputs_temporarily(fake_mode):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -3035,6 +3041,11 @@ def compile_fx_backward(
             for i in candidate_idxs
             if placeholders[i].meta.get("is_static_input", True)
         ]
+
+        # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
+        # which can already be channels-last for convolution_backward (#197514).
+        _recursive_record_original_output_strides(gm)
+
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -3150,6 +3161,10 @@ def compile_fx(
     else:
         get_decomp_fn = select_decomp_table
 
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Inductor graph compilation")
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -3177,10 +3192,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    # Wake up the AsyncCompile subproc pool as early as possible (if the graph uses Triton).
     if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
+        isinstance(e, torch.Tensor) and is_triton(e.device) for e in example_inputs_
     ):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
