@@ -1,8 +1,8 @@
-add_loop_eager,compile_time_instruction_count,3390000000,0.1
+add_loop_eager,compile_time_instruction_count,3300000000,0.1
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,4251000000,0.1
+add_loop_eager_dynamic,compile_time_instruction_count,4211000000,0.1
 
 
 
@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,12030000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,15460000000,0.1
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,15770000000,0.1
 
 
 
@@ -142,11 +142,11 @@ dtensor_dispatch_custom_handler,instruction_count,36060,0.1
 
 
 
-nn_module_guard_eval,instruction_count,71160,0.1
+nn_module_guard_eval,instruction_count,66900,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,96320,0.1
+nn_module_guard_eval_dynamic,instruction_count,94070,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,169200,0.1
+runtime_overhead_inductor,instruction_count,145700,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,179300,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,154600,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,201300,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,180700,0.1
 
 
 
@@ -170,15 +170,15 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,165100,0.1
+runtime_overhead_inductor_dynamic,instruction_count,149400,0.1
 
 
 
-runtime_overhead_inductor_inference_mode_dynamic,instruction_count,176100,0.1
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,155600,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,199700,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,177200,0.1
 
 
 
@@ -186,7 +186,7 @@ runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,10830
 
 
 
-runtime_overhead_eager_cpu,instruction_count,126000,0.1
+runtime_overhead_eager_cpu,instruction_count,115700,0.1
 
 
 
@@ -194,4 +194,4 @@ unbind_split_flip_cat_iter40_batch128,instruction_count,210000000000,0.1
 
 
 
-disable_overhead,instruction_count,4985,0.1
+disable_overhead,instruction_count,5167,0.1
