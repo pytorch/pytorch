@@ -10110,7 +10110,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             package = cap._session._package
             package._device_types = frozenset()
             package.device_types.clear()
-            package.graph_break_device_types.clear()
+            package.graph_break_op_devices.clear()
         expected = {f"{ns}::nofake": ("CPU", "CUDA")}
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
@@ -10129,6 +10129,50 @@ class TestPrecompileCustomOpRecording(TestCase):
                 package.device_types[backend_id] = frozenset({"cuda"})
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
+        # An aten graph-break op on CPU adds no CPU kernel to CUDA graphs' ops.
+        name = f"precompile_devices_nonzero_{uuid.uuid4().hex}"
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write(
+                f"import torch\ndef fn(x, c):\n    return torch.ops.{ns}.op(x), c.nonzero()\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        with capture(
+            importlib.import_module(name).fn,
+            artifact_path=artifact,
+            cache_path=os.path.join(directory, "artifact.cache"),
+            tracer=DynamoTracer(),
+            backend="eager",
+        ) as cap:
+            cap(torch.randn(2), torch.randn(2))
+            package = cap._session._package
+            self.assertIn(("aten::nonzero", ""), package.graph_break_op_names)
+            package._device_types = frozenset({"cuda"})
+            for backend_id in package.device_types:
+                package.device_types[backend_id] = frozenset({"cuda"})
+        expected = {f"{ns}::op": ("CUDA", "CompositeExplicitAutograd")}
+        with open(artifact) as f:
+            self.assertIn(f"CUSTOM_OP_KERNELS = {expected!r}", f.read())
+
+    def test_torch_op_namespaces_cover_torchs_cpp_registrations(self):
+        # A fresh interpreter, so no test's extension library has added ops.
+        code = textwrap.dedent(
+            """
+            import os, torch
+            from torch._precompile import _registration_path, _torch_source_root
+            from torch._precompile import _TORCH_OP_NAMESPACES
+            root = _torch_source_root()
+            prefix = os.path.normcase(os.path.join(root or "", ""))
+            namespaces = set()
+            for name in torch._C._dispatch_get_all_op_names() if root else ():
+                op, _, overload = name.partition(".")
+                path = os.path.normcase(_registration_path(op, overload))
+                if path.startswith(prefix) and not path.endswith(".py"):
+                    namespaces.add(op.split("::")[0])
+            print(sorted(namespaces - _TORCH_OP_NAMESPACES))
+            """
+        )
+        out = subprocess.check_output([sys.executable, "-c", code], text=True)
+        self.assertEqual(out.strip(), "[]")
 
     def test_torch_cpp_op_without_a_source_root_uses_the_namespace(self):
         from torch._precompile import _torch_cpp_op, _torch_source_root
@@ -10246,7 +10290,13 @@ class TestPrecompileCustomOpRecording(TestCase):
     def test_an_op_torch_defines_at_cuda_init_is_reported_with_its_setup(self):
         from torch._precompile import _custom_op_modules, _warn_unregistered_ops
 
-        name = "triton::_triton_bsr_dense_mm_out"
+        # torch/cuda/__init__.py defines torch's triton ops this way at CUDA init.
+        key = f"precompile_{uuid.uuid4().hex}"
+        self.enterContext(mock.patch.dict(torch._TritonLibrary.ops_table))
+        torch._TritonLibrary.registerOp(
+            key, f"{key}(Tensor x) -> Tensor", torch.clone, "CPU"
+        )
+        name = f"triton::{key}"
         found = _custom_op_modules([(name, "")], ("CPU",))
         self.assertEqual((found.modules, found.unrecorded), ((), ()))
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
@@ -10384,8 +10434,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         # against the list itself. The script first imports the torch modules that
         # register ops on import. Namespaces this build does not register (vulkan,
         # metal, nnapi, ...) are not checked.
-        out = subprocess.check_output([sys.executable, "-c", script], text=True)
-        scan = json.loads(out)
+        cmd = [sys.executable, "-c", script]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        scan = json.loads(out.stdout)
         # "_test" holds TorchScript's own test ops.
         self.assertEqual(set(scan["reported"]) - {"_test"}, set())
 
@@ -10418,7 +10470,11 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertGreater(len(scan["modules"]), 1)
         modules = json.dumps(scan["modules"])
         cmd = [sys.executable, "-c", check]
-        self.assertEqual(subprocess.check_output(cmd, input=modules, text=True), "")
+        out = subprocess.run(
+            cmd, input=modules, capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout, "")
 
     def test_a_capture_records_the_ops_of_each_backend_graph(self):
         from torch._dynamo.precompile_package import _CapturePackage
