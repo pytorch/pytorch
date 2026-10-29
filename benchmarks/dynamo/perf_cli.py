@@ -1479,10 +1479,9 @@ def config_to_command(
             }
             if tp["phase"] == "decode":
                 dimensions["decode-length"] = result.decode_length
+            # Failure rows record batch size 0; let the benchmark pick its default.
             cmd_parts.extend(
-                f"--{key}={value}"
-                for key, value in dimensions.items()
-                if value is not None
+                f"--{key}={value}" for key, value in dimensions.items() if value
             )
 
     cmd_parts.extend(["--performance", "--cold-start-latency"])

@@ -121,6 +121,8 @@ from torch._logging import structured
 from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
@@ -3064,12 +3066,25 @@ class GuardBuilder(GuardBuilderBase):
                 return False
 
         metadata = value.__tensor_flatten__()[1]
+        cls = type(value)
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        ref = self.arg_ref(guard)
         has_custom_guard = hasattr(value, "__metadata_guard__")
         if has_custom_guard:
             verify_guard_fn_signature(value)
-            cls = type(value)
+            reason = (
+                f"{class_name}.__metadata_guard__() rejected the metadata "
+                f"for {ref}. Keep the metadata stable or change the check "
+                "if this difference is safe."
+            )
         else:
-            _validate_default_subclass_metadata_guard(metadata, type(value))
+            _validate_default_subclass_metadata_guard(metadata, cls)
+            reason = (
+                f"Metadata from {class_name}.__tensor_flatten__() for "
+                f"{ref} no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe."
+            )
 
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
@@ -3094,7 +3109,7 @@ class GuardBuilder(GuardBuilderBase):
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker,
-            get_verbose_code_parts(global_name, guard),
+            get_verbose_code_parts(global_name, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -3547,18 +3562,23 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         t = type(value)
+        remaining = tuple_iterator_len(value)
 
         code = []
-        code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
+        code.append(f"___tuple_iterator_len({ref}) == {remaining}")
         self._set_guard_export_info(guard, code)
+        item_word = "item" if remaining == 1 else "items"
+        reason = (
+            f"Iterator {ref} must be a tuple iterator with {remaining} {item_word} left; "
+            "Dynamo specialized the compiled code on the tuple iterator type and remaining count."
+        )
 
-        t = type(value)
         obj_id = self.id_ref(t, f"type({guard.name})")
 
         self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-            tuple_iterator_len(value),
+            remaining,
             obj_id,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
 
@@ -4173,14 +4193,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -5226,22 +5246,22 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
             # For FakeTensors, use pytype if set, otherwise default to
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            dispatch_keys = torch._C._dispatch_keys(obj)
-            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            )
-            if is_fake:
+            ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # _dispatch_keys() on a fake reports the Python and
-                # PythonTLSSnapshot keys of the fake itself; the converter may
-                # have recorded the real tensor's keys (from_meta_and_device
-                # always does, from_real_tensor only for an mkldnn source).
-                if obj.dispatch_keys is not None:
-                    dispatch_keys = obj.dispatch_keys
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
