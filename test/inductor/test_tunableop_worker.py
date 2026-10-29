@@ -346,6 +346,15 @@ class TunableOpWorkerTest(TestCase):
         self.assertEqual(outcome.status, "error")
         self.assertIsNone(outcome.time)
 
+    def test_an_interrupt_tears_the_worker_down(self):
+        # BaseException is not Exception: an interrupt leaves the child running
+        # with its result still unread in the pipe, so a reused worker would
+        # hand that result to the next GEMM, and every one after it.
+        with self.assertRaises(KeyboardInterrupt):
+            self._submit_with_fault(KeyboardInterrupt(), running=True)
+        self.assertIsNone(tunableop._worker)
+        self.assertEqual(self.created[-1].kill_calls, 1)
+
     def test_error_restarts_the_worker(self):
         # A catchable exception can leave a sticky GPU fault behind; the worker
         # must not survive it, or every later GEMM fails the same way.
@@ -643,60 +652,43 @@ class TunableopModeValidationTest(TestCase):
         finally:
             tunableop._mode_warned = False
 
-    def test_tune_mode_warns_when_env_blocks_recording(self):
-        # The env reads win over the setters the worker applies, so tune mode
-        # would benchmark everything and persist nothing.
-        for var, value in (
-            ("PYTORCH_TUNABLEOP_TUNING", "0"),
-            ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
+    def test_mode_env_warnings(self):
+        # Each kill switch leaves the mode with nothing to record or borrow;
+        # TUNING=0 is harmless in reuse, which never tunes. Deliberately no
+        # _env_warned reset between cases: one mode's warning must not silence
+        # the other's, and repeating a case must stay quiet rather than warn
+        # once per GEMM.
+        self.addCleanup(tunableop._env_warned.clear)
+        tunableop._env_warned.clear()
+        for mode, var, value, warns in (
+            ("tune", "PYTORCH_TUNABLEOP_TUNING", "0", True),
+            ("tune", "PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
+            ("reuse", "PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
+            ("reuse", "PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0", True),
+            ("reuse", "PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0", True),
+            ("reuse", "PYTORCH_TUNABLEOP_TUNING", "0", False),
         ):
-            with self.subTest(var=var):
-                tunableop._env_warned = False
-                self.addCleanup(setattr, tunableop, "_env_warned", False)
-                with (
-                    inductor_config.patch({"cuda.aten_tunableop_mode": "tune"}),
-                    mock.patch("torch.cuda.is_available", return_value=True),
-                    mock.patch.dict(os.environ, {var: value}),
-                    self.assertLogs(tunableop.log, level="WARNING") as logs,
-                ):
-                    self.assertTrue(tunableop.is_tune_mode())
-                self.assertTrue(any(var in m for m in logs.output))
-                # Warns once, not per GEMM.
-                with (
-                    inductor_config.patch({"cuda.aten_tunableop_mode": "tune"}),
-                    mock.patch("torch.cuda.is_available", return_value=True),
-                    mock.patch.dict(os.environ, {var: value}),
-                    self.assertNoLogs(tunableop.log, level="WARNING"),
-                ):
-                    tunableop.is_tune_mode()
-
-    def test_reuse_mode_env_warnings(self):
-        # Each kill switch leaves reuse with nothing to borrow or nothing to
-        # persist; TUNING=0 is harmless because reuse never tunes.
-        for var, value, warns in (
-            ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1", True),
-            ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0", True),
-            ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0", True),
-            ("PYTORCH_TUNABLEOP_TUNING", "0", False),
-        ):
-            with self.subTest(var=var):
-                tunableop._env_warned = False
-                self.addCleanup(setattr, tunableop, "_env_warned", False)
+            with self.subTest(mode=mode, var=var):
                 env = {
                     k: v
                     for k, v in os.environ.items()
                     if not k.startswith("PYTORCH_TUNABLEOP_")
                 }
-                expect = self.assertLogs if warns else self.assertNoLogs
-                with (
-                    inductor_config.patch({"cuda.aten_tunableop_mode": "reuse"}),
-                    mock.patch("torch.cuda.is_available", return_value=True),
-                    mock.patch.dict(os.environ, {**env, var: value}, clear=True),
-                    expect(tunableop.log, level="WARNING") as logs,
+                is_mode = getattr(tunableop, f"is_{mode}_mode")
+                # Second pass must never warn: once per mode and variable.
+                for expect in (
+                    self.assertLogs if warns else self.assertNoLogs,
+                    self.assertNoLogs,
                 ):
-                    self.assertTrue(tunableop.is_reuse_mode())
-                if warns:
-                    self.assertTrue(any(var in m for m in logs.output))
+                    with (
+                        inductor_config.patch({"cuda.aten_tunableop_mode": mode}),
+                        mock.patch("torch.cuda.is_available", return_value=True),
+                        mock.patch.dict(os.environ, {**env, var: value}, clear=True),
+                        expect(tunableop.log, level="WARNING") as logs,
+                    ):
+                        self.assertTrue(is_mode())
+                    if expect is self.assertLogs:
+                        self.assertTrue(any(var in m for m in logs.output))
 
     def test_mode_is_case_normalized(self):
         # Without this "Tune" turns both passes off behind a one-time warning.

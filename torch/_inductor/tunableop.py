@@ -75,7 +75,7 @@ _REUSE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0"),
 )
-_env_warned = False
+_env_warned: OrderedSet[str] = OrderedSet()
 _warned_faults: OrderedSet[str] = OrderedSet()
 
 
@@ -90,12 +90,13 @@ def _warn_fault_once(status: WorkerStatus, detail: str) -> None:
 def _warn_if_env_blocks(
     blocking_env: tuple[tuple[str, str], ...], consequence: str
 ) -> None:
-    global _env_warned
-    if _env_warned:
-        return
     blocking = [name for name, bad in blocking_env if os.environ.get(name) == bad]
-    if blocking:
-        _env_warned = True
+    # Keyed per mode as well as per variable: one mode's warning must not
+    # silence the other's, and a variable that blocks both says something
+    # different about each.
+    kind = f"{consequence}:{','.join(blocking)}"
+    if blocking and kind not in _env_warned:
+        _env_warned.add(kind)
         log.warning(
             "TunableOp %s: %s overrides the flags the worker sets. Unset it.",
             consequence,
@@ -493,6 +494,13 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
                 # child wedged in teardown never acts on the sentinel.
                 _shutdown_locked(graceful=False)
                 return Outcome(None, "error")
+            except BaseException:  # noqa: B036
+                # Ordinary failures are handled above, so this is
+                # KeyboardInterrupt and friends. The child keeps running and
+                # writes its result into the pipe unread, so reusing the worker
+                # would hand that result to the next GEMM, and every one after.
+                _shutdown_locked(graceful=False)
+                raise
     except Exception:  # lock/restart machinery itself failed
         _warn_fault_once("error", "the worker machinery failed")
         return Outcome(None, "error")
