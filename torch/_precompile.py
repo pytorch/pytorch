@@ -2008,17 +2008,22 @@ def _torch_source_root() -> str | None:
 
 
 def _torch_cpp_op(op_name: str, overload: str) -> bool:
-    """Whether ``import torch`` registers ``op_name`` from C++. An extension adding
-    ops to a torch namespace records its own source, outside torch's root."""
+    """Whether ``import torch`` registers ``op_name`` from C++: its namespace is one
+    of torch's, and it is not an extension's that adds ops to that namespace from a
+    C++ source outside torch's root. Paths alone cannot decide: an extension built in
+    a checkout, or under a directory the root shares, lies inside the root. One that
+    is built in torch's checkout and adds ops to a torch namespace is taken for
+    torch's."""
+    if op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+        return False
     root = _torch_source_root()
     path = _registration_path(op_name, overload)
     if root is None or not path or path.endswith(".py"):
-        return op_name.split("::")[0] in _TORCH_OP_NAMESPACES
+        return True
     return path.startswith(os.path.join(root, ""))
 
 
-# Torch's namespaces defined from C++, which decide for an op whose schema records
-# no C++ path (legacy RegisterOperators, a build with STRIP_ERROR_MESSAGES).
+# Torch's namespaces defined from C++.
 _TORCH_OP_NAMESPACES = frozenset(
     {
         "aten",
@@ -2575,14 +2580,31 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _opens_scope(frame: dict[str, Any]) -> bool:
+    """Whether ``_build_multigraph_forward`` opens ``frame``'s module for its globals."""
+    return bool(frame["variants"] or (frame["trivial"] and frame["resume_names"]))
+
+
 def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
     """The modules a load imports for its frames: the entry's, and those of the
     frames ``_build_multigraph_forward`` opens a scope for. Never a dead record's."""
-    return {
-        f["python_module"]
-        for f in frames
-        if f["is_entry"] or f["variants"] or (f["trivial"] and f["resume_names"])
-    }
+    return {f["python_module"] for f in frames if f["is_entry"] or _opens_scope(f)}
+
+
+def _unimportable_module(modules: Iterable[str]) -> str | None:
+    """The first of ``modules`` another process cannot import, found without
+    importing it: ``__main__``, or one with no spec."""
+    import importlib.util
+
+    for name in modules:
+        try:
+            if name == "__main__" or (
+                name not in sys.modules and importlib.util.find_spec(name) is None
+            ):
+                return name
+        except ImportError:
+            return name
+    return None
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
@@ -2764,6 +2786,8 @@ def _build_multigraph_python_source(
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
+    buf.writeline("# The modules of the frames it serves, which the driver imports.")
+    buf.writeline(f"SERVED_MODULES = {tuple(sorted(_served_modules(frames)))!r}")
     buf.writeline("")
     buf.writeline(
         "# frame name -> number of captured variants. A frame with one variant"
