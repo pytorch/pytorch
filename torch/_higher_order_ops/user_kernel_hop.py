@@ -9,8 +9,11 @@ cutedsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to 
 it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
+import copy
+import copyreg
 import dataclasses
 import threading
+import types
 from collections.abc import Callable, Mapping
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -45,48 +48,97 @@ KernelT = TypeVar("KernelT")
 # Kernel Side Table
 
 
-# We cannot put user kernels into the FX graph as the graph nodes
-# do not support arbitrary functions.
-# Use a side table.
-# We use two dicts so that fetching both the kernel and id are O(1)
-class _Keep:
-    """Keeps a value alive inside a key without taking part in the key's equality."""
+def _object_state(value: object) -> dict[str, object] | None:
+    """The attributes constant_key keys an object by, and _snapshot copies: the
+    fields of a dataclass instance, or the __dict__ of a plain object (one with no
+    __slots__ attributes that is not callable or a module, of a class that does not
+    hash by value), such as a mutable config object. None for any other value,
+    cutlass values included.
 
-    __slots__ = ("value",)
-
-    def __init__(self, value: object) -> None:
-        self.value = value
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, _Keep)
-
-    def __hash__(self) -> int:
-        return 0
+    Limitation: any other object with __slots__ attributes, or a callable one (a
+    functor), is keyed as itself, by identity unless its class defines equality and
+    hashing: mutating it between launches reuses the kernel compiled for its old
+    contents, and a new object with the same contents is compiled again."""
+    cls = type(value)
+    if (getattr(cls, "__module__", "") or "").startswith("cutlass"):
+        return None
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+    if (
+        (cls.__hash__ is None or cls.__hash__ is object.__hash__)
+        and hasattr(value, "__dict__")
+        and not callable(value)
+        and not isinstance(value, types.ModuleType)
+        and not copyreg._slotnames(cls)  # type: ignore[attr-defined]
+    ):
+        return vars(value)
+    return None
 
 
 def constant_key(value: object) -> object:
     """A hashable key for a constant kernel argument, equal for two values only when
-    they are interchangeable: tuples, lists and dicts by content, a cutlass Numeric by
-    its type and Python value, other hashable values by equality, anything else by
-    identity (the key then keeps the value alive, so its id is not reused)."""
+    they are interchangeable: lists, tuples, dicts and objects (see _object_state)
+    by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
+    same), a cutlass Numeric by its type and Python value, other values by their own
+    equality. Any other unhashable value is refused."""
     if isinstance(value, (tuple, list)):
         return (type(value), tuple(constant_key(v) for v in value))
     if isinstance(value, dict):
         return (
-            dict,
+            type(value),
             tuple((constant_key(k), constant_key(v)) for k, v in value.items()),
         )
     if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
         inner = getattr(value, "value", None)
         if isinstance(inner, (bool, int, float)):
-            return (type(value), inner)
+            return (type(value), constant_key(inner))
+    if isinstance(value, float):
+        return (type(value), value.hex())
+    state = _object_state(value)
+    if state is not None:
+        return (type(value), constant_key(state))
     try:
         hash(value)
     except TypeError:
-        return ("id", id(value), _Keep(value))
+        raise TypeError(
+            f"a constant kernel argument of type {type(value).__name__} is "
+            "unhashable: pass a hashable value, or a list, tuple, dict, dataclass or "
+            "plain object of them"
+        ) from None
     return (type(value), value)
 
 
+def _snapshot(value: object) -> object:
+    """``value`` with everything constant_key keys by content copied, so that the
+    caller mutating it later changes neither the stored value nor its key."""
+    if isinstance(value, tuple):
+        items = [_snapshot(v) for v in value]
+        if all(a is b for a, b in zip(items, value)):
+            return value
+        # A namedtuple is rebuilt with _make, any other tuple from the items.
+        return getattr(type(value), "_make", type(value))(items)
+    if isinstance(value, list):
+        new_list = copy.copy(value)
+        new_list[:] = [_snapshot(v) for v in value]
+        return new_list
+    if isinstance(value, dict):
+        new_dict = copy.copy(value)
+        new_dict.clear()
+        new_dict.update((_snapshot(k), _snapshot(v)) for k, v in value.items())
+        return new_dict
+    state = _object_state(value)
+    if state is None:
+        return value
+    new = copy.copy(value)
+    for name, v in state.items():
+        object.__setattr__(new, name, _snapshot(v))
+    return new
+
+
+# We cannot put user kernels into the FX graph as the graph nodes
+# do not support arbitrary functions.
+# Use a side table.
+# We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable(Generic[KernelT]):
     def __init__(self, dedupe_constant_args: bool = False) -> None:
         # Per instance, so that each DSL's table has its own index space.
@@ -94,8 +146,9 @@ class KernelSideTable(Generic[KernelT]):
         self.kernel_to_id: dict[KernelT, int] = {}
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
-        # With dedupe_constant_args, equal constant args share one index, so a table
-        # that is never reset does not grow with every eager launch.
+        # With dedupe_constant_args, equal constant args (see constant_key) share one
+        # index, so a table that is never reset does not grow with every eager launch,
+        # and each entry is a snapshot of the args it was added with.
         self._constant_args_index: dict[object, int] | None = (
             {} if dedupe_constant_args else None
         )
@@ -127,6 +180,7 @@ class KernelSideTable(Generic[KernelT]):
                 key = tuple((k, constant_key(v)) for k, v in sorted(args.items()))
                 if key in self._constant_args_index:
                     return self._constant_args_index[key]
+                args = {k: _snapshot(v) for k, v in args.items()}
             idx = len(self.constant_args)
             self.constant_args[idx] = args
             if key is not None:
