@@ -439,6 +439,9 @@ class CustomOpDef:
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
                 if device_type not in self._backend_fns:
 
                     def backend_impl(*args, **kwargs):
@@ -485,16 +488,7 @@ class CustomOpDef:
                             )
                         return result
 
-                    if device_type is None:
-                        self._lib.impl(
-                            self._name, backend_impl, "CompositeExplicitAutograd"
-                        )
-                    else:
-                        self._lib.impl(
-                            self._name,
-                            backend_impl,
-                            _C._dispatch_key_for_device(device_type),
-                        )
+                    self._lib.impl(self._name, backend_impl, key)
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
@@ -506,9 +500,6 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
-                key = "CompositeExplicitAutograd"
-                if device_type is not None:
-                    key = _C._dispatch_key_for_device(device_type)
                 caller = utils.caller_frame().f_globals.get("__name__")
                 self._backend_fn_callers[key] = caller
             return fn
