@@ -6282,21 +6282,27 @@ def _(x):
         try:
             with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
                 exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
-                # Named like a skipped module, but not a submodule of one.
-                kernels = {"__name__": "functools_ext", "f": ops["f"]}
+                kernels = {"__name__": "kernel_callers_kernels", "f": ops["f"]}
                 exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
                 self.assertEqual(
                     ops["f"]._backend_fn_callers,
                     {
                         "CompositeExplicitAutograd": "kernel_callers_ops",
-                        "CPU": "functools_ext",
+                        "CPU": "kernel_callers_kernels",
                     },
                 )
                 self.assertEqual(
                     ops["g"]._backend_fn_callers, {"CPU": "kernel_callers_ops"}
                 )
+                self.assertEqual(
+                    torch._library.utils.kernel_callers(f"{ns}::h"),
+                    {"CPU": "kernel_callers_kernels"},
+                )
+                # The dispatcher still records torch.library.impl's own Library.
                 dump = torch._C._dispatch_dump(f"{ns}::h")
-                self.assertRegex(dump, r"CPU: registered at /callers/kernels.py:\d+ ::")
+                self.assertRegex(
+                    dump, r"CPU: registered at .*torch[/\\]library\.py:\d+ ::"
+                )
         finally:
             while len(torch.library._keep_alive) > keep_alive:
                 torch.library._keep_alive.pop()._destroy()
@@ -6304,6 +6310,7 @@ def _(x):
                 if n in ops:
                     ops[n]._lib._destroy()
                 OPDEFS.pop(f"{ns}::{n}", None)
+            torch._library.utils.REGISTRATION_CALLERS.pop((f"{ns}::h", "CPU"), None)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):

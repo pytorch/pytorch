@@ -1108,23 +1108,33 @@ def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None
     # registered when served. Lazy items are read, never realized.
     vts: list[VariableTracker] = []
     VariableTracker.visit(vts.append, popped)
-    devices = frozenset[str]()
-    for v in vts:
-        if isinstance(v, LazyVariableTracker):
-            devices |= _tensor_device_types(v.peek_value())
-        elif isinstance(v, TensorVariable) and v.device and v.device.type != "meta":
-            devices |= {v.device.type}
+    leaves: list[Any] = []
+    devices_known = True
     for vt in vts:
         if isinstance(vt, LazyVariableTracker):
-            ops: list[Any] = tree_leaves(vt.peek_value())
-        else:
-            ops = [vt.value] if isinstance(vt, BaseTorchVariable) else []
-        for op in ops:
-            if isinstance(op, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
-                try:
-                    package.add_graph_break_op(op, device_types=devices)
-                except Exception:
-                    log.debug("precompile: dropped a graph-break op", exc_info=True)
+            try:
+                leaves += tree_leaves(vt.peek_value())
+            except Exception:
+                devices_known = False
+                log.debug("precompile: dropped a graph-break item", exc_info=True)
+        elif isinstance(vt, BaseTorchVariable):
+            leaves.append(vt.value)
+    # Served, an op with no recorded device is checked on every kernel key.
+    devices = frozenset[str]()
+    if devices_known:
+        try:
+            known = {
+                v.device.type for v in vts if isinstance(v, TensorVariable) and v.device
+            }
+            devices = _tensor_device_types(leaves) | (known - {"meta"})
+        except Exception:
+            log.debug("precompile: graph-break op devices unknown", exc_info=True)
+    for op in leaves:
+        if isinstance(op, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            try:
+                package.add_graph_break_op(op, device_types=devices)
+            except Exception:
+                log.debug("precompile: dropped a graph-break op", exc_info=True)
 
 
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
