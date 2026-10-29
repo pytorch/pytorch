@@ -506,7 +506,8 @@ class CudaGraphManager {
     }
     auto graph = std::make_unique<Graph>();
     CUDAGraphHandle graph_handle = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(&graph_handle));
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(
+        /*keep_graph=*/0, /*num_rng_states=*/8, &graph_handle));
     graph->graph.reset(graph_handle);
 
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, stream));
@@ -546,8 +547,8 @@ class CudaGraphManager {
       group_input_copies(*graph, dtypes);
 
       // The region's allocations come from the pool.
-      AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_cuda_graph_capture_begin(graph_handle, pool_.get()));
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_capture_begin(
+          graph_handle, pool_.get(), cudaStreamCaptureModeThreadLocal));
       bool capturing = true;
       try {
         fn(input_handles.data(), raw_outputs.data(), capture_stream_);
