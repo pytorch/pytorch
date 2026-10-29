@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import logging
 import math
+import operator
 import os
 import threading
 import traceback
@@ -15,7 +16,7 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self, TypedDict, Unpack
+from typing_extensions import Self, TypedDict, TypeIs, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -25,12 +26,16 @@ from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedte
 from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
-from torch._prims_common import make_contiguous_strides_for, suggest_memory_format
+from torch._prims_common import (
+    are_strides_like_channels_last_or_false,
+    make_contiguous_strides_for,
+)
 from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
     is_sparse_any,
     is_sparse_compressed,
+    is_sparse_compressed_layout,
     MetaConverter,
 )
 from torch._utils import _is_privateuse1_backend_available, render_call
@@ -640,6 +645,11 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
     dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
     return fake_out
+
+
+# Why the dispatch cache bypasses each op outside the builtin namespaces it has
+# seen (see _cached_dispatch_impl).
+_non_builtin_bypass_reasons: dict[OpOverload, str] = {}
 
 
 @functools.cache
@@ -1675,6 +1685,15 @@ class TensorMetadata:
     ) -> None:
         # Flatten the TensorMetadata out into `result`.  Make sure to call
         # state.convert_sym_int() on any SymInts.
+        if (
+            _all_ints(self.shape)
+            and _all_ints(self.stride)
+            and type(self.storage_offset) is int
+            and not isinstance(self.storage_bytes, SymInt)
+        ):
+            # No SymInts to convert, so every value is hashable as it is.
+            result.extend(_tensor_metadata_values(self))
+            return
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
             if isinstance(value, (tuple, list, torch.Size)):
@@ -1703,13 +1722,30 @@ def _same_int_expr(a: _MetadataIntLike, b: _MetadataIntLike) -> bool:
     return a == b
 
 
+_tensor_metadata_values = operator.attrgetter(
+    *(f.name for f in dataclasses.fields(TensorMetadata))
+)
+
+
+def _all_ints(values: tuple[_MetadataIntLike, ...]) -> TypeIs[tuple[int, ...]]:
+    for v in values:
+        if type(v) is not int:
+            return False
+    return True
+
+
 def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    # Read layout/sparseness once (hot-path Python properties on FakeTensor).
+    # This runs for every tensor argument of every cached FakeTensorMode op,
+    # and each property read costs a few hundred ns on a FakeTensor, so read
+    # each one once.
     layout = t.layout
-    _is_sparse_any: bool = is_sparse_any(t)
+    _is_sparse_any = layout is torch.sparse_coo or is_sparse_compressed_layout(layout)
+    is_sparse = t.is_sparse
+    shape = t.shape
+    stride = t.stride() if layout == torch.strided else ()
     # Don't call is_contiguous() on a Tensor which has symbolic sizes or things
     # will go badly (guards will be messed up?). suggest_memory_format walks
     # sizes and strides, which is symbolic arithmetic for such a tensor, so
@@ -1718,20 +1754,25 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     if t._has_symbolic_sizes_strides or _is_sparse_any:
         memory_format = None
     else:
-        memory_format = suggest_memory_format(t)
+        # suggest_memory_format(t), from the values already read.
+        memory_format = torch.contiguous_format
+        if layout == torch.strided and are_strides_like_channels_last_or_false(
+            shape, stride
+        ):
+            memory_format = (
+                torch.channels_last if len(shape) == 4 else torch.channels_last_3d
+            )
         if not t.is_contiguous(memory_format=memory_format):
             memory_format = None
 
-    storage_offset = t.storage_offset()
-
     return TensorMetadata(
         t.dtype,
-        t.shape,
-        t.stride() if layout == torch.strided else (),
+        shape,
+        stride,
         t.device,
         layout,
         memory_format,
-        storage_offset,
+        t.storage_offset(),
         # Only set storage_bytes for tensors that have storage (not sparse)
         t.untyped_storage().nbytes() if not _is_sparse_any else None,
         t.requires_grad,
@@ -1739,8 +1780,8 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
         t.is_conj(),
         t.is_neg(),
         t.is_inference(),
-        t.is_sparse,
-        t.is_coalesced() if t.is_sparse else None,
+        is_sparse,
+        t.is_coalesced() if is_sparse else None,
         t.dense_dim() if _is_sparse_any else None,
         t.sparse_dim() if _is_sparse_any else None,
     )
@@ -2129,6 +2170,20 @@ class FakeTensorMode(TorchDispatchMode):
         state = None
         key = None
         try:
+            # Whether a non-builtin op can be cached doesn't depend on its
+            # arguments, so check that before building a key that would only
+            # be thrown away. The reason doesn't depend on them either, so it
+            # is worked out once per op.
+            is_op_overload = isinstance(func, torch._ops.OpOverload)
+            if is_op_overload and not library_utils.is_builtin(func):
+                reason = _non_builtin_bypass_reasons.get(func)
+                if reason is None:
+                    try:
+                        self._validate_cache_key(func, args, kwargs)
+                    except _BypassDispatchCache as e:
+                        reason = _non_builtin_bypass_reasons[func] = e.reason
+                if reason is not None:
+                    raise _BypassDispatchCache(reason)
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
@@ -2375,8 +2430,9 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("not our fake")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if is_sparse_any(arg):
-                    raise _BypassDispatchCache(f"{arg.layout} tensor")
+                layout = arg.layout
+                if layout is torch.sparse_coo or is_sparse_compressed_layout(layout):
+                    raise _BypassDispatchCache(f"{layout} tensor")
                 if arg.is_mkldnn:
                     raise _BypassDispatchCache("mkldnn tensor")
                 metadata = extract_tensor_metadata(arg)
