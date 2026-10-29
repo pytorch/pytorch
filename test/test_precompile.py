@@ -11347,7 +11347,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         python_code = self._capture_module(source, tracer=DynamoTracer())
         ops = tuple(sorted([(name, ""), (nested, "")]))
         self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
-        # A failing device walk still records the ops, checked on every kernel key.
+        # A failing device walk still records the ops, checked on the frames' devices.
         devices = mock.patch.object(
             torch._dynamo.symbolic_convert,
             "_tensor_device_types",
