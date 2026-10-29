@@ -480,10 +480,13 @@ PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_sum_cutedsl
   python_native/test_sum_inner_tree_plan
   python_native/test_inner_tree_order
+  python_native/test_inner_tree_staged_index
+  python_native/test_inner_tree_combine_unroll
   python_native/test_kernel_coltile
   python_native/test_kernel_xcta
   python_native/test_kernel_rowtile
   python_native/test_kernel_general
+  python_native/test_reduction_config
   python_native/test_hw_caps
   python_native/test_traits
   python_native/test_instrumentation
