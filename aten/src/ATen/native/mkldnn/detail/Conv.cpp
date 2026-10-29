@@ -12,50 +12,6 @@ namespace at::native::mkldnn {
 
 namespace {
 
-// Ported from ideep::convolution_forward_params.
-struct convolution_forward_params {
-  convolution_forward_params() {}
-
-  convolution_forward_params(
-      dnnl::convolution_forward::primitive_desc&& pd,
-      dnnl::convolution_forward&& primitive,
-      ideep::attr_t&& op_attr,
-      int groups)
-      : pd(std::move(pd)),
-        primitive(std::move(primitive)),
-        op_attr(op_attr),
-        groups(groups),
-        bias_attr(ideep::attr_t()),
-        pd_use_threads(omp_get_max_threads()) {}
-
-  convolution_forward_params(
-      dnnl::convolution_forward::primitive_desc&& pd,
-      dnnl::convolution_forward&& primitive,
-      ideep::attr_t&& op_attr,
-      int groups,
-      ideep::attr_t&& bias_attr)
-      : pd(std::move(pd)),
-        primitive(std::move(primitive)),
-        op_attr(op_attr),
-        groups(groups),
-        bias_attr(std::move(bias_attr)),
-        pd_use_threads(omp_get_max_threads()) {}
-
-  dnnl::convolution_forward::primitive_desc pd;
-  dnnl::convolution_forward primitive;
-  ideep::attr_t op_attr;
-  int groups;
-  ideep::attr_t bias_attr;
-  // From IPEX. Set in `do_prepare()`, only used outside ideep.
-  // TO-DO: Use a better name, i.e., num_threads
-  int pd_use_threads;
-
-  // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
-      nullptr;
-};
-
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv
 // quantization version
@@ -1078,6 +1034,123 @@ void do_prepare(
 #endif
 }
 
+// Ported from ideep::convolution_forward::do_prepare.
+// for int8
+template <bool with_bias>
+void do_prepare(
+    convolution_forward_params& param,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    bool is_channels_last,
+    const ideep::attr_t& attr,
+    dnnl::algorithm aalgorithm,
+    dnnl::prop_kind aprop_kind,
+    const ideep::lowp_kind alowp_kind) {
+  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ideep::attr_t op_attr, src_attr, weights_attr, bias_attr;
+  ideep::tensor weights_grouped;
+  dnnl::memory::dims dil_compatible;
+
+  prepare_parameters(
+      src,
+      weights,
+      bias,
+      dst_dims,
+      dst,
+      dilates,
+      groups,
+      src_scales,
+      weights_scales,
+      dst_scales,
+      src_zero_point,
+      dst_zero_point,
+      attr,
+      alowp_kind,
+      with_bias,
+      false,
+      weights_grouped,
+      dil_compatible,
+      op_attr,
+      src_attr,
+      weights_attr,
+      bias_attr,
+      src_desc,
+      weights_desc,
+      bias_desc,
+      dst_desc);
+
+  auto pd = get_primitive_desc<with_bias>(
+      src_desc,
+      weights_desc,
+      bias_desc,
+      dst_desc,
+      strides,
+      dil_compatible,
+      padding_l,
+      padding_r,
+      is_channels_last,
+      op_attr,
+      aalgorithm,
+      aprop_kind);
+
+#ifdef __aarch64__
+  param = {
+      std::move(pd.first),
+      std::move(pd.second),
+      std::move(op_attr),
+      groups,
+      std::move(bias_attr)};
+#else
+  dnnl::convolution_forward primitive(pd);
+
+  param = {
+      std::move(pd),
+      std::move(primitive),
+      std::move(op_attr),
+      groups,
+      std::move(bias_attr)};
+#endif
+
+  // Prepare tensors for scales and zero points
+  if (param.op_attr.has_scales()) {
+    if (!param.all_scales) {
+      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+    }
+    // get_all_scales() returns unordered_map<int, pair of scale and mask>
+    for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
+      int dnnl_arg = arg_scale_pair.first;
+      const std::vector<float>& scale = std::get<0>(std::get<1>(arg_scale_pair));
+      ideep::tensor scales_m(scale);
+      param.all_scales->insert({dnnl_arg, scales_m});
+    }
+  }
+  if (param.op_attr.has_zero_points()) {
+    if (!param.all_zero_points) {
+      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
+    }
+    // get_all_zero_points() returns unordered_map<int, pair of zp and mask>
+    for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
+      int dnnl_arg = arg_zp_pair.first;
+      const std::vector<int32_t>& zp = std::get<0>(std::get<1>(arg_zp_pair));
+      ideep::tensor zp_m(zp);
+      param.all_zero_points->insert({dnnl_arg, zp_m});
+    }
+  }
+}
+
 // Ported from ideep::convolution_forward::compute_binary_dispatch.
 // For fp32 with binary post-op
 template <bool with_bias, bool reorder_src, bool reorder_weight>
@@ -1435,7 +1508,191 @@ ideep::tensor::desc convolution_forward_expected_weights_desc(
   }
 }
 
+void convolution_forward_prepare(
+    convolution_forward_params& param,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr,
+    dnnl::algorithm aalgorithm,
+    dnnl::prop_kind aprop_kind,
+    const ideep::lowp_kind alowp_kind) {
+  bool is_channels_last = src.get_desc().is_channels_last() ||
+      weights.get_desc().is_channels_last();
+  if (bias.is_empty()) {
+    do_prepare</*with_bias=*/false>(
+        param,
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        is_channels_last,
+        attr,
+        aalgorithm,
+        aprop_kind,
+        alowp_kind);
+  } else {
+    do_prepare</*with_bias=*/true>(
+        param,
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        is_channels_last,
+        attr,
+        aalgorithm,
+        aprop_kind,
+        alowp_kind);
+  }
+}
+
+template <bool reorder_src, bool reorder_weight>
+void convolution_forward_compute(
+    const convolution_forward_params& param,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    ideep::tensor& dst) {
+  if (bias.is_empty()) {
+    do_compute</*with_bias=*/false, reorder_src, reorder_weight>(
+        param, src, weights, bias, dst);
+  } else {
+    do_compute</*with_bias=*/true, reorder_src, reorder_weight>(
+        param, src, weights, bias, dst);
+  }
+}
+
+template <bool reorder_src, bool reorder_weight>
+void convolution_forward_compute(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr,
+    dnnl::algorithm aalgorithm,
+    dnnl::prop_kind aprop_kind,
+    const ideep::lowp_kind alowp_kind) {
+  if (bias.is_empty()) {
+    compute_dispatch</*with_bias=*/false, reorder_src, reorder_weight>(
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        true,
+        attr,
+        aalgorithm,
+        aprop_kind,
+        alowp_kind);
+  } else {
+    compute_dispatch</*with_bias=*/true, reorder_src, reorder_weight>(
+        src,
+        weights,
+        bias,
+        dst_dims,
+        dst,
+        strides,
+        dilates,
+        padding_l,
+        padding_r,
+        groups,
+        src_scales,
+        weights_scales,
+        dst_scales,
+        src_zero_point,
+        dst_zero_point,
+        true,
+        attr,
+        aalgorithm,
+        aprop_kind,
+        alowp_kind);
+  }
+}
+
 // The template arguments used by ATen callers.
+template void convolution_forward_compute<false, false>(
+    const convolution_forward_params&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    ideep::tensor&);
+
+template void convolution_forward_compute<true, true>(
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const ideep::tensor&,
+    const dnnl::memory::dims&,
+    ideep::tensor&,
+    const dnnl::memory::dims&,
+    const dnnl::memory::dims&,
+    const dnnl::memory::dims&,
+    const dnnl::memory::dims&,
+    int,
+    const std::vector<float>&,
+    const std::vector<float>&,
+    const std::vector<float>&,
+    const std::vector<int32_t>&,
+    const std::vector<int32_t>&,
+    const ideep::attr_t&,
+    dnnl::algorithm,
+    dnnl::prop_kind,
+    const ideep::lowp_kind);
+
 template void convolution_forward_compute_binary<true, true>(
     const ideep::tensor&,
     const ideep::tensor&,
