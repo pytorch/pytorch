@@ -1974,9 +1974,6 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     names with ``m.set_python_module``."""
     from torch._library.custom_ops import OPDEFS
 
-    if op_name.startswith("prims::"):
-        # torch._prims._make_prim defines every prim from its own function.
-        return None
     if (opdef := OPDEFS.get(op_name)) is not None:
         name = getattr(opdef._init_fn, "__module__", None)
     else:
@@ -2110,16 +2107,10 @@ def _library_op_module(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> str | None:
     """The module whose import registers ``op_name``, if a loaded module defines it:
-    the torch module defining a prim, the one a torch helper defines it from (listed
-    in ``_TORCH_HELPER_OP_MODULES``), or the one creating the
-    ``torch.library.Library`` that defines it. ``file_modules`` is ``_file_modules``."""
+    the one a torch helper defines it from (listed in ``_TORCH_HELPER_OP_MODULES``),
+    or the one creating the ``torch.library.Library`` that defines it.
+    ``file_modules`` is ``_file_modules``."""
     ns = op_name.split("::")[0]
-    if ns == "prims":
-        packet = getattr(torch.ops.prims, op_name.split("::")[1])
-        op = getattr(packet, overload or "default")
-        modules = (sys.modules.get(name) for name in _TORCH_PRIM_MODULES)
-        owners = (m for m in modules if m and any(v is op for v in vars(m).values()))
-        return next((m.__name__ for m in owners), None)
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
     if not path.endswith(".py"):
@@ -2154,9 +2145,18 @@ def _op_registration(
     # Checked first: a lazy custom_op's module imports without defining it.
     if ns in _TORCH_LAZY_OP_NAMESPACES:
         return "lazy", _TORCH_LAZY_OPS.get(op_name, _TORCH_LAZY_OP_NAMESPACES[ns])
-    module = _custom_op_module(op_name, overload) or _library_op_module(
-        op_name, overload, file_modules
-    )
+    if ns == "prims":
+        # torch._prims._make_prim defines every prim from its own function.
+        op = getattr(
+            getattr(torch.ops.prims, op_name.split("::")[1]), overload or "default"
+        )
+        modules = (sys.modules.get(name) for name in _TORCH_PRIM_MODULES)
+        owners = (m for m in modules if m and any(v is op for v in vars(m).values()))
+        module = next((m.__name__ for m in owners), None)
+    else:
+        module = _custom_op_module(op_name, overload) or _library_op_module(
+            op_name, overload, file_modules
+        )
     if module is not None:
         return "module", module
     return ("torch" if _torch_cpp_op(op_name, overload) else "unrecorded"), ""
@@ -2185,8 +2185,8 @@ def _custom_op_modules(
     for setup, ops in sorted(lazy.items()):
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
-            "defines only when %s runs, so the artifact serves only where that ran "
-            "before it is loaded.",
+            "defines only inside %s, so serving this artifact is unsupported: it "
+            "fails to load on a host where that has not run.",
             ", ".join(sorted(ops)),
             setup,
         )
