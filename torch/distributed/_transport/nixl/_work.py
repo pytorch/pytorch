@@ -26,8 +26,8 @@ class _PollingWork(Work):
     """Work that resolves a future from backend status checks.
 
     Subclasses implement a nonblocking, thread-safe ``_poll`` and record a
-    terminal error in ``_error``. A status query error the backend raises without
-    finishing the transfer must leave the Work pending.
+    terminal error in ``_error``. A failed status query must not report completion
+    unless it establishes that the backend has stopped accessing memory.
     """
 
     def __init__(self, timeout: float | None = None) -> None:
@@ -131,23 +131,14 @@ class _NIXLWork(_PollingWork):
             if self._state == "PROC":
                 try:
                     self._state = transport._agent.check_xfer_state(self._handle)
-                except Exception as error:
-                    # NIXL raises for a failed transfer. It also raises NOT_FOUND,
-                    # without finishing the transfer, once a failed load dropped the
-                    # peer's descriptors; the DMA may still run, so the Work stays
-                    # pending and close() cannot finish.
-                    if isinstance(error, transport._backend.nixlNotFoundError):
-                        return False
-                    self._state = "ERR"
+                except BaseException as error:
                     if self._error is None:
                         self._error = error
+                    return False
             if self._state == "PROC":
                 return False
-            if self._state != "DONE":
-                # The peer's loaded descriptors may be stale; reload them.
-                transport._resetting.add(self._buffers[1].agent_name)
-                if self._error is None:
-                    self._error = RuntimeError(f"NIXL transfer failed: {self._state}")
+            if self._state != "DONE" and self._error is None:
+                self._error = RuntimeError(f"NIXL transfer failed: {self._state}")
             try:
                 transport._agent.release_xfer_handle(self._handle)
                 transport._transfers.pop(id(self))

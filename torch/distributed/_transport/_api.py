@@ -13,6 +13,8 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -21,6 +23,22 @@ class MemoryView(Protocol):
     """A read-only view of registered memory."""
 
     def size(self) -> int: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a view of a byte range of this one.
+
+        ``offset`` is relative to this view and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this view.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``view[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -56,6 +74,14 @@ class RemoteBuffer(Protocol):
         """
         ...
 
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``buffer[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
+
 
 @runtime_checkable
 class Memory(Protocol):
@@ -86,8 +112,8 @@ class Transport(ABC):
     futures without blocking the event loop.
 
     Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
-    connect to multiple peers, so backends must identify the peer from each
-    remote descriptor. No process group, ranks, or matching receives are needed.
+    connect to multiple peers, and remote descriptors identify their peer. No
+    process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
     plane. Registration is valid until unregistration or close, including after bind/connect.
 
@@ -139,9 +165,9 @@ class Transport(ABC):
         """Connect to a bound peer and return zero on success.
 
         Connecting to additional peers keeps existing connections; reconnecting
-        with the same connection bytes is a no-op. There is no per-peer disconnect; ``close``
-        releases all peers. Transfers to descriptors naming an unconnected peer
-        raise ``ValueError``.
+        with the same connection bytes is a no-op. There is no per-peer
+        disconnect; ``close`` releases all peers. Transfers to descriptors naming
+        an unconnected peer raise ``ValueError``.
 
         Rank-to-endpoint lookup belongs in a separate application control-plane
         adapter; this interface addresses peers using opaque connection bytes.

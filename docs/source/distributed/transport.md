@@ -17,9 +17,11 @@ can use `read_async`, `write_async`, or `wait_all`. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 Ordinary reads and writes are not ordered on CUDA streams. The API does not
-provide tracing or batching. `RemoteBuffer.slice` returns a descriptor for a
-byte range of the same registration; it does not restrict the peer's access to
-the rest of the registration. Descriptor classes define explicit
+provide tracing or batching. Views and remote buffers support `slice(offset, length)`
+and step-1 `[a:b]` byte ranges. Like Python sequences, `[a:b]` counts negative
+bounds from the end and clamps out-of-range ones, while `slice` raises; a
+transfer of a clamped view copies fewer bytes. A remote slice does not
+restrict the peer's access to the rest of the registration. Descriptor classes define explicit
 `serialize()`/`deserialize()` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -79,20 +81,25 @@ native stream support may override these methods.
 
 ## NIXL backend
 
-The initial backend is NIXL, installed separately with `pip install nixl`;
-`supported()` requires a build providing `nixlRegDList`, `DRAM_SEG`,
-`nixlNotAllowedError` and `nixlNotFoundError`.
+The initial backend is NIXL, installed separately with `pip install nixl`.
 Its default UCX plugin supports CPU and CUDA memory, subject to the installed
 NIXL/UCX build and hardware.
 
 Peers are identified by NIXL agent name. Connecting again with the same
 `bind()` bytes is a no-op. While NIXL holds a peer, connecting a restarted peer
-under the same agent name raises the backend error; the first transfer to the
-restarted peer's descriptors may fail, and retrying it reaches the peer. A
-descriptor whose metadata belongs to another connected peer can reset either
-peer once its transfers finish, so an authorized client can stall transfers to
-other peers. Peer state grows with each connected peer and is released only by
-`close`, which waits for pending transfers to all peers.
+under the same agent name raises the backend error. A descriptor whose
+well-formed metadata names a different connected peer is rejected without
+unloading that peer. Malformed metadata naming a connected peer, even in a
+descriptor carrying the sender's own `agent_name`, drops that peer's
+descriptors: its pending transfers never complete, `connected()` stays True,
+and `close` times out with memory still registered. An endpoint serving
+several peers must therefore trust every peer's descriptor metadata; checking
+`agent_name` does not prevent this. Peer state grows with each connected peer
+and is released only by `close`, which waits for pending transfers to all
+peers. The transport does not tie a descriptor to the peer that sent it, so
+such an endpoint must also authorize each request, for example by assigning
+each client an `agent_name` and checking that the request's
+`remote_buffer.agent_name` matches.
 
 `unregister_memory(memory)` deregisters a local allocation without closing the
 transport. Wait for local transfers first and coordinate with peers to stop remote
@@ -106,28 +113,10 @@ The NIXL adapter resolves those futures by checking native transfer status.
 Each live transfer owns a distinct request handle.
 Independent requests may overlap; explicitly wait before issuing dependent or
 overlapping reads/writes. Completion ordering is not implicit.
-`bind()` returns connection info only; each descriptor's metadata is loaded on
-its first transfer. NIXL cannot unload single remote descriptors, so a transfer
-whose registration overlaps a different one already loaded from its peer, reuses
-a loaded registration with new metadata, or exceeds 4096 loaded registrations
-resets the peer. A failed transfer, or a load refused with `nixlNotAllowedError`
-after the peer restarts under the same `agent_name`, marks the peer so its next
-transfer resets it. A reset first waits for the peer's pending transfers, so a
-stuck transfer blocks the peer until `close`. The wait counts against `timeout`
-and raises `TimeoutError`. With `async_op=True` it happens before the Work is
-returned, and the Work's default wait is the time remaining, possibly zero.
-After a peer restart, a retry reloads the peer once its old transfers finish.
-Any other failed metadata load may leave the peer unusable and its pending
-transfers unfinished, so it closes the transport: `connected()` returns False,
-and `close` times out while those transfers remain, leaving the transport's
-memory registered until process exit. Peers must run the same PyTorch version:
-`connect` loads an older peer's descriptors untracked, which can make reloads
-fail.
 
 NIXL's default wait timeout is 30 seconds. `timeout` is in seconds; `None`
 selects the backend default and zero polls without waiting. `Work.wait` instead
-takes a `datetime.timedelta`; its zero default waits for the timeout remaining
-when the transfer was submitted.
+takes a `datetime.timedelta`; its zero default selects the transfer's timeout.
 Timeout and asyncio cancellation stop waiting, not DMA. The transport retains
 pending requests and buffers, even if the caller drops its Work. Wait again or
 successfully close before reusing buffers. Coordinate with peers before closing
