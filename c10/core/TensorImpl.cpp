@@ -912,11 +912,14 @@ void TensorImpl::ShareExternalPointer(
 }
 
 static void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
-  dst.clear();
-  dst.reserve(src.size());
+  // src may alias dst (e.g. `t.as_strided_(t.sym_sizes(), t.sym_strides())`),
+  // so clone into a temporary before destroying the old contents of dst.
+  SymDimVector result;
+  result.reserve(src.size());
   for (const auto& i : src) {
-    dst.emplace_back(i.clone());
+    result.emplace_back(i.clone());
   }
+  dst = std::move(result);
 }
 
 // NB: this doesn't check that the sizes/strides/offset are in bound for the
