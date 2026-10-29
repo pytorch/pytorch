@@ -323,6 +323,25 @@ jobs:
           name: manywheel-py3_15t-cuda-aarch64-13_0
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_0/*
+      # LLVM BOLT keeps the unoptimized libraries in build/lib/prebolt. Publish
+      # them from nightlies with a short retention for profiling (#199067).
+      - name: Archive pre-BOLT libraries
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        shell: bash
+        run: |
+          if [[ ! -d "${PYTORCH_ROOT}/build/lib/prebolt" ]]; then
+            echo "::warning::build/lib/prebolt not found, BOLT was not applied"
+            exit 0
+          fi
+          mkdir -p "${RUNNER_TEMP}/prebolt"
+          tar -C "${PYTORCH_ROOT}/build/lib/prebolt" -czf "${RUNNER_TEMP}/prebolt/prebolt-cuda-aarch64-13_0.tar.gz" .
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        with:
+          name: prebolt-cuda-aarch64-13_0
+          if-no-files-found: ignore
+          retention-days: 7
+          path: ${{ runner.temp }}/prebolt/*
 
   manywheel-cuda-aarch64-cu132-build:
     name: manywheel-cuda-aarch64-cu132-build
@@ -407,6 +426,25 @@ jobs:
           name: manywheel-py3_15t-cuda-aarch64-13_2
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_2/*
+      # LLVM BOLT keeps the unoptimized libraries in build/lib/prebolt. Publish
+      # them from nightlies with a short retention for profiling (#199067).
+      - name: Archive pre-BOLT libraries
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        shell: bash
+        run: |
+          if [[ ! -d "${PYTORCH_ROOT}/build/lib/prebolt" ]]; then
+            echo "::warning::build/lib/prebolt not found, BOLT was not applied"
+            exit 0
+          fi
+          mkdir -p "${RUNNER_TEMP}/prebolt"
+          tar -C "${PYTORCH_ROOT}/build/lib/prebolt" -czf "${RUNNER_TEMP}/prebolt/prebolt-cuda-aarch64-13_2.tar.gz" .
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        with:
+          name: prebolt-cuda-aarch64-13_2
+          if-no-files-found: ignore
+          retention-days: 7
+          path: ${{ runner.temp }}/prebolt/*
 
   manywheel-cuda-aarch64-cu134-build:
     name: manywheel-cuda-aarch64-cu134-build
@@ -491,6 +529,25 @@ jobs:
           name: manywheel-py3_15t-cuda-aarch64-13_4
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/manywheel-py3_15t-cuda-aarch64-13_4/*
+      # LLVM BOLT keeps the unoptimized libraries in build/lib/prebolt. Publish
+      # them from nightlies with a short retention for profiling (#199067).
+      - name: Archive pre-BOLT libraries
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        shell: bash
+        run: |
+          if [[ ! -d "${PYTORCH_ROOT}/build/lib/prebolt" ]]; then
+            echo "::warning::build/lib/prebolt not found, BOLT was not applied"
+            exit 0
+          fi
+          mkdir -p "${RUNNER_TEMP}/prebolt"
+          tar -C "${PYTORCH_ROOT}/build/lib/prebolt" -czf "${RUNNER_TEMP}/prebolt/prebolt-cuda-aarch64-13_4.tar.gz" .
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        if: ${{ github.ref == 'refs/heads/nightly' }}
+        with:
+          name: prebolt-cuda-aarch64-13_4
+          if-no-files-found: ignore
+          retention-days: 7
+          path: ${{ runner.temp }}/prebolt/*
 
   manywheel-cpu-aarch64-test:
     name: ${{ matrix.build_name }}-test
