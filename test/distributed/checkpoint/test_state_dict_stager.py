@@ -5,6 +5,7 @@ import dataclasses
 import os
 import tempfile
 import unittest
+from concurrent.futures import Future
 from datetime import timedelta
 from unittest import mock
 
@@ -28,6 +29,7 @@ from torch.distributed.checkpoint.staging import (
 )
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
@@ -923,6 +925,38 @@ class TestStateDictStager(TestCase):
         stager.close()
 
 
+class TestDefaultStager(TestCase):
+    def test_async_staging_with_pinned_memory(self, device):
+        tensor = torch.empty(1024 * 1024, device=device)
+        state_dict = {"tensor": tensor}
+        stager = DefaultStager(
+            StagingOptions(
+                use_pinned_memory=True,
+                use_shared_memory=False,
+                use_async_staging=True,
+                use_non_blocking_copy=True,
+            )
+        )
+        self.addCleanup(stager.close)
+
+        storage_ptr = None
+        for value in (1, 2):
+            tensor.fill_(value)
+            expected = torch.full_like(tensor, value, device="cpu")
+            # Make source writes ready for the stager's separate stream.
+            torch.accelerator.synchronize()
+            future = stager.stage(state_dict)
+            self.assertIsInstance(future, Future)
+            staged_tensor = future.result(timeout=30)["tensor"]
+            self.assertEqual(staged_tensor.device.type, "cpu")
+            self.assertTrue(staged_tensor.is_pinned())
+            self.assertFalse(staged_tensor.is_shared())
+            self.assertEqual(staged_tensor, expected)
+            if storage_ptr is not None:
+                self.assertEqual(staged_tensor.data_ptr(), storage_ptr)
+            storage_ptr = staged_tensor.data_ptr()
+
+
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
     @requires_accelerator_dist_backend()
@@ -1533,6 +1567,11 @@ class TestReplicationStager(DTensorContinuousTestBase):
 
             # Clean up
             stager.close()
+
+
+instantiate_device_type_tests(
+    TestDefaultStager, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
