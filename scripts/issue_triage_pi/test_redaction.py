@@ -18,15 +18,15 @@ NOTICE = (
 class RedactionTest(unittest.TestCase):
     def test_only_download_and_storage_links_are_removed(self):
         downloads = [
-            "https://example.org/repro.zip?token=abc#download",
-            "https://example.org/weights.PTH",
-            "https://example.org/model%2Ept",
-            "https://huggingface.co/org/model/resolve/main/model.safetensors",
-            "https://drive.google.com/file/d/123/view",
-            "https://www.dropbox.com/s/123/repro",
-            "https://1drv.ms/u/s!123",
-            "https://mega.nz/file/123#key",
-            "https://we.tl/t-123",
+            "https://example.org/repro.zip?token=abc#download",  # @lint-ignore
+            "https://example.org/weights.PTH",  # @lint-ignore
+            "https://example.org/model%2Ept",  # @lint-ignore
+            "https://huggingface.co/org/model/resolve/main/model.safetensors",  # @lint-ignore
+            "https://drive.google.com/file/d/123/view",  # @lint-ignore
+            "https://www.dropbox.com/s/123/repro",  # @lint-ignore
+            "https://1drv.ms/u/s!123",  # @lint-ignore
+            "https://mega.nz/file/123#key",  # @lint-ignore
+            "https://we.tl/t-123",  # @lint-ignore
         ]
         for url in downloads:
             with self.subTest(url=url):
@@ -36,18 +36,18 @@ class RedactionTest(unittest.TestCase):
                 )
         kept = "\n".join(
             [
-                "https://pytorch.org/docs/stable/index.html",
-                "https://github.com/pytorch/pytorch/issues/123",
-                "https://huggingface.co/org/model",
-                "https://drive.google.com.example.org/readme",
-                "https://example.org/docs/model.pt.html",
+                "https://pytorch.org/docs/stable/index.html",  # @lint-ignore
+                "https://github.com/pytorch/pytorch/issues/123",  # @lint-ignore
+                "https://huggingface.co/org/model",  # @lint-ignore
+                "https://drive.google.com.example.org/readme",  # @lint-ignore
+                "https://example.org/docs/model.pt.html",  # @lint-ignore
                 "path/to/local.pt",
             ]
         )
         self.assertEqual(apply_plan.redact_external_links(kept), kept)
 
     def test_markdown_autolinks_punctuation_and_retries(self):
-        body = '![weights](https://example.org/weights.pt "title")\n<https://example.org/repro.zip>\nSee https://example.org/repro.pkl.'
+        body = '![weights](https://example.org/weights.pt "title")\n<https://example.org/repro.zip>\nSee https://example.org/repro.pkl.'  # @lint-ignore
         expected = f"{NOTICE}\n{NOTICE}\nSee {NOTICE}."
         self.assertEqual(apply_plan.redact_external_links(body), expected)
         self.assertEqual(apply_plan.redact_external_links(expected), expected)
@@ -55,15 +55,15 @@ class RedactionTest(unittest.TestCase):
     def test_adjacent_links_and_quoted_downloads_preserve_surrounding_text(self):
         self.assertEqual(
             apply_plan.redact_external_links(
-                "Inputs: [batch=32, [repro](https://example.org/repro.zip)]"
+                "Inputs: [batch=32, [repro](https://example.org/repro.zip)]"  # @lint-ignore
             ),
             f"Inputs: [batch=32, {NOTICE}]",
         )
-        docs = "[docs](https://pytorch.org/docs/stable/index.html)"
+        docs = "[docs](https://pytorch.org/docs/stable/index.html)"  # @lint-ignore
         for url in (
-            "https://drive.google.com/file/d/123/view",
-            "https://example.org/repro.zip",
-            "https://example.org/repro(1).zip",
+            "https://drive.google.com/file/d/123/view",  # @lint-ignore
+            "https://example.org/repro.zip",  # @lint-ignore
+            "https://example.org/repro(1).zip",  # @lint-ignore
         ):
             with self.subTest(url=url):
                 self.assertEqual(
@@ -76,7 +76,7 @@ class RedactionTest(unittest.TestCase):
                 )
 
     def test_apply_redacts_current_body_not_planning_snapshot(self):
-        original = "Original https://example.org/weights.pt"
+        original = "Original https://example.org/weights.pt"  # @lint-ignore
         current = original + "\nNew human explanation."
         with tempfile.TemporaryDirectory() as temp:
             plan = Path(temp) / "plan.json"
@@ -145,7 +145,7 @@ class RedactionTest(unittest.TestCase):
                     "apply_plan.fetch_issue",
                     return_value=(
                         {
-                            "body": "https://example.org/model.pt",
+                            "body": "https://example.org/model.pt",  # @lint-ignore
                             "labels": [],
                             "state": "open",
                         },
