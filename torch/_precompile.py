@@ -2071,11 +2071,11 @@ def _file_modules() -> dict[str, str]:
 def _library_op_module(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> str | None:
-    """The module whose import registers ``op_name``, if a ``torch.library.Library``
-    created in a loaded module defines it. ``file_modules`` is ``_file_modules``."""
+    """The module whose import registers ``op_name``, if a loaded module defines it:
+    the torch module defining a prim, the one a torch helper defines it from (listed
+    in ``_TORCH_HELPER_OP_MODULES``), or the one creating the
+    ``torch.library.Library`` that defines it. ``file_modules`` is ``_file_modules``."""
     ns = op_name.split("::")[0]
-    if ns in _TORCH_LAZY_OP_NAMESPACES:
-        return None
     if ns == "prims":
         packet = getattr(torch.ops.prims, op_name.split("::")[1])
         op = getattr(packet, overload or "default")
@@ -2103,6 +2103,25 @@ def _kernel_modules(
     return {m for m in modules if m and m.partition(".")[0] != "torch"}
 
 
+def _op_registration(
+    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+) -> tuple[Literal["lazy", "module", "torch", "unrecorded"], str]:
+    """What registers ``op_name`` on a fresh host: ``("lazy", setup)`` for a torch op
+    defined only once ``setup`` runs, ``("module", name)`` for one an importable
+    module registers, ``("torch", "")`` for one ``import torch`` registers from C++,
+    and ``("unrecorded", "")`` otherwise."""
+    ns = op_name.split("::")[0]
+    # Checked first: a lazy custom_op's module imports without defining it.
+    if ns in _TORCH_LAZY_OP_NAMESPACES:
+        return "lazy", _TORCH_LAZY_OP_NAMESPACES[ns]
+    module = _custom_op_module(op_name, overload) or _library_op_module(
+        op_name, overload, file_modules
+    )
+    if module is not None:
+        return "module", module
+    return ("torch" if ns in _TORCH_OP_NAMESPACES else "unrecorded"), ""
+
+
 def _custom_op_modules(
     op_names: Iterable[tuple[str, str]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
@@ -2114,18 +2133,14 @@ def _custom_op_modules(
     lazy: dict[str, set[str]] = {}
     file_modules = functools.cache(_file_modules)
     for op_name, overload in op_names:
-        ns = op_name.split("::")[0]
-        # Checked first: a lazy custom_op's module imports without defining it.
-        if ns in _TORCH_LAZY_OP_NAMESPACES:
-            lazy.setdefault(_TORCH_LAZY_OP_NAMESPACES[ns], set()).add(op_name)
+        kind, value = _op_registration(op_name, overload, file_modules)
+        if kind == "lazy":
+            lazy.setdefault(value, set()).add(op_name)
             continue
-        module = _custom_op_module(op_name, overload)
-        if module is None:
-            module = _library_op_module(op_name, overload, file_modules)
         modules |= _kernel_modules(op_name, overload, file_modules)
-        if module is not None:
-            modules.add(module)
-        elif ns not in _TORCH_OP_NAMESPACES:
+        if kind == "module":
+            modules.add(value)
+        elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
     for setup, ops in sorted(lazy.items()):
         log.warning(
