@@ -2063,6 +2063,58 @@ PyObject* THCPModule_cuda_tunableop_wildcard_fallback_is_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cuda_tunableop_nearest_match_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cuda_tunableop_nearest_match_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  at::cuda::tunable::getTuningContext()->EnableNearestMatch(
+      THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_nearest_match_is_enabled(
+    PyObject* _unused,
+    PyObject* noarg) {
+  HANDLE_TH_ERRORS
+  if (at::cuda::tunable::getTuningContext()->IsNearestMatchEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_record_borrowed_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cuda_tunableop_record_borrowed_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  at::cuda::tunable::getTuningContext()->EnableRecordBorrowed(
+      THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_record_borrowed_is_enabled(
+    PyObject* _unused,
+    PyObject* noarg) {
+  HANDLE_TH_ERRORS
+  if (at::cuda::tunable::getTuningContext()->IsRecordBorrowedEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cuda_tunableop_set_max_tuning_duration(
     PyObject* _unused,
     PyObject* arg) {
@@ -2711,6 +2763,22 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_wildcard_fallback_is_enabled",
      THCPModule_cuda_tunableop_wildcard_fallback_is_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_nearest_match_enable",
+     THCPModule_cuda_tunableop_nearest_match_enable,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_nearest_match_is_enabled",
+     THCPModule_cuda_tunableop_nearest_match_is_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_record_borrowed_enable",
+     THCPModule_cuda_tunableop_record_borrowed_enable,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_record_borrowed_is_enabled",
+     THCPModule_cuda_tunableop_record_borrowed_is_enabled,
      METH_NOARGS,
      nullptr},
     {"_cuda_tunableop_set_max_tuning_duration",
