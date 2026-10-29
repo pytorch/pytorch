@@ -1891,6 +1891,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "DROPPED_GUARD_CODE",
         "CUSTOM_OP_MODULES",
         "CUSTOM_OPS",
+        "CUSTOM_OP_KERNELS",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -2041,6 +2042,19 @@ def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], .
     )
 
 
+# The dispatch keys whose kernels an artifact checks are still registered at load.
+_KERNEL_KEYS = (
+    "CPU",
+    "CUDA",
+    "XPU",
+    "MPS",
+    "PrivateUse1",
+    "CompositeImplicitAutograd",
+    "CompositeExplicitAutograd",
+    "CompositeExplicitAutogradNonFunctional",
+)
+
+
 def _write_custom_op_imports(
     buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
 ) -> None:
@@ -2055,6 +2069,18 @@ def _write_custom_op_imports(
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     buf.writeline(f"CUSTOM_OPS = {ops!r}")
+    # A kernel is often registered by a module other than the op's own, so the
+    # schema alone does not show the op can run.
+    registered = {
+        key: set(torch._C._dispatch_get_registrations_for_dispatch_key(key))
+        for key in _KERNEL_KEYS
+    }
+    kernels = {}
+    for name, overload in ops:
+        qualname = f"{name}.{overload}" if overload else name
+        if keys := tuple(k for k in _KERNEL_KEYS if qualname in registered[k]):
+            kernels[qualname] = keys
+    buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
     buf.writeline("def _import_custom_op_modules():")
     buf.writeline("    import importlib")
     buf.writeline("    import warnings")
@@ -2068,18 +2094,23 @@ def _write_custom_op_imports(
     buf.writeline("        except Exception as e:")
     buf.writeline("            import_errors[module] = e")
     buf.writeline("    missing = []")
+    buf.writeline("    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key")
     buf.writeline("    for name, overload in CUSTOM_OPS:")
+    buf.writeline('        qualname = f"{name}.{overload}" if overload else name')
     buf.writeline("        try:")
     buf.writeline("            torch._C._dispatch_find_schema_or_throw(name, overload)")
     buf.writeline("        except RuntimeError:")
-    buf.writeline(
-        '            missing.append(f"{name}.{overload}" if overload else name)'
-    )
+    buf.writeline("            missing.append(qualname)")
+    buf.writeline("            continue")
+    buf.writeline("        for key in CUSTOM_OP_KERNELS.get(qualname, ()):")
+    buf.writeline("            if not has_kernel(qualname, key):")
+    buf.writeline('                missing.append(f"{qualname} ({key} kernel)")')
     buf.writeline("    if missing:")
     buf.writeline("        raise torch.compiler.PrecompileError(")
     buf.writeline(
-        '            f"this artifact calls custom ops not registered here: {missing}. "'
+        '            f"this artifact calls custom ops or kernels not registered here: "'
     )
+    buf.writeline('            f"{missing}. "')
     buf.writeline(
         '            "Import the modules registering them before loading it. Modules "'
     )
@@ -2092,8 +2123,9 @@ def _write_custom_op_imports(
         '        warnings.warn(f"importing custom op module {module!r} raised {e!r}; "'
     )
     buf.writeline(
-        '        "the ops this artifact calls are registered, so it loads anyway")'
+        '        "the ops this artifact calls and the kernels they had at capture are "'
     )
+    buf.writeline('        "registered, so it loads anyway")')
     buf.writeline("_import_custom_op_modules()")
     buf.writeline("del _import_custom_op_modules")
     buf.writeline("")
@@ -3759,16 +3791,19 @@ def load(
 
     Before anything else runs, the artifact imports the modules in its
     ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
-    and then checks that every op in ``CUSTOM_OPS`` is registered. A module that
-    fails to import only warns when its ops are registered anyway, e.g. by a
-    module the server imported under another name.
+    and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
+    for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the backend and
+    composite keys it had a kernel for at capture). A module that fails to import
+    only warns when those ops and kernels are registered anyway, e.g. by a module
+    the server imported under another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
     example, a captured source changed since capture), or if a custom op the
-    artifact calls is not registered once its imports ran. A cache whose ``format``/``version`` does not match (a foreign or
+    artifact calls, or one of its captured kernels, is not registered once its
+    imports ran. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
