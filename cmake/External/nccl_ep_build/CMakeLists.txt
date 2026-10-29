@@ -18,6 +18,12 @@ get_filename_component(nccl_home "${NCCL_INCLUDE_DIR}" DIRECTORY)
 set(NCCL_HOME "${nccl_home}" CACHE PATH "PyTorch NCCL prefix" FORCE)
 add_subdirectory("${NCCL_EP_SOURCE_DIR}" nccl_ep EXCLUDE_FROM_ALL)
 
+# Resolve JIT headers relative to this EP copy without changing the environment.
+set_property(SOURCE "${NCCL_EP_SOURCE_DIR}/device/jit/jit_runtime.cc"
+  TARGET_DIRECTORY nccl_ep_static
+  APPEND PROPERTY COMPILE_DEFINITIONS env_value=torch_nccl_ep_jit_env_value)
+target_sources(nccl_ep_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/jit_paths.cpp")
+
 # Core NCCL symbols resolve through torch_cuda, including for system NCCL.
 foreach(prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
   get_target_property(libs nccl_ep_static ${prop})
@@ -30,7 +36,7 @@ target_include_directories(nccl_ep_static BEFORE PUBLIC
   "${NCCL_EP_BUILDDIR}/include" "${NCCL_EP_BUILDDIR}/include/nccl_ep"
   "${NCCL_INCLUDE_DIR}" "${NCCL_INCLUDE_DIR}/nccl_device")
 
-# Keep NCCL headers separate so an explicit NCCL_HOME overrides them at runtime.
+# Stage the matching core NCCL headers alongside EP's headers.
 add_custom_target(nccl_ep_artifacts
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${NCCL_EP_BUILDDIR}/nccl/include"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different

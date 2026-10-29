@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import abc
-import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -25,11 +23,6 @@ def _import_nccl_ep() -> Any:
             "TokenSwitchNCCL requires PyTorch built with USE_NCCL_EP=1."
         ) from e
 
-    # Editable installs can place native artifacts outside the Python source tree.
-    home = Path(_ep.__file__).resolve().parent / "share" / "nccl_ep"
-    for name, path in (("NCCL_EP_HOME", home), ("NCCL_HOME", home / "nccl")):
-        if not os.environ.get(name):
-            os.environ[name] = str(path)
     return _ep
 
 

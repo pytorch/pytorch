@@ -4,10 +4,13 @@
 import importlib.util
 import logging
 import os
+import signal
+import subprocess
+import sys
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import patch
+from tempfile import TemporaryDirectory
 
 import torch
 import torch.distributed as dist
@@ -37,6 +40,13 @@ from torch.testing._internal.common_utils import (
 
 
 log = logging.getLogger(__name__)
+
+_NCCL_EP_HEADER_ENV = (
+    "NCCL_EP_HOME",
+    "NCCL_HOME",
+    "NCCL_EP_JIT_SOURCE_DIR",
+    "NCCL_EP_JIT_BUILD_INCLUDE_DIR",
+)
 
 
 def _nccl_ep_available() -> bool:
@@ -69,21 +79,83 @@ class TokenSwitchNCCLLoadingTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @parametrize(
-        "home,header",
+        "prefix,header",
         [
-            ("NCCL_EP_HOME", "nccl_ep.h"),
-            ("NCCL_EP_HOME", "nccl_ep/ep_enums.h"),
-            ("NCCL_EP_HOME", "nccl_ep/device/ht_ep.cuh"),
-            ("NCCL_HOME", "nccl.h"),
-            ("NCCL_HOME", "nccl_device.h"),
-            ("NCCL_HOME", "nccl_device/impl/core__types.h"),
+            ("include", "nccl_ep.h"),
+            ("include", "nccl_ep/ep_enums.h"),
+            ("include", "nccl_ep/device/ht_ep.cuh"),
+            ("nccl/include", "nccl.h"),
+            ("nccl/include", "nccl_device.h"),
+            ("nccl/include", "nccl_device/impl/core__types.h"),
         ],
     )
-    def test_native_jit_headers(self, home, header):
-        with patch.dict(os.environ, {"NCCL_EP_HOME": "", "NCCL_HOME": ""}):
-            _import_nccl_ep()
-            path = Path(os.environ[home]) / "include" / header
-            self.assertTrue(path.is_file(), str(path))
+    def test_native_jit_headers(self, prefix, header):
+        ep = _import_nccl_ep()
+        home = Path(ep.__file__).resolve().parent / "share" / "nccl_ep"
+        path = home / prefix / header
+        self.assertTrue(path.is_file(), str(path))
+
+    @parametrize("value", [None, "", "/another/nccl/installation"])
+    def test_import_preserves_environment(self, value):
+        env = os.environ.copy()
+        for name in _NCCL_EP_HEADER_ENV:
+            if value is None:
+                env.pop(name, None)
+            else:
+                env[name] = value
+        script = """
+import os
+from torch.distributed._token_switch import _import_nccl_ep
+
+before = dict(os.environ)
+_import_nccl_ep()
+if dict(os.environ) != before:
+    raise AssertionError("Loading NCCL EP changed the environment")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @skip_if_lt_x_gpu(2)
+    def test_jit_ignores_foreign_header_paths(self):
+        _import_nccl_ep()
+        # EP caches JIT paths per architecture. Use fresh workers and an empty
+        # disk cache so previously compiled kernels cannot hide wrong paths.
+        with TemporaryDirectory() as tmp:
+            env = {
+                **os.environ,
+                **dict.fromkeys(_NCCL_EP_HEADER_ENV, str(Path(tmp) / "foreign")),
+                "NCCL_EP_JIT_CACHE_DIR": str(Path(tmp) / "cache"),
+            }
+            with subprocess.Popen(
+                [
+                    sys.executable,
+                    __file__,
+                    "TokenSwitchNCCLTest.test_dispatch_combine_roundtrip",
+                    "-v",
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+            ) as process:
+                try:
+                    output, _ = process.communicate(timeout=600)
+                finally:
+                    # Include workers and any JIT compiler children on timeout.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            self.assertEqual(process.returncode, 0, output)
+            self.assertIn("Ran 1 test", output)
+            self.assertNotIn("skipped=", output)
 
 
 NUM_TOKENS = 16
