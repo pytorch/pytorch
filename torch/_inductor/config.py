@@ -2215,7 +2215,7 @@ class triton:
     # None (off) means Gluon is never considered; "allow" lets Gluon templates
     # compete with Triton templates via autotuning; "force" uses Gluon
     # templates in place of Triton templates wherever they apply (unlike
-    # tlx_mode, epilogue fusion is not supported yet).
+    # tlx_mode, epilogue fusion is not forced).
     gluon_mode: Literal["allow", "force"] | None = gluon_mode_default()
 
     # Use cudagraphs on output code

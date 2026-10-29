@@ -1683,7 +1683,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
         if torch.version.hip and (
-            _get_torch_rocm_version() < (7, 2, 1) or isRocmArchAnyOf(MI200_ARCH)
+            _get_torch_rocm_version() < (7, 2, 1)
         ):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
