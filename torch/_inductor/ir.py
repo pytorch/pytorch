@@ -6538,6 +6538,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         unfiltered_choices: list[ChoiceCaller],
         load_input_fusion_allowed_inputs: OrderedSet[str],
         store_output_fusion_allowed_inputs: OrderedSet[str],
+        input_gen_fns: dict[int, Callable[[IRNode], torch.Tensor]] | None = None,
     ) -> None:
         super().__init__(
             layout=layout,
@@ -6550,6 +6551,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
         self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
+        self.input_gen_fns = input_gen_fns or {}
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
             or _is_output_plannable_nvgemm_choice(choice)
@@ -6573,6 +6575,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     @property
     def choices(self) -> list[ChoiceCaller]:
         return self._choices
+
+    def benchmark_inputs(self) -> dict[str, torch.Tensor]:
+        return {
+            self.original_inputs[i].get_name(): gen_fn(self.original_inputs[i])
+            for i, gen_fn in self.input_gen_fns.items()
+        }
 
     def choice_timings(
         self, hint_override: int | None = None

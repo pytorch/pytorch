@@ -9171,12 +9171,14 @@ class TritonScheduling(SIMDScheduling):
         n_spills_threshold=8,
         node_names: OrderedSet[str] | None = None,
         skip_perf_cache: bool = False,
+        input_overrides: dict[str, torch.Tensor] | None = None,
     ) -> tuple[float, str]:
         """Benchmark an already compiled module.
 
         skip_perf_cache: don't serve the result from the .kernel_perf memo. Callers that
         need the autotuned winner in mod.triton_.launchers (not just the timing) must set
         this, since a perf-cache hit returns before the autotuner ever runs.
+        input_overrides: tensors keyed by buffer name to use instead of random inputs.
         """
         device_interface = get_interface_for_device(V.graph.device_type)
         with (
@@ -9216,6 +9218,11 @@ class TritonScheduling(SIMDScheduling):
                     return ms, mod.__file__
 
             args = mod.get_args()
+            if input_overrides:
+                args = tuple(
+                    input_overrides.get(name, arg)
+                    for name, arg in itertools.zip_longest(mod.arg_buffer_names, args)
+                )
             call = mod.call
             wrapped_jit_function = mod.triton_
             # call once to trigger the compilation

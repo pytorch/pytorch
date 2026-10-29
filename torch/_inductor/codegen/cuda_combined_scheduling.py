@@ -275,10 +275,12 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
-    def benchmark_codegened_module(self, module):
+    def benchmark_codegened_module(self, module, input_overrides=None):
         if getattr(module, "is_nvgemm", False):
             return self._benchmark_nvgemm_module(module)
-        return self._triton_scheduling.benchmark_codegened_module(module)
+        return self._triton_scheduling.benchmark_codegened_module(
+            module, input_overrides=input_overrides
+        )
 
     def _benchmark_nvgemm_module(self, module) -> tuple[float, str]:
         from torch._dynamo.utils import preserve_rng_state

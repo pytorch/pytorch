@@ -13,6 +13,7 @@ from torch._inductor.virtualized import V
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
+from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
@@ -664,7 +665,12 @@ def _tuned_grouped_mm_common(
             x, a_is_2d, b_is_2d, m, n, k, alignment
         )
     node, _ = autotune_select_algorithm(
-        algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
+        algorithm_name,
+        choices,
+        input_nodes,
+        layout,
+        input_gen_fns=input_gen_fns,
+        return_multi_template=inductor_config.benchmark_template_fusion,
     )
     return node
 
@@ -1047,6 +1053,7 @@ def tuned_scaled_grouped_mm_v2(
                 input_nodes,
                 mm_layout,
                 input_gen_fns=input_gen_fns,
+                return_multi_template=inductor_config.benchmark_template_fusion,
             )
             return node
 
