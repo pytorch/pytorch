@@ -32,6 +32,19 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         utils.is_tensorlist_like_type(a.type)
         for a in (*schema.arguments, *schema.returns)
     )
+    # What utils.fill_defaults would add, computed once: schema.arguments
+    # builds new Argument objects on every access. A list default is mutable,
+    # so each call must get its own, and schemas with one use fill_defaults.
+    positional_defaults = tuple(
+        a.default_value for a in schema.arguments if not a.kwarg_only
+    )
+    kwarg_only_defaults = {
+        a.name: a.default_value for a in schema.arguments if a.kwarg_only
+    }
+    has_list_default = any(
+        isinstance(d, list)
+        for d in (*positional_defaults, *kwarg_only_defaults.values())
+    )
 
     @dataclass
     class Metadata:
@@ -39,9 +52,11 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         keyword_only_args: dict[str, Any]
 
     def redispatch_no_grad(keyset, args, kwargs):
+        pyobj_dispatcher = op._pyobj_dispatcher
+        if pyobj_dispatcher is not None:
+            return pyobj_dispatcher.redispatch_below_autograd(keyset, *args, **kwargs)
         with _C._AutoDispatchBelowAutograd():
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
-            return result
+            return op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
 
     def forward(ctx, *args):
         metadata = args[-1]
@@ -50,7 +65,15 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         with _C._AutoDispatchBelowAutograd():
             keyset = metadata.keyset
             kwargs = metadata.keyword_only_args
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+            pyobj_dispatcher = op._pyobj_dispatcher
+            if pyobj_dispatcher is not None:
+                result = pyobj_dispatcher.redispatch_below_autograd(
+                    keyset, *args, **kwargs
+                )
+            else:
+                result = op.redispatch(
+                    keyset & _C._after_autograd_keyset, *args, **kwargs
+                )
             if info._setup_context_fn:
                 # The Dispatcher will remove args that are equal to their default
                 # values from (args, kwargs). We're going to add it back so that
@@ -62,7 +85,11 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 # adds a new default arg, then they must update
                 # their setup_context (along with the rest of their operator
                 # registrations)
-                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                if has_list_default:
+                    args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+                else:
+                    args = (*args, *positional_defaults[len(args) :])
+                    kwargs = {**kwarg_only_defaults, **kwargs}
 
                 if has_kwarg_only_args:
                     info._setup_context_fn(
