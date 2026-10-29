@@ -752,6 +752,7 @@ jobs:
           fi
 
       - name: Configure AWS credentials via OIDC
+        id: aws
         if: steps.diff.outputs.too_large == 'false'
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -1102,6 +1103,33 @@ jobs:
               "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}.json" \
               || echo "::warning::trace upload failed (best-effort)"
           fi
+
+      # The inputs the model was handed, so a run can be replayed or turned into
+      # an eval case without rebuilding them from GitHub, where comments get
+      # edited or deleted and force-pushed heads are not guaranteed to survive.
+      # Under pr_review_traces/ because that is the one prefix this job's role
+      # may write. Skipped when there are no credentials (too_large, or OIDC
+      # failed). continue-on-error: a missing snapshot must not fail the review.
+      - name: Upload the review inputs to S3
+        if: always() && steps.aws.outcome == 'success'
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ needs.prepare.outputs.head_sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          MERGE_BASE_SHA: ${{ needs.prepare.outputs.merge_base_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pr-review-input
+          for f in pr-diff.txt pr-files.txt pr-comments.json; do
+            if [ -f "/tmp/$f" ]; then cp "/tmp/$f" /tmp/pr-review-input/; fi
+          done
+          jq -n --arg head_sha "$HEAD_SHA" --arg base_sha "$BASE_SHA" \
+                --arg merge_base_sha "$MERGE_BASE_SHA" \
+                '{head_sha: $head_sha, base_sha: $base_sha, merge_base_sha: $merge_base_sha,
+                  diff: "git diff merge_base_sha head_sha"}' \
+            > /tmp/pr-review-input/manifest.json
+          aws s3 cp --recursive /tmp/pr-review-input \
+            "s3://${S3_BUCKET}/pr_review_traces/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}_input/"
 
       - name: Upload the sanitized verdict
         if: always()
