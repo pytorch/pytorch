@@ -324,7 +324,7 @@ def _nearest_match_is_enabled() -> bool:
 
 
 def _record_borrowed_enable(val: bool = True) -> None:
-    r"""Allow persisting borrowed results while tuning is disabled.
+    r"""Signal a compile-time reuse pass that it may persist borrowed verdicts.
 
     Advisory policy, like _nearest_match_enable: it records an intent for a
     reuse pass to read back. Results are normally written only during a tuning
