@@ -1139,9 +1139,13 @@ class LPPool1d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: a single int, the size of the window
-        stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
@@ -1192,9 +1196,13 @@ class LPPool2d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
@@ -1252,9 +1260,13 @@ class LPPool3d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
@@ -1355,7 +1367,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
                      Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
                      square image :math:`H_{out} \times H_{out}`. :math:`H_{out}` and :math:`W_{out}`
-                     can be either a ``int``, or ``None`` which means the size will be the same as that
+                     can be either an ``int``, or ``None`` which means the size will be the same as that
                      of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
@@ -1398,7 +1410,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
                      Can be a tuple :math:`(D_{out}, H_{out}, W_{out})` or a single
                      :math:`D_{out}` for a cube :math:`D_{out} \times D_{out} \times D_{out}`.
-                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
+                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either an
                      ``int``, or ``None`` which means the size will be the same as that of the input.
 
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1483,7 +1495,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single H for a square image H x H.
-                     H and W can be either a ``int``, or ``None`` which means the size will
+                     H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:
@@ -1523,7 +1535,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
-                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     D, H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:

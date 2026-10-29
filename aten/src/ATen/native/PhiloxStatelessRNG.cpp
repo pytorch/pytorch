@@ -3,8 +3,10 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/StatelessPhilox4x32.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/native/PhiloxStatelessRNG.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,22 +15,22 @@
 #include <ATen/ops/_philox_key_fold_in_native.h>
 #include <ATen/ops/_philox_key_split_native.h>
 #include <ATen/ops/_philox_normal_native.h>
+#include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 
 namespace at::native {
 
 using at::cpu::philox_4x32;
 
 namespace {
-
-// Elements produced per Philox 4x32 call: 4 for float/half/bfloat16, 2 for double.
-template <typename scalar_t>
-constexpr int elems_per_call = std::is_same_v<scalar_t, double> ? 2 : 4;
 
 // Derive a new (seed, offset) key from 4 random uint32 values.
 inline void philox_derive_key(
@@ -76,9 +78,6 @@ void philox_distribution_kernel(
     const char* op_name,
     Tensor& self, const Tensor& key,
     const sample_func_t& sample_func, const param_func_t& param_func) {
-  TORCH_CHECK(self.is_floating_point(),
-      op_name, ": self must be a floating point tensor, got ",
-      self.scalar_type());
   TORCH_CHECK(key.scalar_type() == kUInt64,
       op_name, ": key must have dtype uint64, got ",
       key.scalar_type());
@@ -132,14 +131,14 @@ void philox_distribution_kernel(
   const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
   constexpr int epc = elems_per_call<scalar_t>;
   int64_t chunks_per_key = (elems_per_key + epc - 1) / epc;
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = keys_ptr[key_idx * 2];
     uint64_t offset = keys_ptr[key_idx * 2 + 1];
-    for (int64_t chunk = 0; chunk < chunks_per_key; chunk++) {
+    for (const auto chunk : c10::irange(chunks_per_key)) {
       auto sample = sample_func(seed, offset + static_cast<uint64_t>(chunk));
       int64_t base = key_idx * elems_per_key + chunk * epc;
       int64_t remaining = std::min(static_cast<int64_t>(epc), elems_per_key - chunk * epc);
-      for (int64_t j = 0; j < remaining; j++) {
+      for (const auto j : c10::irange(remaining)) {
         out_ptr[base + j] = param_func(sample[j]);
       }
     }
@@ -175,10 +174,10 @@ Tensor _philox_key_split_cpu(const Tensor& key, int64_t num_splits) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t key_idx = 0; key_idx < num_keys; key_idx++) {
+  for (const auto key_idx : c10::irange(num_keys)) {
     uint64_t seed = input[key_idx * 2];
     uint64_t offset = input[key_idx * 2 + 1];
-    for (int64_t split_idx = 0; split_idx < num_splits; split_idx++) {
+    for (const auto split_idx : c10::irange(num_splits)) {
       auto r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
       int64_t out = (split_idx * num_keys + key_idx) * 2;
       philox_derive_key(r, &out_ptr[out], &out_ptr[out + 1]);
@@ -205,7 +204,7 @@ static Tensor philox_key_fold_in_impl(const Tensor& key, uint64_t fold) {
   auto key_contig = key.contiguous();
   const uint64_t* input = key_contig.const_data_ptr<uint64_t>();
   uint64_t* out_ptr = output.data_ptr<uint64_t>();
-  for (int64_t idx = 0; idx < num_keys; idx++) {
+  for (const auto idx : c10::irange(num_keys)) {
     uint64_t seed = input[idx * 2];
     uint64_t offset = input[idx * 2 + 1];
     auto r = philox_4x32(seed, offset + fold);
@@ -279,6 +278,80 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
   });
+  return self;
+}
+
+Tensor& _philox_randint_cpu_(
+    Tensor& self,
+    const Tensor& key,
+    std::optional<int64_t> low,
+    std::optional<int64_t> high) {
+  auto st = self.scalar_type();
+  TORCH_CHECK(isIntegralType(st, /*includeBool=*/false),
+      "_philox_randint_: self must have an integer dtype, got ", st);
+  AT_DISPATCH_V2(st, "_philox_randint_", AT_WRAP([&] {
+    // 8-byte types pack the four uint32 outputs into two 64-bit values; all
+    // narrower types take one raw uint32 each.
+    auto sample_func = [](uint64_t seed, uint64_t offset) {
+      auto r = philox_4x32(seed, offset);
+      if constexpr (sizeof(scalar_t) == 8) {
+        return std::array<uint64_t, 2>{
+            (static_cast<uint64_t>(r[0]) << 32) | r[1],
+            (static_cast<uint64_t>(r[2]) << 32) | r[3]};
+      } else {
+        return r;
+      }
+    };
+    // An absent high means the dtype's exclusive upper limit; callers must pass
+    // it as None since max + 1 is not representable as int64 for every dtype.
+    constexpr int64_t dtype_low = static_cast<int64_t>(std::numeric_limits<scalar_t>::min());
+    const bool spans_low = !low.has_value() || *low == dtype_low;
+    const bool spans_high = !high.has_value();
+
+    if (spans_low && spans_high) {
+      // Full range: every value of the dtype is equally likely, so the raw bits
+      // are already the answer.
+      auto param_func = [](auto rand) { return static_cast<scalar_t>(rand); };
+      philox_distribution_kernel<scalar_t>(
+          "_philox_randint_", self, key, sample_func, param_func);
+      return;
+    }
+
+    // Reduce in the sampled width, not the output width, so dtypes narrower
+    // than the sample keep all of their random bits.
+    using u_t = std::conditional_t<sizeof(scalar_t) == 8, uint64_t, uint32_t>;
+    // Number of values the dtype holds, which wraps to 0 when the dtype fills
+    // the sampled width. Shifting in two steps keeps this well-defined.
+    constexpr u_t dtype_count = (u_t{1} << (8 * sizeof(scalar_t) - 1)) << 1;
+    u_t lo = low.has_value() ? static_cast<u_t>(*low) : static_cast<u_t>(dtype_low);
+    u_t hi = high.has_value()
+        ? static_cast<u_t>(*high)
+        : static_cast<u_t>(static_cast<u_t>(dtype_low) + dtype_count);
+    u_t range = hi - lo;
+    TORCH_CHECK(range != 0,
+        "_philox_randint_: [low, high) must be non-empty; pass high=None for the "
+        "dtype's full range");
+    // Each element of a 32-bit sample draws 32 random bits, so reducing them
+    // modulo a large range noticeably oversamples the low end (up to 2x). A
+    // range that divides the sampled width evenly is exact at any size, so only
+    // guard the ranges that actually skew. (0 - range) is 2^32 - range, whose
+    // remainder is 2^32 % range without needing a literal that does not fit.
+    if constexpr (sizeof(u_t) == 4) {
+      u_t remainder = static_cast<u_t>(u_t{0} - range) % range;
+      TORCH_CHECK(remainder == 0 || static_cast<uint64_t>(range) < kMaxRange32,
+          "_philox_randint_: range (high - low = ", range, ") does not divide "
+          "2^32 evenly and is too large for the output dtype ", st, ". Each "
+          "element draws only 32 random bits, so a non-dividing range >= 2^28 "
+          "gives a significantly biased distribution. Use a range that divides "
+          "2^32 (a power of two), or a 64-bit dtype (torch.int64 or "
+          "torch.uint64).");
+    }
+    auto param_func = [lo, range](auto rand) {
+      return static_cast<scalar_t>(static_cast<u_t>(lo + static_cast<u_t>(rand) % range));
+    };
+    philox_distribution_kernel<scalar_t>(
+        "_philox_randint_", self, key, sample_func, param_func);
+  }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   return self;
 }
 

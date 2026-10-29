@@ -1,5 +1,5 @@
-diff --git a/test/cpython/3_13/test_patma.py b/test/cpython/3_13/test_patma.py
-index 8325b83a593..2fe120e3b63 100644
+diff --git a/test/cpython/v3_13/test_patma.py b/test/cpython/v3_13/test_patma.py
+index 8325b83a5932b91e5f6f66f879de3bbc59426ffe..ecff696ece4c90bb0507d18c2a4f5e1a9aecec53 100644
 --- a/test/cpython/v3_13/test_patma.py
 +++ b/test/cpython/v3_13/test_patma.py
 @@ -1,3 +1,21 @@
@@ -10,7 +10,7 @@ index 8325b83a593..2fe120e3b63 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_collections.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_patma.py
 +
 +import sys
 +import torch
@@ -24,16 +24,18 @@ index 8325b83a593..2fe120e3b63 100644
  import array
  import collections
  import dataclasses
-@@ -14,7 +32,7 @@ class Point:
+@@ -14,8 +32,9 @@ class Point:
      y: int
  
  
 -class TestCompiler(unittest.TestCase):
 +class TestCompiler(CPythonTestCase):
  
++    @torch._dynamo.error_on_graph_break(False)
      def test_refleaks(self):
          # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
-@@ -24,7 +42,7 @@ class TestCompiler(unittest.TestCase):
+         # just the code under test. This test ensures that if there are leaks in
+@@ -24,7 +43,7 @@ class TestCompiler(unittest.TestCase):
              compile(file.read(), __file__, "exec")
  
  
@@ -42,7 +44,7 @@ index 8325b83a593..2fe120e3b63 100644
  
      @staticmethod
      def check_sequence_then_mapping(x):
-@@ -129,7 +147,7 @@ class TestInheritance(unittest.TestCase):
+@@ -129,7 +148,7 @@ class TestInheritance(unittest.TestCase):
          self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "seq")
  
  
@@ -51,7 +53,7 @@ index 8325b83a593..2fe120e3b63 100644
  
      def test_patma_000(self):
          match 0:
-@@ -2888,7 +2906,7 @@ class TestPatma(unittest.TestCase):
+@@ -2888,7 +2907,7 @@ class TestPatma(unittest.TestCase):
                  self.assertEqual(h, 1)
  
  
@@ -60,7 +62,7 @@ index 8325b83a593..2fe120e3b63 100644
  
      def assert_syntax_error(self, code: str):
          with self.assertRaises(SyntaxError):
-@@ -3222,7 +3240,7 @@ class TestSyntaxErrors(unittest.TestCase):
+@@ -3222,7 +3241,7 @@ class TestSyntaxErrors(unittest.TestCase):
                  pass
          """)
  
@@ -69,7 +71,7 @@ index 8325b83a593..2fe120e3b63 100644
  
      def test_accepts_positional_subpatterns_0(self):
          class Class:
-@@ -3363,7 +3381,7 @@ class TestTypeErrors(unittest.TestCase):
+@@ -3363,7 +3382,7 @@ class TestTypeErrors(unittest.TestCase):
          self.assertIsNone(w)
  
  
@@ -78,7 +80,7 @@ index 8325b83a593..2fe120e3b63 100644
  
      def test_mapping_pattern_checks_duplicate_key_1(self):
          class Keys:
-@@ -3378,7 +3396,7 @@ class TestValueErrors(unittest.TestCase):
+@@ -3378,7 +3397,7 @@ class TestValueErrors(unittest.TestCase):
          self.assertIs(y, None)
          self.assertIs(z, None)
  
@@ -87,7 +89,7 @@ index 8325b83a593..2fe120e3b63 100644
      def test_jump_threading(self):
          # See gh-123048
          def f():
-@@ -3397,7 +3415,7 @@ class TestSourceLocations(unittest.TestCase):
+@@ -3397,7 +3416,7 @@ class TestSourceLocations(unittest.TestCase):
              if inst.opcode in dis.hasjump:
                  self.assertIsNotNone(inst.positions.lineno, "jump without location")
  
@@ -96,7 +98,15 @@ index 8325b83a593..2fe120e3b63 100644
  
      @staticmethod
      def _trace(func, *args, **kwargs):
-@@ -3514,37 +3532,4 @@ class TestTracing(unittest.TestCase):
+@@ -3491,6 +3510,7 @@ class TestTracing(unittest.TestCase):
+         self.assertListEqual(self._trace(f, 1), [1, 2, 3])
+         self.assertListEqual(self._trace(f, 0), [1, 2, 5, 6])
+ 
++    @torch._dynamo.error_on_graph_break(False)
+     def test_parser_deeply_nested_patterns(self):
+         # Deeply nested patterns can cause exponential backtracking when parsing.
+         # See gh-93671 for more information.
+@@ -3514,37 +3534,4 @@ class TestTracing(unittest.TestCase):
  
  
  if __name__ == "__main__":

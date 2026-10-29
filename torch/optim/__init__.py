@@ -28,6 +28,9 @@ from torch.optim.sgd import SGD as SGD
 from torch.optim.sparse_adam import SparseAdam as SparseAdam
 
 
+from torch.optim import functional as functional  # usort: skip
+
+
 Adafactor.__module__ = "torch.optim"
 Muon.__module__ = "torch.optim"
 swap_in_optimizer_params_and_state.__module__ = "torch.optim"
@@ -56,6 +59,7 @@ __all__ = [
     "Adamax",
     "AdamW",
     "ASGD",
+    "functional",
     "LBFGS",
     "lr_scheduler",
     "Muon",

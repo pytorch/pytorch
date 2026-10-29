@@ -23,6 +23,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._inductor.utils import get_collective_config
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -132,6 +133,9 @@ def _get_dedup_rs_pass() -> PatternMatcherPass:
             ):
                 return False
             if len(node.users) != 1:
+                return False
+            # The rewrite would drop the collective config.
+            if get_collective_config(node) is not None:
                 return False
         input_a = match.kwargs["input_a"]
         input_b = match.kwargs["input_b"]
@@ -469,7 +473,7 @@ def pre_bucket_fsdp_collectives(
     """Pre-bucket FSDP collectives before overlap scheduling.
 
     Identifies FSDP process groups via all_gather structural heuristics,
-    then merges all_gather, reduce_scatter, and all_reduce ops on  those
+    then merges all_gather, reduce_scatter, and all_reduce ops on those
     groups into bandwidth-saturating buckets.
     """
     import torch._inductor.config as inductor_config

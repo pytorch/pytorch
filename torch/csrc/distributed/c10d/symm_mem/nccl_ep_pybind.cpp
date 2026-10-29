@@ -26,6 +26,11 @@ PYBIND11_MODULE(_nccl_ep, m) {
   setenv("NCCL_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
 #endif
 
+  py::enum_<NcclEpLayout>(m, "Layout")
+      .value("FLAT", NcclEpLayout::Flat)
+      .value("EXPERT_MAJOR", NcclEpLayout::ExpertMajor)
+      .value("RANK_MAJOR", NcclEpLayout::RankMajor);
+
   py::class_<NcclEpGroup, c10::intrusive_ptr<NcclEpGroup>>(m, "_NcclEpGroup")
       .def_static(
           "create",
@@ -42,7 +47,8 @@ PYBIND11_MODULE(_nccl_ep, m) {
           &nccl_ep_create_handle,
           py::arg("group"),
           py::arg("topk_idx"),
-          py::arg("recv_expert_counter") = py::none())
+          py::arg("recv_expert_counter") = py::none(),
+          py::arg("layout"))
       .def("get_num_recv_tokens", &nccl_ep_handle_get_num_recv_tokens);
 
   m.def(
@@ -56,9 +62,25 @@ PYBIND11_MODULE(_nccl_ep, m) {
       py::arg("out_topk_idx"));
 
   m.def(
+      "_nccl_ep_dispatch_backward",
+      &nccl_ep_dispatch_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("out_tokens"));
+
+  m.def(
       "_nccl_ep_combine",
       &nccl_ep_combine,
       py::arg("handle"),
       py::arg("expert_tokens"),
       py::arg("out_tokens"));
+
+  m.def(
+      "_nccl_ep_combine_backward",
+      &nccl_ep_combine_backward,
+      py::arg("handle"),
+      py::arg("grad_tokens"),
+      py::arg("grad_topk_weights"),
+      py::arg("out_tokens"),
+      py::arg("out_topk_weights"));
 }

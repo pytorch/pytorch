@@ -7,6 +7,7 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e5m3fnu.h>
 #include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/Half.h>
 #include <c10/util/bits.h>
@@ -93,7 +94,7 @@ inline bool isIntegralType(ScalarType t, bool includeBool) {
 inline bool isFloat8Type(ScalarType t) {
   return t == ScalarType::Float8_e5m2 || t == ScalarType::Float8_e5m2fnuz ||
       t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz ||
-      t == ScalarType::Float8_e8m0fnu;
+      t == ScalarType::Float8_e8m0fnu || t == ScalarType::Float8_e5m3fnu;
 }
 
 inline bool isReducedFloatingType(ScalarType t) {
@@ -116,6 +117,24 @@ inline bool isBitsType(ScalarType t) {
   return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
       t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
       t == ScalarType::Bits16;
+}
+
+// Sub-byte integer shell dtypes (UInt1-7, Int1-7). They have no kernels or
+// casts and exist for tensor subclasses to use as a dtype tag.
+constexpr bool isSubByteIntType(ScalarType t) {
+  return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
+      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+      t == ScalarType::UInt7 || t == ScalarType::Int1 ||
+      t == ScalarType::Int2 || t == ScalarType::Int3 || t == ScalarType::Int4 ||
+      t == ScalarType::Int5 || t == ScalarType::Int6 || t == ScalarType::Int7;
+}
+
+// Shell dtypes: Float4_e2m1fn_x2, Bits*, and the sub-byte ints. They have no
+// defined value conversion to or from any other dtype.
+inline bool isShellType(ScalarType t) {
+  return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
+      isSubByteIntType(t);
 }
 
 constexpr bool isBarebonesUnsignedType(ScalarType t) {
@@ -171,6 +190,7 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(Float8_e4m3fn);
       CASE_ISSIGNED(Float8_e4m3fnuz);
       CASE_ISSIGNED(Float8_e8m0fnu);
+      CASE_ISSIGNED(Float8_e5m3fnu);
       CASE_ISSIGNED(Byte);
       CASE_ISSIGNED(Char);
       CASE_ISSIGNED(Short);
@@ -302,4 +322,5 @@ C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap()
 
 } // namespace c10
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
