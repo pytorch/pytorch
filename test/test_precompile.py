@@ -7678,6 +7678,15 @@ def _multi_kernel_hints_gemm(a, b):
     return (a @ b).relu()
 
 
+def _user_stream_fn(x):
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        y = x * 3
+    torch.cuda.current_stream().wait_stream(s)
+    return x * 2 + y
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
@@ -9309,6 +9318,20 @@ class TestPrecompileRuntimeCache(TestCase):
             _NEVER_RUN_BACKWARD_DRIVER,
             "never-run backward phase ok",
         )
+
+    @skipIfCrossRef
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    def test_capture_user_stream_region(self):
+        # The capture forces triton.autotune_at_compile_time, whose autotune block
+        # needs raw_stream defined for a kernel inside a user stream context.
+        x = torch.randn(1024, device="cuda")
+        source, cache = _capture_files(
+            self, _user_stream_fn, [(x,)], backend="inductor"
+        )
+        runnable = torch.compiler.precompile.load(source, cache)
+        with torch.no_grad():
+            out = runnable(x)
+        torch.testing.assert_close(out, _user_stream_fn(x))
 
     @skipIfCrossRef
     @unittest.skipUnless(
@@ -11108,15 +11131,17 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertIn(f"CUSTOM_OPS = {((f'{ns}::op', ''),)!r}", python_code)
 
     def test_an_op_passed_to_a_skipped_call_is_checked(self):
-        _, name = self._op("passed")
-        # The global op is still lazy when the call it is passed to breaks.
+        (_, name), (_, nested) = self._op("passed"), self._op("nested")
+        # The global ops are still lazy when the call they are passed to breaks.
         python_code = self._capture_module(
             f"import torch\nop = torch.ops.{name.replace('::', '.')}.default\n"
-            "call = torch._dynamo.disable(lambda o, x: o(x))\n"
-            "def fn(x):\n    return call(op, x.sin()) + 1\n",
+            f"nested = torch.ops.{nested.replace('::', '.')}.default\n"
+            "call = torch._dynamo.disable(lambda o, x, _: o(x))\n"
+            "def fn(x):\n    return call(op, x.sin(), (nested,)) + 1\n",
             tracer=DynamoTracer(),
         )
-        self.assertIn(f"CUSTOM_OPS = {((name, ''),)!r}", python_code)
+        ops = tuple(sorted([(name, ""), (nested, "")]))
+        self.assertIn(f"CUSTOM_OPS = {ops!r}", python_code)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
