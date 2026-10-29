@@ -9831,6 +9831,70 @@ class TestPrecompileCustomOpModules(TestCase):
         overrides = {f"{ns}::op": {"CPU": override}}
         self.assertIn(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}", source)
 
+    @skipIfCrossRef
+    @parametrize("mode", ("load", "broken", "skipped"))
+    def test_load_checks_a_register_kernel_from_another_module(self, mode):
+        tag = uuid.uuid4().hex
+        vendor, override = f"precompile_vendor_{tag}", f"precompile_override_{tag}"
+        ns = f"precompile_rk_test_{tag}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        # The override replaces only vendor's _backend_fns["cpu"]: the dispatcher
+        # kernel stays custom_ops.py's.
+        sources = {
+            vendor: f'import torch\n@torch.library.custom_op("{ns}::op", mutates_args=(), device_types="cpu")\ndef op(x: torch.Tensor) -> torch.Tensor:\n    return x * 3\n',
+            override: f'import os, torch, {vendor}\nmode = os.environ.get("PRECOMPILE_OVERRIDE")\nif mode == "broken":\n    raise ImportError("broken")\nif mode != "skipped":\n    {vendor}.op.register_kernel("cpu", lambda x: x * 5)\n',
+        }
+        for name, source in sources.items():
+            with open(os.path.join(directory, name + ".py"), "w") as f:
+                f.write(source)
+        script = textwrap.dedent(
+            f"""
+            import sys, warnings
+            import torch
+            from torch.compiler.precompile import capture, load, MakeFxTracer
+            phase, artifact, cache = sys.argv[1:]
+            sys.path.insert(0, {directory!r})
+            x = torch.arange(6, dtype=torch.float32)
+            if phase == "capture":
+                import {override}
+                op = torch.ops.{ns}.op.default
+                with capture(lambda x: op(x), artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
+                    torch.testing.assert_close(cap(x), x * 5)
+            elif phase == "load":
+                torch.testing.assert_close(load(artifact, cache)(x), x * 5)
+            else:
+                # vendor's x * 3 CPU kernel must not stand in for the override's.
+                warnings.simplefilter("ignore")
+                try:
+                    load(artifact, cache)
+                except torch.compiler.PrecompileError as e:
+                    print(e)
+                else:
+                    raise AssertionError("load did not fail")
+            print("ok", phase)
+            """
+        )
+        paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
+        env = dict(os.environ)
+        for phase in ("capture", mode):
+            env["PRECOMPILE_OVERRIDE"] = "" if phase == "capture" else mode
+            cmd = [sys.executable, "-c", script, phase, *paths]
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=900, env=env
+            )
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn(f"ok {phase}", out.stdout)
+        if mode == "broken":
+            self.assertIn(f"failed to import: {[override]!r}", out.stdout)
+        elif mode == "skipped":
+            replaced = [f"{ns}::op (CPU kernel of {override})"]
+            self.assertIn(f"another kernel replaced: {replaced!r}", out.stdout)
+        with open(paths[0]) as f:
+            source = f.read()
+        self.assertIn(f"CUSTOM_OP_MODULES = {(vendor, override)!r}", source)
+        overrides = {f"{ns}::op": {"CPU": override}}
+        self.assertIn(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}", source)
+
 
 def _decomposed_op_fn(x):
     return torch.ops.precompile_inductor_ops.decomposed.default(x.sin()) + 1
