@@ -2606,11 +2606,6 @@ elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
   test_libtorch_agnostic_targetting
-elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
-    (cd .ci/lumen_cli && python -m pip install -e .)
-
-    python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
   test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
