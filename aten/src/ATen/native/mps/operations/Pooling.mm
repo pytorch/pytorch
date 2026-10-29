@@ -667,9 +667,42 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
                                                             bool ceil_mode,
                                                             const int32_t pooling_dims,
                                                             const std::string& op_name) {
-  const auto dims = std::get<0>(
-      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name));
-  max_pool_backward_out_mps_template(grad_input, indices, input, grad_output, dims, pooling_dims, op_name);
+  const auto pool_sizes =
+      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
+  // CPU calls pool3d_backward_shape_check, including the 5D batch dim.
+  // MPS previously only checked the input, so a mismatched indices batch
+  // did not raise.
+  if (pooling_dims == 3) {
+    const auto& kernel_size = std::get<2>(pool_sizes);
+    const auto& stride = std::get<3>(pool_sizes);
+    const auto& padding = std::get<4>(pool_sizes);
+    const auto dilation = std::get<5>(pool_sizes).value_or(std::vector<int32_t>(3, 1));
+    pool3d_backward_shape_check(input,
+                                grad_output,
+                                indices,
+                                input.size(-4),
+                                kernel_size[0],
+                                kernel_size[1],
+                                kernel_size[2],
+                                stride[0],
+                                stride[1],
+                                stride[2],
+                                padding[0],
+                                padding[1],
+                                padding[2],
+                                dilation[0],
+                                dilation[1],
+                                dilation[2],
+                                input.size(-3),
+                                input.size(-2),
+                                input.size(-1),
+                                grad_output.size(-3),
+                                grad_output.size(-2),
+                                grad_output.size(-1),
+                                "max_pool3d_with_indices_backward_out_mps");
+  }
+  max_pool_backward_out_mps_template(
+      grad_input, indices, input, grad_output, std::get<0>(pool_sizes), pooling_dims, op_name);
 }
 
 static void max_unpool_out_mps_template(const Tensor& input,
