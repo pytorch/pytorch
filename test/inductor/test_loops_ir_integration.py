@@ -27,9 +27,10 @@ Environment: unit kernels only (tiny tensors), ``CUDA_VISIBLE_DEVICES=5``,
 ``CC=/usr/bin/gcc CXX=/usr/bin/g++ MAX_JOBS=2``. No benchmark timings.
 """
 
-import io
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import torch
@@ -472,76 +473,39 @@ class TestLoopsIrIntegration(TestCase):
         from torch._inductor.codecache import torch_key
 
         self.assertTrue(hasattr(torch_key, "clear"))
-        inductor_root = os.path.dirname(codecache.__file__)
-        cpp_ir_root = os.path.normpath(
-            os.path.join(inductor_root, "../csrc/inductor/experimental/loops_ir")
-        )
-        self.assertTrue(
-            os.path.isdir(cpp_ir_root), f"expected C++ IR dir at {cpp_ir_root}"
-        )
-        blobs = {
-            "alpha.cpp": b"int alpha() { return 1; }",
-            "beta.h": b"#pragma once",
-            "notes.py": b"x = 1",
-        }
-        real_isdir = os.path.isdir
-        real_scandir = os.scandir
-        real_open = open
-
-        class _Entry:
-            def __init__(self, name):
-                self.name = name
-
-            def is_file(self):
-                return True
-
-        class _Scan:
-            def __init__(self, names):
-                self._names = names
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def __iter__(self):
-                return iter(_Entry(name) for name in self._names)
-
-        def fake_isdir(path, *args, **kwargs):
-            if os.path.normpath(str(path)) == cpp_ir_root:
-                return True
-            return real_isdir(path, *args, **kwargs)
-
-        def fake_scandir(path, *args, **kwargs):
-            if os.path.normpath(str(path)) == cpp_ir_root:
-                return _Scan(sorted(blobs))
-            return real_scandir(path, *args, **kwargs)
-
-        def fake_open(path, *args, **kwargs):
-            if isinstance(path, (str, os.PathLike)) and os.path.normpath(
-                str(path)
-            ).startswith(cpp_ir_root):
-                return io.BytesIO(blobs[os.path.basename(str(path))])
-            return real_open(path, *args, **kwargs)
-
-        try:
-            torch_key.clear()
-            with (
-                mock.patch("os.path.isdir", side_effect=fake_isdir),
-                mock.patch("os.scandir", side_effect=fake_scandir),
-                mock.patch("builtins.open", side_effect=fake_open),
-            ):
-                key_base = torch_key()
+        hash_native_sources = codecache._build_cpp_code_hash
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            options = root / "op_options"
+            options.mkdir()
+            source = options / "alpha.cpp"
+            source.write_bytes(b"int alpha() { return 1; }")
+            (root / "beta.h").write_bytes(b"#pragma once")
+            notes = root / "notes.py"
+            notes.write_bytes(b"x = 1")
+            try:
                 torch_key.clear()
-                blobs["alpha.cpp"] = b"int alpha() { return 2; }"
-                key_cpp_changed = torch_key()
+                with (
+                    mock.patch.object(codecache, "build_code_hash"),
+                    mock.patch.object(
+                        codecache,
+                        "_build_cpp_code_hash",
+                        side_effect=lambda _root, hasher: hash_native_sources(
+                            directory, hasher
+                        ),
+                    ) as native_hash,
+                ):
+                    key_base = torch_key()
+                    torch_key.clear()
+                    source.write_bytes(b"int alpha() { return 2; }")
+                    key_cpp_changed = torch_key()
+                    torch_key.clear()
+                    source.write_bytes(b"int alpha() { return 1; }")
+                    notes.write_bytes(b"x = 2  # not a native source")
+                    key_py_changed = torch_key()
+                    self.assertEqual(native_hash.call_count, 3)
+            finally:
                 torch_key.clear()
-                blobs["alpha.cpp"] = b"int alpha() { return 1; }"
-                blobs["notes.py"] = b"x = 2  # not a native source"
-                key_py_changed = torch_key()
-        finally:
-            torch_key.clear()
         self.assertNotEqual(
             key_base, key_cpp_changed, "native .cpp changes must invalidate torch_key"
         )
