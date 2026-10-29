@@ -39,12 +39,19 @@ struct GemmLeadingDims {
   int64_t ldc = 0;
 };
 
+// "Tight" means the leading dim equals its logical extent, so it carries no
+// independent padding and is a function of m/n/k. The one definition: both
+// LdMayVary below and ShouldWildcardLd* in GemmCommon.h build on it, so the
+// two sites cannot drift.
+inline bool IsTight(int64_t ld, int64_t dim) {
+  return ld == dim;
+}
+
 // A leading dim that tracks the varying logical dim may differ between the two
-// shapes only when it is tight in BOTH. Same tightness rule as
-// ShouldWildcardLd*: a padded ld is not a function of m/n/k, so treating it as
-// one would pair layouts with different padding/alignment.
+// shapes only when it is tight in BOTH: a padded ld is not a function of
+// m/n/k, so treating it as one would pair layouts with different padding.
 inline bool LdMayVary(int64_t q_ld, int64_t q_dim, int64_t c_ld, int64_t c_dim) {
-  return q_ld == c_ld || (q_ld == q_dim && c_ld == c_dim);
+  return q_ld == c_ld || (IsTight(q_ld, q_dim) && IsTight(c_ld, c_dim));
 }
 
 // Are q's and c's leading dims compatible when only M differs? ldc always
