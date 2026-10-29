@@ -5,6 +5,7 @@ import gc
 import json
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
+import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
@@ -819,10 +821,108 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._agent.released, 2)
         self.assertFalse(first._transfers)
 
+    def test_remote_slice_ranges(self):
+        _, _, _, remote = self.registered_pair()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual((part.address, part.length), (remote.address + 3, 2))
+        self.assertEqual(part.metadata, remote.metadata)
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_slice_unregistered_view(self):
+        first, _, source, _ = self.registered_pair()
+        view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
+    def connect_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            third, fourth = (
+                new_transport("nixl", agent_name=name, plugin=self.plugin, timeout=5)
+                for name in ("third", "fourth")
+            )
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth), targets)
+        ]
+        return first, source, targets, remotes
+
+    def test_connects_multiple_peers(self):
+        first, source, targets, remotes = self.connect_peers()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            other = first.write(source.to_view(), remotes[1], async_op=True)
+        work.wait()
+        other.wait()
+        self.assertEqual(first._peers, {"second", "third"})
+        self.assertTrue(first.connected())
+        self.assertEqual(first.connect(json.dumps(["third", []]).encode()), 0)
+        self.assertEqual(first._peers, {"second", "third"})
+        for remote in remotes[:2]:
+            first.write(source.to_view(), remote)
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+        agent = first._agent
+        first.close()
+        self.assertFalse(agent.remote_metadata)
+
+    def test_connect_rank_multiple_peers(self):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            transports = [
+                new_transport("nixl", agent_name=f"rank{rank}", plugin=self.plugin)
+                for rank in range(3)
+            ]
+        for transport in transports:
+            self.addCleanup(transport.close)
+        store = dist.HashStore()
+        calls = [(0, 1), (0, 2), (1, 0), (2, 0)]
+        with ThreadPoolExecutor(len(calls)) as pool:
+            futures = [
+                pool.submit(
+                    transports[rank].connect_rank,
+                    peer,
+                    store=store,
+                    rank=rank,
+                    timeout=5,
+                )
+                for rank, peer in calls
+            ]
+            for future in futures:
+                future.result(timeout=10)
+        self.assertEqual(transports[0]._peers, {"rank1", "rank2"})
+        source = transports[0].register_memory(torch.arange(8, dtype=torch.uint8))
+        for transport in transports[1:]:
+            target = torch.zeros(8, dtype=torch.uint8)
+            remote = transport.register_memory(target).to_remote_buffer()
+            transports[0].write(source.to_view(), remote)
+            self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
+            self.assertEqual(transport._peers, {"rank0"})
+
+    def test_mismatched_metadata_keeps_other_peer(self):
+        first, source, targets, remotes = self.connect_peers()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(source.to_view(), remotes[0], async_op=True)
+            wrong = replace(remotes[1], metadata=remotes[0].metadata)
+            with self.assertRaisesRegex(ValueError, "different agent"):
+                first.write(source.to_view(), wrong)
+            self.assertIn("second", first._agent.remote_metadata)
+            self.assertIn("second", first._remote_agents)
+        work.wait()
+        first.write(source.to_view(), remotes[0])
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
-        with self.assertRaisesRegex(RuntimeError, "already connected"):
-            first.connect(second.bind())
         with self.assertRaisesRegex(ValueError, "connected peer"):
             first.write(source.to_view(), replace(remote, agent_name="other"))
         with self.assertRaisesRegex(ValueError, "different agent"):

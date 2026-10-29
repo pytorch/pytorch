@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import numbers
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from functools import partial
 from typing import Any, cast, Literal, Protocol, runtime_checkable, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
+import torch.distributed as dist
 from torch.distributed import Work
 
 from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -21,6 +26,22 @@ class MemoryView(Protocol):
     """A read-only view of registered memory."""
 
     def size(self) -> int: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a view of a byte range of this one.
+
+        ``offset`` is relative to this view and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this view.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``view[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -45,6 +66,24 @@ class RemoteBuffer(Protocol):
 
     @classmethod
     def deserialize(cls, data: bytes) -> Self: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a descriptor for a byte range of this one.
+
+        ``offset`` is relative to this descriptor and defaults to 0; ``length``
+        defaults to the rest. The range must lie within this descriptor. The
+        result shares this descriptor's registration and lifetime, and does not
+        restrict access to the rest of the registration.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``buffer[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end, out-of-range bounds are clamped and
+        the step must be 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -75,8 +114,9 @@ class Transport(ABC):
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
 
-    Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
-    one outgoing peer; no process group, ranks, or matching receives are needed.
+    Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
+    connect to multiple peers, and remote descriptors identify their peer. No
+    process group, ranks, or matching receives are needed.
     Exchange connection bytes and remote descriptors through a trusted control
     plane. Registration is valid until unregistration or close, including after bind/connect.
 
@@ -121,19 +161,91 @@ class Transport(ABC):
 
     @abstractmethod
     def bind(self, *, timeout: float | None = None) -> bytes:
-        """Bind the endpoint and return its opaque connection URL."""
+        """Bind the endpoint and return its opaque connection URL.
+
+        Implementations must support repeated calls on an open transport,
+        returning its current connection bytes; ``connect_rank`` binds on each
+        call.
+        """
 
     @abstractmethod
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         """Connect to a bound peer and return zero on success.
 
-        Rank-to-endpoint lookup belongs in a separate application control-plane
-        adapter; this interface addresses peers using opaque connection bytes.
+        Connecting to additional peers keeps existing connections; reconnecting
+        with the same connection bytes is a no-op. There is no per-peer
+        disconnect; ``close`` releases all peers. Transfers to descriptors naming
+        an unconnected peer raise ``ValueError``.
+
+        Peers are addressed by opaque connection bytes; ``connect_rank``
+        exchanges them through a Store by rank.
         """
+
+    def connect_rank(
+        self,
+        peer_rank: int,
+        *,
+        store: dist.Store | None = None,
+        rank: int | None = None,
+        tag: str = "default",
+        timeout: float | timedelta | None = 30.0,
+    ) -> int:
+        """Connect to the peer identified by ``peer_rank`` through a Store.
+
+        Both peers call this with each other's identity. It binds, exchanges
+        connection bytes through the Store, connects, and returns zero on
+        success. It blocks until the peer makes the matching call or a timeout
+        expires.
+
+        Args:
+            peer_rank: Nonnegative integer identifying the peer in this Store namespace.
+            store: Trusted rendezvous Store, such as ``torch.distributed.TCPStore``;
+                defaults to the default process group's Store. No collectives are
+                performed. Keys persist, and ``bind()`` bytes may describe
+                registered memory, such as NIXL agent metadata.
+            rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
+                explicit override requires no initialized process group. Identities
+                need not be contiguous, but must be distinct for the two peers.
+            tag: Rendezvous namespace; both peers must pass the same tag. Use
+                a distinct tag for each transport connecting the same rank pair.
+            timeout: Timeout for each of bind, the Store wait, and connect, in
+                seconds or as a ``timedelta``, from 1 ms to about 24.8 days (Store
+                waits use 32-bit milliseconds). ``None`` uses the backend's and
+                the Store's timeouts; with ``store=None``, the wait then holds the
+                default Store's client, shared with the default process group,
+                for up to the Store's timeout.
+
+        Calls are matched in order per rank pair and tag: the Nth call on each
+        peer connects to the other's Nth call, including calls that failed after
+        validating their arguments. When connecting to several peers, call in a
+        consistent order on all ranks, such as ascending peer rank, or from
+        separate threads if the backend's ``bind`` and ``connect`` are
+        thread-safe, as NIXL's are. Give each thread its own Store client, such
+        as ``store.clone()``: a ``TCPStore`` client blocks other calls while it
+        waits, and ``store=None`` shares the default Store's client. Cyclic
+        waits time out. A failure on one side does not imply that the peer's
+        call failed.
+        """
+        if type(tag) is not str:
+            raise ValueError("tag must be a string")
+        wait = None
+        if timeout is not None:
+            if isinstance(timeout, timedelta):
+                timeout = timeout.total_seconds()
+            if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
+                raise ValueError("timeout must be seconds or a timedelta")
+            timeout = float(timeout)
+            if not 0.001 <= timeout <= _MAX_STORE_TIMEOUT:
+                raise ValueError("timeout must be in [1 ms, 2**31 - 1 ms]")
+            wait = timedelta(seconds=timeout)
+        # No backend name produces this root, so new_transport_rank never pairs.
+        root = f"transport_connect_rank/{tag}"
+        store, rank = _pair_store(root, store, rank, peer_rank)
+        return _exchange(self, store, rank, peer_rank, wait)
 
     @abstractmethod
     def connected(self) -> bool:
-        """Return whether the endpoint is connected to its peer."""
+        """Return whether the endpoint is connected to any peer."""
 
     @abstractmethod
     def register_memory(
@@ -141,7 +253,7 @@ class Transport(ABC):
     ) -> Memory:
         """Register a contiguous tensor, including after bind/connect or transfers.
 
-        Exchange its remote-buffer descriptor with the peer before remote access.
+        Exchange its remote-buffer descriptor with peers before remote access.
         """
 
     def unregister_memory(
@@ -306,3 +418,42 @@ class Transport(ABC):
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+
+# TCPStore polls with an int millisecond timeout.
+_MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
+
+
+def _pair_store(
+    root: str, store: dist.Store | None, rank: int | None, peer_rank: int
+) -> tuple[dist.Store, int]:
+    """Validate a rank pair and return the Store scoped to its next attempt."""
+    rank = dist.get_rank() if rank is None else rank
+    store = dist.distributed_c10d._get_default_store() if store is None else store
+    if type(rank) is not int or rank < 0:
+        raise ValueError("rank must be a nonnegative integer")
+    if type(peer_rank) is not int or peer_rank < 0:
+        raise ValueError("peer_rank must be a nonnegative integer")
+    if peer_rank == rank:
+        raise ValueError("peer_rank must differ from the local rank")
+    pair = f"{root}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
+    attempt = store.add(f"{pair}/attempts/{rank}", 1)
+    return dist.PrefixStore(f"{pair}/{attempt}", store), rank
+
+
+def _exchange(
+    transport: Transport,
+    store: dist.Store,
+    rank: int,
+    peer_rank: int,
+    timeout: timedelta | None,
+) -> int:
+    seconds = None if timeout is None else timeout.total_seconds()
+    # Store.set accepts bytes; the stub only declares str.
+    # pyrefly: ignore [bad-argument-type]
+    store.set(str(rank), transport.bind(timeout=seconds))
+    if timeout is None:
+        store.wait([str(peer_rank)])
+    else:
+        store.wait([str(peer_rank)], timeout)
+    return transport.connect(store.get(str(peer_rank)), timeout=seconds)

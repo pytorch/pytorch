@@ -69,6 +69,52 @@ class TransportTestMixin:
             first.close()
             second.close()
 
+    def test_transport_slice(self) -> None:
+        first, second = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            destination = torch.zeros_like(source)
+            read_target = torch.zeros(16, dtype=torch.uint8)
+            source_memory = first.register_memory(source)
+            read_memory = first.register_memory(read_target)
+            descriptor = second.register_memory(destination).to_remote_buffer()
+            remote = type(descriptor).deserialize(descriptor.serialize())
+            part = remote.slice(16, 16)
+            part = type(part).deserialize(part.serialize())
+            self.assertEqual(part, remote[16:32])
+            self.assertEqual(part, remote[-48:-32])
+
+            first.write(source_memory.to_view()[8:24], part)
+            self.assertEqual(destination[16:32], source[8:24])
+            self.assertEqual(destination[:16].count_nonzero(), 0)
+            self.assertEqual(destination[32:].count_nonzero(), 0)
+            view = read_memory.to_mutable_view()[8:]
+            self.assertIsInstance(view, MutableMemoryView)
+            self.assertNotIsInstance(source_memory.to_view()[8:], MutableMemoryView)
+            first.read(view.slice(0, 4), part.slice(4)[:4])
+            self.assertEqual(read_target[8:12], source[12:16])
+            self.assertEqual(read_target[:8].count_nonzero(), 0)
+            self.assertEqual(part[4:100], part.slice(4))
+            self.assertEqual(source_memory.to_view()[60:100].size(), 4)
+            self.assertEqual(source_memory.to_view()[40:20].size(), 0)
+            with self.assertRaisesRegex(ValueError, "does not fit"):
+                first.write(source_memory.to_view(0, 17), part)
+            for sliceable, size in ((part, 16), (source_memory.to_view(0, 16), 16)):
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    sliceable.slice(8, 9)
+                for offset in (size + 1, -1):
+                    with self.assertRaisesRegex(ValueError, "outside"):
+                        sliceable.slice(offset)
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    sliceable.slice(0, -1)
+                with self.assertRaisesRegex(ValueError, "step"):
+                    sliceable[::2]
+                with self.assertRaisesRegex(TypeError, "expected a slice"):
+                    sliceable[0]
+        finally:
+            first.close()
+            second.close()
+
     def test_transport_async_work(self) -> None:
         first, second = self.make_transport_pair()
         try:
