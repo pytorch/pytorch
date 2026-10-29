@@ -4211,9 +4211,12 @@ def load(
     import, and that kernel must still be the active one, registered from the same
     module's file: otherwise the replaced kernel would run in its place. The same
     holds for a module that called ``register_kernel`` on another module's custom
-    op, whose kernel must still be the one that call registered. Any other
-    module only warns when it fails to import and the ops and kernels are
-    registered anyway, e.g. by a module the server imported under another name.
+    op, whose kernel must still be the one that call registered. So such a module
+    is refused, not warned about, when it raises on import (even after
+    registering), when the server imported it under another name, or when
+    another module registers the same kernel. Any other module only warns when
+    it fails to import and the ops and kernels are registered anyway, e.g. by a
+    module the server imported under another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,

@@ -121,7 +121,7 @@ def _frozen_kernel_config() -> dict[str, object]:
 
 
 @contextlib.contextmanager
-def _capture_config(lowers_kernels: bool = True) -> Iterator[None]:
+def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
