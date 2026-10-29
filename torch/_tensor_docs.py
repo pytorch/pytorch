@@ -2398,26 +2398,26 @@ Example::
 add_docstr_all(
     "index_copy_",
     r"""
-index_copy_(dim, index, tensor) -> Tensor
+index_copy_(dim, index, source) -> Tensor
 
-Copies the elements of :attr:`tensor` into the :attr:`self` tensor by selecting
+Copies the elements of :attr:`source` into the :attr:`self` tensor by selecting
 the indices in the order given in :attr:`index`. For example, if ``dim == 0``
-and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is copied to the
+and ``index[i] == j``, then the ``i``\ th row of :attr:`source` is copied to the
 ``j``\ th row of :attr:`self`.
 
-The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
+The :attr:`dim`\ th dimension of :attr:`source` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
 .. note::
     If :attr:`index` contains duplicate entries, multiple elements from
-    :attr:`tensor` will be copied to the same index of :attr:`self`. The result
+    :attr:`source` will be copied to the same index of :attr:`self`. The result
     is nondeterministic since it depends on which copy occurs last.
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`tensor` to select from
-    tensor (Tensor): the tensor containing values to copy
+    index (LongTensor): indices of :attr:`source` to select from
+    source (Tensor): the tensor containing values to copy
 
 Example::
 
@@ -3971,11 +3971,11 @@ In-place version of :meth:`~Tensor.reciprocal`
 add_docstr_all(
     "record_stream",
     r"""
-record_stream(stream)
+record_stream(s)
 
 Marks the tensor as having been used by this stream.  When the tensor
 is deallocated, ensure the tensor memory is not reused for another tensor
-until all work queued on :attr:`stream` at the time of deallocation is
+until all work queued on :attr:`s` at the time of deallocation is
 complete.
 
 .. note::
@@ -4104,7 +4104,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
-    repeat (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
+    repeats (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
 
 Example::
 
@@ -4249,15 +4249,15 @@ Example::
 add_docstr_all(
     "resize_as_",
     r"""
-resize_as_(tensor, memory_format=torch.contiguous_format) -> Tensor
+resize_as_(the_template, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
-:attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
+:attr:`the_template`. This is equivalent to ``self.resize_(the_template.size())``.
 
 Args:
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         Tensor. Default: ``torch.contiguous_format``. Note that memory format of
-        :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
+        :attr:`self` is going to be unaffected if ``self.size()`` matches ``the_template.size()``.
 
 """,
 )
@@ -5512,13 +5512,13 @@ Example::
 add_docstr_all(
     "to_sparse",
     r"""
-to_sparse(sparseDims) -> Tensor
+to_sparse(sparse_dim) -> Tensor
 
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
 :ref:`coordinate format <sparse-coo-docs>`.
 
 Args:
-    sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+    sparse_dim (int, optional): the number of sparse dimensions to include in the new sparse tensor
 
 Example::
 
@@ -5946,15 +5946,15 @@ Args:
 add_docstr_all(
     "type_as",
     r"""
-type_as(tensor) -> Tensor
+type_as(other) -> Tensor
 
 Returns this tensor cast to the type of the given tensor.
 
 This is a no-op if the tensor is already of the correct type. This is
-equivalent to ``self.type(tensor.type())``
+equivalent to ``self.type(other.type())``
 
 Args:
-    tensor (Tensor): the tensor which has the desired type
+    other (Tensor): the tensor which has the desired type
 """,
 )
 
@@ -6050,10 +6050,10 @@ See :func:`torch.vdot`
 add_docstr_all(
     "view",
     r"""
-view(*shape) -> Tensor
+view(*size) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different :attr:`shape`.
+different :attr:`size`.
 
 The returned tensor shares the same data and must have the same number
 of elements, but may have a different size. For a tensor to be viewed, the new
@@ -6066,14 +6066,14 @@ contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 
   \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
+Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`size`
 without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
 :meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
 returns a view if the shapes are compatible, and copies (equivalent to calling
 :meth:`contiguous`) otherwise.
 
 Args:
-    shape (torch.Size or int...): the desired size
+    size (torch.Size or int...): the desired size
 
 Example::
 
@@ -6521,7 +6521,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
 add_docstr_all(
     "masked_scatter",
     r"""
-masked_scatter(mask, tensor) -> Tensor
+masked_scatter(mask, source) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 
