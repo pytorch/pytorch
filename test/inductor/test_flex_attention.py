@@ -881,8 +881,9 @@ def _descriptor_load_pattern(operand):
 
 def _pointer_load_pattern(operand):
     # load_checked_2d is defined unconditionally in every generated kernel, so
-    # only an operand-qualified call establishes the fallback.
-    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+    # only an operand-qualified call establishes the fallback. A kernel defined at
+    # module level calls it by a name suffixed with the kernel's own.
+    return rf"\bload_checked_2d(?:_\w+)?\(\s*{operand.upper()}\s*,"
 
 
 def _check_int64_decode_narrows_coordinates(

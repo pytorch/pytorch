@@ -217,22 +217,23 @@ save_mm_context_fn = functools.partial(
 def shared_recompute_code(code, side):
     """Map region index -> (function body, sources of the kernels it launches)
     for each shared checkpoint-recompute subgraph in Inductor output ``code``,
-    where ``side`` is "fw" or "bw". The subgraph name and the ``optimize_mem``
+    where ``side`` is "fw" or "bw". The subgraph name, the ``optimize_mem``
     autotuning hint (which the forward and backward compiles set differently)
-    are normalized away so both sides compare equal."""
+    and the kernel's cache path (a hash of its source, hint included) are
+    normalized away so both sides compare equal."""
     shared = {}
     for i in re.findall(rf"def recompute_(\d+)_{side}_mod\(args\):", code):
         name = f"recompute_{i}_{side}_mod"
         body = re.search(rf"def {name}\(args\):\n(.*?)\n\n\n", code, re.DOTALL).group(1)
-        sources = [
-            re.search(
-                rf"async_compile\.triton\('{k}', \'\'\'(.*?)\'\'\'", code, re.DOTALL
-            )
-            .group(1)
-            .replace("'optimize_mem': True, ", "")
-            .replace("'optimize_mem': False, ", "")
-            for k in re.findall(r"(triton_\w+)\.run\(", body)
-        ]
+        sources = []
+        for k in re.findall(r"(triton_\w+)\.run\(", body):
+            d = code.index(f"\ndef {k}(")
+            end = re.compile(r"\n(?=\S)").search(code, d + 1).start()
+            source = code[code.rindex("\n@triton_heuristics.", 0, d) : end]
+            source = re.sub(r"\n *filename=[^\n]*", "", source)
+            for hint in ("'optimize_mem': True, ", "'optimize_mem': False, "):
+                source = source.replace(hint, "")
+            sources.append(source)
         shared[int(i)] = (body.replace(name, "shared"), sources)
     return shared
 
@@ -1952,7 +1953,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4911")
     @requires_gpu_and_triton
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -2041,7 +2041,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3393")
     @requires_gpu_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
@@ -2073,6 +2072,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # Save the AOT graphs
         aot_graphs = []
         from torch._inductor import compile_fx
+        from torch._inductor.utils import fresh_cache
 
         def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
             aot_graphs.append(graph)
@@ -2083,7 +2083,10 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         )
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        opt_fn(*args1).sum().backward()
+        # A warm FX-graph cache short-circuits inner_compile, leaving aot_graphs
+        # empty; use a fresh cache so the hook always runs.
+        with fresh_cache():
+            opt_fn(*args1).sum().backward()
 
         fwd_graph = aot_graphs[0]
         # Determine which fused attention backend is expected based on the
@@ -3791,10 +3794,12 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_sac_pieces(self, device):
         # Saved values split the recompute into pieces, each shared separately.
-        # Saving both matmuls gives three: the norm before the first, the silu
-        # between them, and the mul + sigmoid after the second, which reads the
-        # first piece's output h. Saving only the second mm, which the recomputed
-        # first mm feeds, gives two.
+        # Saving both matmuls leaves the norm before the first, the silu between
+        # them, and the mul + sigmoid after the second, which reads h. The
+        # backward needs h right away but the norm only for the first matmul's
+        # gradients, so h = x.sin() is a piece of its own and the norm's piece
+        # runs after the second matmul's gradients: four pieces. Saving only the
+        # second mm, which the recomputed first mm feeds, gives two.
         def three(x, w1, w2):
             h = x.sin()
             n = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6)
@@ -3816,8 +3821,12 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
             return create_selective_checkpoint_contexts(policy)
 
-        cases = ((three, save_mm_context_fn, 3), (two, save_second_mm, 2))
-        for gn, context_fn, pieces in cases:
+        three_order = ["recompute"] * 3 + ["mm"] * 2 + ["recompute"] + ["mm"] * 2
+        cases = (
+            (three, save_mm_context_fn, 4, three_order),
+            (two, save_second_mm, 2, None),
+        )
+        for gn, context_fn, pieces, bw_order in cases:
             with self.subTest(gn.__name__):
                 torch._dynamo.reset()
 
@@ -3831,7 +3840,25 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     torch.randn(8, 8, device=device, requires_grad=True)
                     for _ in range(nargs)
                 ]
-                self._validate(fn, self._shared_recompute_backend(pieces), *args)
+                backend = self._shared_recompute_backend(pieces, bw_order=bw_order)
+                self._validate(fn, backend, *args)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_cast_stays_in_piece(self, device):
+        # The backward needs y's bf16 cast later than the rest of the layer, but
+        # a piece of its own would keep the fp32 y alive until then instead of
+        # the smaller cast, so the cast stays in the layer's piece.
+        def layer(x, g):
+            x32 = x.float()
+            y = x32 * torch.rsqrt(x32.pow(2).mean(-1, keepdim=True) + 1e-6) * g
+            return x + torch.softmax(y, -1).to(x.dtype) * y.to(x.dtype)
+
+        def fn(x, g):
+            return torch.utils.checkpoint.checkpoint(layer, x, g, use_reentrant=False)
+
+        x = torch.randn(8, 8, device=device, dtype=torch.bfloat16, requires_grad=True)
+        g = torch.randn(8, device=device, requires_grad=True)
+        self._validate(fn, self._shared_recompute_backend(1), x, g)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_multi_output_op(self, device):
@@ -3839,7 +3866,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         # its results either graph reads: var_mean's getitems; native_layer_norm's
         # mean and rstd, which the partitioner saves (only its backward reads
         # them) while recomputing its output; SDPA's logsumexp etc., which only
-        # its backward reads.
+        # its backward reads. (var_mean's add + rsqrt are a piece of their own:
+        # the backward recomputes them after a gradient op.)
         def var_mean(x, y):
             h = torch.matmul(x, y)
             v, m = torch.var_mean(h, dim=-1, keepdim=True)
@@ -3856,11 +3884,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         save_mm = {"context_fn": save_mm_context_fn}
         cases = (
-            (var_mean, save_mm, [(8, 8)] * 2),
-            (layer_norm, save_mm, [(8, 8)] * 2),
-            (sdpa, {}, [(2, 4, 16, 8)] * 3),
+            (var_mean, save_mm, [(8, 8)] * 2, 2),
+            (layer_norm, save_mm, [(8, 8)] * 2, 1),
+            (sdpa, {}, [(2, 4, 16, 8)] * 3, 1),
         )
-        for gn, kwargs, shapes in cases:
+        for gn, kwargs, shapes, pieces in cases:
             with self.subTest(gn.__name__):
                 torch._dynamo.reset()
 
@@ -3872,7 +3900,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 args = [
                     torch.randn(s, device=device, requires_grad=True) for s in shapes
                 ]
-                self._validate(fn, self._shared_recompute_backend(1), *args)
+                self._validate(fn, self._shared_recompute_backend(pieces), *args)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_copies_constants(self, device):
@@ -3929,39 +3957,23 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_moves_readers(self, device):
-        # Forward: the piece recomputing p1 and p1 * i2 reads the saved i2,
-        # which the forward computes after the saved c that reads p1, so c moves
-        # below the shared call.
-        def forward_case(x, w, y, w2):
+        # The piece recomputing p1 and p1 * i2 reads the saved i2, which the
+        # forward computes after the saved c that reads p1, so c moves below the
+        # shared call. (The backward runs each piece where the partitioner put
+        # its recompute, so its readers come after it already.)
+        def gn(x, w, y, w2):
             p1 = x.sin()
             c = p1 @ w
             i2 = y @ w2
             return c + (p1 * i2).cos()
 
-        # Backward: the second piece (b1, b1 * a, b1.exp(), after the saved mm)
-        # reads the first piece's a. The backward uses b1.exp() for its gradient
-        # before it recomputes a, so that gradient moves below the second
-        # piece's call.
-        def backward_case(x, w):
-            a = x.sin()
-            b1 = (a @ w).cos()
-            return (b1 * a).sin() + b1.exp()
+        def fn(*args):
+            return torch.utils.checkpoint.checkpoint(
+                gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
+            )
 
-        cases = ((forward_case, 4, 1), (backward_case, 2, 2))
-        for gn, nargs, shared in cases:
-            with self.subTest(gn=gn.__name__):
-                torch._dynamo.reset()
-
-                def fn(*args, gn=gn):
-                    return torch.utils.checkpoint.checkpoint(
-                        gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
-                    )
-
-                args = [
-                    torch.randn(8, 8, device=device, requires_grad=True)
-                    for _ in range(nargs)
-                ]
-                self._validate(fn, self._shared_recompute_backend(shared), *args)
+        args = [torch.randn(8, 8, device=device, requires_grad=True) for _ in range(4)]
+        self._validate(fn, self._shared_recompute_backend(1), *args)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_convex_pieces(self, device):

@@ -412,6 +412,22 @@ PyObject* _get_type_slots(
   return tuple;
 }
 
+// PyTypeObject.tp_name, which Python does not expose: a class statement
+// stores the bare name, C types "module.name" (see descr_repr).
+PyObject* _get_type_tp_name(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (!_checkParamCount(nargs, 1)) {
+    return nullptr;
+  }
+  if (!PyType_Check(args[0])) {
+    PyErr_SetString(PyExc_TypeError, "get_type_tp_name expects a type");
+    return nullptr;
+  }
+  return PyUnicode_FromString(((PyTypeObject*)args[0])->tp_name);
+}
+
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
@@ -428,6 +444,11 @@ void _register_functions(PyObject* mod) {
           nullptr},
       PyMethodDef{
           "get_type_slots", PYC_FN(_get_type_slots), METH_FASTCALL, nullptr},
+      PyMethodDef{
+          "get_type_tp_name",
+          PYC_FN(_get_type_tp_name),
+          METH_FASTCALL,
+          nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},
   });
   PyModule_AddFunctions(mod, fns.data());
@@ -473,7 +494,11 @@ void initDynamoBindings(PyObject* torch) {
           "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(
           "update_diff_guard_root_manager",
-          &CacheEntry::update_diff_guard_root_manager);
+          &CacheEntry::update_diff_guard_root_manager)
+      // Python is handed copies, so compare the entries they were taken from.
+      // compile_id rules out a later entry reusing a freed one's address.
+      .def("__eq__", &CacheEntry::py_equal, py::is_operator())
+      .def("__hash__", &CacheEntry::py_hash);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
       .def_readonly("guard_manager", &PrecompileEntry::guard_manager);

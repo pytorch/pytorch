@@ -31,7 +31,10 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    optimization_hint,
+)
 from torch.fx.passes.reinplace import _is_view_op
 from torch.fx.traceback import (
     _get_memory_budget_annotation,
@@ -238,14 +241,60 @@ def deterministic_recompute(
         shared |= new
         _close(list(new))
 
+    # The partitioner places recompute right before its first use in the
+    # backward, so a region's recompute falls into runs separated by gradient
+    # ops (views aside). A piece runs all at once at its first reader and its
+    # outputs stay alive until their last, so a piece spanning runs would
+    # compute the later runs' values early; pieces stay within one run.
+    copy_names = {n.name for n in copies}
+    bw_run: dict[str, int] = {}
+    run, gap = 0, False
+    for n in bw_module.graph.nodes:
+        if n.op in ("placeholder", "output"):
+            continue
+        if n.name in copy_names:
+            run += gap
+            gap = False
+            bw_run[n.name] = run
+        elif not _is_view(n.target):
+            gap = True
+    run_of = {n: bw_run[n.name] for n in recomputed if n.name in bw_run}
+    # A node run after its inputs' run is better computed with them if it is
+    # their last reader and smaller than them (e.g. a cast of an fp32 value to
+    # bf16): the gap then holds its output instead of its inputs. (Not if it's
+    # just as big: that only grows the piece, and in the forward a piece writes
+    # out everything the backward reads from it at once.)
+    bw_index = {n.name: i for i, n in enumerate(bw_module.graph.nodes)}
+
+    def _nbytes(n: torch.fx.Node) -> int:
+        val = n.meta.get("val")
+        if not isinstance(val, torch.Tensor):
+            return 0
+        return optimization_hint(val.numel(), fallback=1) * val.element_size()
+
+    for n in fw_module.graph.nodes:
+        inputs = [a for a in n.all_input_nodes if a in run_of]
+        if n not in run_of or not inputs or _nbytes(n) == 0:
+            continue
+        here = bw_index[n.name]
+        freed = sum(
+            _nbytes(a)
+            for a in inputs
+            if max(bw_index[u.name] for u in bw_body[a.name].users) == here
+        )
+        prev = max(run_of[a] for a in inputs)
+        if prev < run_of[n] and _nbytes(n) < freed:
+            run_of[n] = prev
+
     # Constant and shared pieces go first, so the pieces that read them find
     # their outputs in bw_of.
     pieces = _split_region(sorted(direct, key=order.__getitem__), copied, order)
     for nodes in regions.values():
-        pieces += _split_region([n for n in nodes if n in shared], copied, order)
+        shared_nodes = [n for n in nodes if n in shared]
+        pieces += _split_region(shared_nodes, copied, order, run_of)
     for nodes in regions.values():
         rest = [n for n in nodes if n not in direct and n not in shared]
-        pieces += _split_region(rest, copied, order)
+        pieces += _split_region(rest, copied, order, run_of)
 
     changed = False
     # The backward node holding each value a shared piece returns, so later
@@ -273,9 +322,11 @@ def _split_region(
     nodes: list[torch.fx.Node],
     copied: set[torch.fx.Node],
     order: dict[torch.fx.Node, int],
+    run_of: dict[torch.fx.Node, int] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """Split a region's recomputed nodes (in topological order) into convex
-    pieces, e.g. two recomputed stretches separated by a saved matmul. A piece
+    pieces, e.g. two recomputed stretches separated by a saved matmul. With
+    ``run_of``, a piece only takes nodes of its seed's run. A piece
     must be convex: if a path left it and came back, no single call could replace
     it. Each piece grows from the first unassigned node, taking a neighboring
     node whenever every node on a path between the piece and it is an unassigned
@@ -285,6 +336,7 @@ def _split_region(
     values outside the region and ``copied`` constants are free to replay, so
     they join every piece that reads them instead of joining pieces together.
     Pieces and their nodes are sorted by ``order``."""
+    run_of = run_of or {}
     in_region = set(nodes)
     outside_views: set[torch.fx.Node] = set()
     for n in nodes:
@@ -310,6 +362,7 @@ def _split_region(
             continue
         group = _unit(seed)
         free -= group
+        run = run_of.get(seed)
         lo = min(order[n] for n in group)
         hi = max(order[n] for n in group)
         frontier: list[tuple[int, torch.fx.Node]] = []
@@ -322,8 +375,9 @@ def _split_region(
 
         _push(group)
         # A rejection means some path between the piece and the neighbor goes
-        # through a node that is neither free nor replayed; growing the piece
-        # keeps that path, so a rejected neighbor stays rejected.
+        # through a node that is neither free nor replayed, or is of another
+        # run; growing the piece keeps that path, so a rejected neighbor stays
+        # rejected.
         rejected: set[torch.fx.Node] = set()
         while frontier:
             _, v = heapq.heappop(frontier)
@@ -335,7 +389,9 @@ def _split_region(
             added = _hull_additions(group, unit, order, unit_lo, unit_hi)
             # Replayed nodes may sit on such a path; they are copied into the
             # piece anyway.
-            if all(n in free or n in replayed for n in added):
+            if all(n in free or n in replayed for n in added) and all(
+                run_of.get(n, run) == run for n in added - replayed
+            ):
                 added -= replayed
                 free -= added
                 group |= added
