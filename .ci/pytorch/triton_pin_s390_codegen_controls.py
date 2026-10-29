@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def kernel_source(label, explicit_fma=False):
     source = (ROOT / "aten/src/ATen/native/cpu/GridSamplerKernel.cpp").read_text()
-    source = source[:source.index("// ~~~~~~~~~~~~~~~~~~~~~~~~~ Grid Sample Kernels")]
+    source = source.replace("REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl)", "")
+    source = source.replace("REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl)", "")
     source = source.replace("#define TORCH_ASSERT_NO_OPERATORS", "#include <ATen/Functions.h>\n#include <torch/library.h>")
     if explicit_fma:
         replacements = {
@@ -42,35 +43,19 @@ def kernel_source(label, explicit_fma=False):
         for old, new in replacements.items():
             assert old in source, old
             source = source.replace(old, new)
-    # Instantiate the unchanged bicubic/zeros/align_corners=false specialization
-    # and grid iterator, without replacing PyTorch's registered CPU kernel.
+    # Keep the complete original dispatch/specialization compilation context.
+    # An indirect call mirrors DispatchStub and prevents constant propagation
+    # from reducing this to the smaller bicubic-only probe.
     source += r'''
-} } // anonymous namespace and at::native
 namespace at::native {
 std::vector<Tensor> pin_backward_LABEL(const Tensor& input, const Tensor& grid,
                                       const Tensor& grad_output_) {
   TORCH_CHECK(input.scalar_type() == kFloat && grid.scalar_type() == kFloat);
-  auto grad_output = grad_output_.contiguous();
   auto grad_input = at::zeros(input.sizes(), input.options());
   auto grad_grid = at::empty(grid.sizes(), grid.options());
-  auto inp_acc = input.accessor<const float, 4>();
-  auto grid_acc = grid.accessor<const float, 4>();
-  auto gout_acc = grad_output.accessor<const float, 4>();
-  auto ginp_acc = grad_input.accessor<float, 4>();
-  auto ggrid_acc = grad_grid.accessor<float, 4>();
-  ApplyGridSample<float, 2, GridSamplerInterpolation::Bicubic,
-                  GridSamplerPadding::Zeros, false> grid_sample(inp_acc);
-  for (const auto n : c10::irange(input.size(0))) {
-    auto inp = inp_acc[n];
-    auto gout = gout_acc[n];
-    auto ginp = ginp_acc[n];
-    auto ggrid = ggrid_acc[n];
-    grid_sample_2d_grid_slice_iterator(grid_acc[n],
-        [&](const Vectorized<float>& x, const Vectorized<float>& y,
-            int64_t offset, int64_t len) {
-          grid_sample.backward<true>(&ginp, ggrid, gout, inp, offset, x, y, len);
-        });
-  }
+  decltype(&grid_sampler_2d_backward_cpu_kernel_impl) volatile fn =
+      &grid_sampler_2d_backward_cpu_kernel_impl;
+  fn(grad_input, grad_grid, grad_output_, input, grid, 2, 0, false, {true, true});
   return {grad_input, grad_grid};
 }
 }
@@ -98,7 +83,7 @@ def investigate(data, report, debug):
     baseline = [torch.ops.aten.grid_sampler_2d_backward(cv, iv, gv, 2, 0, False, [True, True])
                 for iv, gv, cv in layouts]
     flags = ["-O3", "-std=c++20", "-fno-math-errno", "-fno-trapping-math"]
-    flags += (["-march=z15", "-mzvector", "-DCPU_CAPABILITY=ZVECTOR", "-DCPU_CAPABILITY_ZVECTOR"]
+    flags += (["-march=z15", "-mvx", "-mzvector", "-DCPU_CAPABILITY=ZVECTOR", "-DCPU_CAPABILITY_ZVECTOR"]
               if native else ["-mavx2", "-mfma", "-mf16c", "-DCPU_CAPABILITY=AVX2", "-DCPU_CAPABILITY_AVX2"])
     results = {}
     for label, explicit, extra in [("original", False, []),
