@@ -2,7 +2,10 @@
 
 import json
 import os
+from pathlib import Path
+import shutil
 import sys
+import zipfile
 
 import triton_pin_mi350_controls as controls
 
@@ -64,6 +67,20 @@ def main():
             metrics[phase] = values
             (controls.REPORT / 'metrics.json').write_text(json.dumps(metrics, indent=2))
             (controls.REPORT / "results.json").write_text(json.dumps(results, indent=2))
+            kernel_archive = controls.REPORT / f'{phase}-generated-kernels.zip'
+            with zipfile.ZipFile(kernel_archive, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for cache_name in ['triton-cache', 'inductor-cache']:
+                    cache_root = controls.WORK / phase / cache_name
+                    if cache_root.exists():
+                        for path in cache_root.rglob('*'):
+                            if path.is_file() and path.suffix in {'.py', '.json', '.ttir', '.ttgir', '.llir', '.ptx'}:
+                                archive.write(path, Path(cache_name) / path.relative_to(cache_root))
+            if os.environ.get('OUTPUT_DIR'):
+                artifact_root = Path(os.environ['OUTPUT_DIR']) / 'triton-pin-titan-controls'
+                artifact_root.mkdir(parents=True, exist_ok=True)
+                for path in controls.REPORT.iterdir():
+                    if path.is_file() and path.suffix in {'.log', '.json', '.zip'}:
+                        shutil.copy2(path, artifact_root / path.name)
     print("TITAN_NATIVE_CONTROLS", json.dumps(results), flush=True)
 
 
