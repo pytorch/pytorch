@@ -359,6 +359,8 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeTensorMode.cpp
+# /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
 # /torch/csrc/Generator.h
 # /torch/csrc/Layout.cpp
@@ -561,6 +563,7 @@
 # /test/test_model_exports_to_core_aten.py
 # /test/test_module_tracker.py
 # /test/test_monitor.py
+# /test/test_multigpu.py
 # /test/test_multiprocessing.py
 # /test/test_multiprocessing_spawn.py
 # /test/test_namedtuple_return_api.py
@@ -618,7 +621,7 @@
 # label: module: mta
 /test/test_foreach.py @janeyx99
 # label: oncall: pt2, module: higher order operators
-/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+/test/test_hop_infra.py @aorenste @bohnstingl
 # label: module: autograd
 /test/test_ops_fwd_gradients.py @soulitzer
 /test/test_ops_gradients.py @soulitzer
@@ -634,12 +637,12 @@
 # label: module: cuda
 /aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+# /test/test_cow.py
 # /test/test_cuda.py
 # /test/test_cuda_compatibility.py
 # /test/test_cuda_expandable_segments.py
 # /test/test_cuda_graph_debug.py
 # /test/test_cuda_graph_utils.py
-# /test/test_cuda_multigpu.py
 # /test/test_cuda_nvml_based_avail.py
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
@@ -1046,6 +1049,8 @@
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
+# label: oncall: profiler, module: third_party
+/third_party/dynolog_headers/ @scotts @ryanzhang22
 # label: module: third_party, module: xpu
 /third_party/xpu.txt @EikanWang @gujinghui
 #
@@ -1144,6 +1149,7 @@
 # /test/test_utils.py
 # /test/test_utils_config_module.py
 # /test/test_utils_filelock.py
+# /test/torchci/
 # /tools/test/
 # /tools/testing/
 # /torch/_logging/
@@ -1155,7 +1161,7 @@
 # /torch/testing/_internal/common_device_type.py
 /test/run_test.py @pytorch/pytorch-dev-infra
 # label: oncall: pt2, module: testing, module: higher order operators
-/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
 # label: module: benchmark
@@ -1216,7 +1222,7 @@
 /torch/fx/proxy.py @zou3519
 # label: oncall: pt2, module: higher order operators
 # /test/higher_order_ops/
-/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+/torch/_higher_order_ops/ @aorenste @bohnstingl
 # label: oncall: pt2, module: dynamic shapes
 /torch/fx/experimental/symbolic_shapes.py @laithsakka
 /torch/fx/experimental/sym_node.py @laithsakka
@@ -1241,7 +1247,7 @@
 # label: oncall: pt2, module: dynamo, module: onnx
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 # label: oncall: pt2, module: dynamo, module: higher order operators
-/torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+/torch/_dynamo/variables/higher_order_ops.py @aorenste @bohnstingl
 # label: oncall: pt2, module: dynamo, module: pytree
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 #
@@ -1276,13 +1282,17 @@
 # [ai_agent_tooling]
 # /.agents/
 # /.claude/
+# /.github/actions/pi-agent/
 # /.github/copilot-instructions.md
+# /.github/pi/
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
 # /.github/workflows/claude-distributed-triage-cron.yml
 # /.github/workflows/claude-distributed-triage.yml
-# /.github/workflows/claude-issue-triage-run.yml
-# /.github/workflows/claude-issue-triage.yml
+# /.github/workflows/issue-triage-pi.yml
+# /.github/workflows/issue-triage.yml
+# /.github/workflows/pi-agent-tests.yml
+# /.github/workflows/pi-triage-tests.yml
 # /AGENTS.md
 # /AI_POLICY.md
 # /CLAUDE.md
@@ -1301,6 +1311,8 @@
 # label: module: docs
 # /docs/
 /docs/source/conf.py @albanD
+# label: oncall: distributed infra, module: docs
+/docs/source/distributed* @d4l3k @kapilsh
 # label: oncall: pt2, module: docs, module: higher order operators
 /docs/source/higher_order_ops/ @bohnstingl
 # label: module: docs, module: xpu
