@@ -7623,6 +7623,8 @@ from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 torch._inductor.config.triton.multi_kernel = 1
+# The positive control's picked sub-kernel must not satisfy the capture's check.
+os.environ["TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE"] = "1"
 benchmarked = []
 bench = CachingAutotuner.bench
 benchmark_sub_kernels = MultiKernelCall.benchmark_sub_kernels
@@ -9359,8 +9361,10 @@ class TestPrecompileRuntimeCache(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_capture_with_multi_kernel_hints(self):
-        from torch._inductor.codegen.multi_kernel import SizeHintMultiKernel
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.codegen.multi_kernel import (
+            SizeHintMultiKernel,
+            SizeHintMultiKernelCall,
+        )
         from torch._inductor.utils import fresh_cache
 
         a = torch.randn(128, 64, device="cuda")
@@ -9381,13 +9385,20 @@ class TestPrecompileRuntimeCache(TestCase):
                 self, gemm, [(a, b)], backend="inductor", dynamic=True
             )
         self.assertTrue(built, "capture built no SizeHintMultiKernel")
-        runnable = torch.compiler.precompile.load(source, cache)
+        dispatched = []
+        run = SizeHintMultiKernelCall.run
+
+        def recording_run(self, *args, **kwargs):
+            dispatched.append(self.multi_kernel_name)
+            return run(self, *args, **kwargs)
+
         with (
-            mock.patch.object(CachingAutotuner, "bench") as bench,
+            mock.patch.object(SizeHintMultiKernelCall, "run", recording_run),
+            torch.compiler.precompile.no_compilation(),
             torch.no_grad(),
         ):
-            out = runnable(a, b)
-        bench.assert_not_called()
+            out = torch.compiler.precompile.load(source, cache)(a, b)
+        self.assertTrue(dispatched, "the artifact ran no SizeHintMultiKernelCall")
         torch.testing.assert_close(out, gemm(a, b))
 
     @skipIfCrossRef
