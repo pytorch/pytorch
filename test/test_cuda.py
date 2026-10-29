@@ -3065,24 +3065,24 @@ raise RuntimeError("device assert did not fire")
         with self.assertRaisesRegex(
             RuntimeError, "Boolean value of Tensor with no values is ambiguous"
         ):
-            torch._assert_async(torch.tensor([], device="cuda"))
+            torch.assert_async(torch.tensor([], device="cuda"))
         with self.assertRaisesRegex(
             RuntimeError,
             "Boolean value of Tensor with more than one value is ambiguous",
         ):
-            torch._assert_async(torch.tensor([0, 0], device="cuda"))
+            torch.assert_async(torch.tensor([0, 0], device="cuda"))
 
-        torch._assert_async(torch.tensor(1, device="cuda"))
-        torch._assert_async(torch.tensor(0.1, device="cuda"))
-        torch._assert_async(torch.tensor(-0.1, device="cuda"))
-        torch._assert_async(torch.tensor(True, device="cuda"))
-        torch._assert_async(torch.tensor(0 + 0.1j, device="cuda"))
+        torch.assert_async(torch.tensor(1, device="cuda"))
+        torch.assert_async(torch.tensor(0.1, device="cuda"))
+        torch.assert_async(torch.tensor(-0.1, device="cuda"))
+        torch.assert_async(torch.tensor(True, device="cuda"))
+        torch.assert_async(torch.tensor(0 + 0.1j, device="cuda"))
 
         fail_stmts = [
-            "torch._assert_async(torch.tensor(0, device='cuda'))",
-            "torch._assert_async(torch.tensor(0.0, device='cuda'))",
-            "torch._assert_async(torch.tensor(False, device='cuda'))",
-            "torch._assert_async(torch.tensor(0 + 0j, device='cuda'))",
+            "torch.assert_async(torch.tensor(0, device='cuda'))",
+            "torch.assert_async(torch.tensor(0.0, device='cuda'))",
+            "torch.assert_async(torch.tensor(False, device='cuda'))",
+            "torch.assert_async(torch.tensor(0 + 0j, device='cuda'))",
         ]
 
         import subprocess

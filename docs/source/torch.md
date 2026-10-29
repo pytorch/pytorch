@@ -989,6 +989,7 @@ during migration, we recommend using the public APIs.
     set_warn_always
     is_warn_always_enabled
     vmap
+    assert_async
     _assert
     typename
 ```
