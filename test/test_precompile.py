@@ -7971,6 +7971,10 @@ class TestPrecompileRuntimeCache(TestCase):
 
         def write_late_native_dependency():
             if triton_cache is not None:
+                # An installed Triton without an active backend does not own a
+                # capture cache, so its native dependencies are not transported.
+                if _runtime_cache._capture.cache_root is None:
+                    return
                 from triton.runtime.cache import get_cache_manager
 
                 native = "late_helper" + sysconfig.get_config_var("EXT_SUFFIX")
@@ -7990,7 +7994,7 @@ class TestPrecompileRuntimeCache(TestCase):
             with _producer_triton_cache(root / "consumer"):
                 pc.load(source, cache)
                 pc.load(source, cache)
-            if triton_cache is not None:
+            if late:
                 self.assertEqual(
                     (root / "consumer" / late["path"]).read_bytes(),
                     b"late native dependency",
