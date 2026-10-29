@@ -731,6 +731,56 @@ class TestCustomOp(CustomOpTestCaseBase):
         names = {e.name for e in prof.events()}
         self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
 
+    @skipIfTorchDynamo("Checks which dispatcher kernels run in eager")
+    def test_skip_autograd_kernel_if_no_grad(self):
+        lib = self.lib()
+        lib.define("skip_if_no_grad(Tensor x, Tensor[] ys) -> Tensor")
+        op = self.ns().skip_if_no_grad.default
+        calls = []
+
+        def autograd_kernel(keyset, x, ys):
+            calls.append("autograd")
+            with torch._C._AutoDispatchBelowAutograd():
+                return op.redispatch(keyset & torch._C._after_autograd_keyset, x, ys)
+
+        lib.impl("skip_if_no_grad", lambda x, ys: x + 1, "CPU")
+        lib.impl(
+            "skip_if_no_grad",
+            autograd_kernel,
+            "Autograd",
+            with_keyset=True,
+            _skip_if_no_grad=True,
+        )
+        x = torch.zeros(2)
+        xg = torch.zeros(2, requires_grad=True)
+        for pyobj_dispatch in (True, False):
+            op._enable_pyobj_dispatch(pyobj_dispatch)
+            calls.clear()
+            self.assertEqual(op(x, [x]), x + 1)
+            with torch.no_grad():
+                op(xg, [xg])
+            self.assertEqual(calls, [])
+            op(xg, [x])
+            op(x, [xg])
+            self.assertEqual(calls, ["autograd", "autograd"])
+
+        with self.assertRaisesRegex(RuntimeError, "only supported for Autograd"):
+            lib.impl("skip_if_no_grad", lambda x, ys: x, "CPU", _skip_if_no_grad=True)
+
+    @skipIfTorchDynamo("Checks eager autograd behavior")
+    def test_custom_op_kernel_runs_below_autograd_without_grad(self):
+        w = torch.randn(3, requires_grad=True)
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::uses_captured_param", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x * w
+
+        for pyobj_dispatch in (True, False):
+            f._opoverload._enable_pyobj_dispatch(pyobj_dispatch)
+            self.assertFalse(f(torch.randn(3)).requires_grad)
+
     def test_custom_op_call_has_fn_signature(self):
         @torch.library.custom_op(f"{self.test_ns}::call_signature", mutates_args=())
         def f(x: Tensor, y: Tensor, n: int = 2, *, scale: float = 1.0) -> Tensor:
