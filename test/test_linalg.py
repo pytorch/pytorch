@@ -9212,6 +9212,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfRocm
     @skipIfNoLapack
     @onlyCUDA
+    @setLinalgBackendsToDefaultFinally
     @dtypes(*complex_types())
     def test_linalg_ldl_factor_edge_cases(self, device, dtype):
         # Empty inputs, in the matrix, the batch, or both
@@ -9253,6 +9254,16 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             ns |= {nb + i for i in (-1, 0, 1, 2)}
         for n in sorted(ns):
             self._check_ldl_factor_random(n, device, dtype)
+
+        # cuSOLVER has no Hermitian LDL for complex inputs, so the cusolver backend
+        # takes the custom kernel too, rather than raising
+        torch.backends.cuda.preferred_linalg_library('cusolver')
+        t = torch.randn(4, 5, 5, device=device, dtype=dtype)
+        A = t + t.mH
+        A[1].diagonal().zero_()  # 2x2 pivots
+        A[2, -1, :] = A[2, :, -1] = 0  # info = 5
+        A[3].zero_()  # info = 1
+        compare_with_cpu(A)
 
     @skipIfRocm
     @skipIfNoLapack
