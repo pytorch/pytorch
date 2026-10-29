@@ -1006,45 +1006,54 @@ class TestProfiler(TestCase):
         self.assertEqual(trace[0]["name"], tricky_name)
 
     def test_experimental_config_pickle(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", BytesWarning)
+        # Test with default values
+        config = _ExperimentalConfig()
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
 
-            # Test with default values
-            config = _ExperimentalConfig()
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Alternate the flags in pickled order so that a flag read from a
+        # neighboring slot gets the wrong value.
+        config = _ExperimentalConfig(
+            verbose=True,
+            performance_events=["event1", "event2"],
+            enable_cuda_sync_events=False,
+            disable_external_correlation=True,
+            profile_all_threads=False,
+            capture_overload_names=True,
+            record_python_gc_info=False,
+            expose_kineto_event_metadata=True,
+            custom_profiler_config="custom_config",
+            adjust_timestamps=False,
+            trace_only=True,
+        )
+        pickled = pickle.dumps(config)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, _ExperimentalConfig)
+        self.assertEqual(unpickled.__getstate__(), config.__getstate__())
 
-            # Test with non-default values
-            config = _ExperimentalConfig(
-                verbose=True,
-                performance_events=["event1", "event2"],
-                enable_cuda_sync_events=True,
-                adjust_profiler_step=True,
-                disable_external_correlation=True,
-                profile_all_threads=True,
-                capture_overload_names=True,
-                record_python_gc_info=True,
-                expose_kineto_event_metadata=True,
-                custom_profiler_config="custom_config",
-            )
-            pickled = pickle.dumps(config)
-            unpickled = pickle.loads(pickled)
-            self.assertIsInstance(unpickled, _ExperimentalConfig)
+        # Test deepcopy (which uses pickle internally)
+        copied = copy.deepcopy(config)
+        self.assertIsInstance(copied, _ExperimentalConfig)
+        self.assertEqual(copied.__getstate__(), config.__getstate__())
 
-            # Test deepcopy (which uses pickle internally)
-            copied = copy.deepcopy(config)
-            self.assertIsInstance(copied, _ExperimentalConfig)
-
-    def test_adjust_profiler_step_deprecated(self):
-        # adjust_profiler_step is a deprecated no-op: passing it must warn with
-        # FutureWarning and not error.
-        with self.assertWarnsRegex(FutureWarning, "adjust_profiler_step"):
-            with profile(
-                activities=[ProfilerActivity.CPU],
-                experimental_config=_ExperimentalConfig(adjust_profiler_step=True),
-            ):
-                pass
+    def test_experimental_config_rejects_old_pickle_state(self):
+        # Pickles from before PyTorch 2.16 use a different layout, with more,
+        # fewer, or the same number of values as the current state.
+        state = _ExperimentalConfig().__getstate__()
+        old_states = [
+            state + (False,),
+            state[:-1],
+            (False, [], False, False, False, False, False, False, False, "", False),
+        ]
+        for old_state in old_states:
+            # Unpickling calls __setstate__ on an object made by __new__. pybind
+            # ignores __setstate__ on an already initialized object, so this
+            # test can't use _ExperimentalConfig().
+            config = _ExperimentalConfig.__new__(_ExperimentalConfig)
+            with self.subTest(old_state=old_state):
+                with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
+                    config.__setstate__(old_state)
 
     def test_with_modules_deprecated(self):
         # with_modules only collects data for TorchScript models and is on its
@@ -2043,12 +2052,20 @@ with open(sys.argv[1], "w") as f:
     json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
 """
         with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
             result = subprocess.run(
                 [sys.executable, "-c", script, filename],
                 capture_output=True,
                 text=True,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=120,
+                env=env,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with open(filename) as f:
@@ -4689,8 +4706,7 @@ class TestProfilerEventsParityCudaOnly(TestCase):
 
         failure_msg = """\
 ====================================================================================
-IMPORTANT: Are you making a Kineto change or bumping the third_party/kineto
-submodule hash and seeing this message?
+IMPORTANT: Are you making a Kineto change and seeing this message?
 
 New metadata keys (see below) were found in the Chrome trace JSON that are not
 yet exposed through the profiler's events() API (i.e. EventMetadata in
