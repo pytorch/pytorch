@@ -408,13 +408,25 @@ class StrictNumericsCompileTest(TestCase):
     @parametrize("op_name", ("floor_divide", "remainder", "true_divide"))
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("scalar", (False, True))
-    def test_quotient_specials(self, device, dtype, op_name, numerics, scalar):
+    @parametrize("upcast", (False, True))
+    def test_quotient_specials(self, device, dtype, op_name, numerics, scalar, upcast):
         values = _min_max_specials(dtype, device)
         a = values.repeat_interleave(values.numel())
         b = 0.7 if scalar else values.repeat(values.numel())
-        fn = getattr(torch, op_name)
-        actual = torch.compile(fn, fullgraph=True, options={"numerics": numerics})(a, b)
-        self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(a, b).view(_BIT_VIEW[dtype]))
+
+        def fn(a, b):
+            result = getattr(torch, op_name)(a, b)
+            return result, result.double()
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(a, b)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
+        )
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("op_name", ("sub", "rsub", "logaddexp2", "ldexp", "mul"))
@@ -474,7 +486,7 @@ class StrictNumericsCompileTest(TestCase):
             )
 
     @ops(
-        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp")],
+        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
