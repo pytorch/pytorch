@@ -89,6 +89,7 @@ class BenchmarkRunnerTests(TestCase):
         args.profiler_trace_name = "profile"
         profile = mock.Mock()
         setup = mock.Mock() if mode == "prefill" else None
+        request_tokens = {"input_tokens_per_second": 6} if mode == "prefill" else None
         model = torch.nn.Identity()
         model.name = "Qwen/Qwen3-0.6B"
         inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
@@ -108,7 +109,13 @@ class BenchmarkRunnerTests(TestCase):
             ),
         ):
             common.speedup_experiment(
-                args, mock.Mock(), model, inputs, hf_llm=True, setup_fn=setup
+                args,
+                mock.Mock(),
+                model,
+                inputs,
+                hf_llm=True,
+                setup_fn=setup,
+                request_tokens=request_tokens,
             )
         _, headers, values = write.call_args_list[0].args
         row = dict(zip(headers, values))
@@ -253,8 +260,8 @@ class HuggingFacePrefillTestCase(TestCase):
             version = importlib.metadata.version("transformers")
         except importlib.metadata.PackageNotFoundError:
             raise unittest.SkipTest("requires transformers") from None
-        if Version(version) < Version("5.13.0"):
-            raise unittest.SkipTest("requires transformers >= 5.13.0")
+        if Version(version) < Version("5.14.1"):
+            raise unittest.SkipTest("requires transformers >= 5.14.1")
         from transformers import AutoConfig
 
         with (
@@ -316,6 +323,7 @@ class HuggingFacePrefillTestCase(TestCase):
     @contextlib.contextmanager
     def _mock_pretrained(self):
         from benchmarks.dynamo import huggingface_llm_models as llm
+        from transformers import AutoConfig
 
         model = self._make_model("Llama", "cpu").model
         tokenizer = types.SimpleNamespace(vocab_size=32, eos_token_id=2)
@@ -326,6 +334,7 @@ class HuggingFacePrefillTestCase(TestCase):
             mock.patch.object(
                 llm.AutoModelForCausalLM, "from_pretrained", return_value=model
             ),
+            mock.patch.object(AutoConfig, "from_pretrained", return_value=model.config),
         ):
             yield
 
@@ -396,12 +405,12 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 
     def test_prompt_must_fit_generation_context(self):
         runner = self.huggingface.HuggingfaceRunner()
-        runner.args = self._runner_args("--prompt-length=2097")
-        with (
-            self._mock_pretrained(),
-            self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"),
-        ):
-            runner.load_model("cpu", "Qwen/Qwen3-0.6B", batch_size=1)
+        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=2096")
+        with self._mock_pretrained():
+            runner.validate_args(args)
+            args.prompt_length = 2097
+            with self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"):
+                runner.validate_args(args)
 
     def test_prefill_performance_run(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -527,6 +536,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.cudagraph_trees import ExecutionState, get_manager
 
+        torch._dynamo.reset()
         model = self._make_model(model_type, device)
         inputs = torch.randint(0, 32, (2, 4), device=device)
         skips_before = counters["inductor"]["cudagraph_skips"]
