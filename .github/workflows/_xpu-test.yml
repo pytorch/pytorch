@@ -208,7 +208,6 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
-          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
@@ -258,7 +257,6 @@ jobs:
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
-            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e HUGGING_FACE_HUB_TOKEN \
