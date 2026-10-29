@@ -4,13 +4,16 @@
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    skipIfFreeThreaded,
     skipIfTorchDynamo,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+import gc
 import torch
 import torch._dynamo
 import unittest
+import weakref
 import warnings
 import operator
 from collections.abc import Iterable
@@ -32,6 +35,7 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     DecompositionInterpreter,
     get_isolated_graphmodule,
+    get_proxy_mode,
     make_fx,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
@@ -829,6 +833,25 @@ del TestGenericProxyTensor
 
 class TestRealProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    @skipIfFreeThreaded("deferred refcounting frees some objects only in gc")
+    def test_tracer_not_kept_alive(self):
+        # track_tensor_tree runs for every traced op; it must not leave the
+        # proxy tracer alive in a reference cycle until the next gc.
+        tracer_refs = []
+
+        def f(x):
+            tracer_refs.append(weakref.ref(get_proxy_mode().tracer))
+            return (x + 1).split(1)
+
+        gc.collect()
+        gc.disable()
+        try:
+            make_fx(f)(torch.randn(2))
+            self.assertIsNone(tracer_refs[0]())
+        finally:
+            gc.enable()
 
     def test_error_on_data_dependent_ops(self):
         def f():
