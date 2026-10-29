@@ -357,12 +357,29 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
     """
     Copy cpu scalar if doesn't not match with given `device`
     """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        # Like eager, a GPU kernel takes a 0-dim CPU operand by value. When the
+        # operand is computed from a CPU tensor that is not 0-dim (and so cannot
+        # be passed by value), realize it into its own 0-dim CPU buffer, which
+        # the scheduler passes as a scalar, instead of fusing that tensor's CPU
+        # pointer into the GPU kernel.
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device is not None
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and any(
+                len(V.graph.get_buffer(name).get_size()) != 0
+                for name in x.get_read_names()
+            )
+        ):
+            x.realize()
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
