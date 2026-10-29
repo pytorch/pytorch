@@ -68,9 +68,12 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("key", ["a", "c"])
     @parametrize("operation", ["setitem", "update"])
-    def test_dict_update_reordered_input_reuses_graph(self, key, operation):
+    def test_dict_update_reordered_input_reuses_graph(
+        self, mapping_type, key, operation
+    ):
         def fn(x, mapping):
             if operation == "setitem":
                 mapping[key] = x + 1
@@ -82,7 +85,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
         for keys in ("ab", "ba", "ab"):
-            mapping = dict.fromkeys(keys, 0)
+            mapping = mapping_type.fromkeys(keys, 0)
             expected = mapping.copy()
             self.assertEqual(compiled(x, mapping), fn(x, expected))
             self.assertEqual(list(mapping.items()), list(expected.items()))
@@ -458,8 +461,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, module), fn(x, module))
         self.assertEqual(counter.frame_count, 2)
 
+    @parametrize("operation", ["forward", "keys", "values", "items"])
+    def test_plain_dict_hook_registry(self, operation):
+        def add(module, args, output):
+            return output + 1
+
+        def multiply(module, args, output):
+            return output * 2
+
+        def fn(x, module):
+            if operation == "forward":
+                return module(x)
+            view = getattr(module._forward_hooks, operation)()
+            return x + len(view), type(view), list(view)
+
+        module = torch.nn.Identity()
+        module.register_forward_hook(add)
+        module.register_forward_hook(multiply)
+        module._forward_hooks = dict(module._forward_hooks)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, module), fn(x, module))
+        module._forward_hooks = dict(reversed(module._forward_hooks.items()))
+        self.assertEqual(compiled(x, module), fn(x, module))
+
     @parametrize("return_keys", [False, True])
-    def test_hook_dict_keys_guard(self, return_keys):
+    @parametrize("hook_count", [1, 2])
+    def test_hook_dict_keys_guard(self, return_keys, hook_count):
         def hook(module, args, output):
             return output + 1
 
@@ -472,7 +500,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         for index in range(2):
             module = torch.nn.Identity()
-            module.register_forward_hook(hook)
+            for _ in range(hook_count):
+                module.register_forward_hook(hook)
             self.assertEqual(compiled(x, module), fn(x, module))
             self.assertEqual(counter.frame_count, index + 1 if return_keys else 1)
 
@@ -965,6 +994,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("bound", [False, True])
+    def test_dict_wrapper_descriptor_valid_receiver(self, bound):
+        def fn(x):
+            mapping = {"a": x, "b": x}
+            size = dict.__len__.__get__(mapping)() if bound else dict.__len__(mapping)
+            return x + size
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("method", ["keys", "items"])
+    def test_bound_dict_descriptor_storage_order(self, method):
+        def fn(x, mapping):
+            view = getattr(dict, method).__get__(mapping)()
+            return x + 1, type(view), list(view)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
 
     @parametrize("bound", [False, True])
     def test_dict_descriptor_arity_on_ordered_dict(self, bound):

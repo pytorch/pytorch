@@ -7250,6 +7250,52 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, torch.full_like(x, 2))
         self.assertEqual(calls, ["called"])
 
+    def test_builtin_wrapper_descriptor_inherited_from_object(self):
+        class Mapping(dict):
+            def __setattr__(self, name, value):
+                raise AssertionError("must bypass the override")
+
+            def __repr__(self):
+                return "mapping"
+
+        def fn(x):
+            mapping = Mapping()
+            dict.__setattr__(mapping, "extra", x + 1)
+            return mapping.extra, list.__str__(mapping)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_builtin_wrapper_descriptor_missing_receiver(self):
+        def fn(x):
+            try:
+                list.__str__()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "method, args",
+        [
+            ("__dir__", ()),
+            ("__sizeof__", ()),
+            ("__format__", ("",)),
+            ("__reduce__", ()),
+        ],
+    )
+    def test_object_method_descriptor_error_owner(self, method, args):
+        class C:
+            pass
+
+        def fn(x, obj):
+            return x + 1, getattr(obj, method)(*args)
+
+        with self.assertRaisesRegex(Unsupported, f"method `{method}` of class `C`"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1), C())
+
     @parametrize("bound", [False, True])
     def test_method_descriptor_preserves_polyfill_trace_rule(self, bound):
         class C:
