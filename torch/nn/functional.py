@@ -7480,6 +7480,11 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    For TensorWise scaling, each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Both inputs must use the same scale layout.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    It supports bfloat16, float16, and float32 outputs. Other scaling recipes require bfloat16 output.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7489,7 +7494,7 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: dtype used for the output tensor
+        output_dtype: output dtype; TensorWise accepts bfloat16, float16, or float32, other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
