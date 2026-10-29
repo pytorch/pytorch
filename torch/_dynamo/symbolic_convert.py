@@ -165,7 +165,12 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    FrameStateSizeEntry,
+    SourcelessBuilder,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -249,10 +254,13 @@ tls = threading.local()
 # belong to no module (see get_globals_source_and_value).
 UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 compare_op_handlers: dict[str, Any] = {
-    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+    k: SourcelessBuilder.create_internal_builtin(v).call_function
+    for k, v in supported_comparison_ops.items()
 }
-handle_contains = BuiltinVariable(operator.contains).call_function
-handle_not = BuiltinVariable(operator.not_).call_function
+handle_contains = SourcelessBuilder.create_internal_builtin(
+    operator.contains
+).call_function
+handle_not = SourcelessBuilder.create_internal_builtin(operator.not_).call_function
 compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
     tx, [*reversed(args)], {}
 )
@@ -543,7 +551,7 @@ class YieldValueOp(Exception):
 
 def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     nargs = len(inspect.signature(fn).parameters)
-    fn_var = BuiltinVariable(fn)
+    fn_var = SourcelessBuilder.create_internal_builtin(fn)
 
     @functools.wraps(fn)
     def impl(self: InstructionTranslator, inst: Instruction) -> None:
@@ -2981,7 +2989,9 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         if not pyexception_instance_check(val):
             raise AssertionError("expected _exception_instance_check(val) to be true")
-        typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
+        typ = SourcelessBuilder.create_internal_builtin(
+            val.exc_type  # type: ignore[attr-defined, union-attr]
+        )
         tb = val.tp_getattro_impl(
             # pyrefly: ignore[bad-argument-type]
             self,
