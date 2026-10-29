@@ -2033,6 +2033,16 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(Unsupported, msg):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
+    def test_object_richcompare_missing_override_graph_breaks_sourceless(self):
+        from torch._dynamo.exc import Unsupported
+
+        def fn(x):
+            return x + 1, f"{x}" == "tensor([1.])"
+
+        msg = "Missing tp_richcompare_impl override"
+        with self.assertRaisesRegex(Unsupported, msg):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
     def test_skip_function_richcompare(self):
         import time
 
