@@ -207,26 +207,26 @@ it.
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. The
+# python_code you JIT -- same results either way. One caveat: an artifact whose graph
+# calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a failed
+# import only warns, unless the module is in CUSTOM_OP_OVERRIDE_MODULES: its kernel
+# the graph ran at capture overrode another for the same key), then refuses to load
+# unless every op in CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is
+# registered, and every overriding kernel is still the active one, registered from
+# the same module's file. The caller must
+# import, before load, what the artifact cannot record: C++ extension ops, ops from
+# torch.library.define or __main__, and kernels registered through
+# @torch.library.impl, register_kernel or another module's Library. The
 # eager backend has no kernels to accelerate, so the eager cache carries no compiled
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
 # (python_code, cache) pair that did not come from the same precompile capture.
-# Custom ops: an artifact whose graph calls them first imports the modules recorded in
-# CUSTOM_OP_MODULES (a Dynamo artifact after its version checks). A failed import only
-# warns, unless the module is in CUSTOM_OP_OVERRIDE_MODULES (its kernel overrode another
-# for the same key at capture) or, for a Dynamo artifact, in SERVED_MODULES (it serves
-# the artifact's frames); then the load fails. The load then refuses unless every op in
-# CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
-# every overriding kernel is still the active one, registered from the same file.
-# make_fx case: before load, the caller must import C++ extension ops, ops from
-# torch.library.define or __main__, and kernels registered through @torch.library.impl,
-# register_kernel or another module's Library. Dynamo case: if an op or kernel has no
-# recorded module or a recorded module is outside torch, the artifact also imports its
-# served frames' modules, all in the order their imports finished, so the caller must
-# import only those registered outside every served frame's module.
+# A Dynamo artifact runs those imports after its version checks, and fails the load
+# when a SERVED_MODULES module (one serving its frames) does not import. If an op or
+# kernel has no recorded module or one outside torch, it also imports its served
+# frames' modules, so the caller need import only what is registered outside them.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -2050,37 +2050,10 @@ def _torch_cpp_op(op_name: str, overload: str) -> bool:
 
 # Torch's namespaces defined from C++.
 _TORCH_OP_NAMESPACES = frozenset(
-    {
-        "aten",
-        "prim",
-        "inductor",
-        "inductor_prims",
-        "profiler",
-        "quantized",
-        "_quantized",
-        "quantization",
-        "sparse",
-        "c10d",
-        "_c10d_functional",
-        "_c10d_functional_autograd",
-        "_dtensor",
-        "symm_mem",
-        "fsdp",
-        "mkl",
-        "mkldnn",
-        "mkldnn_prepacked",
-        "onednn",
-        "static_runtime",
-        "xnnpack",
-        "prepacked",
-        "vulkan",
-        "vulkan_prepack",
-        "metal",
-        "metal_prepack",
-        "vulkan_quantized",
-        "_nnapi",
-        "_native_aot",
-    }
+    "aten prim inductor inductor_prims profiler quantized _quantized quantization"  # noqa: SIM905
+    " sparse c10d _c10d_functional _c10d_functional_autograd _dtensor symm_mem fsdp"
+    " mkl mkldnn mkldnn_prepacked onednn static_runtime xnnpack prepacked vulkan"
+    " vulkan_prepack metal metal_prepack vulkan_quantized _nnapi _native_aot".split()
 )
 _TORCH_DIR = os.path.dirname(torch.__file__)
 # torch's helpers that build a Library for the caller's namespace record themselves.
@@ -2848,18 +2821,9 @@ def _build_multigraph_artifact(
     unreachable = _unreachable_frames(frames)
     mode = "installed" if unreachable else "standalone"
     binding = _entry_binding(entry_fn) if mode == "standalone" else None
+    imports = (custom_op_modules, custom_ops, custom_op_keys)
     python_code = _build_multigraph_python_source(
-        entry,
-        frames,
-        backends,
-        summary,
-        backend,
-        binding,
-        mode,
-        unreachable,
-        custom_op_modules,
-        custom_ops,
-        custom_op_keys,
+        entry, frames, backends, summary, backend, binding, mode, unreachable, *imports
     )
     inductor_bundle = None
     if backend != "eager":
