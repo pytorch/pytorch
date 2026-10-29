@@ -1987,11 +1987,11 @@ def _called_op_names(python_code: str) -> set[tuple[str, str]]:
 
 def _importable_module(name: str) -> bool:
     """Whether the loaded module ``name`` can be imported by name in another
-    process; ``__main__`` has a spec under ``python -m`` but is the loader's own."""
-    return (
-        name != "__main__"
-        and getattr(sys.modules.get(name), "__spec__", None) is not None
-    )
+    process. Under ``python -m``, ``__main__`` (and a spawn worker's
+    ``__mp_main__``) carries the spec of the module it ran; running a directory
+    or zipapp names that spec ``__main__``."""
+    spec = getattr(sys.modules.get(name), "__spec__", None)
+    return name != "__main__" and spec is not None and spec.name == name
 
 
 def _custom_op_module(op_name: str, overload: str) -> str | None:
