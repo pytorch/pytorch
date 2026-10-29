@@ -9823,6 +9823,35 @@ class TestPrecompileCustomOpRecording(TestCase):
         package.record_eager_fallback(_composite_op_fn.__code__)
         self.assertEqual(package.graph_break_op_names, {(fallback_name, "")})
 
+    def _render_with_ops(self, op_names):
+        # A Dynamo capture of a function in an importable module, whose graphs are
+        # taken to call op_names. Returns the artifact's CUSTOM_OP_MODULES and the
+        # entry's module name.
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        name = f"precompile_render_{uuid.uuid4().hex}"
+        with open(os.path.join(directory, name + ".py"), "w") as f:
+            f.write("def fn(x):\n    return x.sin() + 1\n")
+        self.enterContext(mock.patch.object(sys, "path", [directory, *sys.path]))
+        self.addCleanup(sys.modules.pop, name, None)
+        artifact = os.path.join(directory, "artifact.py")
+        with capture(
+            importlib.import_module(name).fn,
+            artifact_path=artifact,
+            cache_path=os.path.join(directory, "artifact.cache"),
+            tracer=DynamoTracer(),
+            backend="eager",
+        ) as cap:
+            cap(torch.ones(4))
+            cap._session._package.graph_break_op_names |= set(op_names)
+        with open(artifact) as f:
+            (line,) = [l for l in f if l.startswith("CUSTOM_OP_MODULES = ")]
+        return line.strip(), name
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_a_torch_cpp_op_does_not_import_the_frame_modules(self):
+        line, _ = self._render_with_ops([("_c10d_functional::wait_tensor", "")])
+        self.assertEqual(line, "CUSTOM_OP_MODULES = ()")
+
     @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_dynamo_graph_breaks_on_is_checked(self):
         from torch.library import _scoped_library

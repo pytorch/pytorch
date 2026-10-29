@@ -2193,7 +2193,7 @@ class PrecompileSession(Generic[_P, _R]):
                         op_names |= _called_op_names(result.source_code)
         entry = self._served_entry()[0]
         ops = _custom_ops(op_names)
-        modules, unmapped = _custom_op_modules(op_names)
+        modules, unmapped = _custom_op_modules(ops)
         if unmapped:
             # An op with no known module (torch.library.define, a C++ extension's
             # load_library) is likely registered by a module the frames run in,
