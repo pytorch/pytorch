@@ -10247,7 +10247,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         cmd = [sys.executable, "-c", code]
         out = subprocess.check_output(cmd, text=True, timeout=600)
-        self.assertEqual(out.strip(), "[]")
+        msg = "add these to _TORCH_OP_NAMESPACES in torch/_precompile.py, or artifacts import torch's modules for their ops"
+        self.assertEqual(out.strip(), "[]", msg)
 
     def test_pystub_module_is_recorded(self):
         from torch._precompile import _custom_op_module
