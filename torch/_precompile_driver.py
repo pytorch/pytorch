@@ -898,13 +898,6 @@ def _build_installed_forward():
             f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
             f"state. Regenerate the artifact under the serving torch."
         )
-    if "__main__" in SERVED_MODULES:
-        raise _PrecompileError(
-            "precompile: this installed artifact serves frames of module "
-            "'__main__', the capturing script's __main__ module, which no other "
-            "process can import. Regenerate the artifact from functions and "
-            "modules defined in an importable module."
-        )
     if "_import_custom_op_modules" in globals():
 
         def _import_served(module_name):
@@ -923,6 +916,12 @@ def _build_installed_forward():
     package_state = pickle.loads(base64.b64decode(_PACKAGE))
     dynamo = package_state["dynamo"]
     module_name = dynamo.codes[0].python_module
+    if module_name == "__main__":
+        raise _PrecompileError(
+            "precompile: this artifact was captured from a function defined in the "
+            "capturing script's __main__ module, which no other process can import. "
+            "Regenerate the artifact from a function defined in an importable module."
+        )
     try:
         fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
     # Not just ImportError, as in section 0.

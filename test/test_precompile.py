@@ -585,13 +585,10 @@ class TestPrecompile(TestCase):
         from torch._precompile import _served_modules
 
         def frame(module, entry=False, variants=(), trivial=False, resume=()):
-            return {
-                "python_module": module,
-                "is_entry": entry,
-                "variants": list(variants),
-                "trivial": trivial,
-                "resume_names": list(resume),
-            }
+            keys = ("python_module", "is_entry", "variants", "trivial", "resume_names")
+            return dict(
+                zip(keys, (module, entry, list(variants), trivial, list(resume)))
+            )
 
         frames = [
             frame("entry", entry=True),
@@ -4996,6 +4993,27 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, y2), ((self.x3,), {"scale": 0.5}, y3)]
         )
+
+    @skipIfCrossRef
+    def test_a_frame_of_the_scripts_main_module_is_served_installed(self):
+        # Only the entry's frame cannot be __main__: Model.forward's installs onto the
+        # serving script's own __main__.Model.
+        script = os.path.join(self.dir, "app.py")
+        with open(script, "w") as f:
+            f.write(
+                "import sys, torch\nfrom torch.compiler.precompile import capture, load\n"
+                "sys.path.insert(0, sys.argv[1])\nx, (a, c, save) = torch.ones(2), sys.argv[3:]\n"
+                "single = __import__(sys.argv[2]).single\nclass Model(torch.nn.Module):\n"
+                "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return x.cos()\n"
+                "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
+                "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
+                "    assert f.installed and f(Model(), x).equal(single(Model(), x))\n"
+            )
+        for save in ("1", ""):
+            argv = [self.dir, self.module_name, self.artifact, self.cache, save]
+            cmd = [sys.executable, script, *argv]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            self.assertEqual(out.returncode, 0, out.stderr)
 
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
@@ -9560,13 +9578,10 @@ class TestPrecompileCustomOpModules(TestCase):
             # records the ops of Inductor's backward code or of the backward frame
             # it compiled, so the backward op's module is recorded.
             traced_bw = entry == "train_fn"
-            # entry_op has no known module, so a Dynamo artifact also imports its
-            # frames' modules before checking it. fragment and its kernel are
-            # registered from a Library in a module no frame runs in, and are
-            # recorded by its file. In the order their imports finished at capture.
+            # A Dynamo artifact also imports its frames' modules, which may register
+            # an op or kernel, in the order their imports finished at capture.
             modules = (bwmod, module) if traced_bw else (module,)
-            fallback = tracer == "dynamo" and entry == "library_fn"
-            modules += (entries,) if fallback else ()
+            modules += (entries,) if tracer == "dynamo" else ()
             self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
             if traced_bw:
                 self.assertIn(repr((f"{bwns}::scale", "")), python_code)
@@ -10708,13 +10723,9 @@ class TestPrecompileCustomOpRecording(TestCase):
         package = _CapturePackage(lambda x: x)
         package.add_backend_graph("__compiled_fn_1", graph(first))
         package.add_backend_graph("__compiled_fn_2", graph(second))
-        self.assertEqual(
-            package.op_names,
-            {
-                "__compiled_fn_1": {(first_name, "")},
-                "__compiled_fn_2": {(second_name, "")},
-            },
-        )
+        ids = ("__compiled_fn_1", "__compiled_fn_2")
+        expected = dict(zip(ids, ({(first_name, "")}, {(second_name, "")})))
+        self.assertEqual(package.op_names, expected)
 
     def test_a_bypassed_compiles_graph_break_ops_stay_out_of_a_later_fallback(self):
         from torch._dynamo.precompile_package import _CapturePackage
@@ -10756,10 +10767,8 @@ class TestPrecompileCustomOpRecording(TestCase):
         if mode == "installed":
             # The helper's own frame is unreachable from the entry's.
             prelude += (
-                "import torch\n"
-                "def helper(y):\n    y = y.sin()\n"
-                "    torch._dynamo.graph_break()\n    return y.cos()\n"
-                "def fn(x):\n    return helper(x) + 1\n"
+                "import torch\ndef helper(y):\n    y = y.sin()\n    torch._dynamo.graph_break()\n"
+                "    return y.cos()\ndef fn(x):\n    return helper(x) + 1\n"
             )
         else:
             prelude += "def fn(x):\n    return x.sin() + 1\n"
@@ -10949,15 +10958,10 @@ class TestPrecompileCustomOpRecording(TestCase):
         ns = f"precompile_pending_fake_{uuid.uuid4().hex}"
         # register_fake runs inside the trace, so Dynamo graph-breaks on the op.
         python_code = self._capture_module(
-            "import torch\n"
-            f"@torch.library.custom_op({ns + '::op'!r}, mutates_args=())\n"
-            "def op(x: torch.Tensor) -> torch.Tensor:\n"
-            "    return x.clone()\n"
-            "def fake(x):\n"
-            "    return x.clone()\n"
-            "def fn(x):\n"
-            "    op.register_fake(fake)\n"
-            "    return op(x + 1)\n",
+            f"import torch\n@torch.library.custom_op({ns + '::op'!r}, mutates_args=())\n"
+            "def op(x: torch.Tensor) -> torch.Tensor:\n    return x.clone()\n"
+            "def fake(x):\n    return x.clone()\n"
+            "def fn(x):\n    op.register_fake(fake)\n    return op(x + 1)\n",
             tracer=DynamoTracer(),
         )
         self.assertIn(f"CUSTOM_OPS = {((f'{ns}::op', ''),)!r}", python_code)
@@ -10969,7 +10973,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             f"import torch\nop = torch.ops.{name.replace('::', '.')}.default\n"
             f"nested = torch.ops.{nested.replace('::', '.')}.default\n"
             "call = torch._dynamo.disable(lambda o, x, _: o(x))\n"
-            "def fn(x):\n    return call(op, x.sin(), (nested,)) + 1\n"
+            "def fn(x):\n    return call(op, x.sin(), (torch.ops.aten.add, nested)) + 1\n"
         )
         python_code = self._capture_module(source, tracer=DynamoTracer())
         ops = tuple(sorted([(name, ""), (nested, "")]))
@@ -10997,21 +11001,12 @@ class TestPrecompileCustomOpRecording(TestCase):
         # apply() graph-breaks on dropped, and the graph before the break holds
         # LIN's parameter as an attribute, so output_graph bypasses the compile.
         python_code = self._capture_module(
-            "import torch\n"
-            "class Scale(torch.nn.Module):\n"
-            "    def __init__(self):\n"
-            "        super().__init__()\n"
-            "        self.w = torch.nn.Parameter(torch.ones(4))\n"
-            "    def forward(self, x):\n"
-            "        return x * self.w\n"
-            "LIN = Scale()\n"
-            "def apply(x):\n"
-            "    return torch.ops.precompile_bypassed.dropped.default(LIN(x))\n"
-            "@torch._dynamo.disable(recursive=False)\n"
-            "def scale(x):\n"
-            "    return apply(x)\n"
-            "def fn(x):\n"
-            "    return torch.ops.precompile_bypassed.kept.default(scale(x.sin()))\n",
+            "import torch\nclass Scale(torch.nn.Module):\n    def __init__(self):\n"
+            "        super().__init__()\n        self.w = torch.nn.Parameter(torch.ones(4))\n"
+            "    def forward(self, x):\n        return x * self.w\nLIN = Scale()\n"
+            "def apply(x):\n    return torch.ops.precompile_bypassed.dropped.default(LIN(x))\n"
+            "@torch._dynamo.disable(recursive=False)\ndef scale(x):\n    return apply(x)\n"
+            "def fn(x):\n    return torch.ops.precompile_bypassed.kept.default(scale(x.sin()))\n",
             tracer=DynamoTracer(require_complete=False),
         )
         expected = (("precompile_bypassed::kept", ""),)
@@ -11130,31 +11125,38 @@ class TestPrecompileCustomOpRecording(TestCase):
             self.addCleanup(sys.modules[module].lib._destroy)
         self.assertEqual(getattr(torch.ops, ns).op(torch.ones(1)), torch.ones(1) * 3)
 
-    def test_a_kernel_overriding_a_served_modules_kernel_registers_it_last(self):
+    @parametrize("mapped", [False, True])
+    def test_a_kernel_overriding_a_served_modules_registers_it_last(self, mapped):
         ns = f"precompile_served_override_{uuid.uuid4().hex}"
         override = self._module(
             f"import torch\nlib = torch.library.Library({ns!r}, 'IMPL')\n"
             "lib.impl('op', lambda x: x * 3, 'CPU')\n"
         )
-        # The served module defines the op with no known module and registers its
-        # own kernel, which a module imported after it overrides.
-        prelude = (
-            "import torch\nfrom torch.library import _scoped_library\n"
-            f"scope = _scoped_library({ns!r}, 'DEF')\ndefs = scope.__enter__()\n"
-            "defs.define('op(Tensor x) -> Tensor')\n"
-            f"lib = torch.library.Library({ns!r}, 'IMPL')\n"
-            "lib.impl('op', lambda x: x * 2, 'CPU')\n"
+        define = "defs.define('op(Tensor x) -> Tensor')\n"
+        defs = self._module(
+            f"import torch\ndefs = torch.library.Library({ns!r}, 'DEF')\n{define}"
         )
+        # The served module registers its own kernel, which a module imported after
+        # it overrides, for an op defs defines or it defines with no known module.
+        prelude = "import torch\n" + (
+            f"from {defs} import defs\n"
+            if mapped
+            else "from torch.library import _scoped_library\n"
+            f"scope = _scoped_library({ns!r}, 'DEF')\ndefs = scope.__enter__()\n{define}"
+        )
+        prelude += f"lib = torch.library.Library({ns!r}, 'IMPL')\nlib.impl('op', lambda x: x * 2, 'CPU')\n"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             line, name, python_code = self._render_with_ops(
                 [(f"{ns}::op", "")], prelude=prelude, then=(override,)
             )
-        self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name, override)!r}")
+        modules = (defs, name, override) if mapped else (name, override)
+        self.assertEqual(line, f"CUSTOM_OP_MODULES = {modules!r}")
         sys.modules.pop(override).lib._destroy()
         served = sys.modules.pop(name)
         served.lib._destroy()
         served.defs._destroy()
+        sys.modules.pop(defs, None)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             exec(python_code, {"__name__": "artifact"})
@@ -11209,17 +11211,18 @@ class TestPrecompileCustomOpRecording(TestCase):
         with open(os.path.join(root, package, "__init__.py"), "w") as f:
             f.write("raise ValueError('half initialized')\n")
         importlib.invalidate_caches()
-        # A frame module defined in __main__, even a frame other than the entry's,
-        # or one that does not import is refused before the op check too, without
-        # blaming the torch build for the module's own error.
+        # A frame module that does not import, or a standalone artifact's defined in
+        # __main__, even a frame other than the entry's, is refused before the op
+        # check too, without blaming the torch build for the module's own error.
+        main = "__main__ module" if mode == "standalone" else "not registered here"
         for modules, error in (
             (
                 (f"{package}.mod",),
                 rf"'{package}.mod'.*not importable.*initialized\)\.$",
             ),
             (("unittest",), "not registered here"),
-            (("__main__",), "__main__ module"),
-            ((f"{package}.mod", "__main__"), "__main__ module"),
+            (("__main__",), main),
+            (("__main__", "unittest"), main),
             (("precompile_missing",), "'precompile_missing'.*not importable"),
         ):
             code = python_code.replace(served, f"SERVED_MODULES = {modules!r}")
