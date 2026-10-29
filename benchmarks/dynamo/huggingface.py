@@ -502,6 +502,19 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 f"--hf-inference-mode={mode} requires --backend or --inductor"
             )
+        if args.prompt_length is not None:
+            # Checked here so an invalid flag isn't recorded as a model failure.
+            for name in [args.only] if args.only else self.iter_model_names(args):
+                output_length = HF_LLM_MODELS[name].OUTPUT_LENGTH
+                total_length = args.prompt_length + output_length
+                config = AutoConfig.from_pretrained(name).get_text_config(decoder=True)
+                context_length = getattr(config, "max_position_embeddings", None)
+                if context_length is not None and total_length > context_length:
+                    raise ValueError(
+                        f"--prompt-length={args.prompt_length} plus {output_length} "
+                        f"generated-token slots exceeds {name}'s context length "
+                        f"{context_length}"
+                    )
         if args.tp_size > 1:
             self.validate_tensor_parallel_args(args)
 
@@ -526,14 +539,19 @@ class HuggingfaceRunner(BenchmarkRunner):
             unsupported.append("multiple --devices")
         if unsupported:
             raise ValueError("--tp-size does not support " + ", ".join(unsupported))
-        if not args.disable_cudagraphs:
+        if not args.disable_cudagraphs or args.backend == "cudagraphs":
             raise ValueError(
-                "--tp-size requires --disable-cudagraphs until CUDA graphs are "
-                "validated with tensor parallelism"
+                "--tp-size requires --disable-cudagraphs and a backend other than "
+                "cudagraphs until CUDA graphs are validated with tensor parallelism"
             )
         if not (args.bfloat16 or args.float16 or args.float32):
             raise ValueError("--tp-size requires --bfloat16, --float16, or --float32")
         devices = args.devices or (["cuda"] if torch.cuda.is_available() else ["cpu"])
+        if devices == ["cpu"] and torch.accelerator.current_accelerator() is not None:
+            raise ValueError(
+                "CPU tensor parallelism requires a machine without an accelerator, "
+                "since Hugging Face places TP shards on the accelerator"
+            )
         if devices == ["cpu"] and (
             args.inductor or args.backend not in ("eager", "aot_eager")
         ):
@@ -559,6 +577,13 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def use_model_forward_for_compilation(self):
         return self.args.hf_inference_mode in ("prefill", "decode")
+
+    def get_request_tokens(self, example_inputs):
+        if self.args.hf_inference_mode == "prefill":
+            return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
+        if self.args.hf_inference_mode == "decode":
+            return {"output_tokens_per_second": example_inputs["decode_ids"].numel()}
+        return None
 
     def deepcopy_model(self, model):
         if self.args.tp_size == 1:
