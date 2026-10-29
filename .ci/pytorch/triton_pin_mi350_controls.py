@@ -287,6 +287,15 @@ def main():
         fusion=1,
     )
     (REPORT / "results.json").write_text(json.dumps(results, indent=2))
+    if '--verify-fix' in sys.argv:
+        assert set(results) == {'old', 'candidate', 'candidate-implicit-fusion-restored'}, results
+        assert all(code == 0 for phase in results.values() for code in phase.values()), results
+        for phase, outcome in [('old', '1 xfailed'), ('candidate', '1 passed'),
+                               ('candidate-implicit-fusion-restored', '1 xfailed')]:
+            for operation in NODES:
+                log = (REPORT / f'{phase}-{operation}.log').read_text(errors='replace')
+                assert outcome in log and 'XPASS:' not in log, (phase, operation, outcome)
+        print('MI350_ORIGINAL_FIX_VERIFICATION', json.dumps(results), flush=True)
     print(
         "Completed native controls; original XPASS is recorded as a diagnostic outcome."
     )

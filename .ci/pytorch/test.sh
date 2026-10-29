@@ -2642,6 +2642,10 @@ if [[ "${TEST_CONFIG}" == "triton_pin_mi350_fusion" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_controls.py --fusion-only
 fi
 
+if [[ "${TEST_CONFIG}" == "triton_pin_mi350_verify" ]]; then
+  exec python .ci/pytorch/triton_pin_mi350_controls.py --verify-fix
+fi
+
 if [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
