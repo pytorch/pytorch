@@ -48,12 +48,16 @@ def get_source(stacklevel: int) -> str:
     return source
 
 
-def caller_frame() -> types.FrameType:
-    """The first frame outside torch.library's helpers: the user registering a kernel."""
+def caller_frame() -> types.FrameType | None:
+    """The frame of the module body registering a kernel or op from outside
+    torch.library's helpers, the module whose import registers it, if any."""
     # functools for torch.library.impl, a functools.singledispatch.
     skipped = ("torch._library.", "torch.library.", "functools.")
     frame = sys._getframe(1)
-    while frame.f_back and f"{frame.f_globals.get('__name__')}.".startswith(skipped):
+    while frame is not None and (
+        frame.f_code.co_name != "<module>"
+        or f"{frame.f_globals.get('__name__')}.".startswith(skipped)
+    ):
         frame = frame.f_back
     return frame
 
