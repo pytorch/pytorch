@@ -5001,7 +5001,9 @@ class ShapeEnv:
         If the tensor has symbolic sizes from a different ShapeEnv,
         delegates to transfer_symbols_from_foreign_shape_env.
         """
-        fake_mode = getattr(ex, "fake_mode", None)
+        from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+
+        fake_mode = maybe_get_fake_mode(ex) if is_fake_tensor(ex) else None
         if fake_mode is not None and fake_mode.shape_env is not self:
             return self.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
