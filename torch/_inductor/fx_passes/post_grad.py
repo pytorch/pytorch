@@ -38,6 +38,7 @@ from ..fx_utils import (
     FakeTensorUpdater,
     get_fake_args_kwargs,
     get_node_storage,
+    get_storage,
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
@@ -1529,6 +1530,45 @@ def _collect_output_storage(
     )
 
 
+def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
+    """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
+
+    This is a denylist of consumers known to observe placement: ``as_strided``, whose
+    storage offset is relative to the storage, and user-defined Triton kernels, which
+    are opaque and may need an aligned base, for example to build a TMA descriptor on
+    the host or on the device. Other opaque consumers, such as custom ops and extern
+    fallback kernels, are intentionally not included. Views are followed through
+    single- and multi-output view ops.
+    """
+    storage = get_node_storage(node)
+    if storage is None:
+        return False
+    placement_dependent = (
+        aten.as_strided.default,
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+    )
+    pending = [node]
+    seen = OrderedSet([node])
+    while pending:
+        current = pending.pop()
+        for user in current.users:
+            if user.target in placement_dependent:
+                return True
+            if user.op != "call_function" or user in seen:
+                continue
+            val = user.meta.get("val")
+            outputs = val if isinstance(val, (list, tuple)) else [val]
+            if any(
+                isinstance(out, torch.Tensor)
+                and torch._C._has_storage(out)
+                and get_storage(out) == storage
+                for out in outputs
+            ):
+                seen.add(user)
+                pending.append(user)
+    return False
+
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -1624,10 +1664,14 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
+            # A non-view noop such as clone has fresh storage at offset 0. Replacing it
+            # with a source at another offset changes what storage-relative users read,
+            # so compare offsets only when such a user exists.
             if same_tensor_meta(
                 node,
                 src,
-                skip_storage_offset=True,
+                skip_storage_offset=node_is_view
+                or not _depends_on_storage_offset(node),
             ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
@@ -2895,7 +2939,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
-        if i is not None and i.meta["val"].dtype in [torch.bool, torch.int8]:
+        if i is not None and i.meta["val"].dtype in [torch.bool, torch.uint8]:
             any_byte_bool_indices = True
 
     val = args_[2].meta["val"]
