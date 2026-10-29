@@ -1218,6 +1218,56 @@ class TestCustomOp(CustomOpTestCaseBase):
             op._pyobj_dispatcher.redispatch()
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_custom_op_autograd_defaults(self):
+        autograd_excluded = []
+        setup_context_inputs = []
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_autograd_defaults", mutates_args=()
+        )
+        def f(x: Tensor, n: int = 2, *, k: int = 3) -> Tensor:
+            autograd_excluded.append(
+                torch._C._dispatch_tls_is_dispatch_key_excluded(
+                    torch._C.DispatchKey.AutogradOther
+                )
+            )
+            return x * n * k
+
+        def setup_context(ctx, inputs, keyword_only_inputs, output):
+            setup_context_inputs.append((inputs[1:], keyword_only_inputs))
+            ctx.c = inputs[1] * keyword_only_inputs["k"]
+
+        f.register_autograd(lambda ctx, grad: grad * ctx.c, setup_context=setup_context)
+        # With and without PyObject dispatch.
+        for enabled in (True, False):
+            f._opoverload._enable_pyobj_dispatch(enabled)
+            x = torch.randn(3, requires_grad=True)
+            f(x).sum().backward()
+            self.assertEqual(x.grad, torch.full_like(x, 6.0))
+        self.assertEqual(autograd_excluded, [True, True])
+        self.assertEqual(setup_context_inputs, [((2,), {"k": 3})] * 2)
+
+        # Each call's setup_context gets its own copy of a list default.
+        seen_dims = []
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_autograd_list_default",
+            mutates_args=(),
+            schema="(Tensor x, int[] dims=[0]) -> Tensor",
+        )
+        def g(x, dims=None):
+            return x.clone()
+
+        def append_to_dims(ctx, inputs, output):
+            seen_dims.append(list(inputs[1]))
+            inputs[1].append(1)
+
+        g.register_autograd(lambda ctx, grad: grad, setup_context=append_to_dims)
+        for _ in range(2):
+            g(torch.randn(3, requires_grad=True))
+        self.assertEqual(seen_dims, [[0], [0]])
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_respects_torch_function_mode(self):
         import torch._refs
         from torch._prims.context import TorchRefsMode
