@@ -1,7 +1,7 @@
 # Owner(s): ["module: rocm"]
 #
 # Removes the Docker-in-Docker (DinD) requirement. The CI image is the job pod.
-name: rocm-test-no-dind
+name: test-kubernetes
 
 on:
   workflow_call:
@@ -65,15 +65,16 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the ECR CI image selected by the caller to its public GHCR mirror.
-  # For PRs without .ci/docker changes, this is normally the image built from
-  # main; ciflow/docker runs also mirror PR-specific tree-hash images. The wheel
-  # still comes from this PR's build job.
-  # kubelet pulls the job image before any steps run, so the in-job ECR login
-  # used by _rocm-test.yml is too late. docker-builds copies main, release, and
-  # ciflow/docker images from ECR to GHCR under the same tree-hash tag using a
-  # server-side operation. Check for the mirror on a CPU runner before
-  # scheduling GPU shards; if it is missing, fail the workflow explicitly.
+  # This image resolution applies only to CI images built from main, not to
+  # images produced by pull requests. The GHCR mirror is the main CI image tag.
+  # The wheel still comes from this PR's build job; only the container image is
+  # the main-branch CI image. kubelet pulls the job image before any step runs,
+  # so the in-job ECR login _rocm-test.yml performs is too late here.
+  # docker-builds copies each main image it pushes to ECR onto the public GHCR
+  # mirror under the same tag, server-side, so the mirror carries the same
+  # digest. Resolve it on a CPU runner: a hash that was never mirrored fails
+  # here in seconds instead of holding a GPU until the hook's prepare_job
+  # timeout expires.
   resolve-image:
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     runs-on: ubuntu-24.04
@@ -91,6 +92,7 @@ jobs:
           repository="pytorch/ci-image"
           tag="${ECR_IMAGE##*:}"
           image="ghcr.io/${repository}:${tag}"
+          echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
 
           for attempt in $(seq 1 5); do
             token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r .token)"
@@ -100,14 +102,13 @@ jobs:
               "https://ghcr.io/v2/${repository}/manifests/${tag}")"
             if [[ "${status}" == "200" ]]; then
               echo "Resolved ${image}"
-              echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
             echo "attempt ${attempt}: HTTP ${status}"
             sleep 30
           done
 
-          echo "::error::${image} is absent from the GHCR mirror."
+          echo "::error::${image} is absent from the GHCR mirror. docker-builds only mirrors pushes to main/release, so a .ci/docker tree hash that has not landed yet lives only in ECR; run these shards on the DinD runner until the docker change merges."
           exit 1
 
   test:
@@ -119,8 +120,8 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    # The GHCR mirror of the image _linux-build selected. The node pulls it
-    # before any job step runs.
+    # The GHCR mirror of the image _linux-build selected. kubelet authenticates
+    # with the ghcr-pytorch pull secret the scale set puts on the job pod.
     container:
       image: ${{ needs.resolve-image.outputs.docker-image }}
     steps:
@@ -131,61 +132,10 @@ jobs:
         with:
           no-sudo: true
 
-      # TheRock exposes rocminfo/amd-smi only after /etc/rocm_env.sh.
-      # GitHub bash does not source bashrc. Each step is a new shell.
-      - name: Job pod ROCm version
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f /etc/rocm_env.sh ]]; then
-            # shellcheck disable=SC1091
-            source /etc/rocm_env.sh
-          fi
-          amd-smi version || true
-          rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
-
-      - name: Job pod system info
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat /etc/os-release || true
-          rocm-sdk version || true
-          whoami
-          id
-
-      - name: Job pod amd-smi
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f /etc/rocm_env.sh ]]; then
-            # shellcheck disable=SC1091
-            source /etc/rocm_env.sh
-          fi
-          amd-smi monitor -ptumv
-          amd-smi list
-
-      - name: Job pod rocminfo
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f /etc/rocm_env.sh ]]; then
-            # shellcheck disable=SC1091
-            source /etc/rocm_env.sh
-          fi
-          rocminfo
-
       - name: Job pod GPU check
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f /etc/rocm_env.sh ]]; then
-            # shellcheck disable=SC1091
-            source /etc/rocm_env.sh
-          fi
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           required=1
           config="${{ matrix.config }}"
@@ -308,8 +258,6 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           USE_ARC: "1"
-          # Same IPC workaround _rocm-test.yml passes with -e (pytorch#198921).
-          HSA_ENABLE_IPC_MODE_LEGACY: "1"
         shell: bash
         run: |
           set -euo pipefail
@@ -345,12 +293,9 @@ jobs:
           if [[ "${TEST_CONFIG}" == *distributed* ]]; then
             timeout 180 python .ci/pytorch/rocm_preflight.py
           fi
-          # Match the old Docker test environment, including
-          # --ulimit stack=10485760:83886080. bash ulimit -s is KiB.
+          # Match the old Docker test environment.
           ulimit -S -c 0
           ulimit -H -c 0
-          ulimit -H -s 81920
-          ulimit -S -s 10240
           "${TEST_COMMAND}"
 
       - name: Print remaining test logs
