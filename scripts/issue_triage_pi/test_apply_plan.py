@@ -174,6 +174,45 @@ class PlanEffectsTest(unittest.TestCase):
         self.assertTrue(result.close)
         self.assertEqual(result.comment, TEMPLATES["numerical_accuracy"]["comment"])
 
+    def test_review_decision_requires_review_even_if_model_omits_label(self):
+        result = effects("triage_review", ["module: sdpa", "triaged"])
+        self.assertEqual(
+            result.add_labels, ["module: sdpa", "triage review", "bot-triaged"]
+        )
+        self.assertFalse(result.close)
+
+    def test_numerical_close_cannot_override_review_or_human_priority(self):
+        for labels, existing in (
+            (["module: sdpa", "triage review", "triaged"], []),
+            (["module: sdpa"], ["triage review"]),
+            (["module: sdpa"], ["high priority"]),
+        ):
+            with self.subTest(labels=labels, existing=existing):
+                result = effects("close_expected_behavior", labels, existing=existing)
+                self.assertFalse(result.close)
+                self.assertEqual(result.comment, "")
+                self.assertNotIn("triaged", result.add_labels)
+                self.assertIn("triage review", set(result.add_labels) | set(existing))
+
+    def test_numerical_template_requires_expected_behavior_closure(self):
+        for decision in ("label", "triage_review", "request_info"):
+            with self.subTest(decision=decision):
+                result = effects(
+                    decision, ["module: numerical-stability"], ["numerical_accuracy"]
+                )
+                self.assertFalse(result.close)
+                self.assertEqual(result.comment, "")
+                self.assertIn("triage review", result.add_labels)
+                self.assertNotIn("triaged", result.add_labels)
+
+    def test_cancelled_numerical_close_drops_all_closing_comments(self):
+        result = effects(
+            "close_question", templates=["redirect_to_forum", "numerical_accuracy"]
+        )
+        self.assertFalse(result.close)
+        self.assertEqual(result.comment, "")
+        self.assertEqual(result.add_labels, ["triage review", "bot-triaged"])
+
     def test_unknown_template_is_not_posted(self):
         result = effects("request_info", templates=["anything goes"])
         self.assertEqual(result.comment, "")
