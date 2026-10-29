@@ -15,6 +15,20 @@
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
+// sum_j exp(data[j] - max_input).
+template <typename scalar_t>
+inline vec::vec_scalar_t<scalar_t> log_softmax_sum(
+    const scalar_t* data,
+    int64_t size,
+    vec::vec_scalar_t<scalar_t> max_input) {
+  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  return vec::map_reduce_all<scalar_t>(
+      [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+      [](Vec x, Vec y) { return x + y; },
+      data,
+      size);
+}
+
 template <typename scalar_t>
 int64_t vec_log_softmax_lastdim_chunk_size(int64_t grain_size, int64_t outer_size, int64_t dim_size) {
   // Coincidentally, at::internal::GRAIN_SIZE is 32768, which is equal to the
@@ -60,11 +74,7 @@ void serial_vec_log_softmax_lastdim_range(
       int64_t i = ii + j;
       const scalar_t* input_data = input_data_base + i * dim_size;
       scalar_t max_input = max_input_arr[j];
-      tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
-          [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-          [](Vec x, Vec y) { return x + y; },
-          input_data,
-          dim_size);
+      tmp_sum_scalar[j] = log_softmax_sum(input_data, dim_size, max_input);
     }
     // See [Note AVX-SSE transitions] for why this should call the
     // vectorized version (aside from perf improvements).
