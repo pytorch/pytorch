@@ -70,6 +70,45 @@ namespace at::native {
 
 namespace {
 
+bool check_grouped_mxfp8_recipe(
+    ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b) {
+#ifdef USE_ROCM
+  return scaled_blas::check_mxfp8_recipe(
+      type_a, recipe_a, scales_a, swizzle_a, type_b, recipe_b, scales_b, swizzle_b);
+#else
+  // cuBLASLt also supports mixed e4m3/e5m2 inputs; MSLK requires two e4m3 inputs.
+  if (!scaled_blas::is_valid_cublaslt_input_pair(type_a, type_b)) {
+    return false;
+  }
+
+  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
+    return false;
+  }
+
+  if (recipe_a[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_a[0].scalar_type() != at::kFloat8_e8m0fnu) return false;
+  if (!swizzle_a.empty() && swizzle_a[0] == SwizzleType::SWIZZLE_MNxK4) return false;
+  if (recipe_b[0] != ScalingType::BlockWise1x32) return false;
+  if (scales_b[0].scalar_type() != at::kFloat8_e8m0fnu) return false;
+  if (!swizzle_b.empty() && swizzle_b[0] == SwizzleType::SWIZZLE_MNxK4) return false;
+
+  return true;
+#endif
+}
+
+#ifdef USE_ROCM
+constexpr auto grouped_block_swizzle = SwizzleType::NO_SWIZZLE;
+#else
+constexpr auto grouped_block_swizzle = SwizzleType::SWIZZLE_32_4_4;
+#endif
+
 void raise_unsupported_grouped_scaling(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -123,7 +162,8 @@ void raise_unsupported_grouped_scaling(
       "Recipe pairs: 1x128/1x128, 1x128/128x128, or 128x128/1x128.\n"
       "- Packed MNxK4: matching BlockWise1x32 or BlockWise1x128 recipes, float8_e4m3fn/e5m2 inputs "
       "with at least one e4m3fn input, one float8_e8m0fnu scale per input, SWIZZLE_MNxK4.\n"
-      "- MXFP8: matching BlockWise1x32 recipes, float8_e4m3fn inputs, one float8_e8m0fnu scale per input.\n"
+      "- MXFP8: matching BlockWise1x32 recipes, float8 inputs, one float8_e8m0fnu scale per input. "
+      "CUDA requires e4m3fn/e5m2 inputs with at least one e4m3fn input and SWIZZLE_32_4_4.\n"
       "- MXFP4: matching BlockWise1x32 recipes, packed float4 inputs, one float8_e8m0fnu scale per input.\n"
       "- NVFP4: packed float4 inputs, one BlockWise1x16 float8_e4m3fn scale per input, "
       "optionally followed by one TensorWise float32 global scale on both inputs.\n"
@@ -284,6 +324,8 @@ get_cublaslt_grouped_scale_layouts(
       return {Layout::Vec128F32, Layout::Block128x128F32};
     case ScaledGemmImplementation::BLOCK_1x128_1x128:
       return {Layout::Vec128F32, Layout::Vec128F32};
+    case ScaledGemmImplementation::MXFP8_MXFP8:
+      return {Layout::Vec32UE8M0, Layout::Vec32UE8M0};
     case ScaledGemmImplementation::NVFP4_NVFP4:
     case ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE:
       return {Layout::Vec16UE4M3, Layout::Vec16UE4M3};
@@ -414,7 +456,7 @@ bool should_use_cublaslt_scaled_grouped_gemm(
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
   if (major != 10 && major != 11) {
-    TORCH_WARN_ONCE("cublasLt NVFP4 scaled grouped GEMM is only supported on sm10x and sm110");
+    TORCH_WARN_ONCE("cublasLt NVFP4 and MXFP8 scaled grouped GEMM are only supported on sm10x and sm110");
     return false;
   }
   if (batch_count < 1 || batch_count > 1024) {
@@ -425,18 +467,20 @@ bool should_use_cublaslt_scaled_grouped_gemm(
     TORCH_WARN_ONCE("cuBLASLt grouped GEMM requires float16, bfloat16, or float32 out dtype");
     return false;
   }
-  if (use_fast_accum || scale_a[1].numel() != 1 || scale_b[1].numel() != 1 ||
-      !scale_a[1].is_contiguous() || !scale_b[1].is_contiguous()) {
+  const bool nvfp4 = impl == ScaledGemmImplementation::NVFP4_NVFP4;
+  if (nvfp4 && (use_fast_accum || scale_a[1].numel() != 1 || scale_b[1].numel() != 1 ||
+                !scale_a[1].is_contiguous() || !scale_b[1].is_contiguous())) {
     TORCH_WARN_ONCE("cuBLASLt NVFP4 grouped GEMM with requires global scales to be single elements, and does not support fast_accum");
     return false;
   }
-  const auto layout = CublasGroupedScaleLayout::Vec16UE4M3;
+  const auto layout = nvfp4 ? CublasGroupedScaleLayout::Vec16UE4M3 : CublasGroupedScaleLayout::Vec32UE8M0;
   const auto valid_scale_storage = [&](const Tensor& mat, const Tensor& scale, bool is_a) {
     if (!scale.is_contiguous() || reinterpret_cast<uintptr_t>(scale.const_data_ptr()) % 16 != 0) {
       TORCH_WARN_ONCE("cuBLASLt grouped GEMM requires contiguous scales aligned to 16 bytes");
       return false;
     }
-    const int64_t inner = (is_a ? mat.size(-1) : mat.size(-2)) * 2;
+    const int64_t packed_multiplier = nvfp4 ? 2 : 1;
+    const int64_t inner = (is_a ? mat.size(-1) : mat.size(-2)) * packed_multiplier;
     const int64_t outer = is_a ? mat.size(-2) : mat.size(-1);
     const int64_t scale_size = cublas_grouped_scale_size_bytes(layout, inner, outer) / scale.element_size();
     if (mat.dim() == 3) {
@@ -1043,7 +1087,7 @@ std::array<ScaleKernelDispatchEntry, 11> scale_grouped_kernel_dispatch = {{
     ScaledGemmImplementation::MNK4_1x32},
   { "mnk4_1x128", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x128),
     ScaledGemmImplementation::MNK4_1x128},
-  { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  { "mxfp8_mxfp8", check_grouped_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
   { "nvfp4_nvfp4_single_scale", scaled_blas::check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE}}};
@@ -1154,21 +1198,6 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           out_mut);
       return;
     }
-    case ScaledGemmImplementation::MXFP8_MXFP8: {
-      _check_mslk_grouped_support(gemm_impl, mat_a, mat_b);
-      // swizze checks
-      TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
-      _mx8_mx8_bf16_grouped_mm_mslk(
-          mat_a,
-          mat_b,
-          scale_a[0],
-          swizzle_a_enum[0],
-          scale_b[0],
-          swizzle_b_enum[0],
-          offs_opt,
-          out_mut);
-      return;
-    }
     case ScaledGemmImplementation::MXFP4_MXFP4: {
       _check_mslk_grouped_support(gemm_impl, mat_a, mat_b);
       _f4_f4_bf16_grouped_mm_mslk(
@@ -1184,7 +1213,17 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       return;
     }
     // These cases are supported by both backends
+    case ScaledGemmImplementation::MXFP8_MXFP8:
     case ScaledGemmImplementation::NVFP4_NVFP4: {
+      if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
+        TORCH_CHECK_VALUE(
+            swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1,
+            "Expected single swizzle argument");
+        TORCH_CHECK_VALUE(
+            swizzle_a_enum[0] == grouped_block_swizzle && swizzle_b_enum[0] == grouped_block_swizzle,
+            "For MXFP8 grouped GEMM, both scale swizzle types must be ",
+            static_cast<int64_t>(grouped_block_swizzle));
+      }
 #ifdef USE_MSLK
       constexpr bool has_mslk = true;
 #else
@@ -1199,16 +1238,13 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
         return;
       }
       _check_mslk_grouped_support(gemm_impl, mat_a, mat_b);
-      _f4_f4_bf16_grouped_mm_mslk(
-          mat_a,
-          mat_b,
-          scale_a[0], /* block-scale A */
-          scale_a[1], /* global-scale A */
-          scale_b[0], /* block-scale B */
-          scale_b[1], /* global-scale B */
-          offs_opt,
-          std::nullopt, /* bias */
-          out_mut);
+      if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
+        _f4_f4_bf16_grouped_mm_mslk(
+            mat_a, mat_b, scale_a[0], scale_a[1], scale_b[0], scale_b[1], offs_opt, std::nullopt, out_mut);
+      } else {
+        _mx8_mx8_bf16_grouped_mm_mslk(
+            mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], offs_opt, out_mut);
+      }
       return;
     }
     // Unsupported
