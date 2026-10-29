@@ -2,6 +2,7 @@
 # flake8: noqa: F821
 
 import importlib
+import importlib.metadata
 import logging
 import os
 import re
@@ -26,6 +27,8 @@ except ImportError:
         main,
         reset_rng_state,
     )
+
+from packaging.version import Version
 
 import torch
 from torch._dynamo.testing import collect_results
@@ -132,12 +135,14 @@ if not BATCH_SIZE_KNOWN_MODELS:
 try:
     from .huggingface_llm_models import (
         HF_LLM_MODELS,
+        MIN_TRANSFORMERS_VERSION,
         PREFILL_MODELS,
         TextGenerationPrefillModel,
     )
 except ImportError:
     from huggingface_llm_models import (
         HF_LLM_MODELS,
+        MIN_TRANSFORMERS_VERSION,
         PREFILL_MODELS,
         TextGenerationPrefillModel,
     )
@@ -423,6 +428,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             if args.prompt_length is not None:
                 raise ValueError("--prompt-length requires --hf-inference-mode=prefill")
             return
+        installed = importlib.metadata.version("transformers")
+        if Version(installed) < Version(MIN_TRANSFORMERS_VERSION):
+            raise ValueError(
+                f"--hf-inference-mode=prefill requires "
+                f"transformers>={MIN_TRANSFORMERS_VERSION}, found {installed}"
+            )
         if args.prompt_length is not None and args.prompt_length <= 0:
             raise ValueError(
                 f"--prompt-length must be positive, got {args.prompt_length}"
@@ -545,6 +556,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
+        # --batch_size_file values reach here without passing validate_args.
         if self.args.hf_inference_mode == "prefill" and batch_size <= 0:
             raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
