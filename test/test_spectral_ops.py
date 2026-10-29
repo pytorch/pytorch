@@ -1637,7 +1637,6 @@ class TestCUFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/109448
@@ -1653,7 +1652,6 @@ class TestCUFFT(TestCase):
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
 
-    @onlyCUDA
     @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
