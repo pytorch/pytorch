@@ -7,9 +7,12 @@ import tempfile
 import pytorch_test_common
 
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestLazyONNXPackages(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_package_is_lazily_imported(self, pkg, torch_pkg="torch.onnx"):
         with tempfile.TemporaryDirectory() as wd:
             r = subprocess.run(
