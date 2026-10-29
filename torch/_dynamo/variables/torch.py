@@ -1045,6 +1045,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def get_function(self) -> Callable[..., Any]:
         return self.value
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # OpOverload.__call__ just calls _op, so calling _op is calling the op.
+        # CustomOpDef.__call__ calls it directly.
+        if name == "_op" and isinstance(self.value, torch._ops.OpOverload):
+            return self.call_function(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
     @staticmethod
     def _get_mutating_kwarg_names(
         fn: torch._ops.OpOverload | torch._ops.OpOverloadPacket,
