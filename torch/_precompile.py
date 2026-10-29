@@ -1984,6 +1984,40 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
+# Torch's namespaces defined from C++, whose schemas record a build-time path and
+# which `import torch` registers.
+_TORCH_OP_NAMESPACES = frozenset(
+    {
+        "aten",
+        "prim",
+        "inductor",
+        "inductor_prims",
+        "profiler",
+        "quantized",
+        "_quantized",
+        "quantization",
+        "sparse",
+        "c10d",
+        "_c10d_functional",
+        "_c10d_functional_autograd",
+        "_dtensor",
+        "symm_mem",
+        "fsdp",
+        "mkl",
+        "mkldnn",
+        "mkldnn_prepacked",
+        "onednn",
+        "static_runtime",
+        "xnnpack",
+        "prepacked",
+        "vulkan",
+        "vulkan_prepack",
+        "metal",
+        "metal_prepack",
+        "vulkan_quantized",
+        "_nnapi",
+    }
+)
 _TORCH_DIR = os.path.dirname(torch.__file__)
 # torch's helpers that build a Library for the caller's namespace record themselves.
 _TORCH_OP_HELPERS = tuple(
@@ -2042,7 +2076,7 @@ def _custom_op_modules(
         modules |= _kernel_modules(op_name, overload, file_modules)
         if module is not None:
             modules.add(module)
-        elif op_name.split("::")[0] not in ("aten", "prims"):
+        elif op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
             unmapped.add((op_name, overload))
     return tuple(sorted(modules)), tuple(sorted(unmapped))
 
