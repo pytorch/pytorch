@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import inspect
 import io
 import itertools
@@ -1325,6 +1326,72 @@ class TestCustomOp(CustomOpTestCaseBase):
         expected = x.abs()
         with TorchRefsMode():
             self.assertEqual(torch._refs.abs(x), expected)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_torch_function_handoff(self):
+        # __torch_function__ handlers must see the same call, and the caller
+        # the same result, whether or not the op uses PyObject dispatch.
+        lib = self.lib()
+        lib.define(
+            "torch_function_handoff(Tensor x, Tensor[] ys, *, int k=0) -> Tensor"
+        )
+        lib.impl("torch_function_handoff", lambda x, ys, k=0: x + k, "CPU")
+        lib.impl("torch_function_handoff", torch.library.fallthrough_kernel, "Autograd")
+        op = self.ns().torch_function_handoff.default
+        seen = []
+
+        def record(func, types, args, kwargs):
+            tensor_ids = pytree.tree_map_only(torch.Tensor, id, (args, kwargs))
+            seen.append((func, types, tensor_ids))
+
+        class RecordingMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                record(func, types, args, kwargs)
+                return func(*args, **(kwargs or {}))
+
+        class RecordingTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                record(func, types, args, kwargs)
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or {}))
+
+        class ConstantMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return 42
+
+        class NotImplementedMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return NotImplemented
+
+        x = torch.ones(2)
+        sub = torch.ones(2).as_subclass(RecordingTensor)
+        calls = [
+            (RecordingMode, (x, [x]), {}),
+            (RecordingMode, (x, [x]), {"k": 2}),
+            (contextlib.nullcontext, (x, [sub]), {}),
+            (contextlib.nullcontext, (sub, [x]), {"k": 1}),
+        ]
+        for mode, args, kwargs in calls:
+            results = []
+            for enabled in (False, True):
+                op._enable_pyobj_dispatch(enabled)
+                seen.clear()
+                with mode():
+                    out = op(*args, **kwargs)
+                results.append((list(seen), type(out), out))
+            self.assertEqual(results[0], results[1], msg=f"{mode} {args} {kwargs}")
+            self.assertEqual(len(results[1][0]), 1)
+
+        for enabled in (False, True):
+            op._enable_pyobj_dispatch(enabled)
+            with ConstantMode():
+                self.assertEqual(op(x, [x]), 42)
+            with self.assertRaisesRegex(
+                TypeError, "Multiple dispatch failed for '.*torch_function_handoff"
+            ):
+                with NotImplementedMode():
+                    op(x, [x])
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_respects_torch_function_redispatch(self):
