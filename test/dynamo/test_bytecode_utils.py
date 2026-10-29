@@ -27,6 +27,26 @@ def coalesced_co_lines(code):
 
 
 class BytecodeTests(torch._dynamo.test_case.TestCase):
+    def test_get_const_index_uses_identity(self):
+        first = []
+        equal_but_distinct = []
+        code_options = {"co_consts": (first,)}
+        const_indices = {id(first): 0}
+
+        self.assertEqual(
+            bytecode_transformation.get_const_index(
+                code_options, equal_but_distinct, const_indices
+            ),
+            1,
+        )
+        self.assertEqual(
+            bytecode_transformation.get_const_index(
+                code_options, equal_but_distinct, const_indices
+            ),
+            1,
+        )
+        self.assertIs(code_options["co_consts"][1], equal_but_distinct)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
@@ -135,10 +155,9 @@ def fn():
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
-        if sys.version_info >= (3, 11):
-            insts = bytecode_transformation.cleaned_instructions(f.__code__)
-            for inst in insts:
-                self.assertNotIn("_NONE", inst.opname)
+        insts = bytecode_transformation.cleaned_instructions(f.__code__)
+        for inst in insts:
+            self.assertNotIn("_NONE", inst.opname)
 
     @skipIfNotPy311
     def test_py311_jump_offset(self):

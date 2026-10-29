@@ -4,13 +4,22 @@
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <optional>
+#include <string>
+
 namespace c10d::nccl_extension {
 
 TORCH_API bool is_nccl_symmem_available();
 
-TORCH_API void nccl_put(at::Tensor& tensor, const int64_t peer);
+TORCH_API void nccl_put(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name = std::nullopt);
 
-TORCH_API void nccl_get(at::Tensor& tensor, const int64_t peer);
+TORCH_API void nccl_get(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name = std::nullopt);
 
 TORCH_API void nccl_get_out(
     at::Tensor& dst,
@@ -19,12 +28,16 @@ TORCH_API void nccl_get_out(
     int64_t size,
     int64_t peer);
 
-TORCH_API void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal);
+TORCH_API void nccl_wait_for_signal(
+    at::Tensor& sigpad,
+    int64_t signal,
+    const std::optional<std::string>& group_name = std::nullopt);
 
 TORCH_API void nccl_put_with_signal(
     at::Tensor& tensor,
     int64_t signal,
-    int64_t peer);
+    int64_t peer,
+    const std::optional<std::string>& group_name = std::nullopt);
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a shared symmetric
 // memory buffer, routing each to a specific destination rank. Blocks are
@@ -49,15 +62,4 @@ TORCH_API void nccl_all_to_all_nd(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name);
-// All-gather a rank-local bucket of parameter shards from a shared symmetric
-// memory buffer into a parameter-contiguous output, fusing the gather with the
-// copy-out reorder. Parameter i is described by split_sizes[i] (per-rank shard
-// size) and split_offsets[i] (start offset in `input`, defaulting to the
-// exclusive prefix sum of split_sizes).
-TORCH_API void nccl_all_gather_offset(
-    const at::Tensor& input,
-    at::Tensor& out,
-    const std::string& group_name,
-    at::IntArrayRef split_sizes,
-    std::optional<at::IntArrayRef> split_offsets);
 } // namespace c10d::nccl_extension

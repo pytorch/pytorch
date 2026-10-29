@@ -411,16 +411,6 @@ coverage_ignore_functions = [
     "get_default_qconfig_dict",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    # torch.ao.quantization.quantize_jit
-    "convert_dynamic_jit",
-    "convert_jit",
-    "fuse_conv_bn_jit",
-    "prepare_dynamic_jit",
-    "prepare_jit",
-    "quantize_dynamic_jit",
-    "quantize_jit",
-    "script_qconfig",
-    "script_qconfig_dict",
     # torch.ao.quantization.quantize_pt2e
     "convert_pt2e",
     "prepare_pt2e",
@@ -462,8 +452,6 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.checkpoint.default_planner
-    "create_default_local_load_plan",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -475,7 +463,7 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single /
+    # back-compat aliases of all_gather_single / reduce_scatter_single /
     # gather_single
     "all_gather_into_tensor",
     "gather_into_tensor",
@@ -558,8 +546,6 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.style
-    "make_sharded_output_tensor",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
@@ -1408,8 +1394,6 @@ coverage_ignore_classes = [
     # torch.distributed.argparse_util
     "check_env",
     "env",
-    # torch.distributed.checkpoint.api
-    "CheckpointException",
     # torch.distributed.checkpoint.default_planner
     "DefaultLoadPlanner",
     "DefaultSavePlanner",
@@ -1421,20 +1405,11 @@ coverage_ignore_classes = [
     "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.quantized_hf_storage
     "QuantizedHuggingFaceStorageReader",
-    # torch.distributed.checkpoint.metadata
-    "BytesStorageMetadata",
-    "ChunkStorageMetadata",
-    "Metadata",
-    "MetadataIndex",
     # torch.distributed.checkpoint.planner
-    "LoadItemType",
     "LoadPlanner",
     "SavePlanner",
-    "WriteItemType",
     # torch.distributed.checkpoint.state_dict
     "DistributedStateDictOptions",
-    # torch.distributed.checkpoint.storage
-    "WriteResult",
     # torch.distributed.collective_utils
     "SyncPayload",
     # torch.distributed.distributed_c10d
@@ -1463,10 +1438,8 @@ coverage_ignore_classes = [
     "WorkerSpec",
     # torch.distributed.elastic.events.api
     "Event",
-    "RdzvEvent",
     # torch.distributed.elastic.metrics.api
     "ConsoleMetricHandler",
-    "MetricData",
     "MetricHandler",
     "MetricStream",
     "MetricsConfig",
@@ -1475,8 +1448,6 @@ coverage_ignore_classes = [
     "MultiprocessContext",
     "PContext",
     "RunProcsResult",
-    "SignalException",
-    "Std",
     "SubprocessContext",
     "SubprocessHandler",
     # torch.distributed.elastic.multiprocessing.tail_log
@@ -1515,16 +1486,8 @@ coverage_ignore_classes = [
     "CyclingIterator",
     # torch.distributed.elastic.utils.data.elastic_distributed_sampler
     "ElasticDistributedSampler",
-    # torch.distributed.fsdp.api
-    "StateDictType",
     # torch.distributed.fsdp.fully_sharded_data_parallel
     "FullyShardedDataParallel",
-    "OptimStateKeyType",
-    # torch.distributed.fsdp.sharded_grad_scaler
-    "ShardedGradScaler",
-    # torch.distributed.fsdp.wrap
-    "CustomPolicy",
-    "ModuleWrapPolicy",
     # torch.distributed.launcher.api
     "LaunchConfig",
     "elastic_launch",
@@ -1547,8 +1510,6 @@ coverage_ignore_classes = [
     "RRefProxy",
     # torch.distributed.tensor.parallel.fsdp
     "DTensorExtensions",
-    # torch.distributed.tensor.parallel.style
-    "ParallelStyle",
     # torch.distributions.logistic_normal
     "LogisticNormal",
     # torch.distributions.one_hot_categorical
@@ -2183,7 +2144,8 @@ language = "en"
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+# Stale autosummary stubs from before torchrun moved to generated/.
+exclude_patterns = ["distributed/elastic/generated"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
@@ -2357,7 +2319,7 @@ def coverage_post_process(app, exception):
     if "torch" not in modules:
         missing.add("torch")
 
-    for _, modname, ispkg in pkgutil.walk_packages(
+    for _, modname, _ in pkgutil.walk_packages(
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):

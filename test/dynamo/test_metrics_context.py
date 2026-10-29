@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from torch._dynamo.metrics_context import MetricsContext, TopN
+from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext, TopN
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import HardwareClassification
 
@@ -8,15 +8,22 @@ from torch.testing._internal.common_utils import HardwareClassification
 class TestMetricsContext(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
-        self.metrics = {}
+        self.metrics: dict[str, object] = {}
 
-    def _on_exit(self, start_ns, end_ns, metrics, exc_type, exc_value):
+    def _on_exit(
+        self,
+        start_ns: int,
+        end_ns: int,
+        metrics: dict[str, object],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+    ) -> None:
         # Save away the metrics to be validated in the test.
         self.metrics = metrics.copy()
 
-    def test_context_exists(self):
+    def test_context_exists(self) -> None:
         """
         Setting a value without entering the context should raise.
         """
@@ -28,9 +35,9 @@ class TestMetricsContext(TestCase):
             context.set("m", 1)
 
         with self.assertRaisesRegex(RuntimeError, "outside of a MetricsContext"):
-            context.update({"m", 1})
+            context.update({"m": 1})
 
-    def test_nested_context(self):
+    def test_nested_context(self) -> None:
         """
         Only the outermost context should get an on_exit call, and it should
         include everything.
@@ -43,7 +50,7 @@ class TestMetricsContext(TestCase):
             context.set("m2", 2)
         self.assertEqual(self.metrics, {"m1": 1, "m2": 2})
 
-    def test_set(self):
+    def test_set(self) -> None:
         """
         Validate various ways to set metrics.
         """
@@ -54,7 +61,7 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 1, "m2": 2, "m3": 3, "m4": 4})
 
-    def test_set_disallow_overwrite(self):
+    def test_set_disallow_overwrite(self) -> None:
         """
         Validate set won't overwrite.
         """
@@ -65,7 +72,7 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 1})
 
-    def test_update_disallow_overwrite(self):
+    def test_update_disallow_overwrite(self) -> None:
         """
         Validate update won't overwrite.
         """
@@ -74,7 +81,7 @@ class TestMetricsContext(TestCase):
             with self.assertRaisesRegex(RuntimeError, "already been set"):
                 context.update({"m1": 7, "m3": 3})
 
-    def test_update_allow_overwrite(self):
+    def test_update_allow_overwrite(self) -> None:
         """
         Validate update will overwrite when given param.
         """
@@ -84,7 +91,7 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 7, "m2": 2, "m3": 3})
 
-    def test_add_to_set(self):
+    def test_add_to_set(self) -> None:
         """
         Validate add_to_set.
         """
@@ -98,7 +105,7 @@ class TestMetricsContext(TestCase):
         self.assertTrue(isinstance(self.metrics["m1"], set))
         self.assertTrue(isinstance(self.metrics["m2"], set))
 
-    def test_set_key_value(self):
+    def test_set_key_value(self) -> None:
         with MetricsContext(self._on_exit) as context:
             context.set_key_value("feature_usage", "k", True)
             # Overrides allowed
@@ -107,7 +114,7 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"feature_usage": {"k": True, "k2": False}})
 
-    def test_top_n(self):
+    def test_top_n(self) -> None:
         top_n = TopN(3)
         for k, v in (("seven", 7), ("four", 4), ("five", 5), ("six", 6), ("eight", 8)):
             top_n.add(k, v)
@@ -115,6 +122,23 @@ class TestMetricsContext(TestCase):
         self.assertEqual(len(top_n), 3)
         print(list(top_n))
         self.assertEqual(list(top_n), [("eight", 8), ("seven", 7), ("six", 6)])
+
+    def test_runtime_metrics(self) -> None:
+        context = RuntimeMetricsContext(self._on_exit)
+        context.increment(
+            "m1", 1, {"compile_id": None, "is_runtime": True, "metadata": {"k": 1}}
+        )
+        context.increment("m1", 2, {"metadata": {"ignored": 2}})
+        context.finish()
+
+        self.assertEqual(
+            self.metrics,
+            {
+                "m1": 3,
+                "is_runtime": True,
+                "metadata": {"k": 1},
+            },
+        )
 
 
 if __name__ == "__main__":

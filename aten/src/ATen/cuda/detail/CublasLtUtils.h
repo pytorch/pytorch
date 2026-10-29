@@ -140,11 +140,17 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 
 struct CublasLtWorkspace {
-  CublasLtWorkspace() {
-    size = at::cuda::getCUDABlasLtWorkspaceSize();
-    ptr = at::cuda::getCUDABlasLtWorkspace();
+  CublasLtWorkspace()
+      : ptr(nullptr), size(at::cuda::getCUDABlasLtWorkspaceSize()) {
+    if (at::cuda::isCUDABlasWorkspaceCachingEnabled()) {
+      ptr = at::cuda::getCUDABlasLtWorkspace(size);
+    } else {
+      workspace = at::cuda::allocateCUDABlasWorkspace(size);
+      ptr = workspace.get();
+    }
   }
 
+  at::DataPtr workspace;
   void* ptr;
   size_t size;
 };
@@ -171,11 +177,22 @@ inline cublasOperation_t cublasOpFromChar(char op) {
 
 inline int cublasLtMatmulScaleMode(
     at::blas::ScalingType scaling_type,
+    at::blas::SwizzleType swizzle_type,
     ScalarType scale_dtype,
     bool use_fast_accum) {
   switch (scaling_type) {
     case at::blas::ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
+      if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
+#if defined(USE_ROCM) && ROCM_VERSION >= 71300
+        return CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+#else
+        TORCH_CHECK(
+            false,
+            "scaled_gemm with SWIZZLE_32_8 block scales requires ROCm 7.13 "
+            "or above");
+#endif
+      }
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else

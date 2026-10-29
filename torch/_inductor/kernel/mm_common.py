@@ -40,6 +40,23 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 
 @SymbolicGridFn
+def blackwell_persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
+    """Like persistent_mm_grid, with cluster-aligned 2CTA tiles and launch grid.
+
+    The heuristic also rounds ``NUM_SMS`` down to even because the template uses
+    it as the persistent-loop stride.
+    """
+    num_pid_m = cdiv(M, meta["BLOCK_M"])
+    if meta.get("TWO_CTAS", False):
+        num_pid_m = (num_pid_m + 1) // 2 * 2
+    num_tiles = num_pid_m * cdiv(N, meta["BLOCK_N"])
+    grid_size = min(meta["NUM_SMS"], num_tiles)
+    if meta.get("TWO_CTAS", False):
+        grid_size = (grid_size // 2) * 2
+    return (grid_size, 1, 1)
+
+
+@SymbolicGridFn
 def persistent_grouped_mm_grid(*args):
     meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
@@ -94,6 +111,28 @@ def mm_args(
     others = [realize_inputs(expand(x, layout.size)) for x in others]
 
     return [m, n, k, layout, mat1, mat2, *others]
+
+
+def zero_addmm_input(inp, mat1, mat2):
+    """
+    addmm and baddbmm ignore their input when beta == 0, NaN and inf included,
+    but GEMM templates compute beta * input, so the lowerings give them zeros
+    instead. Each choice still scales its accumulator by alpha as eager does,
+    whereas alpha * mm rounds to fp16 first and can overflow.
+    """
+    from ..lowering import lowerings
+
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
+    return lowerings[torch.ops.aten.full](
+        [mat2.get_size()[-1]], 0, dtype=mat1.get_dtype(), device=mat1.get_device()
+    )
 
 
 def addmm_epilogue(dtype, alpha, beta):
@@ -222,6 +261,22 @@ def _use_small_mm_pointwise(
         return False
     skt = statically_known_true or V.graph.sizevars.statically_known_true
     return skt(m >= 64) and skt(k < 5) and skt(n < 5)
+
+
+def _fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
+    # 32-bit byte offset.
+    int32_max = (1 << 31) - 1
+    uint32_max = (1 << 32) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize <= uint32_max
+    )
 
 
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:

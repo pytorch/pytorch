@@ -14,6 +14,7 @@ import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
+from torch._subclasses.fake_tensor import maybe_get_item_memo, maybe_set_item_memo
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
@@ -42,6 +43,7 @@ from .streams import (
     wrap_all_sync_nodes_with_control_deps,
 )
 from .utils import (
+    _get_inner_meta,
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
     fn_wrappers,
@@ -187,9 +189,8 @@ def _create_graph(
 # TODO: Refactor the following code so detach() persists item_memo
 def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
-    if hasattr(t, "item_memo"):
-        # pyrefly: ignore[missing-attribute]
-        detached_t.item_memo = t.item_memo
+    if (item_memo := maybe_get_item_memo(t)) is not None:
+        maybe_set_item_memo(detached_t, item_memo)
     return detached_t
 
 
@@ -250,6 +251,7 @@ def _prepare_graph_capture_tracing(
     updated_flat_args = subclass_tracing_info.plain_tensor_args
     updated_flat_args_descs = subclass_tracing_info.plain_tensor_args_descs
 
+    maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
     if not aot_config.disable_functionalization:
         fn_to_trace, updated_flat_args, updated_flat_args_descs = (
             handle_effect_tokens_fn(
@@ -258,13 +260,14 @@ def _prepare_graph_capture_tracing(
                 updated_flat_args_descs,
                 meta=fw_metadata,
                 trace_joint=trace_joint,
+                inner_meta=_get_inner_meta(maybe_subclass_meta, fw_metadata),
             )
         )
     return _GraphCaptureTracingResult(
         fn_to_trace=fn_to_trace,
         flat_args=updated_flat_args,
         flat_args_descs=updated_flat_args_descs,
-        maybe_subclass_meta=subclass_tracing_info.maybe_subclass_meta,
+        maybe_subclass_meta=maybe_subclass_meta,
     )
 
 
@@ -401,7 +404,12 @@ def aot_dispatch_base_graph(
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
-        unlift_tokens(fw_module, fw_metadata, aot_config)
+        unlift_tokens(
+            fw_module,
+            fw_metadata,
+            aot_config,
+            inner_meta=_get_inner_meta(maybe_subclass_meta, fw_metadata),
+        )
         saved_updated_flat_args_subclasses_desugared = (
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )

@@ -1,4 +1,11 @@
+#include <array>
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+#include <c10/cuda/CUDAMacros.h>
+#include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
@@ -11,6 +18,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
@@ -19,6 +27,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
+#include <ATen/native/cuda/Gfx942Tf32Rounding.h>
 
 #ifdef USE_MSLK
 #include <mslk/gemm/gemm_torch.h>
@@ -93,6 +102,54 @@ enum class Activation {
   RELU,
   GELU,
 };
+
+#ifdef USE_ROCM
+bool is_gfx942_device(const DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(
+      device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    static const std::vector<std::string> gfx942_archs{"gfx942"};
+    results[device_index] =
+        at::detail::getCUDAHooks().isGPUArch(gfx942_archs, device_index);
+  });
+  return results[device_index];
+}
+
+bool should_round_gfx942_tf32_inputs_to_nearest(
+    const Tensor& input,
+    const Scalar& alpha) {
+  static const bool enable_gfx942_rn =
+      c10::utils::check_env("TORCH_GFX942_ENABLE_RN") == true;
+  // gfx942 XF32 MFMA truncates its inputs. Values rounded to the XF32 grid
+  // beforehand survive that conversion unchanged.
+  return enable_gfx942_rn && input.scalar_type() == ScalarType::Float &&
+      alpha.toComplexDouble() != 0.0 &&
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+          at::Float32Precision::TF32 &&
+      is_gfx942_device(input.get_device());
+}
+#endif
+
+std::pair<Tensor, Tensor> round_gfx942_tf32_operands_to_nearest_if_needed(
+    const Tensor& first,
+    const Tensor& second,
+    const Scalar& alpha) {
+#ifdef USE_ROCM
+  if (first.numel() != 0 && second.numel() != 0 &&
+      should_round_gfx942_tf32_inputs_to_nearest(first, alpha)) {
+    return {
+        round_gfx942_tf32_rne_cuda(first),
+        round_gfx942_tf32_rne_cuda(second)};
+  }
+#else
+  (void)alpha;
+#endif
+  return {first, second};
+}
 
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
@@ -534,6 +591,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
 
   at::ScalarType scalar_type = mat1.scalar_type();
+  auto [gemm_mat1, gemm_mat2] =
+      round_gfx942_tf32_operands_to_nearest_if_needed(mat1, mat2, alpha);
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
 
   #ifdef USE_ROCM
@@ -564,7 +623,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           canUseAddmmCudaLtWithDistinctCAndD(
               result, self, mat1, mat2, disable_addmm_cuda_lt_for_device);
       if (distinct_c_and_d_candidate) {
-        cublasCommonArgs args(mat1, mat2, result);
+        cublasCommonArgs args(gemm_mat1, gemm_mat2, result);
         // Returning early below skips the `result.copy_(*args.result)`
         // writeback, which is only correct because the guard keeps `result`
         // row-major and non-conj, so prepare_matrix_for_cublas() borrows it
@@ -619,7 +678,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     );
   }
 
-  cublasCommonArgs args(mat1, mat2, result);
+  cublasCommonArgs args(gemm_mat1, gemm_mat2, result);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
   // The Lt path
@@ -746,8 +805,11 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   int64_t lda = 0, ldb = 0, ldc = 0;
   bool transpose_batch1 = false, transpose_batch2 = false;
-  auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
-  auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
+  auto [gemm_batch1, gemm_batch2] =
+      round_gfx942_tf32_operands_to_nearest_if_needed(
+          batch1, batch2, alpha);
+  auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? gemm_batch2 : gemm_batch1, transpose_batch1, lda, transpose_result, m, k);
+  auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? gemm_batch1 : gemm_batch2, transpose_batch2, ldb, transpose_result, k, n);
 
   ldc = result_->strides()[leading_dim];
   int64_t num_batches = result_->sizes()[0];
@@ -951,7 +1013,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
       [&] {
         Tensor result = at::empty({}, self.options());
 
-        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
             handle,
@@ -998,7 +1060,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::vdot<scalar_t>(

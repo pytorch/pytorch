@@ -8,14 +8,18 @@
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/DTensorState.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
+      fake_tensor_mode_state_(c10::impl::FakeTensorModeTLS::get_state()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       rf_tls_(at::get_record_function_tls_()), functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
+      graph_exec_group_state_(c10::GraphExecGroupState::get_tls_state()),
       torch_dispatch_mode_state_(c10::impl::TorchDispatchModeTLS::get_state()), python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()),
       saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()),
@@ -34,6 +38,10 @@ void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
 }
 
+bool ThreadLocalState::get_grad_mode() const {
+  return autograd_tls_.get_grad_mode();
+}
+
 void ThreadLocalState::set_multithreading_enabled(bool enabled) {
   autograd_tls_.set_multithreading_enabled(enabled);
 }
@@ -44,6 +52,7 @@ void ThreadLocalState::setThreadLocalState(
   // Note that setting the InferenceMode TLS in this function is ONLY ok because we always
   // restore the dispatch key set TLS at the same time.
   c10::AutogradState::set_tls_state(state.autograd_tls_);
+  c10::GraphExecGroupState::set_tls_state(state.graph_exec_group_state_);
 
   c10::impl::TorchDispatchModeTLS::set_state(state.torch_dispatch_mode_state_);
 
@@ -57,6 +66,8 @@ void ThreadLocalState::setThreadLocalState(
 
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
 
+  c10::impl::FakeTensorModeTLS::create_state(state.fake_tensor_mode_state_);
+
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
@@ -69,7 +80,7 @@ void ThreadLocalState::setThreadLocalState(
 
   at::impl::ThreadLocalPythonObjects::set_state(state.saved_objects_);
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
-  for(size_t i=0; i<state.autocast_dtypes_.size(); i++) {
+  for(const auto i : c10::irange(state.autocast_dtypes_.size())) {
      at::autocast::set_autocast_dtype(static_cast<at::DeviceType>(i), state.autocast_dtypes_[i]);
   }
 #endif

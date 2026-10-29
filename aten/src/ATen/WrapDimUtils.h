@@ -148,8 +148,8 @@ inline int64_t legacy_cat_wrap_dim(
 inline void wrap_all_dims(
     std::vector<int64_t>& dims_to_wrap,
     int64_t tensor_total_dims) {
-  for (const auto i : c10::irange(dims_to_wrap.size())) {
-    dims_to_wrap[i] = maybe_wrap_dim(dims_to_wrap[i], tensor_total_dims);
+  for (auto& dims_to_wrap_elem : dims_to_wrap) {
+    dims_to_wrap_elem = maybe_wrap_dim(dims_to_wrap_elem, tensor_total_dims);
   }
 }
 

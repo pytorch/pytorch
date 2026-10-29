@@ -27,7 +27,7 @@ from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
@@ -71,7 +71,7 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 def _extract_tensor_metadata_for_node_hash(
     x: torch.Tensor,
-) -> tuple[Callable[[T], T], tuple[Any, ...]]:
+) -> tuple[Callable[[T], T], tuple[object, ...]]:
     from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
     out = []
@@ -96,7 +96,6 @@ class InputPickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: _extract_tensor_metadata_for_node_hash,
                 torch.SymInt: lambda x: (_ident, (str(x),)),
                 torch.SymBool: lambda x: (_ident, (str(x),)),
                 torch.SymFloat: lambda x: (_ident, (str(x),)),
@@ -104,7 +103,14 @@ class InputPickler(pickle.Pickler):
         )
         self.fast = True
 
-    def dumps(self, obj: Any) -> bytes:
+    # cannot rely on python faketensor type for c++ fakes
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: object) -> Any:
+        if is_fake_tensor(obj):
+            return _extract_tensor_metadata_for_node_hash(obj)
+        return NotImplemented
+
+    def dumps(self, obj: object) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -118,7 +124,7 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_args(arg: Any) -> Any:
+def _extract_args(arg: object) -> object:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
     elif isinstance(arg, (torch.Tensor, int)):
@@ -129,7 +135,7 @@ def _extract_args(arg: Any) -> Any:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[Any | None, ...]]:
+) -> tuple[tuple[str, ...], tuple[object, ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
@@ -139,7 +145,7 @@ def _normalize_args(
 
 
 def _sort_with_ref_region(
-    index_to_rank: dict[int, int], regions: list[list[Any]]
+    index_to_rank: dict[int, int], regions: list[list[T]]
 ) -> None:
     # sort topologically
     # we need to handle edge cases where some nodes have no dependencies

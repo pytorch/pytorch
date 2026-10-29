@@ -121,7 +121,10 @@ def ok_changed_file(file: str) -> bool:
     if (
         file.startswith("torch/")
         and file.endswith(".py")
-        and not file.startswith("torch/csrc/")
+        # Python DSL sources are compiled into the wheel.
+        and not file.startswith(
+            ("torch/csrc/", "torch/_native/", "torch/_vendor/quack/")
+        )
     ):
         return True
     if file.startswith("test/") and file.endswith(".py"):

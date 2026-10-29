@@ -50,7 +50,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -661,7 +660,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # to unshard on the last mesh dim. With batch=1 on the first dimension,
         # the all_gather should use a pure view operation.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=True,
@@ -676,7 +675,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # Even though batch=1 on first dimension, gather_dim will be 2 (not 1),
         # so we can't use the view optimization.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(2), Shard(2)],
             placements_dst=[Shard(2), Replicate()],
             should_use_view=False,
@@ -691,7 +690,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # This should fall back to split+cat since the view optimization
         # doesn't apply when batch > 1.
         self._test_all_gather_optimization(
-            global_shape=(4, 8192, 6144),
+            global_shape=(4, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=False,
@@ -1473,7 +1472,6 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             expected_total_combination *= math.factorial(N)
             self.assertEqual(len(all_combinations), expected_total_combination)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/168197")
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)

@@ -3,28 +3,29 @@ Generic codegen for AOTAutograd runtime wrappers.
 
 PySourceBuilder accumulates indented Python source together with the globals the
 generated code closes over and a fresh-name counter; _compile_and_exec_source is
-the single chokepoint that turns generated source into a live function (logging it
-as a structured-trace artifact for tlparse and giving it a stable traceback
-filename). Every runtime-wrapper codegen routes through it -- the subclass wrappers
-in subclass_codegen.py and the orchestration / alias / mutation epilogues in
-runtime_wrappers.py -- so it knows nothing about any particular wrapper kind. This
-module also hosts the optional thread-local capture sink that records each codegen'd
-wrapper's source, which AOT-to-Python lowering (to_standalone_python.py) uses to
-compose the wrappers into one standalone module. Kept as a leaf module (stdlib +
-torch only) so it is safe to import anywhere.
+the single chokepoint that turns generated source into a live function and gives it
+a stable traceback filename. Every runtime-wrapper codegen routes through it -- the
+subclass wrappers in subclass_codegen.py and the orchestration / alias / mutation
+epilogues in runtime_wrappers.py -- so it knows nothing about any particular wrapper
+kind. This module also hosts thread-local sinks that combine the sources into one
+structured-trace artifact for tlparse and optionally record them for AOT-to-Python
+lowering (to_standalone_python.py). Kept as a leaf module (stdlib + torch only) so
+it is safe to import anywhere.
 """
 
 import contextlib
 import functools
 import logging
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 
 import torch
 from torch.utils._indented_buffer import IndentedBuffer
 
 
 log = logging.getLogger(__name__)
+
+_RUNTIME_WRAPPERS_ARTIFACT_NAME = "aot_autograd_runtime_wrappers"
 
 
 class PySourceBuilder(IndentedBuffer):
@@ -105,22 +106,50 @@ class PySourceBuilder(IndentedBuffer):
         )
 
 
-# Optional sink for the source of every runtime-wrapper function codegen'd via
-# ``_compile_and_exec_source``. When a sink is installed (see
-# ``capture_generated_sources``), each codegen'd wrapper appends a
-# ``GeneratedSource`` to it; this lets AOT-to-Python lowering compose the wrappers
-# into one standalone module. Thread-local (NOT a process global) so a concurrent
-# compile on another thread cannot splice its wrappers into this capture -- and,
-# conversely, so an unrelated concurrent compile on another thread is never mistaken for
-# offloaded capture work and aborted (``_compile_and_exec_source`` runs on EVERY
-# AOTAutograd compile, not just this one). Absent (zero overhead, no behavior change)
-# during ordinary compilation. Mirrors the threading.local used by
-# _saved_tensor_hook_context in graph_compile.py.
+# Thread-local sinks for the source of every runtime-wrapper function codegen'd via
+# ``_compile_and_exec_source``. One aggregates the tlparse artifact; the optional
+# capture sink records ``GeneratedSource`` objects so AOT-to-Python lowering can
+# compose the wrappers into one standalone module. Thread-local state keeps
+# concurrent compiles from splicing their wrappers together.
 _capture_tls = threading.local()
 
 
 def _current_capture_sink() -> "list[GeneratedSource] | None":
     return getattr(_capture_tls, "sink", None)
+
+
+def _current_trace_sink() -> "list[tuple[str, str]] | None":
+    return getattr(_capture_tls, "trace_sink", None)
+
+
+def _format_runtime_wrapper_sources(sources: Sequence[tuple[str, str]]) -> str:
+    return "\n\n".join(f"# {name}\n{source}" for name, source in sources)
+
+
+def _trace_runtime_wrapper_sources(sources: Sequence[tuple[str, str]]) -> None:
+    sources = tuple(sources)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": _RUNTIME_WRAPPERS_ARTIFACT_NAME,
+            "encoding": "string",
+        },
+        payload_fn=lambda: _format_runtime_wrapper_sources(sources),
+    )
+
+
+@contextlib.contextmanager
+def aggregate_runtime_wrapper_sources() -> "Iterator[None]":
+    """Emit codegen in this scope as one structured-trace artifact."""
+    previous_sink = _current_trace_sink()
+    sources: list[tuple[str, str]] = []
+    _capture_tls.trace_sink = sources
+    try:
+        yield
+    finally:
+        _capture_tls.trace_sink = previous_sink
+        if sources:
+            _trace_runtime_wrapper_sources(sources)
 
 
 class GeneratedSource:
@@ -197,14 +226,11 @@ def _compile_and_exec_source(
     if log.isEnabledFor(logging.DEBUG):
         log.debug("Generated %s:\n%s", artifact_name, source)
 
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": artifact_name,
-            "encoding": "string",
-        },
-        payload_fn=lambda: source,
-    )
+    trace_sink = _current_trace_sink()
+    if trace_sink is not None:
+        trace_sink.append((artifact_name, source))
+    else:
+        _trace_runtime_wrapper_sources(((artifact_name, source),))
 
     # Use a path under torch/_functorch/ so the code object is recognized by
     # dynamo's MOD_SKIPLIST. The eval frame hook stays active during the entire
