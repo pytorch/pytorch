@@ -3215,8 +3215,8 @@ class PythonWrapperCodegen(CodeGen):
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
-            self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
+            self._write_autotune_get_raw_stream(
+                get_raw_stream_name(device_idx), device_idx
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
