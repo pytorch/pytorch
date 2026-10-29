@@ -9471,6 +9471,48 @@ class TestPrecompileCustomOpModules(TestCase):
         with open(artifact) as f:
             self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
 
+    @skipIfCrossRef
+    def test_load_imports_the_module_registering_a_library_op_kernel(self):
+        tag = uuid.uuid4().hex
+        defmod, implmod = f"precompile_def_{tag}", f"precompile_impl_{tag}"
+        ns = f"precompile_kernel_test_{tag}"
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        sources = {
+            defmod: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("triple(Tensor x) -> Tensor")\n',
+            implmod: f'import torch, {defmod}\nlib = torch.library.Library("{ns}", "IMPL")\nlib.impl("triple", lambda x: x * 3, "CPU")\n',
+        }
+        for name, source in sources.items():
+            with open(os.path.join(directory, name + ".py"), "w") as f:
+                f.write(source)
+        script = textwrap.dedent(
+            f"""
+            import sys
+            import torch
+            from torch.compiler.precompile import capture, load, MakeFxTracer
+            phase, artifact, cache = sys.argv[1:]
+            sys.path.insert(0, {directory!r})
+            x = torch.arange(6, dtype=torch.float32)
+            if phase == "capture":
+                import {implmod}
+                op = torch.ops.{ns}.triple.default
+                with capture(lambda x: op(x.sin()) + 1, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
+                    torch.save(cap(x), artifact + ".pt")
+            else:
+                assert "{implmod}" not in sys.modules
+                torch.testing.assert_close(load(artifact, cache)(x), torch.load(artifact + ".pt"))
+            print("ok", phase)
+            """
+        )
+        paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
+        for phase in ("capture", "load"):
+            cmd = [sys.executable, "-c", script, phase, *paths]
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn(f"ok {phase}", out.stdout)
+        with open(paths[0]) as f:
+            modules = tuple(sorted((defmod, implmod)))
+            self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", f.read())
+
 
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
