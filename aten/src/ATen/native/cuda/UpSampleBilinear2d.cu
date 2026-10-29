@@ -130,7 +130,9 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
 
 #ifdef USE_ROCM
 // Prefer gather on channels_last when 4*o_numel/i_numel is high (contended
-// atomics). Tuned on gfx1250: gather wins above ~6 atomics/addr, loses below ~5.
+// atomics). One cutoff is shared by all ROCm architectures: gather wins above
+// ~6 atomics/addr and loses below ~5 on the parts measured so far. It can be
+// tuned for individual architectures later.
 constexpr int64_t kNhwcGatherMinContributions = 6;
 
 // Helper function to compute output pixel range that can contribute to input pixel
