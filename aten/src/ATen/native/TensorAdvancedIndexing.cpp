@@ -114,7 +114,6 @@
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_backward_native.h>
 #include <ATen/ops/masked_select_native.h>
-#include <ATen/ops/nested_to_padded_tensor_native.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_numpy_native.h>
 #include <ATen/ops/nonzero_static_native.h>
@@ -1088,12 +1087,12 @@ Tensor& index_put_(
       self, indices, value, accumulate, /*unsafe=*/false);
 }
 
-TORCH_IMPL_FUNC(index_copy_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- const Tensor& result) {
+void index_copy_out_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Tensor& result) {
   if (!result.is_same(self))
     result.copy_(self);
 
@@ -1156,6 +1155,15 @@ TORCH_IMPL_FUNC(index_copy_out)
   auto result_dim_stride = result_nonzero.stride(dim);
   index_copy_stub(
       iter.device_type(), iter, dim, result_dim_size, result_dim_stride);
+}
+
+TORCH_IMPL_FUNC(index_copy_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Tensor& result) {
+  index_copy_out_impl(self, dim, index, source, result);
 }
 
 // Not calling into index_reduce_func_impl because of a different dtype dispatch

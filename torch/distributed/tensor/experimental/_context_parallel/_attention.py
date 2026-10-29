@@ -909,7 +909,7 @@ def _sdpa_handler(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
@@ -1170,6 +1170,7 @@ def _context_parallel_buffers(
                 H=buffer.kv_num_blocks.shape[1],
                 Q_LEN=buffer.seq_lengths[0],
                 KV_LEN=buffer.seq_lengths[1],
+                BLOCK_SIZE=buffer.BLOCK_SIZE,
                 device_mesh=mesh,
                 load_balancer=load_balancer,
             )
@@ -1187,6 +1188,7 @@ def _create_cp_block_mask(
     H: int,
     Q_LEN: int,
     KV_LEN: int,
+    BLOCK_SIZE: tuple[int, int],
     device_mesh: DeviceMesh,
     load_balancer: _LoadBalancer | None = None,
 ) -> BlockMask:
@@ -1208,6 +1210,7 @@ def _create_cp_block_mask(
         H (int): Number of query heads.
         Q_LEN (int): Global sequence length of the query.
         KV_LEN (int): Global sequence length of the key/value.
+        BLOCK_SIZE (Tuple[int, int]): Query and key/value block sizes.
         device_mesh (DeviceMesh): Device mesh used for context parallelism.
         load_balancer (Optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
             QKV before sharding. This will be used to modify the block_mask generated.
@@ -1220,21 +1223,17 @@ def _create_cp_block_mask(
         NotImplementedError: If Q_LEN is not divisible by (CP world size * BLOCK_SIZE).
 
     Warning:
-        Currently requires Q_LEN to be divisible by CP mesh world size * BLOCK_SIZE
-        (BLOCK_SIZE defaults to 128). This constraint exists because the BlockMask
-        must handle both padding and offsets correctly. For example, if Q_LEN is 384,
-        CP world size is 2, and BLOCK_SIZE is 128, the local Q_LEN would be 192. In
-        such cases, both rank0 and rank1 would have paddings in their local BlockMasks.
-        Support for padding in this scenario is planned for future work.
+        Currently requires Q_LEN to be divisible by CP mesh world size * query block
+        size. This constraint exists because the BlockMask must handle both padding and
+        offsets correctly.
 
     """
 
-    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
-
-    if Q_LEN % (device_mesh.size() * _DEFAULT_SPARSE_BLOCK_SIZE) != 0:
+    q_block_size = BLOCK_SIZE[0]
+    if Q_LEN % (device_mesh.size() * q_block_size) != 0:
         raise NotImplementedError(
             f"Q_LEN {Q_LEN} is not divisible by CP mesh world size {device_mesh.size()} * "
-            f"BLOCK_SIZE {_DEFAULT_SPARSE_BLOCK_SIZE}. This is not supported yet. "
+            f"Q_BLOCK_SIZE {q_block_size}. This is not supported yet. "
         )
 
     global _compiled_create_block_mask
@@ -1247,7 +1246,7 @@ def _create_cp_block_mask(
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,
         rank: int,
-        block_size: int,
+        q_block_size: int,
         local_q_size: int,
         qkv_rearrange_indices: torch.Tensor | None = None,
     ) -> _mask_mod_signature:
@@ -1286,13 +1285,13 @@ def _create_cp_block_mask(
         def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
             # calculate local block_idx and block_offset
             local_blk_idx, local_blk_offset = (
-                local_q_idx // block_size,
-                local_q_idx % block_size,
+                local_q_idx // q_block_size,
+                local_q_idx % q_block_size,
             )
             # NOTE: load balancing is not used
-            local_num_blocks = local_q_size // block_size
+            local_num_blocks = local_q_size // q_block_size
             blk_idx = local_num_blocks * rank + local_blk_idx
-            return blk_idx * block_size + local_blk_offset
+            return blk_idx * q_block_size + local_blk_offset
 
         return lambda b, h, q_idx, kv_idx: mask_mod(
             b,
@@ -1307,7 +1306,6 @@ def _create_cp_block_mask(
         Q_LEN, cp_group_size, device_mesh.device_type
     )
     Q_SHARD_LEN = Q_LEN // cp_group_size
-    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
 
     rearrange_indices = (
         load_balancer._generate_indices(restore=False) if load_balancer else None
@@ -1316,7 +1314,7 @@ def _create_cp_block_mask(
         _rewrite_mask_mod(
             mask_mod,
             cp_rank,
-            block_size,
+            q_block_size,
             Q_SHARD_LEN,
             qkv_rearrange_indices=rearrange_indices,
         ),
@@ -1325,7 +1323,7 @@ def _create_cp_block_mask(
         Q_SHARD_LEN,
         KV_LEN,
         device=device_mesh.device_type,
-        BLOCK_SIZE=(block_size, block_size),
+        BLOCK_SIZE=BLOCK_SIZE,
     )
     return block_mask
 

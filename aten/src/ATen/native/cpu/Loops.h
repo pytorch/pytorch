@@ -35,18 +35,9 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
-
-// gcc < 12 ICEs ("unrecognizable insn" during RTL pass vregs) when it auto-vectorizes a loop
-// that bit-casts between integer and float vectors; the BFloat16/Half -> float widening used by
-// many kernels is exactly such a bit-cast. The contiguous fast path in execute_op is what makes
-// those loops vectorizable, so disable it there and keep the runtime-stride loop.
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER) && __GNUC__ < 12
-#define AT_CONTIGUOUS_BASIC_LOOP_FASTPATH 0
-#else
-#define AT_CONTIGUOUS_BASIC_LOOP_FASTPATH 1
-#endif
 
 namespace at::native { inline namespace CPU_CAPABILITY {
 
@@ -66,23 +57,6 @@ typename traits::ArgsTuple
 dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   using Indices = std::make_index_sequence<traits::arity>;
   return dereference_impl<traits>(data, strides, i, Indices{});
-}
-
-template <typename traits, std::size_t... INDEX>
-typename traits::ArgsTuple
-dereference_contiguous_impl(char* C10_RESTRICT data[], int64_t i,
-                            std::index_sequence<INDEX...> /*unused*/) {
-  return std::make_tuple(
-      c10::load<typename traits::template arg<INDEX>::type>(
-          data[INDEX] +
-          i * sizeof(typename traits::template arg<INDEX>::type))...);
-}
-
-template <typename traits>
-typename traits::ArgsTuple
-dereference_contiguous(char* C10_RESTRICT data[], int64_t i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return dereference_contiguous_impl<traits>(data, i, Indices{});
 }
 
 template <typename traits, std::size_t... INDEX>
@@ -107,21 +81,37 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
+template <typename traits, std::size_t... INDEX>
+typename traits::ArgsTuple
+dereference_vec_partial_impl(char* C10_RESTRICT data[],
+                             const typename traits::result_type& opt_scalar,
+                             size_t S,
+                             int64_t i,
+                             [[maybe_unused]] int64_t count,
+                             std::index_sequence<INDEX...> /*unused*/) {
+  using Vec = typename traits::result_type;
+  using scalar_t = typename Vec::value_type;
+  return std::make_tuple(
+      S == INDEX + 1 ?
+      opt_scalar :
+      Vec::loadu(data[INDEX] + i * sizeof(scalar_t), count)...);
+}
+
+// Loads only `count` elements per operand; the lanes beyond `count` are zeroed
+// by Vectorized::loadu, so no memory past the end of the operands is touched.
+template <typename traits>
+typename traits::ArgsTuple
+dereference_vec_partial(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i, int64_t count) {
+  using Indices = std::make_index_sequence<traits::arity>;
+  return dereference_vec_partial_impl<traits>(data, opt_scalar, S, i, count, Indices{});
+}
+
 template <typename func_t,
     std::enable_if_t<!std::is_void_v<typename function_traits<func_t>::result_type>>* = nullptr>
 inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
-#if AT_CONTIGUOUS_BASIC_LOOP_FASTPATH
-  if (is_contiguous<traits>(strides)) {
-    for (; i < n; i++) {
-      result_type* out_ptr = (result_type*)(data[0] + i * sizeof(result_type));
-      *out_ptr = std::apply(op, dereference_contiguous<traits>(&data[1], i));
-    }
-    return;
-  }
-#endif
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
     *out_ptr = std::apply(op, dereference<traits>(
@@ -230,9 +220,14 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
 // the same type and contiguous with one exception: a single input may be
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
 // is 0, then there are no scalar inputs.
+//
+// The trailing elements are handled with masked loads/stores through `vop` as
+// well, not through `op`: a kernel whose scalar and vectorized lambdas are not
+// numerically identical would otherwise give different results depending on an
+// element's position within the tensor.
 template <typename func_t, typename vec_func_t>
 inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, [[maybe_unused]] func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vectorized<scalar_t>;
@@ -253,12 +248,11 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
-  if (i < n) {
-    int64_t strides[ntensors];
-    for (const auto arg : c10::irange(ntensors)) {
-      strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
-    }
-    basic_loop(data, strides, i, n, std::forward<func_t>(op));
+  for (; i < n; i += Vec::size()) {
+    const int64_t count = std::min(static_cast<int64_t>(Vec::size()), n - i);
+    auto args = dereference_vec_partial<traits>(&data[1], opt_scalar, S, i, count);
+    auto out = std::apply(vop, std::move(args));
+    out.store(data[0] + i * sizeof(scalar_t), count);
   }
 }
 

@@ -46,6 +46,9 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
 
   # Directories for NNPACK dependencies submoduled in Caffe2
   set(PYTHON_PEACHPY_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-peachpy" CACHE STRING "PeachPy (Python package) source directory")
+  if(NOT DEFINED PYTHON_SIX_SOURCE_DIR AND DEFINED ENV{PYTHON_SIX_SOURCE_DIR})
+    set(PYTHON_SIX_SOURCE_DIR "$ENV{PYTHON_SIX_SOURCE_DIR}" CACHE STRING "six (Python package) source directory")
+  endif()
   if(NOT DEFINED CPUINFO_SOURCE_DIR)
     set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
@@ -71,6 +74,12 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
       "${CONFU_DEPENDENCIES_BINARY_DIR}/NNPACK")
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
       unset(CMAKE_POLICY_VERSION_MINIMUM)
+    endif()
+    # NNPACK custom commands use PYTHONPATH=... shell env var assignment
+    # syntax, which fails when ctest --instrument wraps them. This can be
+    # removed if https://github.com/Maratyszcza/NNPACK/pull/224 is merged
+    if(USE_CMAKE_INSTRUMENTATION)
+      set_property(DIRECTORY "${NNPACK_SOURCE_DIR}" PROPERTY RULE_LAUNCH_CUSTOM "")
     endif()
     # We build static versions of nnpack and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
