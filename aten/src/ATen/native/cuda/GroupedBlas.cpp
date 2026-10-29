@@ -121,6 +121,8 @@ void raise_unsupported_grouped_scaling(
       "1x128 is outer-major; 128x128 is K-major with K-block count padded to 4. "
       "3D inputs use (groups, scale_size); 2D inputs concatenate group scales in a 1D tensor. "
       "Recipe pairs: 1x128/1x128, 1x128/128x128, or 128x128/1x128.\n"
+      "- Packed MNxK4: matching BlockWise1x32 or BlockWise1x128 recipes, float8_e4m3fn/e5m2 inputs "
+      "with at least one e4m3fn input, one float8_e8m0fnu scale per input, SWIZZLE_MNxK4.\n"
       "- MXFP8: matching BlockWise1x32 recipes, float8_e4m3fn inputs, one float8_e8m0fnu scale per input.\n"
       "- MXFP4: matching BlockWise1x32 recipes, packed float4 inputs, one float8_e8m0fnu scale per input.\n"
       "- NVFP4: packed float4 inputs, one BlockWise1x16 float8_e4m3fn scale per input, "
@@ -144,8 +146,13 @@ void _check_cublaslt_grouped_inputs(
     int64_t batch_count) {
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
   const bool hopper = is_hopper_block_impl(impl);
-  const bool valid_arch = hopper ? major == 9 : major >= 9 && major <= 11;
-  const auto expected_arch = hopper ? "SM9.x" : "SM9.x/SM10.x/SM11.x";
+  if (impl == ScaledGemmImplementation::MNK4_1x32 || impl == ScaledGemmImplementation::MNK4_1x128) {
+    at::cuda::blas::detail::check_mnk4_support();
+  }
+  const bool tensorwise = impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE;
+  const bool valid_arch = hopper ? major == 9 : tensorwise
+      ? major >= 9 && major <= 11 : major == 10 || major == 11;
+  const auto expected_arch = hopper ? "SM9.x" : tensorwise ? "SM9.x/SM10.x/SM11.x" : "SM10.x/SM11.x";
   TORCH_CHECK_NOT_IMPLEMENTED(
       valid_arch, "cuBLASLt grouped GEMM requires ", expected_arch, "; got SM", major, ".x");
   TORCH_CHECK_VALUE(
@@ -267,6 +274,10 @@ get_cublaslt_grouped_scale_layouts(
       return {Layout::Vec128F32, Layout::Block128x128F32};
     case ScaledGemmImplementation::BLOCK_1x128_1x128:
       return {Layout::Vec128F32, Layout::Vec128F32};
+    case ScaledGemmImplementation::MNK4_1x32:
+      return {Layout::Vec32MnK4UE8M0, Layout::Vec32MnK4UE8M0};
+    case ScaledGemmImplementation::MNK4_1x128:
+      return {Layout::Vec128MnK4UE8M0, Layout::Vec128MnK4UE8M0};
     default:
       TORCH_CHECK(false, "unsupported cuBLASLt grouped GEMM implementation: ", static_cast<int>(impl));
   }
@@ -926,7 +937,7 @@ namespace {
 
 using scaled_blas::ScaleKernelDispatchEntry;
 
-std::array<ScaleKernelDispatchEntry, 8> scale_grouped_kernel_dispatch = {{
+std::array<ScaleKernelDispatchEntry, 10> scale_grouped_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE},
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "block_1x128_128x128", std::bind_front(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
@@ -935,6 +946,10 @@ std::array<ScaleKernelDispatchEntry, 8> scale_grouped_kernel_dispatch = {{
     ScaledGemmImplementation::BLOCK_128x128_1x128},
   { "block_1x128_1x128", std::bind_front(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
+  { "mnk4_1x32", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x32),
+    ScaledGemmImplementation::MNK4_1x32},
+  { "mnk4_1x128", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x128),
+    ScaledGemmImplementation::MNK4_1x128},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
   { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
@@ -1000,9 +1015,11 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
   const int64_t batch_count = (mat_a.dim() == 2 || mat_b.dim() == 2)
       ? offs->size(0) : mat_a.size(0);
 
@@ -1011,7 +1028,9 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
     case ScaledGemmImplementation::TENSORWISE_TENSORWISE:
     case ScaledGemmImplementation::BLOCK_1x128_1x128:
     case ScaledGemmImplementation::BLOCK_1x128_128x128:
-    case ScaledGemmImplementation::BLOCK_128x128_1x128: {
+    case ScaledGemmImplementation::BLOCK_128x128_1x128:
+    case ScaledGemmImplementation::MNK4_1x32:
+    case ScaledGemmImplementation::MNK4_1x128: {
       scaled_grouped_mm_cublaslt(
           gemm_impl, mat_a, mat_b, scale_a_ref, scale_recipe_a_enum, swizzle_a_enum,
           scale_b_ref, scale_recipe_b_enum, swizzle_b_enum, offs_opt, use_fast_accum, batch_count, out_mut);

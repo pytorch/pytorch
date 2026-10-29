@@ -28,6 +28,8 @@ enum class ScaledGemmImplementation {
   NVFP4_NVFP4 = 7,
   NVFP4_NVFP4_SINGLE_SCALE = 8,
   MXFP4_MXFP4 = 9,
+  MNK4_1x32 = 10,
+  MNK4_1x128 = 11,
 };
 
 /**
@@ -40,9 +42,11 @@ using acceptance_fn = std::function<bool(
     c10::ScalarType,
     std::vector<ScalingType>&,
     c10::ArrayRef<Tensor>&,
+    c10::ArrayRef<SwizzleType>,
     c10::ScalarType,
     std::vector<ScalingType>&,
-    c10::ArrayRef<Tensor>&)>;
+    c10::ArrayRef<Tensor>&,
+    c10::ArrayRef<SwizzleType>)>;
 
 using ScaleKernelDispatchEntry =
     std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>;
@@ -59,12 +63,14 @@ ScaledGemmImplementation find_scaled_gemm_impl(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     c10::ArrayRef<Tensor>& scales_a,
+    c10::ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    c10::ArrayRef<Tensor>& scales_b) {
+    c10::ArrayRef<Tensor>& scales_b,
+    c10::ArrayRef<SwizzleType> swizzle_b) {
   for (const auto& fn_entry : dispatch) {
     const auto& accept_fn = std::get<1>(fn_entry);
-    if (accept_fn(type_a, recipe_a, scales_a, type_b, recipe_b, scales_b)) {
+    if (accept_fn(type_a, recipe_a, scales_a, swizzle_a, type_b, recipe_b, scales_b, swizzle_b)) {
       return std::get<2>(fn_entry);
     }
   }
@@ -95,9 +101,11 @@ bool check_tensorwise_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Both inputs must be fp8,
@@ -108,9 +116,11 @@ bool check_rowwise_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Two-level scaling, canonical NVFP4
@@ -122,9 +132,11 @@ bool check_nvfp4_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Single-level scaling, what PyT currently understands
@@ -136,9 +148,11 @@ bool check_nvfp4_recipe_single_scale(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Both inputs must be fp8
@@ -152,9 +166,11 @@ bool check_deepseek_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Both inputs must be fp8
@@ -165,9 +181,11 @@ bool check_mxfp8_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Both inputs must be fp4
@@ -178,12 +196,26 @@ bool check_mxfp4_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
     c10::ScalarType type_b,
     std::vector<ScalingType>& recipe_b,
-    ArrayRef<Tensor>& scales_b);
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 TORCH_API
 bool is_valid_cublaslt_input_pair(c10::ScalarType type_a, c10::ScalarType type_b);
+
+TORCH_API
+bool check_mnk4_recipe(
+    ScalingType expected_recipe,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b,
+    ArrayRef<SwizzleType> swizzle_b);
 
 /**
  * Validate v2 _scaled_mm inputs and per-recipe scale shapes/dtypes.
