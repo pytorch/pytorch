@@ -2,7 +2,6 @@
 # Threads own vectorized kept-axis outputs without lane merging. Splitting the reduced
 # axis provides parallelism; unsplit (65536, 256) took 7830us versus ATen's 15.8us.
 
-import functools
 import math
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -53,7 +52,6 @@ class ColConfig(NamedTuple):
     kernel_order: str = "linear"
 
 
-@functools.lru_cache(maxsize=4096)
 def select_col_config(
     rows: int,
     columns: int,
@@ -65,7 +63,10 @@ def select_col_config(
     npar: int | None = None,
     vec: int | None = None,
 ) -> ColConfig:
-    """Select the column kernel and geometry; explicit arguments override it."""
+    """Select the column kernel and geometry; explicit arguments override it.
+
+    Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
+    """
     explicit = any(v is not None for v in (threads_per_block, npar, vec))
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
     cfg = ColConfig(
@@ -670,9 +671,14 @@ def reduce_batched_col_tile(
     x: torch.Tensor,
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
+    threads_per_block: int | None = None,
+    npar: int | None = None,
+    vec: int | None = None,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce dim 1 of contiguous 3D x to nouts (B, C) outputs."""
-    return _reduce_col_tile(trait, trait_key, x, out_dtypes, nouts, None, None, None)
+    return _reduce_col_tile(
+        trait, trait_key, x, out_dtypes, nouts, threads_per_block, npar, vec
+    )
 
 
 def _reduce_col_tile(
