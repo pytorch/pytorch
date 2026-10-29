@@ -453,6 +453,13 @@ class AOTInductorModelContainer {
       auto inactive_map = inactive().map;
       auto inactive_array = inactive().array;
 
+      auto use_active_constants = [&] {
+        auto active_map = active().map;
+        auto active_array = active().array;
+        model->update_constants_map(
+            active_map, /* remap_constants_array= */ false);
+        model->update_constants_array(active_array);
+      };
       try {
         model->update_constants_map(
             inactive_map, /* remap_constants_array= */ false);
@@ -464,14 +471,11 @@ class AOTInductorModelContainer {
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
 
-        // Swap back the model's constants mapping
-        auto active_map = active().map;
-        auto active_array = active().array;
-        model->update_constants_map(
-            active_map, /* remap_constants_array= */ false);
-        model->update_constants_array(active_array);
+        use_active_constants();
         const_folded = ConstantState::FOLDED;
       } catch (...) {
+        // Otherwise the model would keep running with the inactive constants.
+        use_active_constants();
         pool_.return_model_to_available(model);
         throw;
       }
