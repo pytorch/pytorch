@@ -165,4 +165,12 @@ bool has_mpp() {
       is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS);
 }
 
+bool has_metal_4_1() {
+#ifndef CAN_BUILD_METAL_41
+  return false;
+#else
+  return has_mpp() && is_macos_at_least(MacOSVersion::MACOS_27_0);
+#endif
+}
+
 } // namespace at::mps
