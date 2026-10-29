@@ -236,6 +236,16 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
+from .descriptors import (
+    BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
+    GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodDescriptorVariable,
+    MethodWrapperVariable,
+    PropertyVariable,
+    WrapperDescriptorVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DictKeysVariable,
@@ -245,27 +255,19 @@ from .dicts import (
 from .distributed import WorldMetaClassVariable
 from .exception import FrameSummaryVariable
 from .functions import (
-    BoundBuiltinMethodVariable,
-    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
-    GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
-    MemberDescriptorVariable,
-    MethodDescriptorVariable,
-    MethodWrapperVariable,
     PolyfilledFunctionVariable,
-    PropertyVariable,
     PyTreeGetNodeTypeFunctionVariable,
     SkipFunctionVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
     UserFunctionVariable,
-    WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
