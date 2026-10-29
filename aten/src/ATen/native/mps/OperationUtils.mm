@@ -1729,7 +1729,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
         const auto ndim = iter.ndim();
         const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
         const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
-        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+        const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+        bool transposed = false;
+        for (const auto i : c10::irange(1, iter.ntensors())) {
+          const auto strides = iter.strides(i);
+          transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
+        }
+        if (transposed) {
+          const auto tg_x = std::min<NSUInteger>(32, dim0);
+          const auto tg_y = std::min({8UL, dim1, [binaryPSO maxTotalThreadsPerThreadgroup] / tg_x});
+          [computeEncoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2)
+                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+        } else {
+          mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, dim2);
+        }
       }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
