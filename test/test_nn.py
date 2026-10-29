@@ -9512,12 +9512,15 @@ class TestNNDeviceType(NNTestCase):
         subtest(((16, 16), (8, 8), None), name="down_2x"),
         subtest(((9, 10), (9, 32), None), name="aniso"),
         subtest(((10, 12), None, 1.7), name="scale_factor"),
+        subtest(((256, 320), (512, 640), None), name="large_plane"),
     ])
     def test_upsamplingBilinear2d_nchw_kernel_paths(self, device, dtype, align_corners, layout, isize, osize, scale):
-        # The NCHW forward writes 4 outputs per thread when the output is
-        # contiguous, vector-aligned, width % 4 == 0, the input has unit
-        # w-stride, and the op upsamples; every other case takes the
-        # per-element kernel. The NaN prefill catches outputs neither writes.
+        # The NCHW forward loops over planes per output pixel when the output
+        # plane is large enough to fill the device (large_plane). Otherwise it
+        # writes 4 outputs per thread when the output is contiguous,
+        # vector-aligned, width % 4 == 0, and the op upsamples, and one output
+        # per thread in every other case. The NaN prefill catches outputs no
+        # kernel writes.
         n, c = 2, 3
         ih, iw = isize
         if layout == "noncontig_input":
