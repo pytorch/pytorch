@@ -1684,8 +1684,8 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
@@ -1949,8 +1949,8 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be structurally identical to the traced one (only weight
@@ -2048,8 +2048,8 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant (how it serves them is said below):
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state,
@@ -2823,8 +2823,9 @@ def _make_inlined_forward(
         python_code = python_code.replace(
             default, "\n_ALLOW_SERVE_TIME_COMPILES = True\n", 1
         )
-    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
-    exec(compile(python_code, "<precompile>", "exec"), module_ns)
+    from torch._inductor.codecache import exec_from_cache_file
+
+    module_ns = exec_from_cache_file(python_code, "_precompiled_artifact")
     return cast("Callable[..., object]", module_ns["forward"])
 
 
@@ -3539,11 +3540,16 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    Frozen C++ kernels are keyed by their full build command, which includes
-    the producer's absolute PyTorch include and library paths, so they serve
-    only a host whose PyTorch install and toolchain paths match the producer's.
-    Any other host rebuilds them, which needs a C++ compiler there:
-    :func:`no_compilation` does not gate C++ builds.
+    Frozen C++ kernels are keyed by their build command with the PyTorch install
+    taken out, so they serve a host that installed the same PyTorch build
+    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
+    producer's. The key also covers each kernel's source, so a kernel whose source
+    or command names a path in the Inductor cache dir (a linked Halide runtime,
+    CUTLASS or CK library, or a GPU ``cpp_wrapper`` wrapper's cubin path) keeps
+    that path: a host whose cache dir is at the producer's path restores the frozen
+    binary, which needs those files at the same path, and any other host rebuilds
+    it. Rebuilding needs a C++ compiler on the serving host: :func:`no_compilation`
+    does not gate C++ builds.
 
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's

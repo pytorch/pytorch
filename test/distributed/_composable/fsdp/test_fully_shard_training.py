@@ -46,6 +46,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -633,6 +634,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @with_tf32_off
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: bool | int,
@@ -694,7 +696,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 fully_shard_fn(module)
         fully_shard_fn(model)
         if unshard_async_op:
-            model._set_unshard_async_op(unshard_async_op)
+            model.set_unshard_in_current_stream(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
