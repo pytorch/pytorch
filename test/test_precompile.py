@@ -7648,7 +7648,9 @@ x, w = inputs(0)
 make_fx = sys.argv[4] == "make_fx"
 if phase == "capture":
     # Positive control: outside a capture this fn does build a multi-kernel.
-    torch.compile(fn)(x, w)
+    # Under autotune_at_compile_time a multi-kernel def never reaches the module.
+    with torch._inductor.config.patch({"triton.autotune_at_compile_time": False}):
+        torch.compile(fn)(x, w)
     assert "sub-kernel" in benchmarked, benchmarked
     benchmarked.clear()
     torch._dynamo.reset()
@@ -9321,9 +9323,8 @@ class TestPrecompileRuntimeCache(TestCase):
     def test_capture_ignores_multi_kernel_hints(self):
         # multi_kernel_hints builds a size-hint multi-kernel for a dynamic GEMM
         # whatever triton.multi_kernel is, and under autotune_at_compile_time its
-        # def never reaches the module (NameError on multi_kernel_N). The
-        # torch.compile control runs with the ambient autotune_at_compile_time
-        # (off for the Python wrapper), which does not hit that NameError.
+        # def never reaches the module (NameError on multi_kernel_N), so the
+        # torch.compile control pins it off.
         from torch._inductor.codegen.multi_kernel import SizeHintMultiKernel
         from torch._inductor.utils import fresh_cache
 
@@ -9341,7 +9342,10 @@ class TestPrecompileRuntimeCache(TestCase):
             fresh_cache(),
             mock.patch.object(SizeHintMultiKernel, "__init__", counting_init),
         ):
-            torch.compile(gemm, dynamic=True)(a, b)
+            with torch._inductor.config.patch(
+                {"triton.autotune_at_compile_time": False}
+            ):
+                torch.compile(gemm, dynamic=True)(a, b)
             self.assertTrue(built, "positive control built no SizeHintMultiKernel")
             built.clear()
             torch._dynamo.reset()
