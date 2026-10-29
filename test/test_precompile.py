@@ -9975,6 +9975,27 @@ class TestPrecompileCustomOpRecording(TestCase):
             },
         )
 
+    def test_a_bypassed_compiles_graph_break_ops_stay_out_of_a_later_fallback(self):
+        from torch._dynamo.precompile_package import _CapturePackage
+
+        bypassed, bypassed_name = self._op("bypassed")
+        fallback, fallback_name = self._op("fallback")
+
+        def other(x):
+            return x
+
+        package = _CapturePackage(_composite_op_fn)
+        with package.code_context(_composite_op_fn.__code__):
+            package.add_graph_break_op(bypassed._opoverload)
+            package.bypass_current_compile()
+        # As a generator frame Dynamo skips without entering code_context.
+        package.record_eager_fallback(other.__code__)
+        self.assertEqual(package.graph_break_op_names, set())
+        with package.code_context(_composite_op_fn.__code__):
+            package.add_graph_break_op(fallback._opoverload)
+        package.record_eager_fallback(_composite_op_fn.__code__)
+        self.assertEqual(package.graph_break_op_names, {(fallback_name, "")})
+
     def _render_with_ops(self, op_names):
         # A Dynamo capture of a function in an importable module, whose graphs are
         # taken to call op_names. Returns the artifact's CUSTOM_OP_MODULES and the
@@ -10015,6 +10036,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
         self.assertEqual(len([m for m in logs.output if qualname in m]), 1)
 
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_dynamo_graph_breaks_on_is_checked(self):
         from torch.library import _scoped_library
 
@@ -10051,6 +10073,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         )
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_op_in_a_frame_dynamo_falls_back_on_is_checked(self):
         from torch.library import _scoped_library
 
@@ -10072,6 +10095,7 @@ class TestPrecompileCustomOpRecording(TestCase):
         expected = (("precompile_no_fake::op", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     def test_an_artifact_imports_the_modules_of_only_the_backends_it_serves(self):
         served, served_name = self._op("served")
         unserved, unserved_name = self._op("unserved")
