@@ -95,6 +95,7 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_strict_cuda_triton,
     is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -7949,6 +7950,30 @@ def _floor_div_floating(a, b):
     return make_pointwise(fn)(a, b, nan, neg_one, zero)
 
 
+def _div_trunc_cuda_scalar(a: TensorBox | IRNode, b: int | float) -> TensorBox:
+    """Apply truncating division pointwise with a scalar divisor.
+
+    Match eager CUDA by computing the reciprocal and product in FP32, then
+    rounding to the tensor's dtype after truncation.
+
+    Args:
+        a: Tensor dividend.
+        b: Python scalar divisor.
+
+    Returns:
+        The pointwise result with the dividend's shape and dtype.
+    """
+
+    def fn(value):
+        value = ops.to_dtype(value, torch.float32)
+        reciprocal = ops.div_rn(
+            ops.constant(1.0, torch.float32), ops.constant(b, torch.float32)
+        )
+        return ops.trunc(ops.mul(value, reciprocal))
+
+    return make_pointwise(fn, force_output_cast=True)(a)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -7971,7 +7996,18 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        if both_integer:
+            return truncdiv(a, b)
+        if (
+            isinstance(a, (TensorBox, IRNode))
+            and is_strict_cuda_triton(a.get_device())
+            and isinstance(b, (int, float))
+            and a.get_dtype() in (torch.bfloat16, torch.float16)
+        ):
+            # CUDA eager computes a * reciprocal(b) in FP32 for scalar divisors.
+            # Keep the division and product in FP32, then round the op result.
+            return _div_trunc_cuda_scalar(a, b)
+        return trunc(div(a, b))
     return div(a, b)
 
 

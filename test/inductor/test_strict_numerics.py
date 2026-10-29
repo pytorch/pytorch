@@ -376,6 +376,36 @@ class StrictNumericsCompileTest(TestCase):
             # tensorify cannot handle, so lambd is specialized there.
             self.assertEqual(counter.frame_count, 2)
 
+    @config.patch(force_disable_caches=True)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("divisor", (3.8125, 1.00000004))
+    def test_div_trunc_scalar_rounding(self, device, dtype, numerics, upcast, divisor):
+        # For 3.8125, truncation gives 2635 at x=10048. The float consumer
+        # exposes missing output rounding to fp16 (2636) or bf16 (2640).
+        # For 1.00000004, eager rounds the divisor to FP32 1 before taking
+        # its reciprocal. Taking the reciprocal first makes trunc(1 * r) zero.
+        x = torch.tensor(
+            [1.0, 11.4375, -11.4375, 10048.0, -10048.0], device=device, dtype=dtype
+        )
+
+        def fn(x):
+            return torch.div(x, divisor, rounding_mode="trunc").float()
+
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": numerics,
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )
+        metrics.reset()
+        result = compiled(x)
+        self.assertEqual(result.view(torch.int32), fn(x).view(torch.int32))
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -920,8 +950,6 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
-        ("div_trunc_rounding", "bfloat16"),
-        ("div_trunc_rounding", "float16"),
         ("xlogy", "float32"),
         ("div_no_rounding_mode", "bfloat16"),
         ("div_no_rounding_mode", "float16"),
@@ -1157,10 +1185,15 @@ NONFLOAT_XFAIL = frozenset(
 )
 
 
+# Preserve all floating dtype coverage after removing repaired xfail entries.
+FULL_DTYPE_POINTWISE_OPS = frozenset({"div_trunc_rounding"})
+
+
 class _strict_ops(ops):
-    def __init__(self, op_list, xfails):
+    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
         super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
         self.xfails = xfails
+        self.full_dtype_ops = full_dtype_ops
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for case in super()._parametrize_test(test, generic_cls, device_cls):
@@ -1171,6 +1204,7 @@ class _strict_ops(ops):
             if (
                 ALL_SAMPLES
                 or dtype == preferred
+                or _op_id(op) in self.full_dtype_ops
                 or (_op_id(op), _dtype_label(dtype)) in self.xfails
             ):
                 yield case
@@ -1445,7 +1479,9 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
+    @_strict_ops(
+        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
+    )
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
