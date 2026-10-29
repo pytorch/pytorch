@@ -4,9 +4,10 @@ Nothing here is imported or run by torch at runtime, and the generated artifacts
 import this module. Instead torch._precompile emits these function bodies VERBATIM (via
 inspect.getsource, on the to_python_code / emit path only) into the self-contained
 python_code string, after the calling-convention metadata and the compiled/captured
-graph. Authoring the driver as real code -- instead of a hand-written string literal --
-lets pyrefly / ruff / IDEs type-check and navigate the load-bearing driver logic that
-would otherwise be invisible inside a string (and drops the wall of ``# noqa: F821``).
+graph (``_import_custom_op_modules`` goes before them, as section 0). Authoring the
+driver as real code -- instead of a hand-written string literal -- lets pyrefly / ruff
+/ IDEs type-check and navigate the load-bearing driver logic that would otherwise be
+invisible inside a string (and drops the wall of ``# noqa: F821``).
 
 Keeping python_code self-contained and version-frozen (its behavior is hashed via
 code_hash, invariant 7) still holds: the artifact carries the driver TEXT, it does not
@@ -55,12 +56,10 @@ if TYPE_CHECKING:
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
     SERVED_MODULES: tuple[str, ...] = ()
-
-    # Section 0 of a multi-graph artifact that calls custom ops.
+    # Section 0 of an artifact that calls custom ops.
     CUSTOM_OP_MODULES: tuple[str, ...] = ()
-
-    def _import_custom_op_modules() -> None: ...
-
+    CUSTOM_OPS: tuple[tuple[str, str], ...] = ()
+    CUSTOM_OP_KERNELS: dict[str, tuple[str, ...]] = {}
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -80,6 +79,52 @@ if TYPE_CHECKING:
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
+
+
+def _import_custom_op_modules():
+    """Import the modules registering the custom ops the graphs call, then check
+    that every op in CUSTOM_OPS and the CUSTOM_OP_KERNELS it had at capture are
+    registered. Emitted as section 0 and called at exec time."""
+    import importlib
+    import warnings
+
+    import torch
+
+    import_errors = {}
+    for module in CUSTOM_OP_MODULES:
+        try:
+            importlib.import_module(module)
+        # Not just ImportError: a module can raise anything while it registers ops.
+        except Exception as e:
+            import_errors[module] = e
+    missing = []
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    for name, overload in CUSTOM_OPS:
+        qualname = f"{name}.{overload}" if overload else name
+        try:
+            torch._C._dispatch_find_schema_or_throw(name, overload)
+        except RuntimeError:
+            missing.append(qualname)
+            continue
+        for key in CUSTOM_OP_KERNELS.get(qualname, ()):
+            if not has_kernel(qualname, key):
+                missing.append(f"{qualname} ({key} kernel)")
+    if missing:
+        # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
+        from torch._precompile import PrecompileError as _PrecompileError
+
+        raise _PrecompileError(
+            f"this artifact calls custom ops or kernels not registered here: "
+            f"{missing}. "
+            "Import the modules registering them before loading it. Modules "
+            f"that failed to import: {sorted(import_errors) or 'none'}."
+        ) from next(iter(import_errors.values()), None)
+    for module, e in import_errors.items():
+        warnings.warn(
+            f"importing custom op module {module!r} raised {e!r}; "
+            "the ops this artifact calls and the kernels they had at capture are "
+            "registered, so it loads anyway"
+        )
 
 
 def _extract_param_buffers(mods):
@@ -510,7 +555,7 @@ def _build_multigraph_forward():
             _import(_module_name)
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
-        for _module_name in set(SERVED_MODULES).intersection(CUSTOM_OP_MODULES):
+        for _module_name in [m for m in CUSTOM_OP_MODULES if m in SERVED_MODULES]:
             _import(_module_name)
         _import_custom_op_modules()
     frames = pickle.loads(base64.b64decode(_FRAMES))
@@ -819,7 +864,7 @@ def _build_installed_forward():
             )
         # Section 0 also lists them in case they register its ops; their failure
         # fails the load, so it is not warned about as a custom op module's.
-        for _module_name in set(SERVED_MODULES).intersection(CUSTOM_OP_MODULES):
+        for _module_name in [m for m in CUSTOM_OP_MODULES if m in SERVED_MODULES]:
             try:
                 importlib.import_module(_module_name)
             except ImportError as _e:

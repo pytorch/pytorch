@@ -207,7 +207,14 @@ it.
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. The
+# python_code you JIT -- same results either way. One caveat: an artifact whose graph
+# calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a Dynamo
+# artifact does so after its version checks; a failed import only warns), then refuses
+# to load unless every op in CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists
+# for it is registered. The caller must import, before load, what the artifact cannot
+# record: C++ extension ops, ops from torch.library.define or __main__, and kernels
+# registered through @torch.library.impl, register_kernel or another module's
+# Library. The
 # eager backend has no kernels to accelerate, so the eager cache carries no compiled
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
@@ -282,6 +289,7 @@ from typing import (
     cast,
     Generic,
     Literal,
+    NamedTuple,
     NewType,
     ParamSpec,
     TYPE_CHECKING,
@@ -2169,12 +2177,19 @@ def _op_registration(
     return ("torch" if _torch_cpp_op(op_name, overload) else "unrecorded"), ""
 
 
-def _custom_op_modules(
-    op_names: Iterable[tuple[str, str]],
-) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], dict[str, tuple[str, ...]]]:
-    """The modules registering the ops among ``op_names``, the custom ops among
-    them that no importable module is known to register, and the ops torch defines
-    only at runtime grouped by the setup that defines them. Pass the last two to
+class _CustomOpModules(NamedTuple):
+    """What registers a capture's custom ops, from ``_custom_op_modules``."""
+
+    # The modules registering the ops.
+    modules: tuple[str, ...]
+    # The custom ops no importable module is known to register.
+    unrecorded: tuple[tuple[str, str], ...]
+    # The ops torch defines only at runtime, by the setup that defines them.
+    lazy: dict[str, tuple[str, ...]]
+
+
+def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> _CustomOpModules:
+    """What registers the ops among ``op_names``; pass it to
     ``_warn_unregistered_ops``."""
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
@@ -2191,18 +2206,16 @@ def _custom_op_modules(
         elif kind == "unrecorded":
             unrecorded.add((op_name, overload))
     lazy_ops = {setup: tuple(sorted(ops)) for setup, ops in sorted(lazy.items())}
-    return tuple(sorted(modules)), tuple(sorted(unrecorded)), lazy_ops
+    return _CustomOpModules(tuple(sorted(modules)), tuple(sorted(unrecorded)), lazy_ops)
 
 
 def _warn_unregistered_ops(
-    lazy: dict[str, tuple[str, ...]],
-    unrecorded: Iterable[tuple[str, str]],
-    fallback_modules: Sequence[str] = (),
+    found: _CustomOpModules, fallback_modules: Sequence[str] = ()
 ) -> None:
-    """Warns about the ops ``_custom_op_modules`` found torch defines only at
-    runtime (``lazy``) or found no module for (``unrecorded``), naming the
-    ``fallback_modules`` the artifact imports in case they register the latter."""
-    for setup, ops in sorted(lazy.items()):
+    """Warns about the ops ``found`` says torch defines only at runtime or no
+    module registers, naming the ``fallback_modules`` the artifact imports in case
+    they register the latter."""
+    for setup, ops in sorted(found.lazy.items()):
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
             "defines only inside %s, so serving this artifact is unsupported: it "
@@ -2210,7 +2223,7 @@ def _warn_unregistered_ops(
             ", ".join(ops),
             setup,
         )
-    if not (names := sorted({op_name for op_name, _ in unrecorded})):
+    if not (names := sorted({op_name for op_name, _ in found.unrecorded})):
         return
     serves = (
         f"The artifact imports {', '.join(fallback_modules)}, the modules its "
@@ -2299,50 +2312,9 @@ def _write_custom_op_imports(
         if found := tuple(k for k in keys if has_kernel(qualname, k)):
             kernels[qualname] = found
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
-    buf.writeline("def _import_custom_op_modules():")
-    buf.writeline("    import importlib")
-    buf.writeline("    import warnings")
-    buf.writeline("    import torch")
-    buf.writeline("    import_errors = {}")
-    buf.writeline("    for module in CUSTOM_OP_MODULES:")
-    buf.writeline("        try:")
-    buf.writeline("            importlib.import_module(module)")
-    # Not just ImportError: a module can raise anything while it registers ops.
-    buf.writeline("        except Exception as e:")
-    buf.writeline("            import_errors[module] = e")
-    buf.writeline("    missing = []")
-    buf.writeline("    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key")
-    buf.writeline("    for name, overload in CUSTOM_OPS:")
-    buf.writeline('        qualname = f"{name}.{overload}" if overload else name')
-    buf.writeline("        try:")
-    buf.writeline("            torch._C._dispatch_find_schema_or_throw(name, overload)")
-    buf.writeline("        except RuntimeError:")
-    buf.writeline("            missing.append(qualname)")
-    buf.writeline("            continue")
-    buf.writeline("        for key in CUSTOM_OP_KERNELS.get(qualname, ()):")
-    buf.writeline("            if not has_kernel(qualname, key):")
-    buf.writeline('                missing.append(f"{qualname} ({key} kernel)")')
-    buf.writeline("    if missing:")
-    buf.writeline("        raise torch.compiler.PrecompileError(")
-    buf.writeline(
-        '            f"this artifact calls custom ops or kernels not registered here: "'
-    )
-    buf.writeline('            f"{missing}. "')
-    buf.writeline(
-        '            "Import the modules registering them before loading it. Modules "'
-    )
-    buf.writeline(
-        "            f\"that failed to import: {sorted(import_errors) or 'none'}.\""
-    )
-    buf.writeline("        ) from next(iter(import_errors.values()), None)")
-    buf.writeline("    for module, e in import_errors.items():")
-    buf.writeline(
-        '        warnings.warn(f"importing custom op module {module!r} raised {e!r}; "'
-    )
-    buf.writeline(
-        '        "the ops this artifact calls and the kernels they had at capture are "'
-    )
-    buf.writeline('        "registered, so it loads anyway")')
+    from torch import _precompile_driver as driver
+
+    buf.writeline(inspect.getsource(driver._import_custom_op_modules).rstrip())
     if call:
         buf.writeline("_import_custom_op_modules()")
         buf.writeline("del _import_custom_op_modules")
@@ -2361,9 +2333,9 @@ def _build_python_source(
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(compiled._gm)
-        modules, unrecorded, lazy = _custom_op_modules(ops)
-        _warn_unregistered_ops(lazy, unrecorded)
-        _write_custom_op_imports(buf, modules, ops, keys)
+        found = _custom_op_modules(ops)
+        _warn_unregistered_ops(found)
+        _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2420,9 +2392,9 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
         keys = _graph_kernel_keys(gm)
-        modules, unrecorded, lazy = _custom_op_modules(ops)
-        _warn_unregistered_ops(lazy, unrecorded)
-        _write_custom_op_imports(buf, modules, ops, keys)
+        found = _custom_op_modules(ops)
+        _warn_unregistered_ops(found)
+        _write_custom_op_imports(buf, found.modules, ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
