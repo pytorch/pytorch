@@ -73,7 +73,7 @@ def _benchmark_one(kernel, M, K, dtype):
 
     def run():
         if selection == "dual":
-            return _blockscaled_tma_impl_dual(input, square, swizzled)
+            return _blockscaled_tma_impl_dual(input)
         return _blockscaled_tma_impl(input, selection, square, swizzled)
 
     outputs = run()

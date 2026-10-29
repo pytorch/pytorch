@@ -60,16 +60,12 @@ def _quantize_mxfp8_tma(
     return _blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled)
 
 
-def _quantize_mxfp8_tma_dual(
-    input: torch.Tensor,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-):
+def _quantize_mxfp8_tma_dual(input: torch.Tensor):
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
         _blockscaled_tma_impl_dual,
     )
 
-    return _blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled)
+    return _blockscaled_tma_impl_dual(input)
 
 
 _NVIDIA_SM100_OR_LATER = torch.version.rocm is None and bool(SM100OrLater)
@@ -186,9 +182,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(data_hp, -1, False, True)
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k.view(torch.uint8), qdata_k_ref.view(torch.uint8))
         self.assertEqual(qdata_m.view(torch.uint8), qdata_m_ref.view(torch.uint8))
         self.assertEqual(qdata_m.shape, shape)
@@ -275,9 +269,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device).t()
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(data_hp, -1, False, True)
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
         self.assertEqual(scales_k, scales_k_ref)
@@ -368,9 +360,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
-            data_hp, False, True
-        )
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k.shape, (M, K))
         self.assertEqual(qdata_m.shape, (M, K))
         scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
