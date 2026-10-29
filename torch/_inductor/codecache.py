@@ -1054,6 +1054,21 @@ def torch_key() -> bytes:
                 hasher = hashlib.sha256()
                 hasher.update(torch.__version__.encode("utf-8"))
                 build_code_hash([root], "", hasher)
+                # The experimental native passes are JIT-built, not Python modules.
+                cpp_ir_root = os.path.join(
+                    inductor_root, "../csrc/inductor/experimental/loops_ir"
+                )
+                if os.path.isdir(cpp_ir_root):
+                    with os.scandir(cpp_ir_root) as entries:
+                        cpp_files = sorted(
+                            entry.name
+                            for entry in entries
+                            if entry.is_file() and entry.name.endswith((".cpp", ".h"))
+                        )
+                    for name in cpp_files:
+                        hasher.update(name.encode("utf-8") + b"\0")
+                        with open(os.path.join(cpp_ir_root, name), "rb") as f:
+                            hasher.update(hashlib.sha256(f.read()).digest())
                 for path in extra_files:
                     if os.path.exists(path):
                         with open(path, "rb") as f:
