@@ -5561,14 +5561,17 @@ class SourcelessBuilder:
 
     @staticmethod
     def create_internal_user_function(
-        value: types.FunctionType,
+        value: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
     ) -> UserFunctionVariable:
-        """Wrap a compiler-owned function that must ignore trace-rule overrides."""
+        """Wrap a caller-selected function without applying trace-rule overrides."""
         return UserFunctionVariable(value)
 
     @staticmethod
-    def create_internal_builtin(value: Any) -> BuiltinVariable:
-        """Wrap a compiler-selected builtin without reclassifying it."""
+    def create_internal_builtin(value: Callable[..., Any]) -> BuiltinVariable:
+        r"""Wrap compiler-selected callables as exact BuiltinVariables.
+
+        Includes exception types; no generic reclassification is applied.
+        """
         return BuiltinVariable(value)
 
     @overload
