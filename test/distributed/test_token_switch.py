@@ -502,6 +502,7 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
 instantiate_parametrized_tests(TokenSwitchReferenceTest)
 
 
+@instantiate_parametrized_tests
 class _TokenSwitchFlatTests:
     """Flat-layout tests with TOP_K=1 and one expert per rank.
 
@@ -1077,63 +1078,9 @@ class _TokenSwitchExpertMajorTests:
         )
 
 
-@requires_nccl_ep()
-class TokenSwitchNCCLTest(
-    _TokenSwitchFlatTests,
-    _TokenSwitchExpertMajorTests,
-    _TokenSwitchContractTests,
-    MultiProcContinuousTest,
-):
-    _cached_token_switch: TokenSwitchNCCL | None = None
-    _cached_contract_token_switch: TokenSwitchNCCL | None = None
-    contract_dtype = torch.bfloat16
-
-    @classmethod
-    def backend_str(cls):
-        return "nccl"
-
-    @property
-    def device(self):
-        return torch.device("cuda", self.rank)
-
-    @classmethod
-    def get_token_switch(cls) -> TokenSwitchNCCL:
-        if cls._cached_token_switch is None:
-            pg = dist.distributed_c10d._get_default_group()
-            rank = dist.get_rank(pg)
-            world_size = dist.get_world_size(pg)
-            print(f"rank {rank} creating token switch")
-            dist.barrier(pg)
-            cls._cached_token_switch = TokenSwitchNCCL(
-                pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
-            )
-        return cls._cached_token_switch
-
-    @classmethod
-    def get_weight_grad_token_switch(cls, capacity: int) -> TokenSwitchNCCL:
-        pg = dist.distributed_c10d._get_default_group()
-        return TokenSwitchNCCL(
-            pg, dist.get_world_size(pg) * 2, NUM_TOKENS, capacity, TOKEN_SIZE_BYTES
-        )
-
-    @classmethod
-    def get_contract_token_switch(cls) -> TokenSwitchNCCL:
-        if cls._cached_contract_token_switch is None:
-            pg = dist.distributed_c10d._get_default_group()
-            world_size = dist.get_world_size(pg)
-            dist.barrier(pg)
-            cls._cached_contract_token_switch = TokenSwitchNCCL(
-                pg,
-                world_size * CONTRACT_EXPERTS_PER_RANK,
-                NUM_TOKENS,
-                world_size * NUM_TOKENS,
-                TOKEN_SIZE_BYTES,
-            )
-        return cls._cached_contract_token_switch
-
-    def _init(self):
-        torch.cuda.set_device(self.device)
-        dist.barrier()
+@instantiate_parametrized_tests
+class _TokenSwitchNCCLSymmMemTests:
+    """NCCL-only symm_mem window tests; the host class is TokenSwitchNCCLTest."""
 
     @skip_if_lt_x_gpu(2)
     @parametrize("explicit_rendezvous", [True, False])
@@ -1253,6 +1200,66 @@ class TokenSwitchNCCLTest(
         expected = torch.full((NUM_TOKENS, HIDDEN), token_val, dtype=torch.bfloat16)
         self.assertEqual(combined.cpu(), expected)
 
+
+@requires_nccl_ep()
+class TokenSwitchNCCLTest(
+    _TokenSwitchNCCLSymmMemTests,
+    _TokenSwitchFlatTests,
+    _TokenSwitchExpertMajorTests,
+    _TokenSwitchContractTests,
+    MultiProcContinuousTest,
+):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+    _cached_contract_token_switch: TokenSwitchNCCL | None = None
+    contract_dtype = torch.bfloat16
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self):
+        return torch.device("cuda", self.rank)
+
+    @classmethod
+    def get_token_switch(cls) -> TokenSwitchNCCL:
+        if cls._cached_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            rank = dist.get_rank(pg)
+            world_size = dist.get_world_size(pg)
+            print(f"rank {rank} creating token switch")
+            dist.barrier(pg)
+            cls._cached_token_switch = TokenSwitchNCCL(
+                pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
+            )
+        return cls._cached_token_switch
+
+    @classmethod
+    def get_weight_grad_token_switch(cls, capacity: int) -> TokenSwitchNCCL:
+        pg = dist.distributed_c10d._get_default_group()
+        return TokenSwitchNCCL(
+            pg, dist.get_world_size(pg) * 2, NUM_TOKENS, capacity, TOKEN_SIZE_BYTES
+        )
+
+    @classmethod
+    def get_contract_token_switch(cls) -> TokenSwitchNCCL:
+        if cls._cached_contract_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            world_size = dist.get_world_size(pg)
+            dist.barrier(pg)
+            cls._cached_contract_token_switch = TokenSwitchNCCL(
+                pg,
+                world_size * CONTRACT_EXPERTS_PER_RANK,
+                NUM_TOKENS,
+                world_size * NUM_TOKENS,
+                TOKEN_SIZE_BYTES,
+            )
+        return cls._cached_contract_token_switch
+
+    def _init(self):
+        torch.cuda.set_device(self.device)
+        dist.barrier()
+
     @skip_if_lt_x_gpu(2)
     def test_dispatch_group_gemm_combine_symm_mem(self):
         """Full pipeline: dispatch (symm_mem) -> group_gemm -> weight mul -> combine (symm_mem)."""
@@ -1316,8 +1323,6 @@ class TokenSwitchNCCLTest(
         )
         self.assertEqual(combined, expected)
 
-
-instantiate_parametrized_tests(TokenSwitchNCCLTest)
 
 
 class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):

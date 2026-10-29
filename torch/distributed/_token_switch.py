@@ -815,7 +815,8 @@ class TokenSwitchMoRI(TokenSwitch):
         # the slot from the k that was sent.
         m = out_topk_weight_grads.shape[0]
         enc = state.mori_handle.disp_dest_tok_id_map[: m * K].view(m, K).long()
-        dest = state.topk_idx[:m].long().div(self._experts_per_rank, rounding_mode="floor")
+        epr = self._experts_per_rank
+        dest = state.topk_idx[:m].long().div(epr, rounding_mode="floor")
         sent = enc < self._world_size * cap
         same = (dest[:, :, None] == dest[:, None, :]) & sent[:, None, :]
         slot = torch.where(same, enc[:, None, :], -1).amax(dim=2)
