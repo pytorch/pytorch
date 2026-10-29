@@ -476,6 +476,8 @@ class NNModuleVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -561,10 +563,11 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
+                # A builder would eagerly resolve this source through the metaclass.
                 return variables.UserFunctionVariable(
                     subobj.fget,  # pyrefly: ignore[bad-argument-type]
                     source=source,
-                ).call_function(tx, [(self)], {})
+                ).call_function(tx, [self], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     variables.UserFunctionVariable(
@@ -575,7 +578,8 @@ class NNModuleVariable(VariableTracker):
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.UserFunctionVariable(
+                # Preserve eager fallback for non-Python staticmethod callables.
+                return VariableBuilder.create_internal_user_function(
                     subobj.__get__(base), source=source
                 )
             elif istype(subobj, types.FunctionType):
