@@ -9438,6 +9438,7 @@ class TestPrecompileCustomOpModules(TestCase):
             ("dynamo", "inductor", "fn", "standalone"),
             ("dynamo", "eager", "step", "installed"),
             ("dynamo", "inductor", "cond_fn", "standalone"),
+            ("dynamo", "eager", "train_fn", "installed"),
             ("dynamo", "inductor", "train_fn", "standalone"),
             ("dynamo", "eager", "unfakeable_fn", "standalone"),
             ("dynamo", "eager", "data_dependent_fn", "standalone"),
@@ -9467,7 +9468,12 @@ class TestPrecompileCustomOpModules(TestCase):
                         .replace("{bwns}", bwns)
                         .replace("{bwmod}", bwmod)
                     )
+            # Dynamo with the eager backend compiles the op's Python backward as a
+            # frame of the op's module, so the artifact needs that module by name.
+            compiles_bw = (tracer, backend, entry) == ("dynamo", "eager", "train_fn")
             for phase in ("capture", "replay", "preregistered", "missing"):
+                if compiles_bw and phase == "preregistered":
+                    continue
                 out = subprocess.run(
                     [sys.executable, "-c", _CUSTOM_OP_DRIVER, phase, directory]
                     + [module, entries, unused, tracer, backend, entry, bwmod],
@@ -9485,11 +9491,9 @@ class TestPrecompileCustomOpModules(TestCase):
                 if line.startswith("CUSTOM_OP_MODULES = ")
             ]
             # A make_fx training capture traces the backward, and a Dynamo one
-            # records the ops of Inductor's backward code, so their op's module is
-            # recorded. A Dynamo eager backend records only its forward graphs,
-            # and its replay passes only because the forward op's module imports
-            # the backward op's module.
-            traced_bw = entry == "train_fn" and (tracer, backend) != ("dynamo", "eager")
+            # records the ops of Inductor's backward code or of the backward frame
+            # it compiled, so the backward op's module is recorded.
+            traced_bw = entry == "train_fn"
             # entry_op has no known module, so a Dynamo artifact also imports its
             # frames' modules before checking it. fragment's Library lives in a
             # module no frame runs in, and is recorded by its file.
@@ -9711,6 +9715,7 @@ def _eager_fallback_op_fn(x):
 def legacy_op(x: torch.Tensor) -> torch.Tensor: ...
 
 
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 class TestPrecompileCustomOpRecording(TestCase):
     def _op(self, name):
         ns = f"precompile_recording_{uuid.uuid4().hex}"
@@ -9834,6 +9839,29 @@ class TestPrecompileCustomOpRecording(TestCase):
         exec(buf.getvalue(), namespace)
         expected = {f"{ns}::op": ("CPU", "CompositeExplicitAutograd")}
         self.assertEqual(namespace["CUSTOM_OP_KERNELS"], expected)
+
+    def test_torch_cpp_op_without_a_source_root_uses_the_namespace(self):
+        from torch._precompile import _torch_cpp_op, _torch_source_root
+
+        source_root = _torch_source_root.__wrapped__
+        paths = {
+            "aten::quantized_lstm": "/src/pytorch/aten/src/ATen/native/RNN.cpp",
+            "inductor::op": "/src/extension/ext.cpp",
+            "precompile_ext::op": "/src/extension/ext.cpp",
+        }
+        # No recorded path, and an out-of-tree build sharing only "/" with it.
+        for add_path in ("", "/tmp/build/aten/src/ATen/RegisterSchema.cpp"):
+            paths["aten::add"] = add_path
+            with (
+                mock.patch(
+                    "torch._precompile._registration_path",
+                    side_effect=lambda op_name, overload: paths[op_name],
+                ),
+                mock.patch("torch._precompile._torch_source_root", source_root),
+            ):
+                self.assertIsNone(source_root())
+                self.assertTrue(_torch_cpp_op("inductor::op", ""))
+                self.assertFalse(_torch_cpp_op("precompile_ext::op", ""))
 
     def test_pystub_module_is_recorded(self):
         from torch._precompile import _custom_op_module
