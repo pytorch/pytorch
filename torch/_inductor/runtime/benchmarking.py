@@ -596,6 +596,12 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         for attr in ("L2_cache_size", "last_level_cache_size"):
             cache_size = getattr(props, attr, None)
             if cache_size:
+                # On XPU, zeroing a last-level-cache-sized buffer can finish before
+                # the host has launched `_callable`, leaking launch latency into the
+                # event timing. A larger flush buffer keeps the device busy longer.
+                # See https://github.com/pytorch/pytorch/issues/189144
+                if device_type == "xpu":
+                    return max(cache_size, 128 * 1024 * 1024)
                 return cache_size
         return 256 * 1024 * 1024
 
