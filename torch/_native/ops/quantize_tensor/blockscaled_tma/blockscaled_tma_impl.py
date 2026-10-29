@@ -103,8 +103,10 @@ def _canonicalize_matrix_input(
     TMA from directly loading an ``(M, K)`` tile. Permute to
     ``[*B0, *B1, B2, M, K]``, materialize contiguous storage, and fold the
     batch axes into ``(B_product, M, 1, K)``. Keep batch axes in physical stride
-    order when materializing, even if their logical order differs. When the
-    physical matrix axes permit a direct TMA load, instead use a view shaped like
+    order when materializing, even if their logical order differs. For single
+    quantization, materialization places the requested quantized axis last
+    (dim-k); dual quantization keeps both matrix orientations. When the physical
+    matrix axes permit a direct TMA load, instead use a view shaped like
     ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), without
     materializing. Return normalized axes and metadata to undo the permutation.
 
@@ -154,15 +156,26 @@ def _canonicalize_matrix_input(
     fast_axis = physical_matrix_axes[-1]
     quant_axis = normalized[0][-1]
     physical_dim_k = quant_axis == fast_axis
+
+    # Determine if we can take a no-copy fast path (unaligned pointer can still
+    # copy later)
     use_tma_view = (
+        # Physical input must be contiguous and innermost dim must be one of the
+        # requested quantization dims.
         physical_input.is_contiguous()
         and physical_axes[-1] == fast_axis
+        # Unswizzled and square scales only support kernel dim-k. If this
+        # view requires dim-m, single quantization materializes dim-k;
+        # dual quantization is rejected by the spec.
         and (is_scale_swizzled or physical_dim_k)
         and (not is_square_scaling or physical_dim_k)
+        # Dim-m kernel currently requires K % 16 == 0
         and (physical_dim_k or input.shape[fast_axis] % 16 == 0)
     )
+
     if use_tma_view:
-        # TMA tiles the two matrix axes; batch axes between them become slice coordinates.
+        # No-copy fast path, TMA tiles the two matrix axes; batch axes between
+        # them become slice coordinates.
         slow_axis = physical_matrix_axes[0]
         slow_pos = physical_axes.index(slow_axis)
         fast_pos = physical_axes.index(fast_axis)
@@ -183,7 +196,9 @@ def _canonicalize_matrix_input(
             len(normalized) == 2 and normalized[0] != physical_matrix_axes
         )
     else:
-        permutation = (*batch_axes, *matrix_axes)
+        # Materialization fallback, permute-contiguous the input to have the
+        # first dim pair's inner dim last (kernel dim-k)
+        permutation = (*batch_axes, *normalized[0])
         matrix_input = (
             input if permutation == tuple(range(ndim)) else input.permute(permutation)
         ).contiguous()
@@ -194,9 +209,9 @@ def _canonicalize_matrix_input(
                 1,
                 matrix_input.shape[-1],
             )
-            single_dim = (1, 3) if normalized[0] == matrix_axes else (3, 1)
+            single_dim = (1, 3)
         else:
-            single_dim = (-2, -1) if normalized[0] == matrix_axes else (-1, -2)
+            single_dim = (-2, -1)
         swap_dual_outputs = False
     if len(normalized) == 2:
         canonical_dim: _QuantDim = (
@@ -734,6 +749,8 @@ def _blockscaled_tma_impl_dual(
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
         >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
     """
+    if not isinstance(dim, tuple) or len(dim) != 2 or not isinstance(dim[0], tuple):
+        raise ValueError("dual quantization requires two axis pairs")
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(
