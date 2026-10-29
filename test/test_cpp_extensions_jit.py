@@ -115,7 +115,13 @@ class TestCudnnPaths(common.TestCase):
             ("x64", "13.4", ("", "13.4"), ("", "13.4"), ""),
             # Exact version, then numeric minor preference within the same major.
             ("x64", "13.2", ("13.2", "13.10"), ("13.2", "13.10"), "13.2"),
-            ("x64", "13.4", ("13.2", "13.10", "14.0"), ("13.2", "13.10", "14.0"), "13.10"),
+            (
+                "x64",
+                "13.4",
+                ("13.2", "13.10", "14.0"),
+                ("13.2", "13.10", "14.0"),
+                "13.10",
+            ),
             # Incomplete versioned or flat candidates cannot displace a complete pair.
             ("x64", "13.4", ("13.2", "13.4"), ("13.2", "13.10"), "13.2"),
             ("x64", "13.4", ("", "13.4"), ("13.4",), "13.4"),
@@ -140,11 +146,16 @@ class TestCudnnPaths(common.TestCase):
                 open(os.path.join(directory, "cudnn.lib"), "w").close()
             with (
                 mock.patch.multiple(
-                    cpp, CUDNN_HOME=home, CUDA_HOME=os.path.join(root, "cuda"),
-                    IS_WINDOWS=True, IS_MACOS=False, IS_HIP_EXTENSION=False,
+                    cpp,
+                    CUDNN_HOME=home,
+                    CUDA_HOME=os.path.join(root, "cuda"),
+                    IS_WINDOWS=True,
+                    IS_MACOS=False,
+                    IS_HIP_EXTENSION=False,
                 ),
                 mock.patch.object(
-                    sysconfig, "get_platform",
+                    sysconfig,
+                    "get_platform",
                     return_value="win-arm64" if arch == "arm64" else "win-amd64",
                 ),
                 mock.patch("torch.version.cuda", cuda),
@@ -159,11 +170,18 @@ class TestCudnnPaths(common.TestCase):
         with tempfile.TemporaryDirectory() as root:
             home = os.path.join(root, "cudnn")
             with mock.patch.multiple(
-                cpp, CUDNN_HOME=home, CUDA_HOME=os.path.join(root, "cuda"),
-                IS_WINDOWS=False, IS_MACOS=False, IS_HIP_EXTENSION=False,
+                cpp,
+                CUDNN_HOME=home,
+                CUDA_HOME=os.path.join(root, "cuda"),
+                IS_WINDOWS=False,
+                IS_MACOS=False,
+                IS_HIP_EXTENSION=False,
             ):
                 self._assert_cudnn_paths(
-                    home, os.path.join(home, "include"), os.path.join(home, "lib64"), "-L"
+                    home,
+                    os.path.join(home, "include"),
+                    os.path.join(home, "lib64"),
+                    "-L",
                 )
 
 
