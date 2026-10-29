@@ -110,6 +110,8 @@ def _capture_config() -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
+    ``triton.multi_kernel`` is off: a multi-kernel picks its sub-kernel by
+    benchmarking on first launch and the artifact does not record the choice.
     Under ``cpp_wrapper`` the forced flag also turns off
     ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
     keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
@@ -172,6 +174,7 @@ def _capture_config() -> Iterator[None]:
             {
                 "bundled_autotune_remote_cache": False,
                 "triton.autotune_at_compile_time": True,
+                "triton.multi_kernel": 0,
             }
         ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
