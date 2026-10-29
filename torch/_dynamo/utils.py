@@ -3287,11 +3287,34 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
-    items = get_items_from_dict(obj)
     dict_type: type[dict[K, V]] = type(obj)
     if issubclass(dict_type, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
+        items = list(dict.items(obj))
+        if all(type(key) is str for key, _ in items):
+            keys: Iterable[K] = OrderedDict.keys(cast(OrderedDict[K, V], obj))
+        else:
+            from .exc import unimplemented
+
+            state = OrderedDict.__dict__["__dict__"].__get__(obj)
+            if type(state) is not dict:
+                unimplemented(
+                    gb_type="Unsupported OrderedDict instance dictionary",
+                    context="OrderedDict.__dict__",
+                    explanation="A dictionary subclass used as instance state could also be a linked key, so Dynamo cannot inspect the order without invoking user hashes.",
+                    hints=[],
+                    skip_frame=True,
+                )
+            # OrderedDict iteration hashes keys. CPython's odict_traverse visits
+            # instance state, then linked keys, then dict_traverse's two references
+            # per general-table entry. Raw dict writes can leave extra entries
+            # without linked nodes. Exact dict state cannot itself be a key.
+            refs = gc.get_referents(obj)
+            end = len(refs) - 2 * len(items)
+            start = max(i for i in range(end) if refs[i] is state) + 1
+            keys = refs[start:end]
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        return (positions[id(key)] for key in keys)
+    items = get_items_from_dict(obj)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
