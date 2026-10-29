@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    prefer_cublaslt_grouped_gemm,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -3706,6 +3707,7 @@ class TestFP8Matmul(TestCase):
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("legacy", [False, True])
+    @prefer_cublaslt_grouped_gemm(False)
     def test_scaled_grouped_mm_mslk_rejects_layout(self, device, legacy):
         a = torch.empty(2, 128, 128, device=device, dtype=torch.float8_e4m3fn)
         scale = torch.empty(2, 512, device=device, dtype=torch.float8_e8m0fnu)
@@ -3721,6 +3723,7 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("format,legacy", [("mxfp8", False), ("mxfp4", False), ("nvfp4", False), ("mxfp8", True)])
     def test_scaled_grouped_mm_mslk_rejects_group_count(self, device, format, legacy):
         offs = torch.tensor([128], device=device, dtype=torch.int32)
@@ -3740,6 +3743,7 @@ class TestFP8Matmul(TestCase):
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
+    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("out_dtype", [torch.float16, torch.float32])
     def test_scaled_grouped_mm_mslk_rejects_out_dtype(self, device, format, out_dtype):
         offs = torch.tensor([128], device=device, dtype=torch.int32)
@@ -3776,6 +3780,22 @@ class TestFP8Matmul(TestCase):
         C_ref = f_ref(*args, offs=offs)
         C = f(*args, offs=offs)
         self.assertEqual(C, C_ref)
+
+    def scaled_grouped_gemm_cublaslt_nvfp4_helper(self, op, device):
+        ngroups = 3
+        group_sizes = [128] * ngroups
+
+        def make_group(_group, outer, k):
+            value = torch.ones((outer, k), device=device, dtype=torch.bfloat16)
+            scale = torch.ones((outer, k // 16), device=device, dtype=torch.float8_e4m3fn)
+            return _bfloat16_to_float4_e2m1fn_x2(value), to_blocked(scale)
+
+        (A, scale_a), (B_T, scale_b), offs, _, _, _ = (
+            self._make_cublaslt_grouped_gemm_inputs(
+                op, group_sizes, group_sizes, group_sizes, make_group, make_group, device
+            )
+        )
+        return A, B_T, scale_a, scale_b, offs
 
     def scaled_grouped_gemm_cublaslt_hopper_scale_helper(
         self, op, recipe_a, recipe_b, device, case="regular", out_dtype=torch.bfloat16
@@ -3879,6 +3899,58 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MX_GEMM
+        ),
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("two_level", [False, True])
+    @parametrize("swizzle_form", ["explicit", "single", "omitted"])
+    @parametrize("use_out", [False, True])
+    @prefer_cublaslt_grouped_gemm(True)
+    def test_scaled_grouped_gemm_cublaslt_nvfp4(self, op, two_level, swizzle_form, use_out, device):
+        A, B_T, block_scale_a, block_scale_b, offs = (
+            self.scaled_grouped_gemm_cublaslt_nvfp4_helper(op, device)
+        )
+        scale_a = block_scale_a
+        scale_b = block_scale_b
+        expected_scale = 1
+        if two_level:
+            scale_a = [block_scale_a, torch.tensor([2.0], device=device)]
+            scale_b = [block_scale_b, torch.tensor([3.0], device=device)]
+            expected_scale = 6
+            kwargs = _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, "nvfp4")
+            if swizzle_form == "explicit":
+                kwargs["swizzle_a"] = kwargs["swizzle_b"] = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+        else:
+            kwargs = {
+                "scale_a": scale_a,
+                "scale_b": scale_b,
+                "scale_recipe_a": ScalingType.BlockWise1x16,
+                "scale_recipe_b": ScalingType.BlockWise1x16,
+                "swizzle_a": SwizzleType.SWIZZLE_32_4_4,
+                "swizzle_b": SwizzleType.SWIZZLE_32_4_4,
+                "offs": offs,
+            }
+        if swizzle_form == "omitted":
+            kwargs["swizzle_a"] = kwargs["swizzle_b"] = None
+        b = B_T.transpose(-2, -1)
+        if use_out:
+            out_shape = (A.size(-2), B_T.size(-2))
+            if A.dim() == B_T.dim():
+                groups = offs.numel() if offs is not None else A.size(0)
+                out_shape = (groups, *out_shape)
+            kwargs["out"] = torch.empty(out_shape, device=device, dtype=torch.bfloat16)
+        C = scaled_grouped_mm_wrap(A, b, **kwargs)
+        if use_out:
+            self.assertIs(C, kwargs["out"])
+        self.assertEqual(C, torch.full_like(C, 128 * expected_scale))
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg,
     )
@@ -3902,6 +3974,22 @@ class TestFP8Matmul(TestCase):
                 ScalingType.TensorWise,
                 ScalingType.TensorWise,
             )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and PLATFORM_SUPPORTS_MX_GEMM),
+        cublaslt_grouped_mm_skip_msg,
+    )
+    @prefer_cublaslt_grouped_gemm(True)
+    def test_scaled_grouped_gemm_cublaslt_nvfp4_padded(self, device):
+        a, b_t, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_nvfp4_helper("2d/3d", device)
+        a = torch.cat((a, torch.zeros_like(a[:128])))
+        global_scale = torch.ones(1, device=device)
+        kwargs = _build_scaled_grouped_mm_kwargs([scale_a, global_scale], [scale_b, global_scale], offs, "nvfp4")
+        kwargs["out_dtype"] = torch.float32
+        result = scaled_grouped_mm_wrap(a, b_t.transpose(-2, -1), **kwargs)
+        self.assertEqual(result[:384], torch.full_like(result[:384], 128))
 
     @onlyCUDA
     @skipIfRocm
