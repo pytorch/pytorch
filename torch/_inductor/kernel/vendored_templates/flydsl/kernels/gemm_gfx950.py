@@ -1679,14 +1679,10 @@ def gemm_hti_gfx950_kernel(
             rocdl.s_barrier()
         consume(k_tile, c10, a1, b0)
         if const_expr(not prefetch_next):
-            # The tail omits the prefetch barrier, so this barrier releases
-            # the first group to read stage 1 A half 0. B/A half 1 may stay in flight.
-            if const_expr(is_mxfp):
-                # Both groups wait to avoid a branch that spills MXFP8
-                # accumulators. This strengthens, rather than removes, the wait.
-                __waitcnt(half_ldg_b_iters + half_ldg_a_iters)
-            elif wid // n_waves == 1:
-                __waitcnt(half_ldg_b_iters + half_ldg_a_iters)
+            # Retire the leading group's stage-1 A-half-0 copies before this
+            # barrier releases the first group. B/A half 1 may stay in flight.
+            # Both groups wait to avoid a branch that spills MXFP8 accumulators.
+            __waitcnt(half_ldg_b_iters + half_ldg_a_iters)
         rocdl.s_barrier()
 
         b0 = load_b_fragment(0, 1, k_tile + 1)
