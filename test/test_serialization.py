@@ -1064,6 +1064,13 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    def test_set_from_file_invalid_size(self):
+        # 2**61 + 1 elements of size 8 wraps around to 8 bytes
+        for size, msg in ((2, "wrong byte size"), (2**61 + 1, "overflows"), (-1, "invalid storage size")):
+            buf = io.BytesIO(size.to_bytes(8, "little", signed=True) + b"\x00" * 8)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.UntypedStorage(8)._set_from_file(buf, None, False, 8)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
             return super().run(*args, **kwargs)
