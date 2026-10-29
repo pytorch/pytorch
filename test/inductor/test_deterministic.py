@@ -129,6 +129,7 @@ class DeterministicTestGeneric(TestCase):
             )
 
 
+@unittest.skipIf(not HAS_TRITON, "requires triton")
 class DeterministicTestAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -142,7 +143,6 @@ class DeterministicTestAccelerator(TestCase):
         super().tearDown()
 
     @parametrize("deterministic", [False, True])
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_mm_padding(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
 
@@ -161,7 +161,6 @@ class DeterministicTestAccelerator(TestCase):
 
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_max_autotune(self, device, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -179,7 +178,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_pointwise_coordesc_tuning(self, device):
         @torch.compile(mode="max-autotune")
         def f(x):
@@ -191,7 +189,6 @@ class DeterministicTestAccelerator(TestCase):
         self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
     @parametrize("deterministic", [False, True])
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_reduction_coordesc_tuning(self, device, deterministic):
         with inductor_config.patch(
             deterministic=deterministic, coordinate_descent_tuning=True
@@ -211,7 +208,6 @@ class DeterministicTestAccelerator(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self, device):
         H = 768
@@ -244,7 +240,6 @@ class DeterministicTestAccelerator(TestCase):
             )
             size //= 2
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_cumsum_deterministic(self, device):
         from torch._inductor.utils import run_and_get_code
 
