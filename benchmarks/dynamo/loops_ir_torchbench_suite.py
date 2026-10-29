@@ -3973,6 +3973,42 @@ def _verdict(case: dict[str, Any], test: str, mode: str) -> str:
         return "fail"
 
 
+def _completion_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    passes = sum(case.get("status") == "pass" for case in cases)
+    fails = sum(case.get("status") == "fail" for case in cases)
+    selected_complete = bool(cases) and passes == len(cases)
+    required = {
+        (model, test, mode)
+        for model in MODEL_MANIFEST
+        for test in ("eval", "train")
+        for mode in ("strict_eager", "inductor")
+    }
+    passed_default_cases = {
+        (case["model"], case["test"], case.get("cpp_numerics"))
+        for case in cases
+        if case.get("status") == "pass"
+        and case.get("model") in MODEL_MANIFEST
+        and case.get("test") in ("eval", "train")
+        and case.get("batch_size")
+        == MODEL_MANIFEST[case["model"]][f"{case['test']}_bs"]
+    }
+    return {
+        "total": len(cases),
+        "pass": passes,
+        "fail": fails,
+        "skip_or_inventory": len(cases) - passes - fails,
+        "selected_cases_complete": selected_complete,
+        "complete": selected_complete and required <= passed_default_cases,
+        "note": (
+            "Completion requires all 40 CPP cases passing at manifest batch sizes "
+            "(10 models x eval/train x strict/inductor) with generated-code "
+            "participation and backward-CPP evidence for training. Partial "
+            "progress is explicitly incomplete; skips are never passes. "
+            "The verdict and exit code describe the selected cases only."
+        ),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     import torch
@@ -4076,23 +4112,10 @@ def main(argv: list[str] | None = None) -> int:
                     f"case {model_name}/{test}/{mode}: {case.get('status')}", flush=True
                 )
 
-    passes = sum(1 for c in report["cases"] if c.get("status") == "pass")
-    fails = sum(1 for c in report["cases"] if c.get("status") == "fail")
-    skips = sum(1 for c in report["cases"] if c.get("status") not in ("pass", "fail"))
-    report["summary"] = {
-        "total": len(report["cases"]),
-        "pass": passes,
-        "fail": fails,
-        "skip_or_inventory": skips,
-        "complete": passes == len(report["cases"]),
-        "note": (
-            "Completion requires all 40 CPP cases passing (10 models x "
-            "eval/train x strict/inductor) with generated-code participation "
-            "and backward-CPP evidence for training. Partial progress is "
-            "explicitly incomplete; skips are never passes."
-        ),
-    }
-    report["verdict"] = "PASS" if report["summary"]["complete"] else "FAIL"
+    report["summary"] = _completion_summary(report["cases"])
+    report["verdict"] = (
+        "PASS" if report["summary"]["selected_cases_complete"] else "FAIL"
+    )
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True, default=str))
     print(json.dumps(report["summary"], indent=2, sort_keys=True))
     print(f"output_dir={out_dir}")
