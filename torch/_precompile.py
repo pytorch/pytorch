@@ -1988,8 +1988,38 @@ def _custom_op_module(op_name: str, overload: str) -> str | None:
     return name if getattr(module, "__spec__", None) is not None else None
 
 
-# Torch's namespaces defined from C++, whose schemas record a build-time path and
-# which `import torch` registers.
+def _registration_path(op_name: str, overload: str) -> str:
+    """The file that defined ``op_name``, as recorded at build time ("" if none)."""
+    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    return debug.removeprefix("registered at ").rpartition(":")[0]
+
+
+@functools.cache
+def _torch_source_root() -> str | None:
+    """The source root torch's C++ op registrations recorded at build time (the CI
+    checkout in a wheel), from a generated and a hand-written aten schema."""
+    paths = [
+        _registration_path("aten::add", "Tensor"),
+        _registration_path("aten::quantized_lstm", "input"),
+    ]
+    try:
+        return (all(paths) and os.path.commonpath(paths)) or None
+    except ValueError:
+        return None
+
+
+def _torch_cpp_op(op_name: str, overload: str) -> bool:
+    """Whether ``import torch`` registers ``op_name`` from C++. An extension adding
+    ops to a torch namespace records its own source, outside torch's root."""
+    root = _torch_source_root()
+    path = _registration_path(op_name, overload)
+    if root is None or not path or path.endswith(".py"):
+        return op_name.split("::")[0] in _TORCH_OP_NAMESPACES
+    return path.startswith(os.path.join(root, ""))
+
+
+# Torch's namespaces defined from C++, which decide for an op whose schema records
+# no C++ path (legacy RegisterOperators, a build with STRIP_ERROR_MESSAGES).
 _TORCH_OP_NAMESPACES = frozenset(
     {
         "aten",
@@ -2102,8 +2132,10 @@ def _library_op_module(
 def _kernel_modules(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> set[str]:
-    """The modules outside torch whose import registers a kernel of ``op_name``
-    with ``Library.impl``, which is often not the module defining the op."""
+    """The modules outside torch that constructed a ``torch.library.Library``
+    registering a kernel of ``op_name``, often not the module defining the op. A
+    kernel registered through another module's Library records that module, not
+    the one calling ``impl``."""
     qualname = f"{op_name}.{overload}" if overload else op_name
     dump = torch._C._dispatch_dump(qualname)
     paths = re.findall(r"^[^:\n]+: registered at (.+\.py):\d+ ::", dump, re.MULTILINE)
@@ -2127,7 +2159,7 @@ def _op_registration(
     )
     if module is not None:
         return "module", module
-    return ("torch" if ns in _TORCH_OP_NAMESPACES else "unrecorded"), ""
+    return ("torch" if _torch_cpp_op(op_name, overload) else "unrecorded"), ""
 
 
 def _custom_op_modules(
@@ -2194,12 +2226,17 @@ _KERNEL_KEYS = (
 
 
 def _write_custom_op_imports(
-    buf: PySourceBuilder, modules: tuple[str, ...], ops: tuple[tuple[str, str], ...]
+    buf: PySourceBuilder,
+    modules: tuple[str, ...],
+    ops: tuple[tuple[str, str], ...],
+    call: bool = True,
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
-    # path imports the module that registers the op. The recorded module is a best
-    # guess (and an op defined with torch.library.define or from __main__ has
-    # none), so the imports are best effort and the ops themselves are checked.
+    # path imports the module that registers the op. The recorded modules are the
+    # ones that constructed each Library used for the op's define and impls, which
+    # misses a module calling impl on another module's Library (and an op defined
+    # with torch.library.define or from __main__ has none), so the imports are best
+    # effort and the ops and their kernels are checked.
     if not ops:
         return
     buf.writeline("# " + "=" * 70)
@@ -2263,8 +2300,9 @@ def _write_custom_op_imports(
         '        "the ops this artifact calls and the kernels they had at capture are "'
     )
     buf.writeline('        "registered, so it loads anyway")')
-    buf.writeline("_import_custom_op_modules()")
-    buf.writeline("del _import_custom_op_modules")
+    if call:
+        buf.writeline("_import_custom_op_modules()")
+        buf.writeline("del _import_custom_op_modules")
     buf.writeline("")
 
 
@@ -2673,7 +2711,8 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
-    _write_custom_op_imports(buf, custom_op_modules, custom_ops)
+    # The driver imports them after its version checks.
+    _write_custom_op_imports(buf, custom_op_modules, custom_ops, call=False)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
