@@ -1630,10 +1630,31 @@ class _CapturePackage(CompilePackage):
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
 
-    def add_graph_break_op(self, op: object) -> None:
+    def add_graph_break_op(
+        self,
+        op: object,
+        failed_op: object = None,
+        device_types: frozenset[str] = frozenset(),
+    ) -> None:
         from torch._precompile import _overload_names
 
-        self._compile_graph_break_op_names |= _overload_names(op)
+        names = _overload_names(op)
+        self._compile_graph_break_op_names |= names
+        has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+        backend_keys = [torch._C._dispatch_key_for_device(t) for t in device_types]
+
+        def runs_own_kernel(qualname: str) -> bool:
+            if has_kernel(qualname, "CompositeExplicitAutograd"):
+                return True
+            return bool(backend_keys) and all(
+                has_kernel(qualname, k) for k in backend_keys
+            )
+
+        # Eagerly, op calls failed_op only if it decomposes into it; otherwise
+        # only op's fake impl does.
+        if names and all(runs_own_kernel(f"{n}.{o}" if o else n) for n, o in names):
+            return
+        self._compile_graph_break_op_names |= _overload_names(failed_op)
 
     @contextlib.contextmanager
     def code_context(
