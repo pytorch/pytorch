@@ -1007,7 +1007,7 @@ class TestFlexDecoding(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @with_tf32_off
-    @expectedFailureXPU # https://github.com/intel/torch-xpu-ops/issues/2400
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/2400
     def test_pointwise_query_producer(self, device, head_dims):
         # https://github.com/pytorch/pytorch/issues/198513
         # The pointwise producer's layout follows its [B, S, H, D] input, not the
