@@ -228,7 +228,7 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         from torch.fx.experimental.proxy_tensor import _coor_enabled
 
@@ -236,7 +236,7 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, torch.device) and _coor_enabled():
             # Drop the index so an explicit cuda:N lands in the same bucket as a
-            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            # rank-relative CurrentDeviceVariable; see its tp_hash_impl.
             return hash(torch.device(self.value.type)), False
 
         value_type = cast(Any, type(self.value))
@@ -962,7 +962,7 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:

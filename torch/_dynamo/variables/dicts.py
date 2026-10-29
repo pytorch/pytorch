@@ -98,7 +98,7 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
+# - Implement tp_hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement tp_richcompare_impl() for key equality
 
@@ -562,7 +562,7 @@ class ConstDictVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
+        # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
@@ -983,7 +983,7 @@ class ConstDictVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
@@ -1190,10 +1190,10 @@ class MappingProxyVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MappingProxyType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # mappingproxy.__hash__ delegates to the underlying dict, which
         # raises TypeError. Mirror that behavior.
-        return self.dv_dict.hash_impl(tx)
+        return self.dv_dict.tp_hash_impl(tx)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -1348,7 +1348,7 @@ class DictViewVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     @property
@@ -1574,7 +1574,7 @@ class DictValuesVariable(DictViewVariable):
     # (https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6630),
     # so it inherits object's tp_hash (PyObject_GenericHash) — hashable.
     #
-    # Override DictViewVariable.hash_impl to restore the base identity hash.
+    # Override DictViewVariable.tp_hash_impl to restore the base identity hash.
     kv = "values"
 
     # dict.values() do not implement tp_as_number
@@ -1590,8 +1590,8 @@ class DictValuesVariable(DictViewVariable):
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        return super(DictViewVariable, self).hash_impl(tx)
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return super(DictViewVariable, self).tp_hash_impl(tx)
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:

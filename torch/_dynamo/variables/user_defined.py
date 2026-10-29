@@ -157,7 +157,7 @@ def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
     Covers tp_hash and tp_richcompare slots for C extension types.
-    Used by UDOV's hash_impl and tp_richcompare_impl MRO walks.
+    Used by UDOV's tp_hash_impl and tp_richcompare_impl MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -396,7 +396,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return GuardBuilder.CLASS_MATCH
         return None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         if self.source:
             try:
                 install_guard(self.source.make_guard(GuardBuilder.CLASS_MATCH))
@@ -1303,7 +1303,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         # it resolves through cls.__mro__ first and can land on
                         # a different object (object.__repr__ rather than the
                         # metaclass __repr__). There is no expression for the
-                        # bound method itself, and hash_impl and
+                        # bound method itself, and tp_hash_impl and
                         # reconstruct_pycode both read the method VT's source,
                         # so leave it unset rather than give them cls.name.
                         fn_source = self.source and AttrSource(
@@ -4283,12 +4283,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def is_hashable(self) -> bool:
-        # Mirrors the __hash__ is None check in hash_impl's MRO walk.
+        # Mirrors the __hash__ is None check in tp_hash_impl's MRO walk.
         # Returns "Is this hashable in CPython?", not "can Dynamo trace the hash?".
-        # Unknown C hashes are hashable but graph-break in hash_impl.
+        # Unknown C hashes are hashable but graph-break in tp_hash_impl.
         return type(self.value).__hash__ is not None
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # Mirrors CPython's slot_tp_hash which looks up __hash__ via the MRO:
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9521-L9565
         # __hash__ = None → PyObject_HashNotImplemented:
@@ -4296,7 +4296,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self.inherits_base_slot("__hash__"):
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         obj_type = type(self.value)
 
@@ -4340,7 +4340,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="Non-constant __hash__ return",
-                        context=f"hash_impl {self}",
+                        context=f"tp_hash_impl {self}",
                         explanation=f"__hash__ returned a non-constant "
                         f"{type(result).__name__}.",
                         hints=[
@@ -4365,7 +4365,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 break
             unimplemented(
                 gb_type="Untraceable C tp_hash",
-                context=f"hash_impl {self}",
+                context=f"tp_hash_impl {self}",
                 explanation=f"{cls.__name__} defines a C __hash__ that "
                 f"Dynamo cannot trace into.",
                 hints=[
@@ -4378,7 +4378,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if self._base_methods is not None:
             # self is-a base VT (multiple inheritance); use its hash on self.
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
         # hash(self.value) calls the real tp_hash — handles both
         # object.__hash__ (identity) and builtin-inherited C hashes
         # (e.g. IntEnum inheriting int.__hash__).
@@ -4708,19 +4708,19 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # The fast path below replicates CPython's *generated* frozen dataclass
         # __hash__ (hash(tuple(field_values))).  A frozen dataclass may instead
         # define a custom __hash__ (e.g. the PyTreeSpec polyfill); dataclasses
         # synthesizes the generated one via exec (co_filename "<string>"), so a
         # __hash__ from a real source file is custom -- defer to the general
-        # MRO-walking hash_impl, which traces it.
+        # MRO-walking tp_hash_impl, which traces it.
         type_hash = type(self.value).__hash__
         if (
             isinstance(type_hash, types.FunctionType)
             and type_hash.__code__.co_filename != "<string>"
         ):
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
         # CPython's frozen dataclass __hash__ is generated by _hash_add:
         # https://github.com/python/cpython/blob/e76aa128fe/Lib/dataclasses.py#L886-L892
