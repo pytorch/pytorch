@@ -627,7 +627,7 @@ class BenchmarkJobCallTest(TestCase):
 
 
 class TunableopModeValidationTest(TestCase):
-    """Invalid TORCHINDUCTOR_ATEN_TUNABLEOP_MODE values warn instead of silently
+    """Invalid TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE values warn instead of silently
     disabling."""
 
     hw_classification = HardwareClassification.GENERIC
@@ -635,18 +635,18 @@ class TunableopModeValidationTest(TestCase):
     def test_invalid_mode_warns_and_disables(self):
         tunableop._mode_warned = False
         try:
-            with inductor_config.patch({"cuda.aten_tunableop_mode": "ON"}):
+            with inductor_config.patch({"cuda.autotune_tunableop_mode": "ON"}):
                 with self.assertLogs(tunableop.log, level="WARNING") as logs:
                     self.assertFalse(tunableop.is_tune_mode())
                     self.assertFalse(tunableop.is_reuse_mode())
                     self.assertFalse(tunableop.is_enabled())
             self.assertTrue(
-                any("TORCHINDUCTOR_ATEN_TUNABLEOP_MODE" in m for m in logs.output)
+                any("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE" in m for m in logs.output)
             )
             # Echoes what was set, not the normalized form.
             self.assertTrue(any("'ON'" in m for m in logs.output))
             # Warns only once: the second invalid value logs nothing.
-            with inductor_config.patch({"cuda.aten_tunableop_mode": "bogus"}):
+            with inductor_config.patch({"cuda.autotune_tunableop_mode": "bogus"}):
                 with self.assertNoLogs(tunableop.log, level="WARNING"):
                     tunableop.is_enabled()
         finally:
@@ -681,7 +681,7 @@ class TunableopModeValidationTest(TestCase):
                     self.assertNoLogs,
                 ):
                     with (
-                        inductor_config.patch({"cuda.aten_tunableop_mode": mode}),
+                        inductor_config.patch({"cuda.autotune_tunableop_mode": mode}),
                         mock.patch("torch.cuda.is_available", return_value=True),
                         mock.patch.dict(os.environ, {**env, var: value}, clear=True),
                         expect(tunableop.log, level="WARNING") as logs,
@@ -695,7 +695,7 @@ class TunableopModeValidationTest(TestCase):
         tunableop._mode_warned = False
         self.addCleanup(setattr, tunableop, "_mode_warned", False)
         with (
-            inductor_config.patch({"cuda.aten_tunableop_mode": "Tune"}),
+            inductor_config.patch({"cuda.autotune_tunableop_mode": "Tune"}),
             mock.patch("torch.cuda.is_available", return_value=True),
             self.assertNoLogs(tunableop.log, level="WARNING"),
         ):
@@ -707,7 +707,7 @@ class TunableopModeValidationTest(TestCase):
         self.addCleanup(setattr, tunableop, "_mode_warned", False)
         for mode in ("off", "tune", "reuse"):
             with self.subTest(mode=mode):
-                with inductor_config.patch({"cuda.aten_tunableop_mode": mode}):
+                with inductor_config.patch({"cuda.autotune_tunableop_mode": mode}):
                     with self.assertNoLogs(tunableop.log, level="WARNING"):
                         tunableop.is_enabled()
 
