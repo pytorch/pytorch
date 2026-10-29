@@ -1087,13 +1087,16 @@ class TileReduce:
             num_bits_per_copy=const_expr(vec * mX.element_type.width),
         )
         # A short LAST block's surplus groups clamp onto group 0 rather than branching; the rows
-        # they would have filled belong to threads whose store is guarded anyway.
-        nlive = (Int32(mX.shape[0]) - row0) * Int32(const_expr(cols))
+        # they would have filled belong to threads whose store is guarded anyway. Compare rows,
+        # not groups: live rows * cols overflows Int32 once M approaches 2^31 / cols.
+        live_rows = Int32(mX.shape[0]) - row0
         for i in cutlass.range_constexpr(
             -(-ngroups // const_expr(self.threads_per_block))
         ):
             g = Int32(const_expr(i * self.threads_per_block)) + tx
-            ok = (g < nlive) & (g < Int32(const_expr(ngroups)))
+            ok = (g // Int32(const_expr(cols)) < live_rows) & (
+                g < Int32(const_expr(ngroups))
+            )
             gs = g if ok else Int32(0)
             # Per ROW, not off a flat pointer: cp.async needs a statically transfer-aligned source,
             # and a raw `iterator + offset` carries no alignment while a flat_divide of a row does.
