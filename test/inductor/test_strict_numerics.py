@@ -1449,6 +1449,14 @@ class PointwiseStrictNumericsTest(TestCase):
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         xfail = POINTWISE_XFAIL
+        if (
+            torch.version.hip is None
+            and _op_id(op) == "rsub"
+            and dtype in (torch.float32, torch.float16, torch.bfloat16)
+        ):
+            # Explicit FMA for alpha subtraction also makes rsub match eager.
+            # Keep the global ledger entries so all three dtypes are collected.
+            xfail = xfail - {("rsub", _dtype_label(dtype))}
         if IS_SM89 and dtype == torch.bfloat16 and _op_id(op) == "abs":
             import triton
 
