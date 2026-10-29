@@ -2997,6 +2997,33 @@ raise RuntimeError("device assert did not fire")
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
 
+    def test_vectorized_elementwise_remainder_sizes(self):
+        # Sizes around the 256 / 1024 / 4096 boundaries of the vectorized kernel's
+        # remainder block, alone and after full blocks.
+        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
+        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
+        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
+            for n in sizes:
+                a, b, c = (
+                    torch.randint(0, 100, (n,), device="cuda").to(dtype)
+                    for _ in range(3)
+                )
+                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
+                out = torch.full((n + 64,), 7, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], a_cpu + b_cpu)
+                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
+                self.assertEqual(
+                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
+                )
+                self.assertEqual(torch.square(a), torch.square(a_cpu))
+                self.assertEqual(a.float(), a_cpu.float())
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x, y = torch.randn(2, n, device="cuda")
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
     # this might create a reference cycle on self...
     def _make_multiply_in_stream(self):
         class MultiplyInStream(torch.autograd.Function):
