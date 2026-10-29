@@ -223,10 +223,10 @@ it.
 # every overriding kernel is still the active one, registered from the same file.
 # make_fx case: before load, the caller must import C++ extension ops, ops from
 # torch.library.define or __main__, and kernels registered through @torch.library.impl,
-# register_kernel or another module's Library. Dynamo case: for an op or kernel with no
-# recorded module, the artifact imports its served frames' modules, in the order their
-# imports finished, so the caller must import only those registered outside every served
-# frame's module.
+# register_kernel or another module's Library. Dynamo case: if an op or kernel has no
+# recorded module or a recorded module is outside torch, the artifact also imports its
+# served frames' modules, all in the order their imports finished, so the caller must
+# import only those registered outside every served frame's module.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -2702,9 +2702,8 @@ def _build_multigraph_python_source(
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
-    buf.writeline(
-        "# The modules of its frames, imported by section 0 or the standalone driver."
-    )
+    buf.writeline("# Frame modules: section 0 imports those CUSTOM_OP_MODULES lists,")
+    buf.writeline("# probes the rest; the driver (installed: install()) imports them.")
     buf.writeline(f"SERVED_MODULES = {tuple(sorted(_served_modules(frames)))!r}")
     buf.writeline("")
     buf.writeline(
