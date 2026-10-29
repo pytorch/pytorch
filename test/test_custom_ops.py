@@ -716,6 +716,21 @@ class TestCustomOp(CustomOpTestCaseBase):
         self.assertEqual(calls, ["custom"])
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
+    def test_pyobject_dispatch_records_profiler_events(self):
+        @torch.library.custom_op(
+            f"{self.test_ns}::pyobject_dispatch_profiled", mutates_args=()
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = self.ns().pyobject_dispatch_profiled.default
+        self.assertTrue(op._is_pyobj_dispatcher_enabled())
+        with torch.profiler.profile() as prof:
+            f(torch.randn(3))
+        names = {e.name for e in prof.events()}
+        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
+
+    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
         @torch.library.custom_op(
             f"{self.test_ns}::pyobject_dispatch_custom_op_autograd",
