@@ -642,9 +642,10 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // torch.cuda.graph's: no warm-up, synchronization or tensor lifetime
 // management. capture_begin and capture_end use the current stream, which
 // must be on the pool's device; replay uses the current stream of the
-// capture's device. Captures are thread-local, and a graph captures once.
-// Under the cudaMallocAsync allocator backend, CUDAGraph ignores the pool and
-// allows only one capture at a time in the process. Callers must:
+// capture's device. A graph captures once.
+// capture_begin fails under the cudaMallocAsync allocator backend, where
+// CUDAGraph ignores the pool, allows only one capture at a time in the
+// process, and aborts when a failed capture's tensors are freed. Callers must:
 // - capture on a cudaStreamNonBlocking stream;
 // - end every capture whose capture_begin succeeded with capture_end, on its
 //   thread and stream, before deleting the graph, also when the captured work
@@ -682,16 +683,25 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_mem_pool(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool);
 
+// keep_graph and num_rng_states are at::cuda::CUDAGraph's constructor
+// arguments, which torch.cuda.CUDAGraph defaults to false and 8. With
+// keep_graph, the captured graph is kept and the first replay instantiates it.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_graph(
+    int32_t keep_graph,
+    int64_t num_rng_states,
     CUDAGraphHandle* ret_graph // returns new reference
 );
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_graph(CUDAGraphHandle graph);
 
+// capture_mode is a cudaStreamCaptureMode. cudaStreamCaptureModeThreadLocal
+// restricts only the capturing thread, so other inference threads keep
+// running; cudaStreamCaptureModeGlobal also restricts them.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
-    CUDAMemPoolHandle pool);
+    CUDAMemPoolHandle pool,
+    int32_t capture_mode);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
