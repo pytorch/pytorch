@@ -62,6 +62,7 @@ from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
+from torch.utils._pytree import tree_leaves
 
 from . import (
     config,
@@ -147,6 +148,8 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _record_graph_break_op,
+    _tensor_device_types,
     counters,
     FrameState,
     get_fake_value,
@@ -1097,6 +1100,27 @@ def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any
     return wrapper
 
 
+def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None:
+    from .variables.torch import BaseTorchVariable
+
+    # The instruction runs eagerly, so the ops it calls or passes must be
+    # registered when served. Lazy items are read, never realized.
+    vts: list[VariableTracker] = []
+    VariableTracker.visit(vts.append, popped)
+    devices = frozenset[str]()
+    for v in vts:
+        if isinstance(v, LazyVariableTracker):
+            devices |= _tensor_device_types(v.peek_value())
+        elif isinstance(v, TensorVariable) and v.device and v.device.type != "meta":
+            devices |= {v.device.type}
+    for vt in vts:
+        if isinstance(vt, LazyVariableTracker):
+            for op in tree_leaves(vt.peek_value()):
+                package.add_graph_break_op(op, device_types=devices)
+        elif isinstance(vt, BaseTorchVariable):
+            package.add_graph_break_op(vt.value, device_types=devices)
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1122,9 +1146,16 @@ def break_graph_if_unsupported(
                         "expected speculation.reason is not None to be true"
                     )
                 return handle_graph_break(self, inst, speculation.reason)
+            stack: list[VariableTracker] = self.stack[:] if self.output.package else []
             try:
                 return inner_fn(self, inst)
             except (Unsupported, UserError) as excp:
+                # Before every fallback (try block, loop, skipped frame) and the
+                # restart that resumes after this instruction.
+                popped = stack[len(self.stack) :]
+                _record_graph_break_op(
+                    self, lambda p: _record_graph_break_ops(p, popped)
+                )
                 if self.active_generic_context_managers:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:

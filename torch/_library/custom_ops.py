@@ -296,6 +296,9 @@ class CustomOpDef:
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        # The module registering each kernel, by dispatch key, as the dispatcher
+        # records only this file.
+        self._backend_fn_callers: dict[str, str | None] = {}
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
@@ -503,6 +506,11 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
+                key = "CompositeExplicitAutograd"
+                if device_type is not None:
+                    key = _C._dispatch_key_for_device(device_type)
+                caller = utils.caller_frame().f_globals.get("__name__")
+                self._backend_fn_callers[key] = caller
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(

@@ -3617,8 +3617,9 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-        else:
-            self.header.splice(kernel_defs)
+            if V.graph.cpp_wrapper:
+                return
+        self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
         if config.profile_bandwidth:
@@ -5636,6 +5637,15 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
+            if config.triton.autotune_at_compile_time:
+                autotune_idx = (
+                    V.graph.device_ops.current_device_idx_expr()
+                    if _coor_enabled()
+                    else device.index
+                )
+                self.kernel_autotune_calls.writeline(
+                    f"{stream_name} = get_raw_stream({autotune_idx})"
+                )
             self.writeline(
                 f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
             )

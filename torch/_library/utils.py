@@ -2,6 +2,7 @@
 import dataclasses
 import inspect
 import sys
+import types
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any, Literal, overload
 
@@ -45,6 +46,16 @@ def get_source(stacklevel: int) -> str:
     frame = inspect.getframeinfo(sys._getframe(stacklevel))
     source = f"{frame.filename}:{frame.lineno}"
     return source
+
+
+def caller_frame() -> types.FrameType:
+    """The first frame outside torch.library's helpers: the user registering a kernel."""
+    # functools for torch.library.impl, a functools.singledispatch.
+    skipped = ("torch._library", "torch.library", "functools")
+    frame = sys._getframe(1)
+    while frame.f_back and frame.f_globals.get("__name__", "").startswith(skipped):
+        frame = frame.f_back
+    return frame
 
 
 def parse_namespace(qualname: str) -> tuple[str, str]:
