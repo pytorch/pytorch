@@ -10364,6 +10364,12 @@ class TestPrecompileCustomOpRecording(TestCase):
             _warn_unregistered_ops(found)
         (warning,) = logs.output
         self.assertIn(f"run the kernels {qualname} (CUDA), which no recorded", warning)
+        # A spawn worker runs that __main__ again as __mp_main__.
+        mp_main = types.ModuleType("__mp_main__")
+        mp_main.__spec__ = spec
+        self.enterContext(mock.patch.dict(sys.modules, {"__mp_main__": mp_main}))
+        found = register("__mp_main__", "cuda", in_module)
+        self.assertEqual(found.untracked_kernels, ((qualname, "CUDA"),))
 
     def test_an_overloaded_custom_op_records_its_module_and_kernel_callers(self):
         from torch._precompile import _custom_op_modules
