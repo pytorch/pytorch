@@ -1311,6 +1311,8 @@ ldl_diagonal_panel_fused_kernel(
     // strided swap of up to nb entries per interchange, the copy, a pass after the
     // GEMM), so it needs re-benchmarking and possibly re-tuning panel_width, while
     // the factorization is backward stable either way and info differs only as above.
+    // Pinned by test_linalg_ldl_factor_zero_row_col_info. Once fixed, real dtypes can
+    // move here from cuSOLVER (see ldl_factor_kernel).
     if (D_is_singular && gtid == 0 && *dinfo == 0) {
       *dinfo = curr_step + 1;
     }
@@ -1354,9 +1356,9 @@ void ldl_diagonal_panel(
   int max_coop_blocks
 ) {
   // TODO: can be easily extended to the batched case
-  constexpr int PANEL_THRESHOLD = 512;
-  constexpr int LARGE_PANEL_NTHREADS = 1024;
-  constexpr int SMALL_PANEL_NTHREADS = 256;
+  // NOTE: the single-block kernel used to be split by panel rows: 256 threads up to
+  // 512 rows and 1024 above. The 1024-thread variant was dropped to save binary size.
+  constexpr int PANEL_NTHREADS = 256;
   const auto stream = at::cuda::getCurrentCUDAStream();
 
   auto problem_dim = n - curr_step;
@@ -1376,19 +1378,11 @@ void ldl_diagonal_panel(
     (void)cudaGetLastError();
   }
 
-  if (problem_dim > PANEL_THRESHOLD) {
-    ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, LARGE_PANEL_NTHREADS, 0, stream>>>(
-      dLD, n, lda,
-      nb, curr_step, dcurr_step,
-      dipiv, dinfo, nullptr, nullptr
-    );
-  } else {
-    ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, SMALL_PANEL_NTHREADS, 0, stream>>>(
-      dLD, n, lda,
-      nb, curr_step, dcurr_step,
-      dipiv, dinfo, nullptr, nullptr
-    );
-  }
+  ldl_diagonal_panel_fused_kernel<scalar_t, PANEL_NTHREADS, hermitian, /*cooperative=*/false><<<1, PANEL_NTHREADS, 0, stream>>>(
+    dLD, n, lda,
+    nb, curr_step, dcurr_step,
+    dipiv, dinfo, nullptr, nullptr
+  );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -1466,7 +1460,8 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   }
 }
 
-// Hermitian LDL, i.e. symmetric for real dtypes
+// Hermitian LDL of complex inputs. Real ones go to cuSOLVER (see ldl_factor_kernel),
+// so they are not instantiated.
 void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tensor& info) {
   const int n = cuda_int_cast(LD.size(-1), "LD.size(-1)");
   if (LD.numel() == 0) {
@@ -1504,7 +1499,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
   // Disabling TF32 in GEMMs
   NoTF32Guard disable_tf32;
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
+  AT_DISPATCH_COMPLEX_TYPES(LD.scalar_type(), "ldl_factor_blas3_kernel", [&] {
     ldl_factor_panels<scalar_t, /*hermitian=*/c10::is_complex<scalar_t>::value>(LD, pivots, info, n, lda);
   });
 

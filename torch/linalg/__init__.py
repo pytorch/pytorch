@@ -933,8 +933,10 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """
-    + rf"""
-.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.ldl_factor_ex")}
+    + r"""
+.. note:: When inputs are on a CUDA device, this function synchronizes that device with the CPU.
+          So does :func:`torch.linalg.ldl_factor_ex`: it skips checking ``info`` by default, but the
+          factorization itself synchronizes, as its Bunch-Kaufman pivoting is data-dependent.
 """
     + r"""
 
@@ -984,10 +986,13 @@ Division by 0 will occur if the result is used for solving a system of linear eq
 ``info`` filled with zeros indicates that the factorization was successful.
 If ``check_errors=True`` and ``info`` contains positive integers, then a `RuntimeError` is thrown.
 
+.. note:: When the inputs are on a CUDA device, this function synchronizes that device with the CPU
+          even when :attr:`check_errors`\ `= False`, which only skips checking ``info`` (a check that
+          always synchronizes). The factorization itself synchronizes, as its Bunch-Kaufman pivoting
+          is data-dependent: whether a pivot block is 1x1 or 2x2 depends on the values of :attr:`A`.
+
 """
     + rf"""
-.. note:: {common_notes["sync_note_ex"]}
-
 .. warning:: {common_notes["experimental_warning"]}
 """
     + r"""

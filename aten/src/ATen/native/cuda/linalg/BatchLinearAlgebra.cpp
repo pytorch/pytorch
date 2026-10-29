@@ -422,7 +422,7 @@ void ldl_factor_kernel(
     case at::LinalgBackend::Cusolver:
        {
 #ifndef USE_ROCM
-         if (hermitian) {
+         if (hermitian && LD.is_complex()) {
            return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
          }
 #endif
@@ -436,8 +436,11 @@ void ldl_factor_kernel(
 }
     default:
 #ifndef USE_ROCM
-    // By default the custom kernel takes hermitian=true.
-      if (hermitian) {
+    // cuSOLVER has no Hermitian LDL for complex inputs, so the custom kernel takes them.
+    // For real inputs, where hermitian=true is sytrf too, the custom kernel is faster, yet
+    // they are still dispatched to cuSOLVER: the custom kernel does not always flag an
+    // exactly zero row/col in info (see the TODO in ldl_diagonal_panel_fused_kernel).
+      if (hermitian && LD.is_complex()) {
         return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info);
       }
 #endif

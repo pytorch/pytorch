@@ -29,14 +29,14 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
+     freeze_rng_state, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      skipIfNoLapack,
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIf,
+     skipCUDAIf, expectedFailureCUDA,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type, largeMPSBufferTest)
@@ -1119,6 +1119,44 @@ class TestLinalg(TestCase):
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test(shape, batch, uplo)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @serialTest()
+    def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
+        # Warm up n=1024 so the rocBLAS GEMM code objects are loaded. Then
+        # allocate until the device is full: 1 GiB blocks, then 64 MiB, 2 MiB,
+        # and 256 KiB, so the leftover hole is under 256 KiB. Deleting those
+        # tensors returns the blocks to the caching allocator without
+        # empty_cache. rocBLAS hipMalloc still cannot grow the handle
+        # workspace. The n=2048 syevd workspace is taken from that cache.
+        def spd(n):
+            a = torch.randn(4, n, n, device=device)
+            return a @ a.mT + torch.eye(n, device=device)
+
+        warmup = spd(1024)
+        torch.linalg.eigh(warmup)
+        torch.cuda.synchronize()
+        del warmup
+
+        chunks = []
+        try:
+            for size in (1 << 30, 64 << 20, 2 << 20, 256 << 10):
+                try:
+                    while True:
+                        chunks.append(torch.empty(size, dtype=torch.uint8, device=device))
+                except torch.OutOfMemoryError:
+                    pass
+            del chunks
+            chunks = []
+            values, _ = torch.linalg.eigh(spd(2048))
+            torch.cuda.synchronize()
+            # isnan on device would load a new kernel while the device is still
+            # full. The copy is a memcpy of the finished eigenvalues.
+            self.assertFalse(torch.isnan(values.cpu()).any())
+        finally:
+            del chunks
+            torch.cuda.empty_cache()
+
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -1423,8 +1461,6 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
     def test_vector_norm(self, device, dtype):
-        if IS_ARM64 and device == 'cpu' and dtype in [torch.float16, torch.bfloat16, torch.float32]:
-            raise unittest.SkipTest("Fails on ARM, see https://github.com/pytorch/pytorch/issues/125438")
         # have to use torch.randn(...).to(bfloat16) instead of
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
@@ -9127,7 +9163,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfNoLapack
     @onlyCUDA
     @skipCUDAIfNoCusolver
-    @dtypes(*floating_and_complex_types())
+    @dtypes(*complex_types())
     def test_linalg_ldl_factor_stability_large_inputs(self, device, dtype):
         # Check whether the LDL factorization (Bunch-Kaufman, hermitian=True) is
         # backward stable, as in test_linalg_batched_lu_stability_large_inputs but
@@ -9176,7 +9212,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipIfRocm
     @skipIfNoLapack
     @onlyCUDA
-    @dtypes(*floating_and_complex_types())
+    @dtypes(*complex_types())
     def test_linalg_ldl_factor_edge_cases(self, device, dtype):
         # Empty inputs, in the matrix, the batch, or both
         for shape in ((0, 0), (2, 0, 0), (0, 5, 5), (0, 2, 5, 5), (2, 0, 5, 5), (0, 0, 0), (2, 0, 0, 0)):
@@ -9218,19 +9254,59 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for n in sorted(ns):
             self._check_ldl_factor_random(n, device, dtype)
 
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    # One dtype keeps it fast, test_linalg_ldl_factor_stability_large_inputs covers both
+    @dtypes(torch.complex64)
+    def test_linalg_ldl_factor_batched_large_panels(self, device, dtype):
+        # A non-slow subset of test_linalg_ldl_factor_stability_large_inputs. The edge cases
+        # stop at n = 130, while n = 600 gives the single-block panel kernel more rows than
+        # threads (256), and n = 2100 starts with panels of more than COOP_MIN_ROWS = 2048
+        # rows, which the cooperative kernel factors. Both run on a batch of 2.
+        b = 2
+        norm = partial(torch.linalg.matrix_norm, ord='fro')
+        for n in (600, 2100):
+            t = torch.randn(b, n, n, device=device, dtype=dtype)
+            A = t + t.mH
+            B = torch.randn(b, n, 3, device=device, dtype=dtype)
+            [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
+            # see test_linalg_ldl_factor_stability_large_inputs
+            K = 1.0
+            self.assertTrue((scaled_residual < K).all())
+
+    @skipIfRocm
+    @onlyCUDA
+    # TODO: remove once the custom kernel flags these, see the TODO in ldl_diagonal_panel_fused_kernel
+    @expectedFailureCUDA
+    # Real inputs go to cuSOLVER (see ldl_factor_kernel)
+    @dtypes(*complex_types())
+    def test_linalg_ldl_factor_zero_row_col_info(self, device, dtype):
+        # An exactly zero row/col makes the input singular, so info has to flag it. The custom
+        # kernel misses it when that row/col becomes the curr_step + 1 partner of a 2x2 pivot
+        # that is not the first of its panel (see the TODO in ldl_diagonal_panel_fused_kernel).
+        # That is about a third of random inputs, so a batch of 32 all but surely hits it.
+        b, n = 32, 300
+        t = torch.randn(b, n, n, device=device, dtype=dtype)
+        A = t + t.mH
+        for i, k in enumerate(torch.linspace(1, n - 2, b).long().tolist()):
+            A[i, k, :] = A[i, :, k] = 0
+        info = torch.linalg.ldl_factor_ex(A, hermitian=True).info
+        self.assertTrue((info > 0).all())
+
     @slowTest
     @skipIfRocm
     @skipIfNoLapack
     @onlyCUDA
     # nb grows with n (see ldl::panel_width). On H100, 4097, 8193 and 16385 are the first
-    # n with nb = 64, 96 and 128; float stops at 64, so only 4097 is new for it.
-    # On GB200, 16385 reaches the widest nb of every dtype but complex128, which needs 20481.
+    # n with nb = 64, 96 and 128 (complex64 skips 64).
+    # On GB200, 16385 reaches the widest nb of complex64, and complex128 needs 20481.
     @parametrize("n", (4097, 8193, 16385, 20481))
     # A, LD and one temporary on the device
     @largeTensorTest(lambda self, device, dtype, n: 3 * n * n * dtype.itemsize, device="cuda")
     # A and LD in the CPU solve, in double precision
     @largeTensorTest(lambda self, device, dtype, n: 2 * n * n * (16 if dtype.is_complex else 8), device="cpu")
-    @dtypes(*floating_and_complex_types())
+    @dtypes(*complex_types())
     def test_linalg_ldl_factor_panel_widths(self, device, dtype, n):
         if n == 20481 and dtype != torch.complex128:
             self.skipTest("Reaches no new panel width")
