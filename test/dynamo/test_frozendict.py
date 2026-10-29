@@ -40,6 +40,43 @@ parametrize_pytree_module = parametrize(
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("operation", ["update", "copy", "frozendict"])
+    def test_merge_cross_owner_iteration_descriptor(self, operation):
+        class Mapping(dict):
+            __iter__ = builtins.frozendict.__iter__
+
+            def keys(self):
+                return ["b"]
+
+            def __getitem__(self, key):
+                return 2
+
+        def fn(x, mapping):
+            if operation == "update":
+                result = {}
+                result.update(mapping)
+            elif operation == "copy":
+                result = dict.copy(mapping)
+            else:
+                result = builtins.frozendict(mapping)
+            return x + 1, result
+
+        x, mapping = torch.ones(1), Mapping(a=1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    def test_input_subclass_inherited_get(self):
+        class Mapping(builtins.frozendict):
+            pass
+
+        def fn(x, mapping):
+            return x + mapping.get("a", 0)
+
+        x, mapping = torch.ones(1), Mapping(a=2)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
     @parametrize("key_type", [float, complex, tuple, frozenset])
     def test_input_nan_key_identity_guard(self, key_type):
         def make_key():
