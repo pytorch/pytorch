@@ -7,6 +7,7 @@ import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_CUTEDSL,
@@ -18,6 +19,8 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA and SM90OrLater and TEST_CUTEDSL, "requires CUDA and CuTeDSL"
 )
 class TestInnerTreeStagedIndex(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize(
         "dtype,op,pattern,rows",
         [
