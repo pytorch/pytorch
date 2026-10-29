@@ -18,6 +18,10 @@ RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
 
+# Use a certifi CA bundle without the compromised eMudhra roots instead of the one vendored by the base image
+RUN /opt/python/cp312-cp312/bin/python -m pip install "certifi>=2026.10.23" && \
+    ln -sf $(/opt/python/cp312-cp312/bin/python -c 'import certifi; print(certifi.where())') /opt/_internal/certs.pem
+
 FROM base as cuda
 ARG BASE_CUDA_VERSION=12.6
 # Install CUDA

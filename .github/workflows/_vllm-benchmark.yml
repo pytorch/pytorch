@@ -116,7 +116,7 @@ jobs:
 
           # Need to install pip because there might be parts that are not using
           # uv yet
-          uv pip install pip==25.3
+          uv pip install pip==26.2.2
 
           uv pip install \
             dist/torch-*.whl \

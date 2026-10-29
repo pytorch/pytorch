@@ -501,6 +501,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.atan",
         "math.atan2",
         "math.atanh",
+        "math.cbrt",
         "math.ceil",
         "math.comb",
         "math.copysign",
@@ -511,6 +512,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.erf",
         "math.erfc",
         "math.exp",
+        "math.exp2",
         "math.expm1",
         "math.fabs",
         "math.factorial",
@@ -934,7 +936,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects",
         "torch._C._jit_pass_dce",
         "torch._C._jit_pass_decompose_ops",
-        "torch._C._jit_pass_dedup_module_uses",
         "torch._C._jit_pass_erase_number_types",
         "torch._C._jit_pass_erase_shape_information",
         "torch._C._jit_pass_filter_non_tensor_arguments",
@@ -951,19 +952,13 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv",
         "torch._C._jit_pass_fuse_frozen_conv_add_relu",
         "torch._C._jit_pass_fuse_linear",
-        "torch._C._jit_pass_fuse_quantized_add_relu",
         "torch._C._jit_pass_fuse_tensorexprs",
         "torch._C._jit_pass_fuse",
         "torch._C._jit_pass_inline_fork_wait",
         "torch._C._jit_pass_inline_functional_graphs",
         "torch._C._jit_pass_inline",
         "torch._C._jit_pass_inplace_to_functional_activation",
-        "torch._C._jit_pass_insert_observer_method_for_ondevice_ptq",
-        "torch._C._jit_pass_insert_observers",
-        "torch._C._jit_pass_insert_prepack_unpack",
         "torch._C._jit_pass_insert_prepacked_ops",
-        "torch._C._jit_pass_insert_quant_dequant_for_ondevice_ptq",
-        "torch._C._jit_pass_insert_quant_dequant",
         "torch._C._jit_pass_integer_value_refinement",
         "torch._C._jit_pass_lint",
         "torch._C._jit_pass_loop_unrolling",
@@ -1010,9 +1005,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_propagate_dtype",
         "torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute",
         "torch._C._jit_pass_propagate_shapes_on_graph",
-        "torch._C._jit_pass_quant_finalize_for_ondevice_ptq",
-        "torch._C._jit_pass_quant_finalize",
-        "torch._C._jit_pass_quant_fusion",
         "torch._C._jit_pass_refine_integer_values",
         "torch._C._jit_pass_refine_tuple_types",
         "torch._C._jit_pass_remove_dropout",
@@ -1020,7 +1012,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._jit_pass_remove_inplace_ops",
         "torch._C._jit_pass_remove_mutation",
         "torch._C._jit_pass_replace_old_ops_with_upgraders",
-        "torch._C._jit_pass_replicate_dequantize",
         "torch._C._jit_pass_run_decompositions",
         "torch._C._jit_pass_specialize_autogradzero",
         "torch._C._jit_pass_swap_functional_linear",
@@ -2439,10 +2430,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
     TorchInGraphFunctionVariable,
 )
 
-
-if sys.version_info >= (3, 11):
-    torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
-    torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 12):
     torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable
