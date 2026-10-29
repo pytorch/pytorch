@@ -90,6 +90,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     GetSet,
     Member,
     Method,
@@ -3139,8 +3140,42 @@ class BuiltinVariable(BaseBuiltinVariable):
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(
-        self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker:
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        *args: VariableTracker,
+    ) -> VariableTracker | None:
+        if args:
+            if len(args) != 2 or not check_unspec_or_constant_args([obj, *args], {}):
+                return None
+            name, bases, namespace = [v.as_python_constant() for v in (obj, *args)]
+            # Avoid running user hooks, or copying mutable namespace values.
+            if (
+                type(bases) is not tuple
+                or any(base is not object for base in bases)
+                or type(namespace) is not dict
+                or not all(
+                    ConstantVariable.is_base_literal(v) for v in namespace.values()
+                )
+            ):
+                return None
+            namespace = namespace.copy()
+            if "__module__" not in namespace and "__name__" in tx.f_globals:
+                namespace["__module__"] = tx.f_globals["__name__"]
+            try:
+                cls = type(name, bases, namespace)
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            constructor_args = [
+                obj,
+                args[0],
+                VariableTracker.build(tx, namespace.copy()),
+            ]
+            result = variables.user_defined.NewClassVariable(cls, constructor_args)
+            return tx.output.side_effects.track_object_existing(
+                cls, result, mutation_type_cls=AttributeMutationNew
+            )
+
         try:
             py_type = obj.python_type()
         except NotImplementedError as error:
@@ -3898,6 +3933,19 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
+            if isinstance(obj, variables.user_defined.NewClassVariable):
+                if not isinstance(name, str):
+                    raise_type_error(
+                        tx, f"attribute name must be string, not '{type(name).__name__}'"
+                    )
+                meta_attr = obj.lookup_metaclass_attr(name)
+                if name != "__doc__" and meta_attr is not NO_SUCH_SUBOBJ:
+                    unimplemented(
+                        gb_type="Unsupported attribute write on a new class",
+                        context=f"setattr({obj}, {name}, {val})",
+                        explanation="Dynamo does not model this metaclass attribute setter.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
             if obj.is_tensor():
                 from .builder import wrap_fx_proxy
 
