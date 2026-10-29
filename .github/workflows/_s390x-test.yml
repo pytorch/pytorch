@@ -248,12 +248,17 @@ jobs:
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
+          REQUIREMENTS_FILE=.ci/docker/requirements-ci.txt
+          if [[ $TEST_CONFIG == 'triton_pin_s390_controls' ]]; then
+            REQUIREMENTS_FILE=.ci/pytorch/triton_pin_s390_requirements.txt
+          fi
+
           # sometimes there are intermittent network errors, do a couple of retries
-          docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt || \
-            (sleep 15 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
-            (sleep 30 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
-            (sleep 60 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
-            (sleep 300 && python3 -m pip install -r .ci/docker/requirements-ci.txt)"
+          docker exec -t "${container_name}" sh -c "python3 -m pip install -r ${REQUIREMENTS_FILE} || \
+            (sleep 15 && python3 -m pip install -r ${REQUIREMENTS_FILE}) || \
+            (sleep 30 && python3 -m pip install -r ${REQUIREMENTS_FILE}) || \
+            (sleep 60 && python3 -m pip install -r ${REQUIREMENTS_FILE}) || \
+            (sleep 300 && python3 -m pip install -r ${REQUIREMENTS_FILE})"
 
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 

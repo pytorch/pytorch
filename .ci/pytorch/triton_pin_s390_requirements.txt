@@ -1,0 +1,22 @@
+# Dependencies for the original grid_sampler_2d functorch case only.
+# Keep the numerical and test framework versions resolved by the original job.
+numpy==1.26.4
+expecttest==0.3.0
+hypothesis==6.56.4
+optree==0.13.0
+opt-einsum==3.3
+sympy==1.13.3
+networkx==3.5
+typing-extensions==4.15.0
+pyyaml==6.0.3
+packaging==24.2
+setuptools==78.1.1
+pytest==7.3.2
+pytest-rerunfailures==14.0
+pytest-xdist==3.3.1
+pytest-subtests==0.13.1
+unittest-xml-reporting==3.2.0
+lxml==5.3.0
+psutil
+filelock==3.20.3
+jinja2==3.1.6
