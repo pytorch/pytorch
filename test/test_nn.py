@@ -15722,7 +15722,6 @@ class TestNNDeviceType(NNTestCase):
             # Check that backward does not cause a hard error
             outs[0].sum().backward()
 
-    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)
