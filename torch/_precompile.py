@@ -2076,8 +2076,9 @@ _TORCH_LAZY_OP_NAMESPACES = MappingProxyType(
     {
         "triton": "CUDA initialization (torch.cuda.init())",
         "_inductor_debug": "torch._inductor.runtime.debug_utils.register_check_mem_op()",
-        # The op name comes from a process-global counter.
-        "_native": "the same sequence of torch._native register_op_override calls",
+        # The op name comes from a process-global counter, so only the same call
+        # sequence reproduces it.
+        "_native": "a torch._native register_op_override call",
         "semi_structured": "torch.sparse.semi_structured._ensure_cusparselt_mm_registered() "
         "or _ensure_cutlass_mm_registered()",
     }
