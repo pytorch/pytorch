@@ -6536,6 +6536,8 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(mt((10, 2)), kwargs=dict(n_fft=10))
     yield SampleInput(mt((6, 3)), kwargs=dict(n_fft=6, onesided=False))
     yield SampleInput(mt((6, 4)), kwargs=dict(n_fft=10, onesided=True))
+    yield SampleInput(mt((13, 1)), kwargs=dict(n_fft=25, center=False))
+    yield SampleInput(mt((25, 1)), kwargs=dict(n_fft=25, center=False, onesided=False))
 
     for center in [False, True]:
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
