@@ -629,7 +629,6 @@
   "test/package/test_dependency_api.py",
   "test/package/test_digraph.py",
   "test/package/test_directory_reader.py",
-  "test/package/test_glob_group.py",
   "test/package/test_load_bc_packages.py",
   "test/package/test_mangling.py",
   "test/package/test_misc.py",
