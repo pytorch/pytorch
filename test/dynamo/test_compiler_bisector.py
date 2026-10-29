@@ -343,10 +343,10 @@ class TestCompilerBisector(TestCase):
                 get_env_val.cache_clear()
 
 
+@unittest.skipIf(not has_triton(), "requires Triton")
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
@@ -383,7 +383,6 @@ class TestCompilerBisectorDevice(TestCase):
         )
         self.assertIn(expected_result, output.stdout)
 
-    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_lowering(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -402,7 +401,6 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
 
-    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_emulate_precision_casts(self, device):
         def test_fn():
             torch._dynamo.reset()
