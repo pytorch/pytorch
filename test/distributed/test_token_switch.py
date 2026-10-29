@@ -179,6 +179,31 @@ class _ReferenceTokenSwitch(TokenSwitch):
         rows = self._all_gather(padded).flatten(0, 1)[h.send_flat_slot]
         out_tokens.zero_().index_add_(0, h.send_token, rows)
 
+    def _combine_backward(self, routing, grad_tokens, out_expert_grads):
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        out_expert_grads[: len(r)].copy_(self._all_gather(grad_tokens)[r, t])
+
+    def _dispatch_backward(
+        self,
+        routing,
+        grad_recv_tokens,
+        grad_recv_topk_weights,
+        out_token_grads,
+        out_topk_weight_grads,
+    ):
+        self._combine(routing, grad_recv_tokens, out_token_grads)
+        h = routing.handle
+        r, t = h.recv_src[:, 0], h.recv_src[:, 1]
+        epr = self._experts_per_rank
+        _, weights = _to_local(
+            h.topk_idx_all[r, t],
+            grad_recv_topk_weights[: len(r)],
+            self._rank * epr,
+            epr,
+        )
+        self._combine(routing, weights, out_topk_weight_grads)
+
 
 class _TokenSwitchContractTests:
     """Contract tests (see TokenSwitch's docstring) shared by every backend.
@@ -399,6 +424,64 @@ class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTes
     def _init(self):
         dist.barrier()
 
+    def test_backend_requires_dispatch_backward(self):
+        class IncompleteTokenSwitch(_ReferenceTokenSwitch):
+            _dispatch_backward = TokenSwitch._dispatch_backward
+
+        with self.assertRaisesRegex(TypeError, "_dispatch_backward"):
+            IncompleteTokenSwitch(
+                None, self.world_size * CONTRACT_EXPERTS_PER_RANK, NUM_TOKENS
+            )
+
+    @parametrize("loss_target", ["tokens", "weights", "both", "tokens_frozen"])
+    def test_dispatch_weight_gradients(self, loss_target):
+        self._init()
+        ts = self.get_contract_token_switch()
+        ids, weights, tokens, copies, _, _ = self._contract_inputs(seed=15)
+        tokens.requires_grad_(loss_target != "tokens_frozen")
+        weights.requires_grad_()
+        routing = ts.create_routing(ids, layout="flat")
+        received, scores, _ = ts.dispatch(
+            routing, tokens, weights, ts.max_recv_tokens_per_rank
+        )
+        score_grads = scores.new_empty(scores.numel() * 2)[::2].view_as(scores)
+        score_grads.copy_(
+            2 * scores.detach()
+            + received[:, :1].detach() / 8
+            + received[:, 1:2].detach() / 16
+            + self.rank
+            + 1
+        )
+        self.assertFalse(score_grads.is_contiguous())
+        loss = received.new_zeros(())
+        if loss_target in ("tokens", "both"):
+            loss = loss + received.sum()
+        if loss_target != "tokens":
+            loss = loss + (scores * score_grads).sum()
+        loss.backward()
+        expected = (
+            torch.zeros_like(tokens)
+            if loss_target == "weights"
+            else copies.expand_as(tokens)
+        )
+        if loss_target == "tokens_frozen":
+            self.assertIsNone(tokens.grad)
+        else:
+            self.assertEqual(tokens.grad, expected)
+        expected_weights = (
+            2 * weights.detach()
+            + tokens[:, :1] / 8
+            + tokens[:, 1:2] / 16
+            + ids // CONTRACT_EXPERTS_PER_RANK
+            + 1
+        )
+        if loss_target == "tokens":
+            expected_weights.zero_()
+        self.assertEqual(weights.grad, expected_weights)
+
+
+instantiate_parametrized_tests(TokenSwitchReferenceTest)
+
 
 @requires_nccl_ep()
 class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
@@ -445,6 +528,127 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     def _init(self):
         torch.cuda.set_device(self.device)
         dist.barrier()
+
+    def _weight_grad_inputs(self):
+        token = torch.arange(NUM_TOKENS, device=self.device)
+        destination = (token + self.rank) % self.world_size
+        ids = torch.stack(
+            (
+                destination * 2,
+                destination * 2 + 1,
+                (destination + 1) % self.world_size * 2,
+            ),
+            dim=1,
+        )
+        ids = torch.where(token[:, None] % 2 == 0, ids, ids.flip(1))
+        tokens = (
+            torch.arange(HIDDEN, device=self.device).expand(NUM_TOKENS, -1).float() / 8
+        )
+        tokens = tokens.contiguous()
+        tokens[:, 0] = self.rank + 1
+        tokens[:, 1] = token + 1
+        weights = (
+            torch.arange(NUM_TOKENS * 3, device=self.device)
+            .reshape(NUM_TOKENS, 3)
+            .float()
+        )
+        weights = weights / 32 + 0.125 + self.rank / 16
+        return ids, tokens.to(torch.bfloat16), weights
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", ["flat", "expert_major"])
+    @parametrize("loss_target", ["tokens", "weights", "both", "tokens_frozen"])
+    def test_dispatch_weight_gradients(self, layout, loss_target):
+        self._init()
+        ids, tokens, weights = self._weight_grad_inputs()
+        capacity = NUM_TOKENS * self.world_size * 3
+        ts = TokenSwitchNCCL(
+            dist.distributed_c10d._get_default_group(),
+            self.world_size * 2,
+            NUM_TOKENS,
+            capacity,
+            TOKEN_SIZE_BYTES,
+        )
+        routing = ts.create_routing(ids, layout=layout)
+        tokens.requires_grad_(loss_target != "tokens_frozen")
+        weights.requires_grad_()
+        received, scores, _ = ts.dispatch(routing, tokens, weights, capacity)
+        token_grads = received.new_empty(received.numel() * 2)[::2].view_as(received)
+        token_grads.copy_(received.detach() / 16)
+        score_grads = scores.new_empty(scores.numel() * 2)[::2].view_as(scores)
+        coefficient = received[:, 0].detach() / 8 + received[:, 1].detach() / 16 + 1
+        coefficient = coefficient[:, None] if layout == "flat" else coefficient
+        # Nonzero gradients in invalid flat slots must not reach source weights.
+        score_grads.copy_(2 * scores.detach() + coefficient)
+        self.assertFalse(token_grads.is_contiguous())
+        self.assertFalse(score_grads.is_contiguous())
+        outputs, gradients = [], []
+        if loss_target in ("tokens", "both"):
+            outputs.append(received)
+            gradients.append(token_grads)
+        if loss_target != "tokens":
+            outputs.append(scores)
+            gradients.append(score_grads)
+        torch.autograd.backward(outputs, gradients)
+        if loss_target == "tokens_frozen":
+            self.assertIsNone(tokens.grad)
+        else:
+            copies = 2 if layout == "flat" else 3
+            expected_tokens = tokens.detach() * (copies / 16)
+            if loss_target == "weights":
+                expected_tokens.zero_()
+            self.assertEqual(tokens.grad, expected_tokens, rtol=0, atol=0)
+        expected_weights = (
+            2 * weights.detach() + tokens[:, :1] / 8 + tokens[:, 1:2] / 16 + 1
+        )
+        if loss_target == "tokens":
+            expected_weights.zero_()
+        self.assertEqual(weights.grad, expected_weights, rtol=0, atol=0)
+        torch.cuda.synchronize()
+        dist.barrier()
+        del received, scores, outputs, gradients
+        routing = None
+        ts = None
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_data_dependent_weights(self, layout):
+        self._init()
+        ids, tokens, _ = self._weight_grad_inputs()
+        tokens.requires_grad_()
+        weights = tokens[:, :3].float().softmax(dim=1)
+        weights.retain_grad()
+        capacity = NUM_TOKENS * self.world_size * 3
+        ts = TokenSwitchNCCL(
+            dist.distributed_c10d._get_default_group(),
+            self.world_size * 2,
+            NUM_TOKENS,
+            capacity,
+            TOKEN_SIZE_BYTES,
+        )
+        routing = ts.create_routing(ids, layout=layout)
+        received, scores, _ = ts.dispatch(routing, tokens, weights, capacity)
+        routed_weights = scores.sum(dim=1) if layout == "flat" else scores
+        expert_tokens = received.float() * (self.rank + 1)
+        expert_tokens = (expert_tokens * routed_weights[:, None]).to(received.dtype)
+        result = ts.combine(routing, expert_tokens)
+        loss = result.float().sum()
+        loss.backward()
+        reference = tokens.detach().clone().requires_grad_()
+        reference_weights = reference[:, :3].float().softmax(dim=1)
+        reference_weights.retain_grad()
+        rank_scale = ids // 2 + 1
+        coefficient = (reference_weights * rank_scale).sum(dim=1, keepdim=True)
+        expected = reference.float() * coefficient
+        expected.sum().backward()
+        self.assertEqual(result.float(), expected, rtol=0.02, atol=0.004)
+        self.assertEqual(weights.grad, reference_weights.grad, rtol=0, atol=0)
+        self.assertEqual(tokens.grad, reference.grad, rtol=0.02, atol=0.004)
+        torch.cuda.synchronize()
+        dist.barrier()
+        del received, scores, expert_tokens, result, loss
+        routing = None
+        ts = None
 
     @skip_if_lt_x_gpu(2)
     def test_create_routing(self):
