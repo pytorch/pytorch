@@ -2276,13 +2276,11 @@ def _custom_op_modules(
         dump = torch._C._dispatch_dump(qualname)
         paths = dict(re.findall(pattern, dump, re.MULTILINE))
         fn_modules = _custom_op_kernel_modules(op_name)
-        # Loading the extension that defines a C++ op registers its C++ kernels.
-        schema_path = _registration_path(op_name, overload)
-        cpp_op = kind == "module" and schema_path and not schema_path.endswith(".py")
         for k in (k for k in missing if k in paths):
             fn_module = fn_modules.get(k, value)
             foreign = fn_module != value and fn_module.partition(".")[0] != "torch"
-            if cpp_op and not paths[k].endswith(".py"):
+            # Taken as registered by the C++ extension the op's module loads.
+            if kind == "module" and not paths[k].endswith(".py"):
                 continue
             if foreign or not os.path.realpath(paths[k]).startswith(torch_dir):
                 untracked_kernels.add((op_name, k))
