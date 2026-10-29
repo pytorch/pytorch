@@ -4221,6 +4221,11 @@ def _tensor_device_types(tree: Any) -> frozenset[str]:
     )
 
 
+def _graph_break_op_package(tx: InstructionTranslatorBase) -> Any:
+    package = tx.output.package
+    return package if package and package.records_graph_break_ops else None
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4324,8 +4329,8 @@ def _get_fake_value_impl(
     except Unsupported as e:
         # run_node and wrap_fake_exception graph-break on these.
         fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
-        package = tx.output.package
-        if package is not None and isinstance(e.__cause__, fake_failures):
+        package = _graph_break_op_package(tx)
+        if package and isinstance(e.__cause__, fake_failures):
             package.add_graph_break_op(
                 node.target, device_types=_tensor_device_types((args, kwargs))
             )
@@ -4340,11 +4345,9 @@ def _get_fake_value_impl(
             torch._subclasses.fake_tensor.DynamicOutputShapeException,
             torch._subclasses.fake_tensor.UnsupportedOperatorException,
         )
-        package = tx.output.package
-        device_types = frozenset()
-        if package is not None:
-            device_types = _tensor_device_types((args, kwargs))
-        if package is not None and isinstance(cause, graph_break_causes):
+        package = _graph_break_op_package(tx)
+        device_types = _tensor_device_types((args, kwargs)) if package else frozenset()
+        if package and isinstance(cause, graph_break_causes):
             # These graph-break below, and the op then runs eagerly on its inputs'
             # devices; so do the TypeError and pending fake impl branches.
             package.add_graph_break_op(node.target, cause.func, device_types)
