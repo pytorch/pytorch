@@ -844,16 +844,14 @@ def reduce_row_tile(
     M, N = x.shape
     if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
         raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
-    # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
-    # explicit launch shapes on the default order; explicit requests raise below.
+    # Dispatchers resolve PYTORCH_NATIVE_INNER_TREE (reduction_order), so only an explicit
+    # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
-    gated = order is None and inner_tree_order_enabled()
     itree = None
-    if (order == "inner_tree" or gated) and (final and threads_per_row is None):
+    if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
     if order == "inner_tree" and itree is None:
-        # Explicit inner_tree cannot silently use another DAG; only the env gate may fall back.
         raise ValueError(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
             f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
