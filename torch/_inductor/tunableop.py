@@ -74,12 +74,12 @@ _TUNE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
 )
 # Reuse: TUNING=0 is harmless, it never tunes. These each break it --
-# RECORD_UNTUNED skips ReadFile, NEAREST_MATCH=0 stops borrowing, and
-# RECORD_BORROWED=0 keeps the validated winner out of the results file.
+# RECORD_UNTUNED skips ReadFile, NEAREST_MATCH_ENABLED=0 stops borrowing, and
+# RECORD_BORROWED_ENABLED=0 keeps the validated winner out of the results file.
 _REUSE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "1"),
-    ("PYTORCH_TUNABLEOP_NEAREST_MATCH", "0"),
-    ("PYTORCH_TUNABLEOP_RECORD_BORROWED", "0"),
+    ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0"),
+    ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0"),
 )
 _env_warned = False
 _warned_faults: OrderedSet[str] = OrderedSet()

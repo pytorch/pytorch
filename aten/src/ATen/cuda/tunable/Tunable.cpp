@@ -58,23 +58,25 @@ namespace {
 // Checked at the point of action so it holds even for a caller that never
 // consults IsNearestMatchEnabled()/IsRecordBorrowedEnabled().
 //
-// PYTORCH_TUNABLEOP_NEAREST_MATCH forces borrowing off for the process;
-// PYTORCH_TUNABLEOP_RECORD_BORROWED forces recording off, in memory as well as
-// in the results file. Both take only "0"; any other value, 1 included, is
-// ignored and leaves the decision to the reuse pass. That is the inverse of
-// the usual PYTORCH_TUNABLEOP_* convention, which is why these two are kept
-// out of the user-facing table in README.md: the mechanism they govern has no
-// public entry point yet, and documenting them there would promise a contract
-// before there is a feature to attach it to. Add them when it goes public.
+// Both follow PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED: unset leaves the decision to
+// the reuse pass, 0 forces the feature off for the whole process, 1 defers to
+// the pass as well, and check_env warns on anything else. NEAREST_MATCH_ENABLED
+// governs borrowing, RECORD_BORROWED_ENABLED governs recording a borrow, in
+// memory as well as in the results file. Both are kept out of the user-facing
+// table in README.md: the mechanism they govern has no public entry point yet,
+// and documenting them there would promise a contract before there is a feature
+// to attach it to. Add them when it goes public.
 bool NearestMatchDisabledByEnv() {
   static const bool disabled =
-      c10::utils::get_env("PYTORCH_TUNABLEOP_NEAREST_MATCH") == "0";
+      !c10::utils::check_env("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED")
+           .value_or(true);
   return disabled;
 }
 
 bool RecordBorrowedDisabledByEnv() {
   static const bool disabled =
-      c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_BORROWED") == "0";
+      !c10::utils::check_env("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED")
+           .value_or(true);
   return disabled;
 }
 
