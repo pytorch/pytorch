@@ -36,13 +36,14 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyAccelerator, onlyCPU, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes, skipCPUIf, skipCUDAIf, skipCUDAIfNoMagma, skipIf,
-     DeviceTypeTestBase, PrivateUse1TestBase, preserves_device_selection, MPSTestBase, CPUTestBase, onlyAccelerator)
+     DeviceTypeTestBase, PrivateUse1TestBase, preserves_device_selection, MPSTestBase, CPUTestBase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
 import operator
 import string
@@ -217,6 +218,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, True)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5979")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @dtypes(torch.complex64, torch.complex128)
     def test_isclose_complex(self, device, dtype):
@@ -363,7 +365,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
@@ -372,18 +374,19 @@ class TestTesting(TestCase):
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 class TestThatContainsCUDAAssertFailure(TestCase):
 
     @slowTest
     def test_throw_unrecoverable_cuda_exception(self):
-        x = torch.rand(10, device='cuda')
+        x = torch.rand(10, device=GPU_TYPE)
         # cause unrecoverable CUDA exception, recoverable on CPU
         y = x[torch.tensor([25])].cpu()
 
     @slowTest
     def test_trivial_passing_test_case_on_cpu_cuda(self):
-        x1 = torch.tensor([0., 1.], device='cuda')
+        x1 = torch.tensor([0., 1.], device=GPU_TYPE)
         x2 = torch.tensor([0., 1.], device='cpu')
         self.assertEqual(x1, x2)
 
@@ -399,7 +402,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
@@ -427,7 +430,8 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 instantiate_device_type_tests(
     TestThatContainsCUDAAssertFailure,
     globals(),
-    only_for='cuda'
+    only_for=('cuda', 'xpu'),
+    allow_xpu=True,
 )
 
 if __name__ == '__main__':
@@ -442,7 +446,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
-    @onlyCUDA
+    @onlyAccelerator
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
@@ -484,7 +488,8 @@ class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
 instantiate_device_type_tests(
     TestThatContainsCUDAAssertFailure,
     globals(),
-    only_for='cuda'
+    only_for=('cuda', 'xpu'),
+    allow_xpu=True,
 )
 
 if __name__ == '__main__':
@@ -540,7 +545,7 @@ if __name__ == '__main__':
 
     @onlyCPU
     @ops(
-        [
+        list(dict.fromkeys([
             op
             for op in op_db
             if len(
@@ -549,15 +554,26 @@ if __name__ == '__main__':
                 )
             )
             > 0
-        ][:1],
+        ][:1]
+        + [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("xpu")
+                )
+            )
+            > 0
+        ][:1])),
         dtypes=OpDTypes.none,
     )
     def test_supported_dtypes(self, device, op):
-        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
-        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        device_type = "cuda" if op.supported_dtypes("cuda") else "xpu"
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes(device_type))
+        self.assertEqual(op.supported_dtypes(device_type), op.supported_dtypes(f"{device_type}:0"))
         self.assertEqual(
-            op.supported_dtypes(torch.device("cuda")),
-            op.supported_dtypes(torch.device("cuda", index=1)),
+            op.supported_dtypes(torch.device(device_type)),
+            op.supported_dtypes(torch.device(device_type, index=1)),
         )
 
     def test_setup_and_teardown_run_for_device_specific_tests(self, device):
@@ -584,7 +600,7 @@ class TestFoo(TestCase):
         # make sure the test can access the stored thing
         print(self.stored_thing)
 
-instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
+instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}', allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
@@ -594,7 +610,7 @@ if __name__ == '__main__':
         self.assertIn(expected_error_text, stderr)
 
 
-instantiate_device_type_tests(TestTesting, globals())
+instantiate_device_type_tests(TestTesting, globals(), allow_xpu=True)
 
 
 class TestFrameworkUtils(TestCase):
@@ -653,6 +669,7 @@ class TestEnvironmentVariable(TestCase):
 instantiate_device_type_tests(
     TestEnvironmentVariable,
     globals(),
+    allow_xpu=True,
 )
 
 if __name__ == '__main__':
@@ -2328,7 +2345,7 @@ class TestMakeTensor(TestCase):
         torch.testing.assert_close(actual, expected)
 
 
-instantiate_device_type_tests(TestMakeTensor, globals())
+instantiate_device_type_tests(TestMakeTensor, globals(), allow_xpu=True)
 
 
 def _get_test_names_for_test_class(test_cls):
@@ -2913,7 +2930,7 @@ class TestSkipReasonAtCollection(TestCase):
         with self._lists(), unittest.mock.patch(f"{self._CDT}.{internal_mode}", True), \
                 unittest.mock.patch(f"{self._CU}.IS_SANDCASTLE", True):
             wrappers = {
-                "device": onlyCUDA,
+                "device": onlyAccelerator,
                 "count": deviceCountAtLeast(2),
                 "sandcastle": skip_but_pass_in_sandcastle("pass internally"),
                 "sandcastle_if": skip_but_pass_in_sandcastle_if(True, "pass internally"),
@@ -3066,8 +3083,8 @@ class TestSkipReasonAtCollection(TestCase):
                     super().setUpClass()
                     cls.ready = True
 
-            @onlyCUDA
-            def test_cuda_only(self, device):
+            @onlyAccelerator
+            def test_accelerator_only(self, device):
                 pass
 
             @skipCPUIf(True, "cpu dep")
@@ -3096,22 +3113,22 @@ class TestSkipReasonAtCollection(TestCase):
             instantiate_device_type_tests(TestGeneric, scope, only_for="cpu")
         cpu = scope["TestGenericCPU"]
         with self._lists():
-            self.assertEqual(self._reason(cpu, "test_cuda_only_cpu"), "Only runs on cuda")
+            self.assertEqual(self._reason(cpu, "test_accelerator_only"), "Only runs on cuda")
             self.assertEqual(self._reason(cpu, "test_cpu_dep_cpu"), "cpu dep")
             self.assertIsNone(self._reason(cpu, "test_magma_cpu"))
             self.assertIsNone(self._reason(cpu, "test_plain_cpu"))
             expected_count = None if custom_setup else "fewer than 2 devices detected"
             self.assertEqual(self._reason(cpu, "test_two_devices_cpu"), expected_count)
             with self.assertRaisesRegex(unittest.SkipTest, "Only runs on cuda"):
-                cpu("test_cuda_only_cpu").test_cuda_only_cpu()
+                cpu("test_accelerator_only").test_accelerator_only_cpu()
 
     def test_device_template_without_setup_hooks(self):
         class NoSetup:
             pass
 
         class TestGeneric(NoSetup):
-            @onlyCUDA
-            def test_cuda_only(self, device):
+            @onlyAccelerator
+            def test_accelerator_only(self, device):
                 self.fail("CPU must retain the existing runtime skip")
 
         scope = {"TestGeneric": TestGeneric}
@@ -3119,9 +3136,9 @@ class TestSkipReasonAtCollection(TestCase):
             instantiate_device_type_tests(TestGeneric, scope)
         cpu = scope["TestGenericCPU"]
         with self._lists():
-            self.assertIsNone(self._reason(cpu, "test_cuda_only_cpu"))
-            with self.assertRaisesRegex(unittest.SkipTest, "Only runs on cuda"):
-                cpu("test_cuda_only_cpu").test_cuda_only_cpu()
+            self.assertIsNone(self._reason(cpu, "test_accelerator_only_cpu"))
+            with self.assertRaisesRegex(unittest.SkipTest, "Only runs on accelerator"):
+                cpu("test_accelerator_only_cpu").test_accelerator_only()
 
     @parametrize("setup_kind", ["device", "bypass", "wrapped", "inherited"])
     def test_setup_device_selection_opt_in_is_not_inherited(self, setup_kind):
@@ -3133,7 +3150,7 @@ class TestSkipReasonAtCollection(TestCase):
         calls = []
 
         class Dynamic(Audited):
-            @onlyCUDA
+            @onlyAccelerator
             def test_runs(self, device):
                 calls.append("test")
 
@@ -3143,7 +3160,7 @@ class TestSkipReasonAtCollection(TestCase):
                 if setup_kind == "bypass":
                     self.bypass_device_restrictions = True
                 else:
-                    self.device_type = "cuda"
+                    self.device_type = GPU_TYPE
 
             Dynamic.setUp = functools.wraps(Audited.setUp)(setUp) if setup_kind == "wrapped" else setUp
 
@@ -3247,7 +3264,7 @@ class TestSkipReasonAtCollection(TestCase):
         calls = []
 
         class Generic(Audited):
-            @onlyCUDA
+            @onlyAccelerator
             def test_runs(self, device):
                 calls.append("test")
 
@@ -3308,12 +3325,12 @@ class TestSkipReasonAtCollection(TestCase):
         class FakeOpenReg(PrivateUse1TestBase):
             device_type = "openreg"
 
-        @onlyCUDA
-        def test_cuda_only(self, device):
+        @onlyAccelerator
+        def test_accelerator_only(self, device):
             pass
 
         with self._lists():
-            self.assertIsNone(skip_reason_at_collection(FakeOpenReg, test_cuda_only, "test_cuda_only"))
+            self.assertIsNone(skip_reason_at_collection(FakeOpenReg, test_accelerator_only, "test_accelerator_only"))
 
     def test_unknown_conditions_keep_the_test(self):
         class FakeCUDA(DeviceTypeTestBase):
@@ -3364,11 +3381,11 @@ class TestSkipReasonAtCollection(TestCase):
             def setUp(self):
                 super().setUp()
                 if not descriptor:
-                    self.device_type = "cuda"
+                    self.device_type = GPU_TYPE
 
-            @onlyCUDA
+            @onlyAccelerator
             def test_runs(self):
-                self.assertEqual(self.device_type, "cuda")
+                self.assertEqual(self.device_type, GPU_TYPE)
 
         with self._lists():
             self.assertIsNone(self._reason(Dynamic, "test_runs"))
@@ -3687,7 +3704,7 @@ class TestPruneSkipsAtCollection(TestCase):
         excluded = {
             "TestPruneFixture::test_runs", "TestPruneFixture::test_static_mark",
             "TestCustomDispatch::test_static_mark",
-            "TestPruneFixtureDeviceCPU::test_cuda_only_cpu", "test_pytest_mark", "test_pytest_static_condition",
+            "TestPruneFixtureDeviceCPU::test_accelerator_only", "test_pytest_mark", "test_pytest_static_condition",
         }
         shard_inputs = {nodeid.split("::", 1)[1] for nodeid in first["before"]}
         self.assertFalse(shard_inputs & excluded)
@@ -3854,7 +3871,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
@@ -3888,7 +3905,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
@@ -3925,7 +3942,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
@@ -3978,7 +3995,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -4001,7 +4018,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
@@ -4062,7 +4079,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         device = self.device_type
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
@@ -4116,7 +4133,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         device = self.device_type
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
@@ -4140,7 +4157,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         device = self.device_type
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
@@ -4160,7 +4177,7 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         locals_dict = dict(locals())
-        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
@@ -4188,7 +4205,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
             locals_dict = dict(locals())
-            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
         # Verify proper error behavior with @ops + @dtypes, as both try to set dtype.
 
@@ -4200,7 +4217,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
             locals_dict = dict(locals())
-            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
     def test_multiple_handling_of_same_param_error(self, device):
         # Test that multiple decorators handling the same param errors out.
@@ -4214,7 +4231,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
             locals_dict = dict(locals())
-            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device, allow_xpu=True)
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, device, x):
@@ -4229,7 +4246,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
 
 instantiate_parametrized_tests(TestTestParametrization)
-instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
+instantiate_device_type_tests(TestTestParametrizationDeviceType, globals(), allow_xpu=True)
 
 
 class TestImports(TestCase):
@@ -4280,7 +4297,7 @@ class TestImports(TestCase):
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
-                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.examples",  # requires Accelerator and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
@@ -4752,7 +4769,7 @@ class TestHardwareClassifications(TestCase):
                 self.assertEqual(ran, {"test_cuda", "test_unclassified"}, output)
 
 
-instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestImports)
 
 

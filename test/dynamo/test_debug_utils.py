@@ -600,7 +600,7 @@ class TestBackendOverrideIntegration(TestCase):
 
 
 instantiate_device_type_tests(
-    TestBackendOverrideIntegration, globals(), except_for="mps"
+    TestBackendOverrideIntegration, globals(), except_for="mps", allow_xpu=True
 )
 
 

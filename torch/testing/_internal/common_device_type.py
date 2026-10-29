@@ -1140,6 +1140,9 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
+        if torch.xpu.is_available():
+            test_bases.append(XPUTestBase)
+
         if _is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
