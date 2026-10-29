@@ -1426,7 +1426,7 @@ class CompilePackage:
         failed_op: object = None,
         device_types: frozenset[str] = frozenset(),
     ) -> None:
-        """Called with each torch callable (an op, or not an op) on the stack of an
+        """Called with each ``OpOverload`` or ``OpOverloadPacket`` on the stack of an
         instruction Dynamo graph-breaks on, which runs eagerly between graphs on
         ``device_types``; and with the op that failed when fake tensors could not
         run it for lack of a fake kernel or a data-dependent output value or shape."""
