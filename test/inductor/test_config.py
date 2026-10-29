@@ -2,6 +2,7 @@
 import functools
 import math
 import unittest
+import unittest.mock
 
 import torch
 from torch._dynamo.utils import counters
@@ -9,6 +10,10 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -61,6 +66,30 @@ class TestInductorConfig(TestCase):
         config.load_config(saved2)
         self.assertEqual(config.max_fusion_size, 321)
         self.assertEqual(config.triton.cudagraphs, False)
+
+    def test_use_block_ptr_enabled_off_by_default(self):
+        from torch._inductor.codegen.triton_utils import use_block_ptr_enabled
+
+        with config.patch("triton.use_block_ptr", False):
+            self.assertFalse(use_block_ptr_enabled())
+
+    def test_use_block_ptr_enabled_tracks_triton_capability(self):
+        # With the flag on, the effective setting follows Triton capability; when
+        # the block-pointer API is gone it is a no-op that warns exactly once.
+        import torch._inductor.codegen.triton_utils as triton_utils
+
+        with config.patch("triton.use_block_ptr", True):
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: True
+            ):
+                self.assertTrue(triton_utils.use_block_ptr_enabled())
+
+            triton_utils._warn_block_ptr_unavailable.cache_clear()
+            with unittest.mock.patch.object(
+                triton_utils, "has_triton_block_ptr", lambda: False
+            ):
+                with self.assertWarns(FutureWarning):
+                    self.assertFalse(triton_utils.use_block_ptr_enabled())
 
     def test_hasattr(self):
         self.assertTrue(hasattr(config, "max_fusion_size"))
@@ -172,6 +201,19 @@ class TestInductorConfig(TestCase):
                 torch.randn(10)
             ),
         )
+
+    @parametrize(
+        "key",
+        (
+            "fusion_memory_timeline_peak_memory_increase_gb",
+            "fusion_memory_timeline_peak_memory_pct_threshold",
+        ),
+    )
+    @parametrize("value", (None, 0.0, 0.5))
+    def test_fusion_memory_timeline_peak_options(self, key, value):
+        self.assertIsNone(getattr(config, key))
+        optimized = torch.compile(dummy_fn, options={key: value})
+        self.assertEqual(optimized.get_compiler_config()[key], value)
 
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
@@ -496,6 +538,9 @@ class TestInductorConfig(TestCase):
         called = False
         z.grad_fn.apply(torch.tensor(0))
         self.assertFalse(called)
+
+
+instantiate_parametrized_tests(TestInductorConfig)
 
 
 if __name__ == "__main__":

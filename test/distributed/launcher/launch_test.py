@@ -15,6 +15,7 @@ from contextlib import closing
 import torch.distributed.launch as launch
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -25,6 +26,8 @@ def path(script):
 
 
 class LaunchTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp()

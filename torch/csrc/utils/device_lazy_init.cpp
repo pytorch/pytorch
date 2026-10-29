@@ -2,6 +2,7 @@
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 
@@ -43,9 +44,7 @@ void device_lazy_init(at::DeviceType device_type) {
   pybind11::gil_scoped_acquire g;
   std::string module_name = "torch." + at::DeviceTypeName(device_type, true);
   auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
-  if (!module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(module);
 
   if (device_type == at::DeviceType::PrivateUse1) {
     auto has_lazy_init_method =
@@ -57,9 +56,7 @@ void device_lazy_init(at::DeviceType device_type) {
   }
 
   auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
-  if (!res) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(res);
 
   is_initialized[static_cast<int>(device_type)] = true;
 }
@@ -82,8 +79,8 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
   at_fork_registered[static_cast<int>(device_type)] = true;
   c10::call_once(at_fork_register_once, []() {
     pthread_atfork(nullptr, nullptr, []() {
-      for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES);
-           ++i) {
+      for (const auto i :
+           c10::irange(static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES))) {
         if (!at_fork_registered[i]) {
           continue;
         }
