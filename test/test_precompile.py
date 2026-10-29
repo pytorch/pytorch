@@ -9632,21 +9632,33 @@ class TestPrecompileCustomOpModules(TestCase):
                 op = torch.ops.{ns}.triple.default
                 with capture(lambda x: op(x.sin()) + 1, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer(), backend="eager") as cap:
                     torch.save(cap(x), artifact + ".pt")
-            else:
+            elif phase == "load":
                 assert "{implmod}" not in sys.modules
                 torch.testing.assert_close(load(artifact, cache)(x), torch.load(artifact + ".pt"))
+            else:
+                try:
+                    load(artifact, cache)
+                except torch.compiler.PrecompileError as e:
+                    print(e)
             print("ok", phase)
             """
         )
         paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
-        for phase in ("capture", "load"):
+        for phase in ("capture", "load", "broken"):
+            if phase == "broken":
+                # The schema is still registered by defmod, but not the CPU kernel.
+                with open(os.path.join(directory, implmod + ".py"), "w") as f:
+                    f.write("raise ImportError('no kernels here')\n")
             cmd = [sys.executable, "-c", script, phase, *paths]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertIn(f"ok {phase}", out.stdout)
+        self.assertIn(f"['{ns}::triple (CPU kernel)']", out.stdout)
         with open(paths[0]) as f:
-            modules = tuple(sorted((defmod, implmod)))
-            self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", f.read())
+            source = f.read()
+        modules = tuple(sorted((defmod, implmod)))
+        self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", source)
+        self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
 
 def _decomposed_op_fn(x):
@@ -9756,9 +9768,11 @@ class TestPrecompileCustomOpRecording(TestCase):
 
         with self.assertWarnsRegex(UserWarning, rf"'{broken}' raised RuntimeError"):
             source, namespace = run(((f"{ns}::op", ""),))
-        # Only the two metadata names stay in the artifact's namespace.
+        # Only the metadata names stay in the artifact's namespace.
         names = {name for name in namespace if not name.startswith("__")}
-        self.assertEqual(names, {"CUSTOM_OP_MODULES", "CUSTOM_OPS"})
+        self.assertEqual(
+            names, {"CUSTOM_OP_MODULES", "CUSTOM_OPS", "CUSTOM_OP_KERNELS"}
+        )
         with self.assertNoLogs("torch._precompile", "DEBUG"):
             with self.assertRaisesRegex(PrecompileError, "missing calling-convention"):
                 _parse_artifact_metadata(source)
