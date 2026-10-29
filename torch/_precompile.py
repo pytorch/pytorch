@@ -2000,9 +2000,11 @@ def _torch_source_root() -> str | None:
         _registration_path("aten::quantized_lstm", "input"),
     ]
     try:
-        return (all(paths) and os.path.commonpath(paths)) or None
+        root = os.path.commonpath(paths) if all(paths) else None
     except ValueError:
         return None
+    # Paths sharing only a filesystem root (an out-of-tree build) match any path.
+    return root if root and root != os.path.dirname(root) else None
 
 
 def _torch_cpp_op(op_name: str, overload: str) -> bool:
@@ -2073,8 +2075,7 @@ def _library_op_module(
 ) -> str | None:
     """The module whose import registers ``op_name``, if a ``torch.library.Library``
     created in a loaded module defines it. ``file_modules`` is ``_file_modules``."""
-    debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
-    path = debug.removeprefix("registered at ").rpartition(":")[0]
+    path = _registration_path(op_name, overload)
     if not path.endswith(".py") or path.startswith(_TORCH_OP_HELPERS):
         return None
     return file_modules().get(os.path.realpath(path))
