@@ -2731,12 +2731,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(flags(), ambient)
             torch._logging._internal.warning_once.cache_clear()
             with self.assertLogs(precompile_package.log, "WARNING") as logs:
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertEqual(flags(), captured)
                 self.assertEqual(flags(), ambient)
 
                 with self.assertRaisesRegex(RuntimeError, "boom"):
-                    with _capture_config():
+                    with _capture_config(lowers_kernels=True):
                         raise RuntimeError("boom")
                 self.assertEqual(flags(), ambient)
             self.assertEqual(len(logs.records), 2)
@@ -2745,7 +2745,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with (
                 self.assertLogs(precompile_package.log, "WARNING") as logs,
                 inductor_config.patch("triton.multi_kernel", 2),
-                _capture_config(),
+                _capture_config(lowers_kernels=True),
             ):
                 self.assertEqual(inductor_config.triton.multi_kernel, 0)
             self.assertEqual(len(logs.records), 1)
@@ -2758,7 +2758,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2806,15 +2806,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
