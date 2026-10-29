@@ -41,6 +41,45 @@ class TestSortAndSelect(TestCase):
         y = x.sort(stable=None).values
         self.assertTrue(torch.all(y == torch.ones(10)).item())
 
+    @skipIfTorchDynamo("compiles inside the test")
+    def test_sort_out_narrow_indices_errors_compiled(self):
+        # The Python meta must reject what the C++ meta rejects.
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        def f(x, v, i):
+            return torch.sort(x, stable=True, out=(v, i))
+
+        # Outs already shaped like x: Dynamo cannot trace out= resizes.
+        x = torch.randn(4, 300, device=device)
+        v = torch.empty_like(x)
+        for dtype, msg in (
+            (torch.uint8, "too small"),
+            (torch.float32, "indices must be"),
+        ):
+            with self.assertRaisesRegex(Exception, msg):
+                torch.compile(f, backend="aot_eager", fullgraph=True)(
+                    x, v, torch.empty(x.shape, dtype=dtype, device=device)
+                )
+        i = torch.empty(x.shape, dtype=torch.int16, device=device)
+        torch.compile(f, backend="aot_eager", fullgraph=True)(x, v, i)
+        self.assertEqual(i.long(), torch.sort(x, stable=True).indices)
+
+        # The dim-first overloads (sort.default, sort.values) check the same dim.
+        def g(x, v, i):
+            return torch.sort(x, 0, out=(v, i))
+
+        for shape, ok in (((300, 2), False), ((2, 300), True)):
+            torch._dynamo.reset()
+            x = torch.randn(shape, device=device)
+            v = torch.empty_like(x)
+            i = torch.empty(shape, dtype=torch.uint8, device=device)
+            if ok:
+                torch.compile(g, backend="aot_eager", fullgraph=True)(x, v, i)
+                self.assertEqual(i.long(), torch.sort(x, 0).indices)
+            else:
+                with self.assertRaisesRegex(Exception, "too small"):
+                    torch.compile(g, backend="aot_eager", fullgraph=True)(x, v, i)
+
     def test_topk_quantized_scalar_input(self):
         # Calling topk on a quantized scalar input used to segfault,
         # see https://github.com/pytorch/pytorch/issues/116324
@@ -1421,6 +1460,49 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(uv.size(0), 2)
         finally:
             torch.set_num_threads(prev_num_threads)
+
+    @dtypes(
+        torch.uint8, torch.int8, torch.uint16, torch.int16, torch.uint32, torch.int32
+    )
+    def test_sort_out_narrow_indices(self, device, dtype):
+        x = make_tensor((3, 4, 100), dtype=torch.float32, device=device, low=-3, high=3)
+        x[0, 0, :50] = x[0, 0, 50:]  # ties exercise stability
+        for dim, descending in product((0, 1, 2, -1), (False, True)):
+            ref_v, ref_i = torch.sort(x, dim=dim, descending=descending, stable=True)
+            v = torch.empty(0, device=device)
+            i = torch.empty(0, dtype=dtype, device=device)
+            res = torch.sort(x, dim=dim, descending=descending, stable=True, out=(v, i))
+            self.assertIs(res.indices, i)
+            self.assertEqual(i.dtype, dtype)
+            self.assertEqual(v, ref_v)
+            self.assertEqual(i.long(), ref_i)
+
+            i = torch.empty(0, dtype=dtype, device=device)
+            torch.argsort(x, dim=dim, descending=descending, stable=True, out=i)
+            self.assertEqual(i.long(), ref_i)
+
+        scalar = torch.tensor(1.5, device=device)
+        i = torch.empty(0, dtype=dtype, device=device)
+        torch.sort(scalar, stable=True, out=(torch.empty(0, device=device), i))
+        self.assertEqual(i.long(), torch.tensor(0, device=device))
+
+    def test_sort_out_narrow_indices_errors(self, device):
+        x = torch.randn(2, 300, device=device)
+        v = torch.empty(0, device=device)
+        for dtype in (torch.uint8, torch.int8):
+            with self.assertRaisesRegex(RuntimeError, "too small"):
+                torch.sort(
+                    x, stable=True, out=(v, torch.empty(0, dtype=dtype, device=device))
+                )
+        # Only the sorted dim's length matters: dim 0 has length 2.
+        i = torch.empty(0, dtype=torch.int8, device=device)
+        torch.sort(x, dim=0, stable=True, out=(v, i))
+        self.assertEqual(i.long(), torch.sort(x, dim=0, stable=True).indices)
+        for dtype in (torch.float32, torch.bool, torch.uint64):
+            with self.assertRaisesRegex(RuntimeError, "indices"):
+                torch.sort(
+                    x, stable=True, out=(v, torch.empty(0, dtype=dtype, device=device))
+                )
 
 
 class TestSortAndSelectCUDA(TestCase):

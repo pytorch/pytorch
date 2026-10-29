@@ -28,6 +28,7 @@
 #include <ATen/ops/broadcast_tensors.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/kthvalue.h>
@@ -47,6 +48,7 @@
 #endif
 
 #include <algorithm>
+#include <limits>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -78,9 +80,30 @@ TORCH_META_FUNC(topk)
 
 TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
-  maybe_wrap_dim(dim, self.dim());
+  dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK_TYPE(!self.is_complex(), "Sort does not support complex dtypes");
+
+  // An out= indices tensor may be narrower than int64 to save memory; it must
+  // hold every index along the sorted dim.
+  const auto& indices_out = maybe_get_output(1);
+  const auto indices_dtype = indices_out.defined() ? indices_out.scalar_type() : kLong;
+  if (indices_dtype != kLong) {
+    int64_t max_index = 0;
+    switch (indices_dtype) {
+      case kByte: max_index = std::numeric_limits<uint8_t>::max(); break;
+      case kChar: max_index = std::numeric_limits<int8_t>::max(); break;
+      case kUInt16: max_index = std::numeric_limits<uint16_t>::max(); break;
+      case kShort: max_index = std::numeric_limits<int16_t>::max(); break;
+      case kUInt32: max_index = std::numeric_limits<uint32_t>::max(); break;
+      case kInt: max_index = std::numeric_limits<int32_t>::max(); break;
+      default:
+        TORCH_CHECK(false, "sort(): indices must be int64, int32, uint32, int16, uint16, int8 or uint8, got ", indices_dtype);
+    }
+    const int64_t nsort = self.dim() == 0 ? 1 : self.size(dim);
+    TORCH_CHECK(nsort - 1 <= max_index, "sort(): indices dtype ", indices_dtype,
+                " is too small for a sorted dimension of size ", nsort);
+  }
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
@@ -90,7 +113,7 @@ TORCH_META_FUNC2(sort, stable)
       : at::infer_dense_strides(self.sizes(), self.strides());
 
   set_output_raw_strided(0, self.sizes(), strides, self.options());
-  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong));
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(indices_dtype));
 }
 
 } // namespace at::meta
@@ -1036,9 +1059,16 @@ TORCH_IMPL_FUNC(sort_stable_out)
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
     indices.zero_();
-  } else {
-    dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
+    return;
+  }
+  dim = maybe_wrap_dim(dim, self.dim());
+  // sort_stub writes int64 indices; narrow out= indices go through a temporary.
+  const auto indices_long = indices.scalar_type() == kLong
+      ? c10::MaybeOwned<Tensor>::borrowed(indices)
+      : c10::MaybeOwned<Tensor>::owned(at::empty_like(indices, indices.options().dtype(kLong)));
+  sort_stub(self.device().type(), self, values, *indices_long, dim, descending, stable.value_or(false));
+  if (!indices_long->is_same(indices)) {
+    indices.copy_(*indices_long);
   }
 }
 
