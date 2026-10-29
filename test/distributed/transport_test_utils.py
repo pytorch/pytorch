@@ -69,6 +69,35 @@ class TransportTestMixin:
             first.close()
             second.close()
 
+    def test_transport_remote_slice(self) -> None:
+        first, second = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            destination = torch.zeros_like(source)
+            read_target = torch.zeros(8, dtype=torch.uint8)
+            source_memory = first.register_memory(source)
+            read_memory = first.register_memory(read_target)
+            descriptor = second.register_memory(destination).to_remote_buffer()
+            remote = type(descriptor).deserialize(descriptor.serialize())
+            part = remote.slice(16, 16)
+            part = type(part).deserialize(part.serialize())
+
+            first.write(source_memory.to_view(0, 16), part)
+            self.assertEqual(destination[16:32], source[:16])
+            self.assertEqual(destination[:16].count_nonzero(), 0)
+            self.assertEqual(destination[32:].count_nonzero(), 0)
+            first.read(read_memory.to_mutable_view(), part.slice(4))
+            self.assertEqual(read_target, source[4:12])
+            with self.assertRaisesRegex(ValueError, "does not fit"):
+                first.write(source_memory.to_view(0, 17), part)
+            with self.assertRaisesRegex(ValueError, "exceeds|outside"):
+                part.slice(8, 9)
+            with self.assertRaisesRegex(ValueError, "exceeds|outside"):
+                part.slice(17)
+        finally:
+            first.close()
+            second.close()
+
     def test_transport_async_work(self) -> None:
         first, second = self.make_transport_pair()
         try:

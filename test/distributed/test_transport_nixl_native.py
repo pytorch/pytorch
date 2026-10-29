@@ -59,6 +59,9 @@ def _native_worker(rank, connection, progress_thread):
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
+        part = NIXLRemoteBuffer.deserialize(remote_source.slice(400, 800).serialize())
+        transport.read(other_memory.to_mutable_view(0, 800), part)
+        torch.testing.assert_close(other_target[:200], target[100:300])
         connection.send_bytes(b"finished")
         if _receive(connection) != b"finished":
             raise AssertionError("unexpected control-plane message")

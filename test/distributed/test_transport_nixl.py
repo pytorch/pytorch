@@ -388,6 +388,7 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         wrong = replace(
             remote,
             address=remote.address + remote.length,
+            region_address=remote.address + remote.length,
             metadata=json.dumps(("unexpected", [])).encode(),
         )
         with patch.object(
@@ -471,6 +472,35 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             for _ in range(3):
                 first.write(source.to_view(), remote)
         self.assertEqual(first._agent.loads, loads + 1)
+
+    def test_remote_slices_reuse_loaded_metadata(self):
+        first, second, source, remote = self.registered_pair()
+        loads = first._agent.loads
+        first.write(source.to_view(0, 2), remote.slice(2, 2))
+        first.write(source.to_view(), remote)
+        first.write(source.to_view(0, 2), remote.slice(0, 2))
+        self.assertEqual(first._agent.loads, loads + 1)
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual(
+            (part.address, part.length, part.region_address, part.region_length),
+            (remote.address + 3, 2, remote.address, remote.length),
+        )
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_rejects_slice_outside_registration(self):
+        first, _, source, remote = self.registered_pair()
+        for wrong in (
+            replace(remote, address=remote.address - 1),
+            replace(remote, length=remote.length + 1),
+        ):
+            with self.assertRaisesRegex(ValueError, "outside its registration"):
+                wrong.serialize()
+            with self.assertRaisesRegex(ValueError, "outside its registration"):
+                first.write(source.to_view(0, 1), wrong)
+        data = json.loads(remote.serialize())
+        data["fields"]["region_length"] = 0
+        with self.assertRaisesRegex(ValueError, "outside its registration"):
+            type(remote).deserialize(json.dumps(data).encode())
 
     @parametrize("start", [0, 4])
     def test_reregistered_remote_memory_resets_peer(self, start):

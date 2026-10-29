@@ -132,7 +132,7 @@ class NIXLTransport(Transport):
         self._peer_name: str | None = None
         self._remote_agents: set[str] = set()
         # Peer registrations loaded into NIXL, keyed by (memory type, device,
-        # address, length).
+        # registration address, registration length).
         self._loaded: dict[str, dict[_LoadedKey, bytes]] = {}
         # Peers to reset once idle; transfers to them wait until then.
         self._resetting: set[str] = set()
@@ -306,6 +306,8 @@ class NIXLTransport(Transport):
             registration.device_id,
             registration.memory_type,
             metadata,
+            registration.address,
+            registration.length,
         )
 
     def _check_transfer(
@@ -318,6 +320,9 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
+        remote_buffer._validate(
+            {name: getattr(remote_buffer, name) for name in remote_buffer._fields}
+        )
         if self._peer_name != remote_buffer.agent_name:
             raise ValueError("remote buffer does not belong to the connected peer")
         if local_buffer.size() > remote_buffer.length:
@@ -408,8 +413,8 @@ class NIXLTransport(Transport):
         key = (
             remote_buffer.memory_type,
             remote_buffer.device_id,
-            remote_buffer.address,
-            remote_buffer.length,
+            remote_buffer.region_address,
+            remote_buffer.region_length,
         )
         loaded = self._loaded.get(name, {})
         if name not in self._resetting and loaded.get(key) == remote_buffer.metadata:
