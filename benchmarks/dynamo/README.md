@@ -130,6 +130,27 @@ CSV `abs_latency` and `eager_latency` are milliseconds for all
 step across batch elements. Default output and profiler trace names get a
 `_decode` suffix.
 
+#### Whisper encode and decode
+
+`openai/whisper-tiny` and `openai/whisper-large-v3-turbo` support
+`--hf-inference-mode=encode` and `decode`. Each batch element is 30 seconds of
+random audio:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --decode-length=128 \
+  --batch-size=1 --only=openai/whisper-large-v3-turbo
+```
+
+Encode times one compiled encoder forward over the log-mel features. Decode
+allocates static self- and cross-attention caches. Each request runs the encoder
+and prefills the decoder start token eagerly outside the timed region, which
+fills the cross-attention cache, then times `--decode-length` single-token
+compiled decoder forwards. The self-attention cache holds 447 positions, as in
+`generate` with a static cache, so `--decode-length` is at most 446. Whisper rejects `--prompt-length` with `--only` and ignores it in runs over
+several decode models. Encode rows report `eager_latency` but no throughput.
+Default output and profiler trace names get an `_encode` suffix for encode.
+
 #### Tensor-parallel prefill and decode
 
 `--tp-size=N` runs prefill or decode with one model and request sharded across

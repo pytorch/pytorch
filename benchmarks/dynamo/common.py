@@ -1306,6 +1306,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         output_tokens = times * example_inputs["decode_ids"].numel()
         headers += ["eager_latency", "output_tokens_per_second"]
         row += [median[0] * 1000, output_tokens / median[1]]
+    elif hf_inference_mode == "encode":
+        headers.append("eager_latency")
+        row.append(median[0] * 1000)
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -3631,7 +3634,7 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill", "decode"),
+        choices=("generate", "prefill", "decode", "encode"),
         default="generate",
         help="Inference workload for registered Hugging Face generation models.",
     )
