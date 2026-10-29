@@ -7411,6 +7411,9 @@ for _cls in (
         _cls, globals(), only_for=("cpu", "xpu"), allow_xpu=True
     )
 
+# Otherwise the generic class stays reachable via `_cls` and gets collected again.
+del _cls
+
 
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
