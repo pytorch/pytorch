@@ -84,6 +84,10 @@ def build_pin(label, repository, sha):
             "JSON_SYSPATH",
             "LLVM_INCLUDE_DIRS",
             "LLVM_LIBRARY_DIR",
+            "LLVM_DIR",
+            "MLIR_DIR",
+            "LLD_DIR",
+            "CMAKE_PREFIX_PATH",
         }:
             env.pop(key)
     env.update(
@@ -108,6 +112,16 @@ def build_pin(label, repository, sha):
         env=env,
         name=f"{label}-native-build",
     )
+    cmake_caches = list((source / "build").glob("**/CMakeCache.txt"))
+    llvm_directories = [
+        line.split("=", 1)[1]
+        for cache in cmake_caches
+        for line in cache.read_text().splitlines()
+        if line.startswith("LLVM_DIR:")
+    ]
+    assert llvm_directories and all(
+        str(phase / "dependencies") in path for path in llvm_directories
+    ), f"LLVM package escaped this pin's SDK: {llvm_directories}"
     wheels = list((source / "dist").glob("*.whl"))
     assert len(wheels) == 1, wheels
     site = phase / "site"
@@ -137,6 +151,7 @@ def build_pin(label, repository, sha):
                     wheels[0].open("rb"), "sha256"
                 ).hexdigest(),
                 "sdk_manifests": manifests,
+                "cmake_llvm_directories": llvm_directories,
                 "compiler": subprocess.check_output(["c++", "--version"], text=True),
             },
             indent=2,
