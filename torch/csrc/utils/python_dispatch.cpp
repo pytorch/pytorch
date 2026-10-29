@@ -85,6 +85,28 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
+// Whether autograd needs to see a call with these arguments: grad mode is on
+// and a Tensor among them (or in a list among them) requires grad.
+static bool any_requires_grad(c10::ArrayRef<c10::IValue> arguments) {
+  if (!at::GradMode::is_enabled()) {
+    return false;
+  }
+  for (const auto& ivalue : arguments) {
+    if (ivalue.isTensor()) {
+      if (ivalue.toTensor().requires_grad()) {
+        return true;
+      }
+    } else if (ivalue.isList()) {
+      for (const auto& elem : ivalue.toListRef()) {
+        if (elem.isTensor() && elem.toTensor().requires_grad()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
@@ -92,17 +114,23 @@ class PythonKernelHolder : public c10::OperatorKernel {
   bool with_keyset_;
   // If "with_op", then we expect the op as first arg (or second if keyset)
   bool with_op_;
+  // An Autograd kernel that only redispatches below Autograd when grad mode
+  // is off or no input requires grad, so the dispatcher can do that itself
+  // without calling into Python (torch.library.custom_op's).
+  bool skip_if_no_grad_;
 
  public:
   PythonKernelHolder(
       py::object func,
       c10::DispatchKey dispatch_key,
       bool with_keyset = false,
-      bool with_op = false)
+      bool with_op = false,
+      bool skip_if_no_grad = false)
       : func_(func.release().ptr(), getPyInterpreter()),
         dispatch_key_(dispatch_key),
         with_keyset_(with_keyset),
-        with_op_(with_op) {}
+        with_op_(with_op),
+        skip_if_no_grad_(skip_if_no_grad) {}
 
   PyObject* func(c10::impl::PyInterpreter* interpreter) const {
     return func_.ptr(interpreter);
@@ -116,10 +144,22 @@ class PythonKernelHolder : public c10::OperatorKernel {
     return with_op_;
   }
 
+  bool skip_if_no_grad() const {
+    return skip_if_no_grad_;
+  }
+
   void operator()(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack) {
+    if (skip_if_no_grad_ &&
+        !any_requires_grad(
+            torch::jit::last(*stack, op.schema().arguments().size()))) {
+      at::AutoDispatchBelowAutograd guard;
+      op.redispatchBoxed(keyset & c10::after_autograd_keyset, stack);
+      return;
+    }
+
     // Figure out if we can handle it hermetically, or if we have
     // to double dispatch
 
@@ -434,6 +474,33 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
       kwnames);
 }
 
+// Whether autograd needs to see a call with these arguments; like
+// any_requires_grad, but for the PyObject arguments of a fast-path call.
+static bool pyobject_dispatch_any_requires_grad(
+    PyObject* const* args,
+    Py_ssize_t n) {
+  if (!at::GradMode::is_enabled()) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < n; ++i) {
+    PyObject* obj = args[i];
+    if (THPVariable_Check(obj)) {
+      if (THPVariable_Unpack(obj).requires_grad()) {
+        return true;
+      }
+    } else if (PyList_CheckExact(obj) || PyTuple_CheckExact(obj)) {
+      PyObject** items = PySequence_Fast_ITEMS(obj);
+      for (Py_ssize_t j = 0; j < PySequence_Fast_GET_SIZE(obj); ++j) {
+        if (THPVariable_Check(items[j]) &&
+            THPVariable_Unpack(items[j]).requires_grad()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -467,6 +534,20 @@ static PyObject* pyobject_dispatch_with_keyset(
         args,
         nargs,
         nkwargs,
+        kwnames,
+        op_args_start);
+  }
+  if (C10_UNLIKELY(holder->skip_if_no_grad()) && !skip_torch_function &&
+      !pyobject_dispatch_any_requires_grad(
+          args + op_args_start, nargs - op_args_start + nkwargs)) {
+    // See PythonKernelHolder::operator().
+    at::AutoDispatchBelowAutograd guard;
+    return pyobject_dispatch_with_keyset(
+        self,
+        key_set & c10::after_autograd_keyset,
+        skip_torch_function,
+        args,
+        nargs,
         kwnames,
         op_args_start);
   }
@@ -506,6 +587,16 @@ static PyObject* pyobject_dispatch_vectorcall(
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // The C++ Dispatcher records each call for the profiler (RecordFunction in
+  // Dispatcher::callBoxed); let it handle the call while anything listens.
+  // This check doesn't sample callbacks: callBoxed does, and sampling here too
+  // would record a call with probability p^2 instead of p.
+  if (C10_UNLIKELY(at::hasCallbacks())) {
+    return PyObject_Vectorcall(
+        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
+#endif
   c10::SmallVector<PyObject*, 64> normalized_args;
   std::vector<py::object> owned_args;
   if (!pyobject_dispatch_try_normalize_args(
@@ -857,8 +948,14 @@ void initDispatchBindings(PyObject* module) {
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
              py::object func,
-             bool with_keyset) {
+             bool with_keyset,
+             bool skip_if_no_grad) {
             HANDLE_TH_ERRORS
+            TORCH_CHECK(
+                !skip_if_no_grad || dispatch == c10::DispatchKey::Autograd ||
+                    c10::isIncludedInAlias(
+                        dispatch, c10::DispatchKey::Autograd),
+                "skip_if_no_grad is only supported for Autograd kernels");
             auto& lib = self.cast<torch::Library&>();
             if (func.is(py::module::import("torch.library")
                             .attr("fallthrough_kernel"))) {
@@ -873,7 +970,11 @@ void initDispatchBindings(PyObject* module) {
                       dispatch,
                       CppFunction::makeFromBoxedFunctor(
                           std::make_unique<PythonKernelHolder>(
-                              func, dispatch, with_keyset))),
+                              func,
+                              dispatch,
+                              with_keyset,
+                              /*with_op=*/false,
+                              skip_if_no_grad))),
                   register_or_verify());
               python_registrations_.withLock([&](auto& regs) {
                 regs[lib._resolve(name)].insert_or_assign(
@@ -888,7 +989,8 @@ void initDispatchBindings(PyObject* module) {
           py::arg("name"),
           py::arg("dispatch"),
           py::arg("func"),
-          py::arg("with_keyset") = false)
+          py::arg("with_keyset") = false,
+          py::arg("skip_if_no_grad") = false)
       .def(
           "define",
           [](const py::object& self,
