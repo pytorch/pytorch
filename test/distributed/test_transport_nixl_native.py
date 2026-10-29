@@ -92,45 +92,6 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
-def _reregister_worker(rank, connection):
-    # A smaller registration at the same address stays loaded after the owner
-    # deregisters it; NIXL would resolve reads of the new registration to it.
-    with new_transport("nixl", "cpu", timeout=5) as transport:
-        connection.send_bytes(transport.bind())
-        transport.connect(_receive(connection))
-        tensor = torch.zeros(1 << 18, dtype=torch.float32)
-        if rank == 0:
-            memory = transport.register_memory(tensor)
-            for value in range(1, 3):
-                remote = NIXLRemoteBuffer.deserialize(_receive(connection))
-                transport.read(memory.to_mutable_view(0, 4096), remote)
-                torch.testing.assert_close(
-                    tensor[:1024], torch.full((1024,), value * 1.0)
-                )
-                connection.send_bytes(b"read")
-            # The reset must not break transfers in the other direction.
-            tensor.fill_(3)
-            connection.send_bytes(memory.to_remote_buffer().serialize())
-            if _receive(connection) != b"read":
-                raise AssertionError("unexpected control-plane message")
-        else:
-            memory = transport.register_memory(tensor[: 1 << 17])
-            for value in range(1, 3):
-                tensor.fill_(value)
-                connection.send_bytes(memory.to_remote_buffer().serialize())
-                if _receive(connection) != b"read":
-                    raise AssertionError("unexpected control-plane message")
-                transport.unregister_memory(memory)
-                memory = transport.register_memory(tensor)
-            remote = NIXLRemoteBuffer.deserialize(_receive(connection))
-            transport.read(memory.to_mutable_view(0, 4096), remote)
-            torch.testing.assert_close(tensor[:1024], torch.full((1024,), 3.0))
-            connection.send_bytes(b"read")
-        transport.unregister_memory(memory)
-        asyncio.run(transport.close_async(timeout=5))
-    connection.close()
-
-
 def _exit_after(worker, *args):
     worker(*args)
     # NIXL 1.5 can segfault during interpreter teardown after a clean close.
@@ -145,17 +106,12 @@ def _exit_after(worker, *args):
 class TestNIXLNative(TestCase):
     @parametrize("progress_thread", [True, False])
     def test_two_process_cpu_transfers(self, progress_thread):
-        self._run(_native_worker, progress_thread)
-
-    def test_two_process_cpu_reregistered_memory(self):
-        self._run(_reregister_worker)
-
-    def _run(self, worker, *args):
         context = multiprocessing.get_context("spawn")
         connections = context.Pipe()
         processes = [
             context.Process(
-                target=_exit_after, args=(worker, rank, connections[rank], *args)
+                target=_exit_after,
+                args=(_native_worker, rank, connections[rank], progress_thread),
             )
             for rank in range(2)
         ]
