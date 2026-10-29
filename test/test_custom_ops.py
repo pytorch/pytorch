@@ -5534,6 +5534,41 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.sin())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_multi_types_register_kernel_for_one(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
+
+        # One function registered for several devices at once: each device
+        # must check whether its own kernel is enabled.
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x + 1
+
+        @g.register_kernel(("cpu", "cuda"))
+        def _(x):
+            return x + 2
+
+        self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(g(x), x + 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
         called_f1 = 0
