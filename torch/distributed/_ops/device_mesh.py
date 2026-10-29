@@ -3,11 +3,8 @@
 import torch
 from torch import SymInt
 
-from ..device_mesh import _register_distributed_opaque_types, DeviceMesh
+from ..device_mesh import DeviceMesh
 
-
-# The ops below take a DeviceMesh, so it must be an opaque type first.
-_register_distributed_opaque_types()
 
 # Register custom operator
 torch.library.define(

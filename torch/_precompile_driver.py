@@ -108,7 +108,8 @@ def _import_custom_op_modules(served=(), import_served=None):
             continue
         try:
             importlib.import_module(module)
-        # Not just ImportError: a module can raise anything while it registers ops.
+        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
+        # torch.distributed.tensor raises ValueError.
         except Exception as e:
             import_errors[module] = e
     # Refused before the op check, which would report such a module's ops missing.
@@ -135,25 +136,19 @@ def _import_custom_op_modules(served=(), import_served=None):
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
     # Another module's kernel under the same key would pass the check above, so
-    # the active kernel must be registered from the overriding module's file, or
-    # be the custom_op's own, with the overriding module its register_kernel caller.
-    from torch._library import custom_ops
-
+    # the active kernel must be registered from the overriding module's file.
     overridden = []
     real = os.path.realpath
     override_errors = set()
     for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
         dump = torch._C._dispatch_dump(qualname)
-        callers = getattr(custom_ops.OPDEFS.get(qualname), "_backend_fn_callers", {})
         for key, module in owners.items():
             pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
             active = re.search(pattern, dump, re.MULTILINE)
-            paths = [getattr(sys.modules.get(module), "__file__", None)]
-            if callers.get(key) == module:
-                paths.append(custom_ops.__file__)
+            path = getattr(sys.modules.get(module), "__file__", None)
             if module in import_errors:
                 override_errors.add(module)
-            elif not (active and real(active[1]) in {real(p) for p in paths if p}):
+            elif not (active and path and real(active[1]) == real(path)):
                 overridden.append(f"{qualname} ({key} kernel of {module})")
     if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
