@@ -13,7 +13,7 @@ from cutlass import const_expr, Int32, Int64
 
 import torch
 
-from ...cutedsl import hw_caps as _hw, launch as _L
+from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
@@ -55,19 +55,12 @@ class ColConfig(NamedTuple):
 
 @functools.lru_cache(maxsize=4096)
 def select_col_config(
-    cc: tuple[int, int],
-    dtype: torch.dtype,
     rows: int,
     columns: int,
     batches: int,
     nfields: int,
-    trait_key: str,
     *,
     itemsize: int,
-    acc_bits: int,
-    nouts: int,
-    alignment: int,
-    contiguous: bool,
     threads_per_block: int | None = None,
     npar: int | None = None,
     vec: int | None = None,
@@ -713,18 +706,11 @@ def _reduce_col_tile(
         out_shape = (B, C)
     align = _L.supported_alignment(rows, tile.align_bytes(C, x.element_size()))
     cfg = select_col_config(
-        _hw.caps(x.device).cc,
-        x.dtype,
         R,
         C,
         B,
         trait.nfields,
-        trait_key,
         itemsize=x.element_size(),
-        acc_bits=trait.acc.width,
-        nouts=nouts,
-        alignment=align,
-        contiguous=x.is_contiguous(),
         threads_per_block=threads_per_block,
         npar=npar,
         vec=vec,
