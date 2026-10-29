@@ -226,7 +226,7 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 [Problems only — flag checklist items that are violated]
 
 ### Testing
-[Problems only — tests that do not follow the patterns in the checklist]
+[Problems only — tests that do not follow the checklist, as adjusted by any applicable `REVIEW.md`]
 
 ### API Design
 [Problems only]
