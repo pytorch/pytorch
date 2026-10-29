@@ -9617,7 +9617,8 @@ class TestPrecompileCustomOpModules(TestCase):
             self.assertIn(f"CUSTOM_OP_MODULES = {(module,)!r}", f.read())
 
     @skipIfCrossRef
-    def test_load_imports_the_module_registering_a_library_op_kernel(self):
+    @parametrize("shared", (False, True))
+    def test_load_imports_the_module_registering_a_library_op_kernel(self, shared):
         tag = uuid.uuid4().hex
         defmod, implmod = f"precompile_def_{tag}", f"precompile_impl_{tag}"
         ns = f"precompile_kernel_test_{tag}"
@@ -9626,6 +9627,11 @@ class TestPrecompileCustomOpModules(TestCase):
             defmod: f'import torch\nlib = torch.library.Library("{ns}", "DEF")\nlib.define("triple(Tensor x) -> Tensor")\n',
             implmod: f'import torch, {defmod}\nlib = torch.library.Library("{ns}", "IMPL")\nlib.impl("triple", lambda x: x * 3, "CPU")\n',
         }
+        if shared:
+            # The kernel is attributed to defmod, which built the Library, so the
+            # artifact does not import implmod and only the load check catches it.
+            impl = 'lib.impl("triple", lambda x: x * 3, "CPU")'
+            sources[implmod] = f"import {defmod}\n{defmod}.{impl}\n"
         for name, source in sources.items():
             with open(os.path.join(directory, name + ".py"), "w") as f:
                 f.write(source)
@@ -9654,8 +9660,8 @@ class TestPrecompileCustomOpModules(TestCase):
             """
         )
         paths = [os.path.join(directory, "artifact.py"), os.path.join(directory, "c")]
-        for phase in ("capture", "load", "broken"):
-            if phase == "broken":
+        for phase in ("capture", "broken") if shared else ("capture", "load", "broken"):
+            if phase == "broken" and not shared:
                 # The schema is still registered by defmod, but not the CPU kernel.
                 with open(os.path.join(directory, implmod + ".py"), "w") as f:
                     f.write("raise ImportError('no kernels here')\n")
@@ -9666,7 +9672,7 @@ class TestPrecompileCustomOpModules(TestCase):
         self.assertIn(f"['{ns}::triple (CPU kernel)']", out.stdout)
         with open(paths[0]) as f:
             source = f.read()
-        modules = tuple(sorted((defmod, implmod)))
+        modules = (defmod,) if shared else tuple(sorted((defmod, implmod)))
         self.assertIn(f"CUSTOM_OP_MODULES = {modules!r}", source)
         self.assertIn(f"CUSTOM_OP_KERNELS = {{'{ns}::triple': ('CPU',)}}", source)
 
@@ -9794,6 +9800,16 @@ class TestPrecompileCustomOpRecording(TestCase):
         # Chained to the first module's error.
         self.assertIsInstance(raised.exception.__cause__, RuntimeError)
 
+    def test_extension_cpp_op_in_torch_namespace_is_custom_op(self):
+        from torch._precompile import _custom_op_modules, _torch_source_root
+
+        op = ("inductor::accumulate_grad_", "")
+        self.assertEqual(_custom_op_modules([op]), ((), ()))
+        # As an extension built elsewhere would record its TORCH_LIBRARY_FRAGMENT.
+        root = os.path.join(os.path.dirname(_torch_source_root()), "extension")
+        with mock.patch("torch._precompile._torch_source_root", return_value=root):
+            self.assertEqual(_custom_op_modules([op]), ((), (op,)))
+
     def test_pystub_module_is_recorded(self):
         from torch._precompile import _custom_op_module
 
@@ -9871,6 +9887,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             (line,) = [l for l in f if l.startswith("CUSTOM_OP_MODULES = ")]
         return line.strip(), name
 
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_a_torch_cpp_op_does_not_import_the_frame_modules(self):
         line, _ = self._render_with_ops([("_c10d_functional::wait_tensor", "")])
@@ -9965,6 +9982,35 @@ class TestPrecompileCustomOpRecording(TestCase):
                 python_code = f.read()
         expected = (served._init_fn.__module__,)
         self.assertIn(f"CUSTOM_OP_MODULES = {expected!r}", python_code)
+
+    @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+    def test_a_version_mismatch_refuses_before_the_custom_op_imports(self):
+        from torch.library import _scoped_library
+
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        artifact = os.path.join(directory, "artifact.py")
+        ns = f"precompile_unregistered_{uuid.uuid4().hex}"
+        # Registered only during the capture, so the artifact's op check fails.
+        with _scoped_library(ns, "DEF") as lib:
+            lib.define("op(Tensor x) -> Tensor")
+            with capture(
+                _no_compilation_single_graph,
+                artifact_path=artifact,
+                cache_path=os.path.join(directory, "artifact.cache"),
+                tracer=DynamoTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(4))
+                cap._session._package.graph_break_op_names.add((f"{ns}::op", ""))
+        with open(artifact) as f:
+            python_code = f.read()
+        with self.assertRaisesRegex(PrecompileError, "not registered here"):
+            exec(python_code, {"__name__": "artifact"})
+        version = f"TORCH_VERSION = {torch.__version__!r}"
+        self.assertIn(version, python_code)
+        python_code = python_code.replace(version, "TORCH_VERSION = '0.0'")
+        with self.assertRaisesRegex(PrecompileError, "produced by torch 0.0"):
+            exec(python_code, {"__name__": "artifact"})
 
 
 if __name__ == "__main__":
