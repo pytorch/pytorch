@@ -625,6 +625,32 @@ def _tdm_operand(name, stride, size=(2, 4, 128, 64), offset=0, dtype=torch.float
 # Host-side gate logic. Device capability is mocked, so these are not ROCm-only:
 # running them on CUDA and XPU builds is what keeps the gate honest there too.
 class TestFlexAttentionROCmOptions(InductorTestCase):
+    def test_backward_public_options(self):
+        from torch.nn.attention.flex_attention import (
+            _KernelOptionsWithInternals,
+            FlexKernelOptions,
+        )
+
+        public = FlexKernelOptions.__annotations__
+        internal = _KernelOptionsWithInternals.__annotations__
+        self.assertIn("BACKEND", public)
+        self.assertIn("bwd_ROCM_SEPARATE_DQ", public)
+        for name in internal:
+            if name.startswith("bwd_ROCM_") and name != "bwd_ROCM_SEPARATE_DQ":
+                self.assertNotIn(name, public)
+        self.assertNotIn("bwd_XCD_REMAP", public)
+
+    @common_utils.parametrize("phase", (0, 1, 2))
+    def test_backward_generic_grid_ignores_rocm_phases(self, phase):
+        from torch._inductor.kernel.flex.flex_attention import (
+            flex_attention_backward_grid,
+        )
+
+        meta = dict(BLOCK_M2=128, BLOCK_N1=128, ROCM_BWD_PHASE=phase, ROCM_GQA_SPLITS=4)
+        self.assertEqual(
+            flex_attention_backward_grid(1, 8, 257, 64, 2, 260, meta), (15, 1, 2)
+        )
+
     def _backward_auto_profile_inputs(
         self, dtype=torch.float16, batch=4, length=4096, dim=128, heads=64, kv_heads=8
     ):
@@ -684,7 +710,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         return nodes, out, options
 
     def _backward_auto_profile(self, nodes, out, options, user_options=None, **flags):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_auto_profile,
             _is_rocm_scalar_true_mask_graph,
             _is_rocm_simple_causal_mask_graph,
@@ -765,7 +791,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_backward_auto_profile_measured_shapes(
         self, dtype, batch, length, dim, heads, kv_heads
     ):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _get_rocm_backward_phase_options,
             _normalize_rocm_backward_options,
@@ -891,7 +917,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         self.assertEqual(options, original)
 
     def test_backward_auto_profile_d256_gqa4_uses_panel_profile(self):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _normalize_rocm_backward_options,
             _use_rocm_separate_dq,
@@ -930,7 +956,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_backward_auto_profile_d96_gqa4_phase_options(
         self, length, automatic, panel, gqa
     ):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _get_rocm_backward_phase_options,
             _normalize_rocm_backward_options,
@@ -994,7 +1020,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
 
     @common_utils.parametrize("compact", (False, True))
     def test_backward_auto_profile_d256_gqa4_preserves_explicit_options(self, compact):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _get_rocm_backward_phase_options,
             _normalize_rocm_backward_options,
@@ -1354,7 +1380,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_fp16_coverage_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_fp16_coverage,
         )
         from torch._inductor.virtualized import V
@@ -1614,7 +1640,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         return values
 
     def _d128_coverage_routes(self, values, fp32, **option_overrides):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _normalize_rocm_backward_options,
             _use_rocm_d128_dv_view_carry_split64,
@@ -1719,7 +1745,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_d128_fp32_balanced64_joint_length_scope(
         self, query_length, key_length, do_length, out_length, lse_length, expected
     ):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_fp32_balanced64_coverage,
         )
         from torch._inductor.virtualized import V
@@ -1843,7 +1869,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_fp32_balanced64_coverage_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_fp32_balanced64_coverage,
         )
         from torch._inductor.virtualized import V
@@ -2020,7 +2046,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d256_xcd_snake_guard(self, gqa, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_xcd_snake
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_xcd_snake
         from torch._inductor.virtualized import V
 
         dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
@@ -2116,7 +2142,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d256_xcd_snake_causal_graph(self, case, expected):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _is_rocm_simple_causal_mask_graph,
         )
 
@@ -2173,7 +2199,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_d256_panel_guard(
         self, gfx950, dtype, qk_dim, v_dim, use_tma, requested, expected
     ):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_d256_panel_dots
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d256_panel_dots,
+        )
 
         options = {"QK_HEAD_DIM": qk_dim, "V_HEAD_DIM": v_dim, "USE_TMA": use_tma}
         if requested is not None:
@@ -2206,7 +2234,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_gqa_split_dkdv_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_gqa_split_dkdv
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_gqa_split_dkdv,
+        )
         from torch._inductor.virtualized import V
 
         dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}.get(case, torch.float16)
@@ -2266,7 +2296,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_gqa_split_default_mask_structure(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _is_rocm_default_block_mask,
         )
         from torch._inductor.virtualized import V
@@ -2323,7 +2353,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ((0, 1, (15, 1, 2)), (1, 2, (3, 1, 4)), (2, 1, (12, 1, 2))),
     )
     def test_gqa_split_grid(self, phase, splits, expected):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             flex_attention_backward_grid,
         )
 
@@ -2349,7 +2379,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d256_scalar_true_mask_graph(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _is_rocm_scalar_true_mask_graph,
         )
 
@@ -2404,7 +2434,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d256_dense_separate_dq_guard(self, gqa, dq_m, dq_n, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_separate_dq
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_separate_dq
         from torch._inductor.virtualized import V
 
         dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
@@ -2479,7 +2509,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_d256_dense_guard_preserves_d128(
         self, mask_is_scalar_true, block_mask_is_default
     ):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_separate_dq
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_separate_dq
         from torch._inductor.virtualized import V
 
         query = _tdm_operand(
@@ -2522,7 +2552,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         self.assertTrue(actual)
 
     def test_d256_dense_guard_preserves_fp16(self):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_gqa_split_dkdv,
             _use_rocm_separate_dq,
         )
@@ -2610,7 +2640,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_early_probability_compact_guard(self, gqa, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_early_probability_compact,
         )
         from torch._inductor.virtualized import V
@@ -2793,7 +2823,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         gqa4_pilot = case.startswith("gqa4_pilot_")
         if gqa4_pilot:
             case = case.removeprefix("gqa4_pilot_")
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d192_panel_phase,
         )
         from torch._inductor.virtualized import V
@@ -3033,7 +3063,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d96_panel_phase_guard(self, gqa, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_d96_panel_phase
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_panel_phase,
+        )
         from torch._inductor.virtualized import V
 
         dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
@@ -3188,7 +3220,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         use_d192_panel_phase=False,
         use_d96_panel_phase=False,
     ):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _get_rocm_backward_phase_options,
             _normalize_rocm_backward_options,
@@ -3234,7 +3266,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ("missing", "disabled", "backward", "numeric", "raw", "forward"),
     )
     def test_d192_gqa4_phase_options(self, panel_request, early_request):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _normalize_rocm_backward_options,
             _use_rocm_d192_panel_phase,
@@ -3346,7 +3378,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d192_dq_early_dp_guard(self, parent_admitted, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d192_dq_early_dp,
         )
 
@@ -3435,7 +3467,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d96_dq_early_dp_guard(self, parent_admitted, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_d96_dq_early_dp
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_dq_early_dp,
+        )
         from torch._inductor.virtualized import V
 
         q_size, k_size = [4, 21, 4096, 96], [4, 21, 4096, 96]
@@ -3625,7 +3659,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_xcd_reverse_dq_rows_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_reverse_causal_dq_rows,
         )
         from torch._inductor.virtualized import V
@@ -3839,7 +3873,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
             )
 
         with mock.patch.object(
-            flex_kernel_mod, "_use_rocm_d128_reverse_causal_dq_rows", guard
+            flex_kernel_mod.rocm_backward,
+            "_use_rocm_d128_reverse_causal_dq_rows",
+            guard,
         ):
             current, dkdv, dq = self._rocm_backward_phase_options(
                 options, use_separate_dq=separate
@@ -3889,7 +3925,9 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d96_dq_unroll2_guard(self, parent_admitted, case):
-        from torch._inductor.kernel.flex.flex_attention import _use_rocm_d96_dq_unroll2
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_dq_unroll2,
+        )
         from torch._inductor.virtualized import V
 
         q_size, k_size = ([4, 21, 4096, 96], [4, 21, 4096, 96])
@@ -4105,7 +4143,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_dv_view_carry_split64_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_dv_view_carry_split64,
         )
         from torch._inductor.virtualized import V
@@ -4313,7 +4351,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
             )
 
         with mock.patch.object(
-            flex_kernel_mod, "_use_rocm_d128_dv_view_carry_split64", guard
+            flex_kernel_mod.rocm_backward, "_use_rocm_d128_dv_view_carry_split64", guard
         ):
             current, dkdv, dq = self._rocm_backward_phase_options(
                 options, single_config=config_count == 1
@@ -4448,7 +4486,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     )
     def test_d128_query_tile_outer_fp32_guard(self, batch, case):
         from torch._inductor.ir import Buffer, FixedLayout
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4599,7 +4637,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     )
     @common_utils.parametrize("field", ("batch", "head", "stride"))
     def test_d128_query_tile_outer_fp32_metadata(self, batch, index, field):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4630,7 +4668,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         "case", ("enabled", "matrix16", "stages2", "expanded", "option_off")
     )
     def test_d128_query_tile_outer_fp32_selection(self, batch, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _select_rocm_d128_query_tile_outer_options,
         )
         from torch._inductor.virtualized import V
@@ -4673,7 +4711,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     def test_d128_query_tile_outer_fp32_shape_scope(
         self, batch, length, scale, contiguous
     ):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4689,7 +4727,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     @common_utils.parametrize("index", tuple(range(16)))
     @common_utils.parametrize("field", ("size", "stride", "dtype", "missing"))
     def test_d128_query_tile_outer_fp32_n2048_operand_guard(self, index, field):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4808,7 +4846,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_query_tile_outer_guard(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4864,7 +4902,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     @common_utils.parametrize("index", tuple(range(8, 16)))
     @common_utils.parametrize("field", ("batch", "head", "shape", "dtype", "unknown"))
     def test_d128_query_tile_outer_metadata(self, index, field):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -4897,7 +4935,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
 
     @common_utils.parametrize("prefix", ("", "fwd_", "bwd_"))
     def test_d128_query_tile_outer_private_aliases(self, prefix):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _strip_rocm_query_tile_outer_options,
         )
 
@@ -4913,7 +4951,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ("broadcast", "expanded", "unknown", "kpack2", "option_off", "other_scale"),
     )
     def test_d128_query_tile_outer_selection(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _select_rocm_d128_query_tile_outer_options,
         )
         from torch._inductor.virtualized import V
@@ -5011,7 +5049,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     )
     def test_d128_query_tile_outer_fp16_B2_guard(self, case):
         from torch._inductor.ir import Buffer, FixedLayout
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -5098,7 +5136,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     @common_utils.parametrize("index", tuple(range(16)))
     @common_utils.parametrize("field", ("dtype", "stride"))
     def test_d128_query_tile_outer_fp16_B2_operands(self, index, field):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -5129,7 +5167,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
     @common_utils.parametrize("index", (3, 4, 7, 8, 11, 14, 15))
     @common_utils.parametrize("field", ("rank", "stride_count"))
     def test_d128_query_tile_outer_fp16_B2_rank(self, index, field):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -5164,7 +5202,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_query_tile_outer_fp16_B2_types(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _use_rocm_d128_gqa_query_tile_outer,
         )
         from torch._inductor.virtualized import V
@@ -5222,7 +5260,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         ),
     )
     def test_d128_query_tile_outer_fp16_B2_selection(self, case):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _select_rocm_d128_query_tile_outer_options,
         )
         from torch._inductor.virtualized import V
@@ -5265,7 +5303,7 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
 
     @common_utils.parametrize("contiguous", (False, True))
     def test_d128_query_tile_outer_fp16_B2_automatic_scope(self, contiguous):
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             _get_rocm_backward_config_options,
             _get_rocm_backward_phase_options,
             _normalize_rocm_backward_options,
@@ -5361,18 +5399,20 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
         self.assertIs(profile["ROCM_EARLY_DP"], False)
         self.assertIs(profile["XCD_REMAP"], False)
         current = dict(profile)
-        requests = flex_kernel_mod._normalize_rocm_backward_options(current)
-        current = flex_kernel_mod._get_rocm_backward_config_options(
+        requests = flex_kernel_mod.rocm_backward._normalize_rocm_backward_options(
+            current
+        )
+        current = flex_kernel_mod.rocm_backward._get_rocm_backward_config_options(
             current, is_gfx950=True
         )
         with V.set_graph_handler(_tdm_graph()):
             self.assertTrue(
-                flex_kernel_mod._use_rocm_gqa_split_dkdv(
+                flex_kernel_mod.rocm_backward._use_rocm_gqa_split_dkdv(
                     True, *nodes[:3], current, True, True, True, False
                 )
             )
             self.assertFalse(
-                flex_kernel_mod._use_rocm_separate_dq(
+                flex_kernel_mod.rocm_backward._use_rocm_separate_dq(
                     True,
                     *nodes[:3],
                     current,
@@ -5382,27 +5422,29 @@ class TestFlexAttentionROCmOptions(InductorTestCase):
                     block_mask_is_default=True,
                 )
             )
-            phase1, phase2 = flex_kernel_mod._get_rocm_backward_phase_options(
-                current,
-                nodes,
-                requests=requests,
-                single_config=True,
-                is_gfx950=True,
-                query=nodes[0],
-                key=nodes[1],
-                value=nodes[2],
-                grad_out=nodes[5],
-                use_separate_dq=False,
-                use_d192_panel_phase=False,
-                use_d96_panel_phase=False,
-                fp16_pilot=False,
-                fp32_balanced64_pilot=False,
-                score_is_trivial=True,
-                has_captures=False,
-                mask_is_causal=False,
-                mask_is_scalar_true=True,
-                block_mask_is_default=True,
-                grad_logsumexp_is_none=True,
+            phase1, phase2 = (
+                flex_kernel_mod.rocm_backward._get_rocm_backward_phase_options(
+                    current,
+                    nodes,
+                    requests=requests,
+                    single_config=True,
+                    is_gfx950=True,
+                    query=nodes[0],
+                    key=nodes[1],
+                    value=nodes[2],
+                    grad_out=nodes[5],
+                    use_separate_dq=False,
+                    use_d192_panel_phase=False,
+                    use_d96_panel_phase=False,
+                    fp16_pilot=False,
+                    fp32_balanced64_pilot=False,
+                    score_is_trivial=True,
+                    has_captures=False,
+                    mask_is_causal=False,
+                    mask_is_scalar_true=True,
+                    block_mask_is_default=True,
+                    grad_logsumexp_is_none=True,
+                )
             )
         self.assertEqual((phase1["ROCM_BWD_PHASE"], phase2["ROCM_BWD_PHASE"]), (1, 2))
         for phase in (phase1, phase2):
@@ -8376,12 +8418,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             architecture_patch = mock.patch.object(
                 flex_kernel_mod, "torch", lowering_torch
             )
+        backward_template = (
+            flex_kernel_mod.rocm_backward.flex_attention_backward_template
+            if arch == "gfx950"
+            else flex_kernel_mod.flex_attention_backward_template
+        )
         with (
             architecture_patch,
             mock.patch.object(
-                flex_kernel_mod.flex_attention_backward_template,
+                backward_template,
                 "maybe_append_choice",
-                wraps=flex_kernel_mod.flex_attention_backward_template.maybe_append_choice,
+                wraps=backward_template.maybe_append_choice,
             ) as choices,
         ):
             out = torch.compile(attention, fullgraph=True)(q, k, v)
@@ -8559,7 +8606,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
                     choices = []
-                    original_append = flex_kernel_mod.flex_attention_backward_template.maybe_append_choice
+                    original_append = flex_kernel_mod.rocm_backward.flex_attention_backward_template.maybe_append_choice
 
                     def append_choice(*args, **kwargs):
                         choices.append(
@@ -8589,7 +8636,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                         )
 
                     with mock.patch.object(
-                        flex_kernel_mod.flex_attention_backward_template,
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template,
                         "maybe_append_choice",
                         side_effect=append_choice,
                     ):
@@ -8860,7 +8907,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
 
-        template = flex_kernel_mod.flex_attention_backward_template
+        template = flex_kernel_mod.rocm_backward.flex_attention_backward_template
         original_append, original_select = (
             template.maybe_append_choice,
             flex_kernel_mod.autotune_select_algorithm,
@@ -9165,7 +9212,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 for do in grad_outputs
             )
             controls.append((default_out, default_gradients))
-        template = flex_kernel_mod.flex_attention_backward_template
+        template = flex_kernel_mod.rocm_backward.flex_attention_backward_template
         original_append, original_select = (
             template.maybe_append_choice,
             flex_kernel_mod.autotune_select_algorithm,
@@ -9473,7 +9520,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             architecture_patch = mock.patch.object(
                 flex_kernel_mod, "torch", lowering_torch
             )
-        template = flex_kernel_mod.flex_attention_backward_template
+        template = (
+            flex_kernel_mod.flex_attention_backward_template
+            if fallback == "architecture"
+            else flex_kernel_mod.rocm_backward.flex_attention_backward_template
+        )
         original_append = template.maybe_append_choice
         original_select = flex_kernel_mod.autotune_select_algorithm
         choice_phases = {}
@@ -9631,7 +9682,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 },
             )
 
-        from torch._inductor.kernel.flex.flex_attention import (
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
             flex_attention_backward_template,
         )
 
@@ -15507,7 +15558,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -15928,7 +15981,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -16338,7 +16393,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -16705,7 +16762,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -17117,7 +17176,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -17514,7 +17575,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -17853,7 +17916,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,
@@ -18463,7 +18528,9 @@ class GraphModule(torch.nn.Module):
                         )
 
                     compiled = torch.compile(forward, fullgraph=True, dynamic=False)
-                    template = flex_kernel_mod.flex_attention_backward_template
+                    template = (
+                        flex_kernel_mod.rocm_backward.flex_attention_backward_template
+                    )
                     original_append, original_select = (
                         template.maybe_append_choice,
                         flex_kernel_mod.autotune_select_algorithm,

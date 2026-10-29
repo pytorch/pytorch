@@ -293,94 +293,11 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    bwd_XCD_REMAP: NotRequired[bool]
-    r"""Remap backward work across eight XCDs on gfx950.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_EARLY_DP: NotRequired[bool]
-    r"""Compute dP before probability reconstruction in the gfx950 dK/dV loop.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D256_PANEL_DOTS: NotRequired[bool]
-    r"""Split BF16 D256 dot products into two D128 panels on gfx950.
-    Requires equal query/key and value head dimensions and the pointer path.
-    Unspecified: automatic for qualified inputs."""
-
     bwd_ROCM_SEPARATE_DQ: NotRequired[bool]
     r"""Run separate dK/dV and dQ kernels for supported gfx950 configurations.
     Requires an identity score modification and no captured tensors.
-    See the ROCm backward option guide for dtype, shape, and configuration requirements.
-    Unspecified: automatic for qualified inputs. Set ``False`` to disable automatic selection."""
-
-    bwd_ROCM_EARLY_PROBABILITY_COMPACT: NotRequired[bool]
-    r"""Convert probabilities before later dK/dV work in the BF16 D256 split kernel.
-    Requires ``bwd_ROCM_SEPARATE_DQ``, ``bwd_ROCM_D256_PANEL_DOTS``, and ``bwd_ROCM_EARLY_DP``.
-    Supports dense attention with tiles ``(16, 64, 128, 32)`` and four warps, two stages.
-    Default: ``False``."""
-
-    bwd_ROCM_D192_PANEL_DOTS: NotRequired[bool]
-    r"""Request separate BF16 D192 backward kernels with two D128 panels for dK/dV.
-    Supports the dense shapes and configuration in the ROCm backward option guide.
-    Default: ``False``."""
-
-    bwd_ROCM_D192_DQ_EARLY_DP: NotRequired[bool]
-    r"""Compute dP early in the BF16 D192 dQ kernel.
-    Requires ``bwd_ROCM_D192_PANEL_DOTS`` with the general early-dP option disabled.
-    Default: ``False``."""
-
-    bwd_ROCM_D96_PANEL_DOTS: NotRequired[bool]
-    r"""Request separate BF16 D96 backward kernels with two D64 panels for dK/dV.
-    Supports the dense shapes and configuration in the ROCm backward option guide.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D96_DQ_EARLY_DP: NotRequired[bool]
-    r"""Compute dP early in the BF16 D96 dQ kernel.
-    Requires ``bwd_ROCM_D96_PANEL_DOTS`` and contiguous blocks for the supported MHA shapes.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D96_DQ_UNROLL2: NotRequired[bool]
-    r"""Unroll the BF16 D96 dQ loop by two iterations.
-    Requires ``bwd_ROCM_D96_PANEL_DOTS`` and ``bwd_ROCM_D96_DQ_EARLY_DP``.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_GQA_SPLIT_DKDV: NotRequired[bool]
-    r"""Split FP16 D64 dense GQA dK/dV work between two query-head owners.
-    Requires four query heads per KV head and tiles ``(32, 128, 128, 32)``.
-    Uses four warps, two stages, separate dQ, and FP32 partial-gradient reduction.
-    Default: ``False``."""
-
-    bwd_ROCM_XCD_SNAKE: NotRequired[bool]
-    r"""Reverse alternate groups of eight work blocks in the BF16 D256 causal kernel.
-    Requires tiles ``(32, 64, 64, 64)``, four warps, and one stage.
-    Supports one or four query heads per KV head and excludes other ROCm scheduling options.
-    Default: ``False``."""
-
-    bwd_ROCM_D128_REVERSE_DQ_ROWS: NotRequired[bool]
-    r"""Reverse dQ row traversal in supported D128 causal GQA split kernels.
-    Requires separate dQ, early dP, XCD remapping, and 128-by-128 sparse blocks.
-    FP16 and FP32 require their matching coverage option.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64: NotRequired[bool]
-    r"""Accumulate dV through two D64 views in supported D128 causal GQA split kernels.
-    Requires ``bwd_ROCM_D128_REVERSE_DQ_ROWS`` and its activation requirements.
-    The compiler can also select query-tile-first traversal for qualified inputs.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D128_FP16_COVERAGE: NotRequired[bool]
-    r"""Enable FP16 D128 causal GQA split kernels for qualified static shapes.
-    Requires separate dQ, early dP, XCD remapping, and 128-by-128 sparse blocks.
-    Supports ``(batch, length)`` values ``(4, 2048)``, ``(4, 4096)``,
-    ``(2, 4096)``, ``(1, 4096)``, and ``(2, 2048)`` with 64 query heads and eight KV heads.
-    Requires tiles ``(32, 128, 128, 32)``, four warps, and two stages.
-    Unspecified: automatic for qualified inputs."""
-
-    bwd_ROCM_D128_FP32_BALANCED64_COVERAGE: NotRequired[bool]
-    r"""Enable IEEE FP32 D128 causal GQA split kernels for qualified static shapes.
-    Requires separate dQ, early dP, XCD remapping, and 128-by-128 sparse blocks.
-    Supports batches one, two, and four at lengths 2048 and 4096 with 64 query heads and eight KV heads.
-    Requires tiles ``(16, 64, 64, 16)``, four warps, and one stage.
-    Unspecified: automatic for qualified inputs."""
+    Set ``False`` to disable automatic selection.
+    """
 
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
@@ -404,6 +321,22 @@ class FlexKernelOptions(TypedDict, total=False):
 class _KernelOptionsWithInternals(FlexKernelOptions, total=False):
     OUTPUT_LOGSUMEXP: bool
     OUTPUT_MAX: bool
+
+    bwd_XCD_REMAP: NotRequired[bool]
+    bwd_ROCM_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D256_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_EARLY_PROBABILITY_COMPACT: NotRequired[bool]
+    bwd_ROCM_D192_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_D192_DQ_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D96_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_D96_DQ_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D96_DQ_UNROLL2: NotRequired[bool]
+    bwd_ROCM_GQA_SPLIT_DKDV: NotRequired[bool]
+    bwd_ROCM_XCD_SNAKE: NotRequired[bool]
+    bwd_ROCM_D128_REVERSE_DQ_ROWS: NotRequired[bool]
+    bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64: NotRequired[bool]
+    bwd_ROCM_D128_FP16_COVERAGE: NotRequired[bool]
+    bwd_ROCM_D128_FP32_BALANCED64_COVERAGE: NotRequired[bool]
 
 
 class AuxRequest(NamedTuple):
