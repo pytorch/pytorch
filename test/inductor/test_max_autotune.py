@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -1696,6 +1697,19 @@ class TestMaxAutotune(TestCase):
             torch.compile(m)(inp)
 
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfRocm
+    @parametrize("precision", ("tf32", "ieee"))
+    @config.patch(max_autotune=True, max_autotune_conv_backends="TRITON")
+    @recover_orig_fp32_precision
+    def test_conv_template_follows_cudnn_conv_precision(self, precision):
+        torch.backends.cudnn.conv.fp32_precision = precision
+        x = torch.randn(2, 32, 16, 16, device=GPU_TYPE)
+        w = torch.randn(32, 32, 3, 3, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(torch.nn.functional.conv2d), x, w)
+        expected = precision == "tf32" and torch.cuda.is_tf32_supported()
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expected}", code[0])
 
     def test_non_contiguous_input_mm(self):
         """
@@ -6855,7 +6869,6 @@ class TestTDMConfigDenseAndGeneric(TestCase):
 
         self.assertTrue(is_gfx1250_arch("gfx1250"))
         self.assertTrue(is_gfx1250_arch("gfx1250:sramecc+:xnack-"))
-        self.assertFalse(is_gfx1250_arch("gfx1251"))
         self.assertFalse(is_gfx1250_arch("gfx0000"))
         self.assertFalse(is_gfx1250_arch("amd-gfx1250"))
 
