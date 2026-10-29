@@ -75,6 +75,13 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.partial_layout, "column")
         self.assertEqual(cfg.combine_columns, 0)
 
+    def test_ordered_columns_require_inner_tree(self):
+        """Reject an unordered request on the ordered column kernel."""
+        with self.assertRaisesRegex(ValueError, "require inner_tree"):
+            ct.reduce_ordered_col(
+                None, "sum", None, [torch.float32], 1, order="unordered"
+            )
+
 
 class TestColumnCombine(TestCase):
     hw_classification = HardwareClassification.CUDA
