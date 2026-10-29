@@ -1032,6 +1032,21 @@ def build_code_hash(
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
+def _build_cpp_code_hash(root: str, hasher: hashlib._Hash) -> None:
+    source_root = Path(root)
+    sources = sorted(
+        path
+        for path in source_root.rglob("*")
+        if path.is_file()
+        and path.suffix in (".cpp", ".h")
+        and "tests" not in path.relative_to(source_root).parts
+    )
+    for path in sources:
+        relative_name = path.relative_to(source_root).as_posix()
+        hasher.update(relative_name.encode("utf-8") + b"\0")
+        hasher.update(hashlib.sha256(path.read_bytes()).digest())
+
+
 @torch_key_cache
 def torch_key() -> bytes:
     """
@@ -1059,16 +1074,7 @@ def torch_key() -> bytes:
                     inductor_root, "../csrc/inductor/experimental/loops_ir"
                 )
                 if os.path.isdir(cpp_ir_root):
-                    with os.scandir(cpp_ir_root) as entries:
-                        cpp_files = sorted(
-                            entry.name
-                            for entry in entries
-                            if entry.is_file() and entry.name.endswith((".cpp", ".h"))
-                        )
-                    for name in cpp_files:
-                        hasher.update(name.encode("utf-8") + b"\0")
-                        with open(os.path.join(cpp_ir_root, name), "rb") as f:
-                            hasher.update(hashlib.sha256(f.read()).digest())
+                    _build_cpp_code_hash(cpp_ir_root, hasher)
                 for path in extra_files:
                     if os.path.exists(path):
                         with open(path, "rb") as f:
