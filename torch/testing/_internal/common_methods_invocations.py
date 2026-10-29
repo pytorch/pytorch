@@ -6578,9 +6578,10 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
         yield sample
 
     # A right-hand side with the shape of L.shape[:-1] is a matrix broadcast over the batch. See #196694
+    # L also holds values in the triangle the op does not read. See #199069
     A = make_fullrank_matrices_with_distinct_singular_values(S, S, S, dtype=dtype, device=device)
     for upper in (False, True):
-        L = torch.linalg.cholesky(A @ A.mH, upper=upper)
+        L = torch.linalg.cholesky(A @ A.mH, upper=upper) + (A.tril(-1) if upper else A.triu(1))
         yield SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
                           args=(L.requires_grad_(requires_grad),), kwargs=dict(upper=upper))
 
@@ -13307,8 +13308,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # https://github.com/pytorch/pytorch/issues/199069
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCPUIfNoLapack],
            skips=(
                # https://github.com/pytorch/pytorch/issues/165294
