@@ -265,6 +265,7 @@ import logging
 import operator
 import os
 import pickle
+import re
 import stat
 import sys
 import threading
@@ -2090,6 +2091,18 @@ def _library_op_module(
     return file_modules().get(os.path.realpath(path))
 
 
+def _kernel_modules(
+    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+) -> set[str]:
+    """The modules outside torch whose import registers a kernel of ``op_name``
+    with ``Library.impl``, which is often not the module defining the op."""
+    qualname = f"{op_name}.{overload}" if overload else op_name
+    dump = torch._C._dispatch_dump(qualname)
+    paths = re.findall(r"^[^:\n]+: registered at (.+\.py):\d+ ::", dump, re.MULTILINE)
+    modules = {file_modules().get(os.path.realpath(path)) for path in paths}
+    return {m for m in modules if m and m.partition(".")[0] != "torch"}
+
+
 def _custom_op_modules(
     op_names: Iterable[tuple[str, str]],
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
@@ -2109,6 +2122,7 @@ def _custom_op_modules(
         module = _custom_op_module(op_name, overload)
         if module is None:
             module = _library_op_module(op_name, overload, file_modules)
+        modules |= _kernel_modules(op_name, overload, file_modules)
         if module is not None:
             modules.add(module)
         elif ns not in _TORCH_OP_NAMESPACES:
