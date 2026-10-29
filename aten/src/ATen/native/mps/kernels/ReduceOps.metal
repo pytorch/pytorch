@@ -1581,3 +1581,54 @@ REGISTER_ARG_REDUCTIONS_FOR_TYPE(int);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(short);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(char);
 REGISTER_ARG_REDUCTIONS_FOR_TYPE(uchar);
+
+template <typename T, bool STRIDED>
+kernel void dot_reduce(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device opmath_t<T>* partials [[buffer(2)]],
+    constant DotParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  using ACC = opmath_t<T>;
+  const long a_stride = STRIDED ? params.a_stride : 1;
+  const long b_stride = STRIDED ? params.b_stride : 1;
+  const uint grid_size = static_cast<uint>(params.num_tgs) * tptg;
+  const long block = static_cast<long>(DOT_BLOCK_ELEMS_PER_THREAD) * grid_size;
+  ACC val = 0;
+  for (long begin = 0; begin < params.numel; begin += block) {
+    device const T* a_block = a + begin * a_stride;
+    device const T* b_block = b + begin * b_stride;
+    val += thread_reduce_flat<SUM_NCHAINS>(
+        [&](uint i) {
+          const auto x = static_cast<ACC>(a_block[i * a_stride]);
+          const auto y = static_cast<ACC>(b_block[i * b_stride]);
+          return mul(params.a_conj ? conj(x) : x, params.b_conj ? conj(y) : y);
+        },
+        [](ACC x, ACC y) { return x + y; },
+        ACC(0),
+        static_cast<uint>(::metal::min(params.numel - begin, block)),
+        tgid * tptg + tid,
+        grid_size);
+  }
+  threadgroup ACC shared[MAX_THREADGROUP_SIZE / simdgroup_size];
+  const ACC sum = threadgroup_sum(shared, val, tid, tptg);
+  if (tid == 0) {
+    partials[tgid] = sum;
+  }
+}
+
+#define INSTANTIATE_DOT_REDUCE(T)                                   \
+  INSTANTIATE_KERNEL("dot_reduce_dense_" #T, dot_reduce, T, false); \
+  INSTANTIATE_KERNEL("dot_reduce_strided_" #T, dot_reduce, T, true)
+
+INSTANTIATE_DOT_REDUCE(float);
+INSTANTIATE_DOT_REDUCE(half);
+INSTANTIATE_DOT_REDUCE(bfloat);
+INSTANTIATE_DOT_REDUCE(float2);
+INSTANTIATE_DOT_REDUCE(long);
+INSTANTIATE_DOT_REDUCE(int);
+INSTANTIATE_DOT_REDUCE(short);
+INSTANTIATE_DOT_REDUCE(char);
+INSTANTIATE_DOT_REDUCE(uchar);

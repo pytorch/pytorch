@@ -1,7 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/OpMathType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/ReduceOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -20,6 +23,12 @@
 namespace at::native {
 
 namespace mps {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/ReduceOps_metallib.h>
+#endif
 
 inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dim() == 1 && other.dim() == 1,
@@ -53,7 +62,13 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using namespace mps;
-  using CachedGraph = MPSBinaryCachedGraph;
+
+  const auto dtype = self.scalar_type();
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(dtype) || dtype == kComplexFloat ||
+                                  (isIntegralType(dtype, false) && !isBarebonesUnsignedType(dtype)),
+                              "\"dot\" not implemented for '",
+                              dtype,
+                              "'");
 
   if (self.numel() == 0 & other.numel() == 0) {
     return zeros({}, self.options());
@@ -61,61 +76,32 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 
   dot_check(self, other);
 
-  auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  MPSStream* stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "dot_mps" + getTensorsStringKey({self, other});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
-
-      MPSGraphTensor* castSelf = nil;
-      MPSGraphTensor* castOther = nil;
-
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char) {
-        castSelf = [mpsGraph castTensor:selfTensor toType:MPSDataTypeInt32 name:@"castSelfTensor"];
-        castOther = [mpsGraph castTensor:otherTensor toType:MPSDataTypeInt32 name:@"castOtherTensor"];
-      } else {
-        castSelf = selfTensor;
-        castOther = otherTensor;
-      }
-      if (self.is_conj()) {
-        castSelf = [mpsGraph conjugateWithTensor:selfTensor name:nil];
-      }
-      if (other.is_conj()) {
-        castOther = [mpsGraph conjugateWithTensor:otherTensor name:nil];
-      }
-
-      MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
-                                                      secondaryTensor:castOther
-                                                                 name:@"multiplication"];
-
-      MPSGraphTensor* dotProductTensor = [mpsGraph reductionSumWithTensor:dot axes:nil name:@"dotProduct"];
-
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char)
-        dotProductTensor = [mpsGraph castTensor:dotProductTensor
-                                         toType:getMPSDataType(self)
-                                           name:@"castDotProductTensor"];
-
-      newCachedGraph->inputTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = dotProductTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  return output;
+  using namespace std::string_view_literals;
+  // Mirrors c10::metal::opmath_t, the type dot_reduce writes its partials in
+  const auto acc_type = isIntegralType(dtype, false) ? (dtype == kLong ? kLong : kInt) : toOpMathType(dtype);
+  const auto numel = self.numel();
+  const auto num_partials =
+      std::min<int64_t>(DOT_MAX_TGS, at::ceil_div<int64_t>(numel, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
+  const DotParams<> params{.numel = numel,
+                           .num_tgs = num_partials,
+                           .a_stride = self.stride(0),
+                           .b_stride = other.stride(0),
+                           .a_conj = self.is_conj(),
+                           .b_conj = other.is_conj()};
+  const auto partials = at::empty({num_partials}, self.options().dtype(acc_type));
+  const auto layout = self.stride(0) == 1 && other.stride(0) == 1 ? "dense"sv : "strided"sv;
+  const auto kernel = fmt::format("dot_reduce_{}_{}", layout, scalarToMetalTypeString(dtype));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc(kernel);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, self, other, partials, params);
+      mtl_dispatch1DJob(encoder, pso, num_partials * [pso maxTotalThreadsPerThreadgroup]);
+    }
+  });
+  return (num_partials == 1 ? partials.squeeze(0) : partials.sum(acc_type)).to(dtype);
 }
 
 Tensor vdot_mps(const Tensor& self, const Tensor& other) {
