@@ -94,12 +94,12 @@ TORCH_API sycl::event deconvolution_backward_weights(
 TORCH_API void woq_matmul_int4(
     at::Tensor& result, // dst, [M, N]
     const at::Tensor& mat1_, // src, [M, K]
-    const at::Tensor& mat2_, // quantized weight, [K/8, N]
+    const at::Tensor& mat2_, // quantized weight, [N, K/8]
     const at::Tensor& scale, // [K/group_size, N]
     const at::Tensor& zp, // [k/group_size, N]
     int64_t group_size);
 
-TORCH_API void matmul_int4_impl_cache(
+TORCH_API void matmul_int4(
     at::Tensor& result,
     const at::Tensor& mat1_,
     const at::Tensor& mat2_,

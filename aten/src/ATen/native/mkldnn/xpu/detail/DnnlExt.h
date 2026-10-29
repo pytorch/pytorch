@@ -333,8 +333,7 @@ struct matmul_primitive_cache_t {
       const int device_id,
       F f_attr,
       const dnnl::memory::data_type dst_dt,
-      const int64_t scale_group_size,
-      const int64_t zp_group_size) {
+      const int64_t group_size) {
     auto& cached = get_cache(device_id);
     memory::dims src_strides, wei_strides, dst_strides;
     get_strides<Tt>(src_strides, wei_strides, dst_strides, lda, ldb, ldc);
@@ -346,8 +345,7 @@ struct matmul_primitive_cache_t {
         k,
         int(b_dims),
         int(dst_dt),
-        int(scale_group_size),
-        int(zp_group_size));
+        int(group_size));
     auto iter = cached.find(pri_key);
     if (iter == cached.end()) {
       auto [src_dt, wei_dt] = onednn_types_mapper<Ts>::get();
@@ -413,23 +411,11 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     const int device_id,
     F attr,
     const dnnl::memory::data_type dst_dt,
-    const int64_t scale_group_size,
-    const int64_t zp_group_size) {
+    const int64_t group_size) {
   switch (Tt) {
     case trans_type_t::nt:
       return matmul_primitive_cache_t<trans_type_t::nt, Ts, Sd, F>::get(
-          m,
-          n,
-          k,
-          lda,
-          ldb,
-          ldc,
-          b_dims,
-          device_id,
-          attr,
-          dst_dt,
-          scale_group_size,
-          zp_group_size);
+          m, n, k, lda, ldb, ldc, b_dims, device_id, attr, dst_dt, group_size);
     default:
       TORCH_INTERNAL_ASSERT(false, "unsupported trans type ...");
   }
@@ -449,8 +435,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     F attr,
     const at::ScalarType scale_dtype,
     const dnnl::memory::data_type dst_dt,
-    const int64_t scale_group_size,
-    const int64_t zp_group_size) {
+    const int64_t group_size) {
   switch (scale_dtype) {
     case at::ScalarType::Float:
       return matmul_primitive_create_and_cache<Ts, at::ScalarType::Float, F>(
@@ -465,8 +450,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           device_id,
           attr,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     case at::ScalarType::Half:
       return matmul_primitive_create_and_cache<Ts, at::ScalarType::Half, F>(
           Tt,
@@ -480,8 +464,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           device_id,
           attr,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     case at::ScalarType::BFloat16:
       return matmul_primitive_create_and_cache<Ts, at::ScalarType::BFloat16, F>(
           Tt,
@@ -495,8 +478,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           device_id,
           attr,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unsupported scale dtype for int4 matmul: ", scale_dtype);
@@ -518,8 +500,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
     F attr,
     const at::ScalarType scale_dtype,
     const dnnl::memory::data_type dst_dt,
-    const int64_t scale_group_size = 0,
-    const int64_t zp_group_size = 0) {
+    const int64_t group_size = 0) {
   switch (Ts) {
     case joint_dtypes_t::f16_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::f16_int4, F>(
@@ -535,8 +516,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           attr,
           scale_dtype,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     case joint_dtypes_t::bf16_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::bf16_int4, F>(
           Tt,
@@ -551,8 +531,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           attr,
           scale_dtype,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     case joint_dtypes_t::s8_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::s8_int4, F>(
           Tt,
@@ -567,8 +546,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           attr,
           scale_dtype,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     case joint_dtypes_t::u8_int4:
       return matmul_primitive_create_and_cache<joint_dtypes_t::u8_int4, F>(
           Tt,
@@ -583,8 +561,7 @@ static inline primitive_ext& matmul_primitive_create_and_cache(
           attr,
           scale_dtype,
           dst_dt,
-          scale_group_size,
-          zp_group_size);
+          group_size);
     default:
       TORCH_INTERNAL_ASSERT(false, "Only support int4 ...");
   }

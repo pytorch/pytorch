@@ -292,8 +292,6 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       __func__,
       " : expect mat_a to be int8 or uint8 tensor, but got ",
       mat_a.dtype());
-  TORCH_CHECK(
-      mat_a.is_contiguous(), __func__, " : expect mat_a to be contiguous.");
   TORCH_CHECK(mat_a.dim() == 2, __func__, " : expect mat_a to be 2D tensor.");
 
   TORCH_CHECK(
@@ -301,19 +299,31 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       __func__,
       " : expect mat_b to be int32 (packed int4) tensor, but got ",
       mat_b.dtype());
-  TORCH_CHECK(
-      mat_b.is_contiguous(), __func__, " : expect mat_b to be contiguous.");
   TORCH_CHECK(mat_b.dim() == 2, __func__, " : expect mat_b to be 2D tensor.");
 
-  // NOLINTNEXTLINE(*c-array*)
-  TensorArg targs[]{
+  TORCH_CHECK(
+      mat_a.strides()[1] == 1,
+      __func__,
+      " : expect mat_a to have stride 1 on its last dimension, but got strides ",
+      mat_a.strides());
+  TORCH_CHECK(
+      mat_b.strides()[1] == 1,
+      __func__,
+      " : expect mat_b to have stride 1 on its last dimension, but got strides ",
+      mat_b.strides());
+
+  std::vector<TensorArg> targs{
       {mat_a, "mat_a", 1},
       {mat_b, "mat_b", 2},
       {mat_a_scale, "mat_a_scale", 3},
       {mat_b_scale, "mat_b_scale", 4},
       {mat_a_zero_point, "mat_a_zero_point", 5},
       {mat_b_zero_point, "mat_b_zero_point", 6}};
+  if (bias.has_value() && bias->defined()) {
+    targs.emplace_back(*bias, "bias", 7);
+  }
   checkAllSameGPU(__func__, targs);
+  c10::DeviceGuard device_guard(mat_a.device());
 
   int64_t M = mat_a.size(0);
   int64_t N = mat_b.size(0);
@@ -324,7 +334,8 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       " : expect mat_b.size(1) (",
       mat_b.size(1),
       ") to equal mat_a.size(1) / 8 (",
-      K / 8);
+      K / 8,
+      ")");
   TORCH_CHECK(
       group_size > 1 && group_size % 32 == 0,
       __func__,
@@ -365,6 +376,14 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       M,
       ", 1], but got ",
       mat_a_zero_point.sizes());
+  TORCH_CHECK(
+      mat_a_scale.is_contiguous(),
+      __func__,
+      " : expect mat_a_scale to be contiguous.");
+  TORCH_CHECK(
+      mat_a_zero_point.is_contiguous(),
+      __func__,
+      " : expect mat_a_zero_point to be contiguous.");
 
   TORCH_CHECK(
       mat_b_scale.dtype() == c10::kFloat,
@@ -395,13 +414,22 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       ", ",
       N,
       "]");
+  TORCH_CHECK(
+      mat_b_scale.is_contiguous(),
+      __func__,
+      " : expect mat_b_scale to be contiguous.");
+  TORCH_CHECK(
+      mat_b_zero_point.is_contiguous(),
+      __func__,
+      " : expect mat_b_zero_point to be contiguous.");
 
   auto dst_dtype = out_dtype.value_or(c10::kFloat);
   TORCH_CHECK(
       dst_dtype == c10::kFloat || dst_dtype == c10::kBFloat16 ||
           dst_dtype == c10::kHalf,
-      "qlinear_w4a8_int xpu: output dtype must be one of float32, bfloat16, "
-      "or float16, but got ",
+      __func__,
+      " : expect out_dtype to be one of float32, bfloat16, or float16, "
+      "but got ",
       dst_dtype);
 
   TORCH_CHECK(
@@ -421,10 +449,10 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
 
   Tensor qout = at::empty({M, N}, mat_a.options().dtype(dst_dtype));
 
-  matmul_int4_impl_cache(
+  matmul_int4(
       qout,
-      mat_a.contiguous(),
-      mat_b.contiguous(),
+      mat_a,
+      mat_b,
       mat_a_scale,
       mat_b_scale,
       mat_a_zero_point,
