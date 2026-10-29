@@ -2142,19 +2142,18 @@ class TritonTemplateKernel(TritonKernel):
                 # (e.g., for FlexAttention templates), freeze immediately
                 node.data.freeze_layout()
             else:
-                # Compute what strides WOULD be if frozen, without actually freezing
-                fixed_layout_copy = layout.get_fixed_layout_without_freezing()
-                # Save to graph-level constraints instead of per-kernel
-                existing = V.graph.buffer_layout_constraints.get(node_name)
-                if existing is not None and existing != fixed_layout_copy:
-                    raise AssertionError(
-                        f"Layout constraint mismatch for {node_name}: "
-                        f"existing {existing} vs new {fixed_layout_copy}"
-                    )
-                else:
-                    V.graph.buffer_layout_constraints[node_name] = fixed_layout_copy
+                # Reuse the layout recorded by an earlier template consumer, which
+                # GraphLowering.finalize freezes the buffer to. Recomputing it can
+                # give different strides, since stride padding is skipped when the
+                # FX node being lowered has dislike_padding set.
+                fixed_layout = V.graph.buffer_layout_constraints.get(node_name)
+                if fixed_layout is None:
+                    # Compute what strides WOULD be if frozen, without actually freezing
+                    fixed_layout = layout.get_fixed_layout_without_freezing()
+                    # Save to graph-level constraints instead of per-kernel
+                    V.graph.buffer_layout_constraints[node_name] = fixed_layout
 
-                return list(fixed_layout_copy.stride)
+                return list(fixed_layout.stride)
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
@@ -3711,6 +3710,17 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
+        # The selected template was rendered against the layouts recorded for its
+        # flexible inputs (see TritonTemplateKernel.get_stride_and_maybe_freeze_layout)
+        # and has no extern fallback, so freeze them now, before a later consumer
+        # or GraphLowering.finalize picks a different layout.
+        for inp in self.input_nodes:
+            if should_use_layout_constraints(inp) and isinstance(
+                inp.get_layout(), ir.FlexibleLayout
+            ):
+                inp.freeze_layout_with_exact_strides(
+                    V.graph.buffer_layout_constraints[inp.get_name()].stride
+                )
         buffer = ir.TritonTemplateBuffer(
             layout=self.layout,
             inputs=self.input_nodes,
