@@ -3435,6 +3435,55 @@ class TestMaxAutotune(TestCase):
         FileCheck().check_not("triton_tem").run(code[0])
         self.assertEqual(out, fn(x, w), atol=0, rtol=0)
 
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("consumer", ("none", "custom_op", "reduction"))
+    def test_deferred_layout_constraint_persistent_tma_operand_order(self, consumer):
+        # z reads x transposed, so a fill-order freeze makes it column-major:
+        # in GraphLowering.finalize, or while lowering a later consumer (a custom
+        # op keeping z's eager strides, a split reduction deciding its input's
+        # layout). The persistent TMA template picked A_ROW_MAJOR from z's
+        # deferred row-major layout, so z must be frozen to that layout.
+        m, k, n = (4096, 2048, 64) if consumer == "reduction" else (256, 128, 64)
+
+        if consumer == "custom_op":
+
+            @torch.library.custom_op("test_max_autotune::col_sum", mutates_args=())
+            def col_sum(t: torch.Tensor) -> torch.Tensor:
+                return t.float().sum(0)
+
+            @col_sum.register_fake
+            def _(t):
+                return t.new_empty(t.shape[1], dtype=torch.float32)
+
+        def fn(bias, x, b):
+            z = (x.t() * 2).to(torch.bfloat16)
+            out = torch.addmm(bias, z, b)
+            if consumer == "custom_op":
+                return out, col_sum(z)
+            if consumer == "reduction":
+                return out, z.float().sum(0)
+            return out
+
+        x = torch.randint(-2, 3, (k, m), device=GPU_TYPE).float()
+        b = torch.randint(-2, 3, (k, n), device=GPU_TYPE).bfloat16()
+        bias = torch.randint(-2, 3, (n,), device=GPU_TYPE).bfloat16()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "benchmark_epilogue_fusion": False,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            out, code = run_and_get_code(torch.compile(fn), bias, x, b)
+
+        FileCheck().check("triton_tem").check("tl.make_tensor_descriptor").run(code[0])
+        self.assertEqual(out, fn(bias, x, b), atol=0, rtol=0)
+
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):
         """Test that mm layout freezing behavior depends on always_freeze_layout.

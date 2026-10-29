@@ -3710,6 +3710,17 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
+        # The selected template was rendered against the layouts recorded for its
+        # flexible inputs (see TritonTemplateKernel.get_stride_and_maybe_freeze_layout)
+        # and has no extern fallback, so freeze them now, before a later consumer
+        # or GraphLowering.finalize picks a different layout.
+        for inp in self.input_nodes:
+            if should_use_layout_constraints(inp) and isinstance(
+                inp.get_layout(), ir.FlexibleLayout
+            ):
+                inp.freeze_layout_with_exact_strides(
+                    V.graph.buffer_layout_constraints[inp.get_name()].stride
+                )
         buffer = ir.TritonTemplateBuffer(
             layout=self.layout,
             inputs=self.input_nodes,
