@@ -2591,14 +2591,17 @@ def _opens_scope(frame: dict[str, Any]) -> bool:
 
 
 def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
-    """The modules a load imports for its frames: the entry's, and those of the
-    frames ``_build_multigraph_forward`` opens a scope for. Never a dead record's."""
+    """The modules of the entry frame and of the frames ``_build_multigraph_forward``
+    opens a scope for, which that driver imports. Never a dead record's. The
+    installed driver's ``CompilePackage.install`` also binds the modules of the
+    codes this leaves out, which its pre-check does not cover."""
     return {f["python_module"] for f in frames if f["is_entry"] or _opens_scope(f)}
 
 
 def _unimportable_module(modules: Iterable[str]) -> str | None:
-    """The first of ``modules`` another process cannot import, found without
-    importing it: ``__main__``, or one with no spec."""
+    """The first of ``modules`` another process cannot import, without importing it
+    (``find_spec`` does import a dotted name's parents): ``__main__``, one with no
+    spec, or one whose parent's import raises."""
     import importlib.util
 
     for name in modules:
@@ -2607,7 +2610,7 @@ def _unimportable_module(modules: Iterable[str]) -> str | None:
                 name not in sys.modules and importlib.util.find_spec(name) is None
             ):
                 return name
-        except ImportError:
+        except Exception:
             return name
     return None
 
