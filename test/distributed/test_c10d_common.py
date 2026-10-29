@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import importlib
+import importlib.metadata
 import os
 import pickle
 import re
@@ -371,6 +371,11 @@ class BackendEntryPointTest(TestCase):
     def test_fake_backend_entrypoint(self):
         from torch.distributed._backends import fake
 
+        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+        self.assertEqual(
+            [ep.value for ep in eps if ep.name == "fake"],
+            ["torch.distributed._backends.fake:_register_fake_backend"],
+        )
         with unittest.mock.patch.dict(dist.Backend._plugins):
             dist.Backend._plugins.pop("FAKE", None)
             dist.Backend._ensure_backend_registered("fake")

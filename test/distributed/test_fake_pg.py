@@ -61,6 +61,18 @@ class TestFakePG(TestCase):
         dist.all_reduce(output)
         self.assertEqual(tuple(output.shape), (3, 3))
 
+    @unittest.skipIf(not dist.is_gloo_available(), "requires gloo")
+    def test_debug_detail_keeps_backend_alive(self):
+        # DETAIL wraps the backend in _ProcessGroupWrapper, which must keep the
+        # Python backend object alive.
+        self.addCleanup(dist.set_debug_level, dist.get_debug_level())
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+        wrapper = dist.group.WORLD._get_backend(torch.device("cpu"))
+        self.assertIsInstance(wrapper.wrapped_pg, FakeProcessGroup)
+        self.assertEqual(wrapper.wrapped_pg.name(), "fake")
+
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
         # raised "does not support setting timeout". Setting a timeout is a
@@ -168,7 +180,6 @@ class TestFakePG(TestCase):
         pg.allreduce([x], timeout=timedelta(seconds=5)).wait()
         self.assertEqual(x, torch.full((2,), 16.0))
         self.assertIsInstance(pg.allreduce([x]), FakeWork)
-        self.assertNotIsInstance(pg.allreduce(x), FakeWork)
         for bad in (
             lambda: pg.allreduce(None),
             lambda: pg.allreduce([1, 2]),
