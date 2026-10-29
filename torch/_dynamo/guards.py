@@ -4664,7 +4664,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # A concrete C++ backend such as ProcessGroupNCCL is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
         # alone let an unguarded one fail the whole frame with "cannot pickle".
         # The C++ Backend is also the Python backend extension point (a Python
