@@ -175,7 +175,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
 // first, as does a thread's first call, is captured on its next call and
 // replayed after that, up to AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs
 // (default 8); past that, new layouts run eagerly. Once a graph is captured,
-// changing the active constants fails. Requires a CUDA model compiled with
+// the container's constants can't change. Requires a CUDA model compiled with
 // aot_inductor.cudagraphs=True.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithCudaGraph(
     AOTInductorModelContainerHandle container_handle,

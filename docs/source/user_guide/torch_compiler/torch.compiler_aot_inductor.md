@@ -219,8 +219,8 @@ In C++, `AOTIModelPackageLoader::run_with_cuda_graph` takes the same arguments a
   outputs come back as separate tensors.
 - If a capture fails but the eager call succeeds, that layout runs eagerly from
   then on, with a warning.
-- Once a graph is captured, the active constants can't change; the inactive
-  constant buffer can still be updated.
+- Once a graph is captured, the model's constants can't change; load the model
+  again to use new weights.
 
 ## Troubleshooting
 

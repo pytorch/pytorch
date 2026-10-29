@@ -925,6 +925,53 @@ class AOTInductorTestsTemplate:
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
 
+    def test_failed_inactive_constant_folding_keeps_active_constants(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(2048, 4096, device=device))
+                self.b = torch.nn.Parameter(torch.randn(2048, device=device))
+
+            def forward(self, x):
+                return x @ torch.relu(self.w.t()) + self.b
+
+        model = Model(self.device)
+        x = torch.randn(2, 4096, device=self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
+        params = dict(model.named_parameters())
+        new_weights = {
+            name: params[fqn].detach() + 1
+            for name, fqn in runner.get_constant_names_to_original_fqns().items()
+            if fqn in params
+        }
+        runner.update_constant_buffer(new_weights, True, False)
+
+        # Leave too little memory for the 32 MB folded constant.
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        total = torch.cuda.get_device_properties(self.device).total_memory
+        torch.cuda.set_per_process_memory_fraction(
+            (torch.cuda.memory_reserved() + (8 << 20)) / total
+        )
+        try:
+            with self.assertRaises(RuntimeError):
+                runner.run_const_fold(True)
+        finally:
+            torch.cuda.set_per_process_memory_fraction(1.0)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
+
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
             raise unittest.SkipTest("MPS baseline mismatch")
@@ -10385,20 +10432,25 @@ class AOTInductorTestsTemplate:
                 # Folded into a CUDA constant at compile time.
                 return x + torch.tensor([1.0, 2.0, 3.0, 4.0]).to(x.device)
 
-        class UnusedCpuInput(torch.nn.Module):
-            def forward(self, x, unused):
-                return x.relu()
-
         x = torch.randn(4, 4, device=self.device)
-        for model, inputs in (
-            (torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU()), (x,)),
-            (CpuConstant(), (x,)),
-            (UnusedCpuInput(), (x, torch.randn(4))),
-        ):
+        mlp = torch.nn.Sequential(torch.nn.Linear(4, 8), torch.nn.ReLU())
+        for model in (mlp.to(self.device), CpuConstant()):
             with self.subTest(type(model).__name__):
-                self.check_model(
-                    model, inputs, options={"aot_inductor.cudagraphs": True}
+                so_path = AOTIRunnerUtil.legacy_compile(
+                    model, (x,), options={"aot_inductor.cudagraphs": True}
                 )
+                runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
+                    so_path, 1, self.device
+                )
+                launches = []
+                for _ in range(3):
+                    (out,), launched = run_profiled(
+                        lambda: runner.run_with_cuda_graph([x])
+                    )
+                    self.assertEqual(out, model(x))
+                    launches.append(launched)
+                # Warm-up, capture, replay.
+                self.assertEqual(launches, [False, True, True])
 
     def test_aot_cudagraphs_rejects_non_cuda_model(self):
         if self.device == "cuda":
@@ -10469,9 +10521,9 @@ class AOTInductorTestsTemplate:
             (Item(), "incompatible op", {}),
             (MutatesInput(), r"mutated inputs \(1 instances\)\. Found from", {}),
             (Cond(), "control flow operator: torch.cond", {}),
-            (SyncsEvent(), r"waits on the host \(Event.synchronize\)", {}),
-            (SyncsStream(), r"waits on the host \(Stream.synchronize\)", {}),
-            (SyncsDevice(), r"waits on the host \(torch.cuda.synchronize\)", {}),
+            (SyncsEvent(), "incompatible op streams.synchronize_event", {}),
+            (SyncsStream(), "incompatible op streams.synchronize_stream", {}),
+            (SyncsDevice(), "incompatible op streams.synchronize_device", {}),
             (WhileLoop(), "control flow operator: torch.while_loop", {}),
         ):
             with (
@@ -10482,6 +10534,26 @@ class AOTInductorTestsTemplate:
                     model,
                     (torch.randn(4, 4, device=self.device),),
                     inductor_configs={"aot_inductor.cudagraphs": True, **configs},
+                )
+
+        class UnusedInput(torch.nn.Module):
+            def forward(self, x, unused):
+                return x.relu()
+
+        x = torch.randn(4, 4, device=self.device)
+        devices = ["cpu"]
+        if torch.cuda.device_count() >= 2:
+            devices.append(f"{GPU_TYPE}:1")
+        for device in devices:
+            msg = f"CUDA graph: input arg1_1 is on {device}"
+            with (
+                self.subTest("UnusedInput", device=device),
+                self.assertRaisesRegex(Exception, msg),
+            ):
+                AOTIRunnerUtil.compile(
+                    UnusedInput(),
+                    (x, torch.randn(4, device=device)),
+                    inductor_configs={"aot_inductor.cudagraphs": True},
                 )
 
     def test_aot_cudagraphs_checks_subgraphs(self):

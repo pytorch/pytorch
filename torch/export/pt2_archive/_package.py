@@ -746,7 +746,7 @@ class AOTICompiledModel:
         layout runs eagerly first, is captured on its next call and replayed
         after that, up to ``AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS`` (default 8)
         graphs per model instance. Outputs are copies, and once a graph is
-        captured, loading constants into the active buffer fails.
+        captured, the model's constants can't change.
         """
         return self._run(self.loader.run_with_cuda_graph, args, kwargs)
 

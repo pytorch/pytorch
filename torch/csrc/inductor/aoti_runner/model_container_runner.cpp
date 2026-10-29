@@ -235,6 +235,7 @@ consider rebuild your model with the latest AOTInductor.");
             model_so_->sym("AOTInductorModelContainerRunWithCudaGraph"));
   } catch (const at::DynamicLibraryError&) {
     // Older models can't run as CUDA graphs; run_with_cuda_graph() says so.
+    run_with_cuda_graph_func_ = nullptr;
   }
 
   // Hack to find the json file name from the model so file
@@ -334,7 +335,7 @@ int64_t AOTIModelContainerRunner::get_stream_affinity_model_index_for_testing(
 }
 
 template <typename Call>
-void AOTIModelContainerRunner::call_model(const char* name, Call&& call) {
+void AOTIModelContainerRunner::call_model(const char* name, Call&& call) const {
   torch::aot_inductor::set_last_error(nullptr);
   if (std::forward<Call>(call)() != AOTI_RUNTIME_SUCCESS) {
     if (const char* error = get_aoti_runtime_error()) {
@@ -365,15 +366,10 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
       get_num_outputs_func_(container_handle_, &num_outputs));
   std::vector<AtenTensorHandle> output_handles(num_outputs);
 
-  torch::aot_inductor::set_last_error(nullptr);
-  if (std::forward<RunFunc>(run_func)(
-          output_handles.data(), output_handles.size()) !=
-      AOTI_RUNTIME_SUCCESS) {
-    if (const char* error = get_aoti_runtime_error()) {
-      TORCH_CHECK(false, error);
-    }
-    torch::headeronly::detail::throw_exception(name, __FILE__, __LINE__);
-  }
+  call_model(name, [&] {
+    return std::forward<RunFunc>(run_func)(
+        output_handles.data(), output_handles.size());
+  });
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
@@ -493,10 +489,12 @@ std::unordered_map<std::string, int32_t> AOTIModelContainerRunner::
 const std::unordered_map<std::string, at::Tensor> AOTIModelContainerRunner::
     extract_constants_map(bool use_inactive) const {
   TensorConstantMap extracted_map;
-  AOTI_RUNTIME_ERROR_CODE_CHECK(extract_constants_map_func_(
-      container_handle_,
-      (AOTInductorConstantMapHandle)&extracted_map,
-      use_inactive));
+  call_model("extract_constants_map_func_", [&] {
+    return extract_constants_map_func_(
+        container_handle_,
+        (AOTInductorConstantMapHandle)&extracted_map,
+        use_inactive);
+  });
 
   std::unordered_map<std::string, at::Tensor> result;
   for (const auto& pair : extracted_map) {
@@ -685,8 +683,10 @@ void AOTIModelContainerRunner::update_inactive_constant_buffer(
   ctx.use_inactive = true;
   ScopedObserverEvent observer_event(
       observer(), AOTIContainerEvent::kUpdateConstantBuffer, ctx);
-  AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
-      container_handle_, (AOTInductorConstantMapHandle)&const_map));
+  call_model("update_inactive_constant_buffer_func_", [&] {
+    return update_inactive_constant_buffer_func_(
+        container_handle_, (AOTInductorConstantMapHandle)&const_map);
+  });
 }
 
 void AOTIModelContainerRunner::run_const_fold(
@@ -722,8 +722,9 @@ void AOTIModelContainerRunner::free_inactive_constant_buffer() {
   TORCH_CHECK(
       free_inactive_constant_buffer_func_ != nullptr,
       "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
-  AOTI_RUNTIME_ERROR_CODE_CHECK(
-      free_inactive_constant_buffer_func_(container_handle_));
+  call_model("free_inactive_constant_buffer_func_", [&] {
+    return free_inactive_constant_buffer_func_(container_handle_);
+  });
 }
 
 bool AOTIModelContainerRunner::did_call_load_constants() const {

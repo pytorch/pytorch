@@ -208,7 +208,7 @@ class TORCH_API AOTIModelContainerRunner {
   // Calls a model C API function as call(), and on failure throws the error
   // message the model recorded.
   template <typename Call>
-  void call_model(const char* name, Call&& call);
+  void call_model(const char* name, Call&& call) const;
   // Calls a model run function, which steals the input handles, as
   // run_func(output_handles, num_outputs), and returns the outputs it writes.
   template <typename RunFunc>
