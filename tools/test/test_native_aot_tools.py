@@ -736,7 +736,7 @@ class TestArch(unittest.TestCase):
             self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
-        # These expectations come from top-k's ARCHS plus the compatibility rules,
+        # These expectations come from the declaration plus the compatibility rules,
         # not from suffixes in the build's supported-device list.
         f = export.archs_from_cuda_arch_list
         cases = (
@@ -751,9 +751,12 @@ class TestArch(unittest.TestCase):
             ("10.0;10.0a", ["sm_100f"]),
             ("10.0a;9.0", ["sm_100f", "sm_90"]),
         )
-        for arch_list, targets in cases:
-            with self.subTest(arch_list=arch_list):
-                self.assertEqual(f(arch_list), targets)
+        with tempfile.TemporaryDirectory() as ops:
+            _write_fake_decl(ops)
+            with mock.patch.object(export, "OPS_DIR", ops):
+                for arch_list, targets in cases:
+                    with self.subTest(arch_list=arch_list):
+                        self.assertEqual(f(arch_list), targets)
 
     def test_build_arch_parser_does_not_choose_op_targets(self):
         f = export.build_arches_from_cuda_arch_list
@@ -1029,18 +1032,16 @@ def _fake_triton(**metadata):
 
 
 class TestTritonExport(unittest.TestCase):
-    _KERNEL = "class _Fn:\n    arg_names = ('A_ptr', 'M', 'BLOCK')\nkern = _Fn()\n"
+    _KERNEL = types.SimpleNamespace(arg_names=("A_ptr", "M", "BLOCK"))
 
     @contextlib.contextmanager
-    def _exported(self, arch, signature="*fp32:16, i32, 64", **metadata):
+    def _exported(self, arch, signature="*fp32:16, i32, 64", wrapped=False, **metadata):
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "kernel.py")
-            with open(path, "w") as f:
-                f.write(self._KERNEL)
             b = {
                 "prefix": "fake_bmm_f32",
-                "kernel_path": path,
-                "kernel_name": "kern",
+                "fn": types.SimpleNamespace(jit_kernel=self._KERNEL)
+                if wrapped
+                else self._KERNEL,
                 "signature": signature,
                 "launch": {"grid_x": "M"},
                 "num_warps": 8,
@@ -1070,21 +1071,26 @@ class TestTritonExport(unittest.TestCase):
             self.assertEqual(seen["target"], ("cuda", 90, 32))
             self.assertEqual(seen["options"].get("arch"), "sm90")
 
-    def test_divisibility_hints_leave_the_signature_and_constants_split_out(self):
-        with self._exported("sm_90") as (_, _extra, seen):
-            self.assertEqual(seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"})
-            self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
-
-    def test_a_divisibility_hint_reaches_the_compiler_as_an_attr(self):
+    def test_signatures_preserve_types_constants_and_alignment(self):
         # Dropped from the signature and not passed on, the hint would be inert and
         # the SASS generically addressed -- measured ~7x slower on bmm. The key is an
         # index into the kernel's full parameter list, constexprs included, which is
         # how ast_to_ttir sizes the table it looks them up in.
-        with self._exported("sm_90", signature="*fp32:16, i32:16, 64") as (_, _e, seen):
-            self.assertEqual(
-                seen["src"]["attrs"],
-                {(0,): [["tt.divisibility", 16]], (1,): [["tt.divisibility", 16]]},
-            )
+        for wrapped in (False, True):
+            with (
+                self.subTest(wrapped=wrapped),
+                self._exported(
+                    "sm_90", signature="*fp32:16, i32:16, 64", wrapped=wrapped
+                ) as (_, _extra, seen),
+            ):
+                self.assertEqual(
+                    seen["src"]["signature"], {"A_ptr": "*fp32", "M": "i32"}
+                )
+                self.assertEqual(seen["src"]["constexprs"], {"BLOCK": 64})
+                self.assertEqual(
+                    seen["src"]["attrs"],
+                    {(0,): [["tt.divisibility", 16]], (1,): [["tt.divisibility", 16]]},
+                )
 
     def test_the_compiled_warp_count_wins_over_the_requested_one(self):
         # Warp specialization raises it (ttg.total-num-warps), and the launcher's
@@ -1101,8 +1107,12 @@ class TestTritonExport(unittest.TestCase):
     def test_a_signature_that_does_not_match_the_kernel_is_refused(self):
         # Silently, the entries would pair with the wrong parameters: every attr key
         # and baked constant lands on a neighbour.
-        with self.assertRaisesRegex(RuntimeError, "signature has 2 entries"):
-            with self._exported("sm_90", signature="*fp32:16, i32"):
+        for wrapped in (False, True):
+            with (
+                self.subTest(wrapped=wrapped),
+                self.assertRaisesRegex(RuntimeError, "signature has 2 entries"),
+                self._exported("sm_90", signature="*fp32:16, i32", wrapped=wrapped),
+            ):
                 pass
 
     def test_a_kernel_that_wants_scratch_is_refused(self):
