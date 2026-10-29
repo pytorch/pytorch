@@ -17,9 +17,9 @@
 
 namespace torch::aot_inductor {
 
-// The model instances that AOTInductorModelContainer hands out to concurrent
-// run() calls. Model must provide is_finished() and wait_for_completion();
-// Stream is an opaque device stream handle.
+// Owns the model instances that AOTInductorModelContainer hands out to
+// concurrent run() calls. Model must provide is_finished() and
+// wait_for_completion(); Stream is an opaque device stream handle.
 template <typename Model, typename Stream>
 class ModelPool {
  public:
@@ -37,9 +37,33 @@ class ModelPool {
     available_models_.reserve(num_models);
   }
 
-  void add_model(Model* model) {
-    models_.push_back(model);
-    available_models_.push_back(model);
+  // Takes ownership of a model. The pool is filled before it is shared.
+  Model& add_model(std::unique_ptr<Model> model) {
+    models_.push_back(std::move(model));
+    available_models_.push_back(models_.back().get());
+    return *models_.back();
+  }
+
+  size_t size() const {
+    return models_.size();
+  }
+
+  // The first-added model. Its identity is stable for the pool's lifetime.
+  // The pool must not be empty.
+  Model& primary_model() {
+    return *models_.front();
+  }
+
+  const Model& primary_model() const {
+    return *models_.front();
+  }
+
+  // The caller must keep runs from using the models meanwhile.
+  template <typename Fn>
+  void for_each_model(Fn&& fn) {
+    for (auto& model : models_) {
+      fn(*model);
+    }
   }
 
   // Stream affinity is intended for controlled multi-stream benchmarking with
@@ -79,7 +103,7 @@ class ModelPool {
       return AOTI_STREAM_AFFINITY_UNBOUND;
     }
     for (size_t i = 0; i < models_.size(); ++i) {
-      if (models_[i] == stream_it->second) {
+      if (models_[i].get() == stream_it->second) {
         return static_cast<int64_t>(i);
       }
     }
@@ -319,8 +343,8 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  // All model instances, in the container's index order.
-  std::vector<Model*> models_;
+  // Every model instance, in the container's index order.
+  std::vector<std::unique_ptr<Model>> models_;
 
   // Holds the model instances available for inference. When stream affinity
   // is enabled, each model is in exactly one execution state under

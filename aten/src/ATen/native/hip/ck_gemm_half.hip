@@ -605,13 +605,10 @@ void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     "gfx1150", "gfx1151"
 #endif
   };
-  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake)
-  // and at::Context::ckGemmSupported().
-  static const std::vector<std::string> supported_archs = {"gfx90a", "gfx942", "gfx950"};
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
   }
-  else if (at::detail::getCUDAHooks().isGPUArch(supported_archs)) {
+  else if (at::globalContext().ckGemmSupported()) {
     dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
   }
   else {
