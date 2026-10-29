@@ -104,7 +104,9 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
     // free dim (M, N or batch count), rounded up. Separate from Lookup so a caller
     // can tell a measured hit from a borrow, which is expected to be validated.
     // Unconditional: TunableOp dispatch never calls this, so calling it is the
-    // opt-in and there is no flag to consult.
+    // opt-in and there is no flag to consult. Nor is there a check for an
+    // existing exact entry -- a candidate equal to the query differs in no dim,
+    // so it never matches. Call Lookup first and only come here on a miss.
     //
     // Caller contract: benchmark the returned solution and reject it unless
     // Call() reports OK. The match is made on the params signature, which does
