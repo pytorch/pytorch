@@ -209,7 +209,8 @@ def child(label, aten, prefix):
             "--tb=short",
             "--reruns=0",
             f"--junitxml={REPORT / (label + '.xml')}",
-            "-x",
+            "-p",
+            "no:xdist",
             *nodes,
         ],
         plugins=[plugin],
@@ -226,7 +227,12 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
     cache = WORK / f"cache-{label}"
     env["TRITON_CACHE_DIR"] = str(cache / "triton")
     env["TORCHINDUCTOR_CACHE_DIR"] = str(cache / "inductor")
-    env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+    if prefix:
+        # Match the original CI cache policy. Fresh per-phase directories isolate
+        # attempts without changing tests that compare generated source text.
+        env.pop("TORCHINDUCTOR_FORCE_DISABLE_CACHES", None)
+    else:
+        env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
     env["TORCH_COMPILE_DEBUG"] = "1"
     env["MIOPEN_ENABLE_LOGGING"] = "1"
     env["MIOPEN_LOG_LEVEL"] = "6"
@@ -255,7 +261,27 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
     log = (REPORT / f"{label}.log").read_text(errors="replace")
     assert code in (0, 1) and "CONV_NUMERICS" in log
     assert "passed" in log or "1 failed" in log
-    assert "RuntimeError:" not in log
+    if not prefix:
+        assert "RuntimeError:" not in log
+    import xml.etree.ElementTree as ET
+
+    cases = ET.parse(REPORT / f"{label}.xml").getroot().iter("testcase")
+    cases = list(cases)
+    target = [c for c in cases if c.get("name") == "test_conv_with_as_strided_cuda"]
+    assert len(target) == 1 and target[0].find("skipped") is None
+    test_results = {
+        "original_case": {
+            "name": target[0].get("name"),
+            "failed": target[0].find("failure") is not None,
+            "error": target[0].find("error") is not None,
+        },
+        "executed_cases": len(cases),
+        "all_failures": [
+            {"name": c.get("name"), "classname": c.get("classname")}
+            for c in cases
+            if c.find("failure") is not None or c.find("error") is not None
+        ],
+    }
     with zipfile.ZipFile(
         DEBUG / f"{label}-generated-kernels.zip", "w", zipfile.ZIP_DEFLATED
     ) as archive:
@@ -270,7 +296,11 @@ def phase(label, *, site=None, sha=None, aten=False, prefix=False):
                     ".amdgcn",
                 }:
                     archive.write(path, path.relative_to(cache))
-    return {"exit": code, **json.loads((REPORT / f"{label}-numerics.json").read_text())}
+    return {
+        "exit": code,
+        **test_results,
+        **json.loads((REPORT / f"{label}-numerics.json").read_text()),
+    }
 
 
 def main():
