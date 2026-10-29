@@ -16,9 +16,9 @@ import os
 
 RUN_CODE_SKIPS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 
-# (reason, condition). functools.wraps copies it onto outer wrappers such as
-# instantiate_test.
-_MARK_ATTR = "__pt_rerun_code_skip__"
+# (reason, condition) pairs, one per stacked decorator. functools.wraps copies
+# them onto outer wrappers such as instantiate_test.
+_MARK_ATTR = "__pt_rerun_code_skips__"
 
 
 def _forwarding_wrapper(fn):
@@ -38,17 +38,14 @@ def mark_rerun_code_skip(fn, reason, condition):
     # Decorators are often applied to a function shared by several tests
     # (OpInfo variants, device classes), so mark a fresh wrapper instead.
     marked = fn if isinstance(fn, type) else _forwarding_wrapper(fn)
-    setattr(marked, _MARK_ATTR, (reason, condition))
+    setattr(marked, _MARK_ATTR, (*getattr(fn, _MARK_ATTR, ()), (reason, condition)))
     return marked
 
 
 def rerun_code_skip_reason(fn, cls):
     """The reason rerun-disabled-tests runs this test, or None if it does not."""
     for obj in (fn, cls):
-        mark = getattr(obj, _MARK_ATTR, None)
-        if mark is None:
-            continue
-        reason, condition = mark
-        if condition():
-            return reason
+        for reason, condition in getattr(obj, _MARK_ATTR, ()):
+            if condition():
+                return reason
     return None

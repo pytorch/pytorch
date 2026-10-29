@@ -40,5 +40,11 @@ class TestCodeSkipSuite(TestCase):
         pass
 
 
+@known_failure_skip_if(lambda: True, "class known failure")
+class TestCodeSkipSuiteClass(TestCase):
+    def test_in_known_failure_class(self):
+        pass
+
+
 if __name__ == "__main__":
     run_tests()

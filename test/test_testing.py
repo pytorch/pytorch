@@ -820,6 +820,11 @@ class TestRerunCodeSkip(TestCase):
         failing = True
         self.assertEqual(rerun_code_skip_reason(marked, None), "known failure")
 
+    def test_stacked_marks(self):
+        inner = mark_rerun_code_skip(_returns_ran, "inner failure", lambda: True)
+        outer = mark_rerun_code_skip(inner, "outer failure", lambda: False)
+        self.assertEqual(rerun_code_skip_reason(outer, None), "inner failure")
+
     def test_class_reason(self):
         class TestFoo(TestCase):
             def test_a(self):
@@ -835,7 +840,7 @@ class TestRerunCodeSkip(TestCase):
             if rerun:
                 self.assertEqual(decorated(None), "ran")
             else:
-                with self.assertRaises(unittest.SkipTest):
+                with self.assertRaisesRegex(unittest.SkipTest, "^known failure$"):
                     decorated(None)
         self.assertEqual(rerun_code_skip_reason(decorated, None), "known failure" if rerun else None)
 
@@ -846,7 +851,7 @@ class TestRerunCodeSkip(TestCase):
                 skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/1")(_returns_ran),
             ]
             for fn in skip_if_rocm:
-                with self.assertRaises(unittest.SkipTest):
+                with self.assertRaisesRegex(unittest.SkipTest, "^skipIfRocm: "):
                     fn(None)
             others = [
                 skipCUDAIfRocm(_returns_ran),
@@ -876,13 +881,13 @@ def _junit_outcome(case: ET.Element) -> tuple[str, str | None]:
 @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "code skip collection doesn't depend on the device")
 class TestRerunCodeSkipCollection(TestCase):
-    def _run_suite(self, rerun: bool) -> dict[str, list[tuple[str, str | None]]]:
+    def _run_suite(self, rerun: bool, extra_args: tuple[str, ...] = ()) -> dict[str, list[tuple[str, str | None]]]:
         with tempfile.TemporaryDirectory() as tmp:
             xml_path = Path(tmp) / "report.xml"
             # Run the file directly, as run_test.py does, so its decorators apply before pytest loads conftest.
             args = [
                 sys.executable, "junit_xml_testdata/rerun_code_skip_suite.py", "--use-pytest",
-                f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider",
+                f"--junit-xml-reruns={xml_path}", "-p", "no:cacheprovider", *extra_args,
             ]
             env = dict(_JUNIT_CHILD_ENV)
             if rerun:
@@ -911,6 +916,13 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_code_skip_capability_skip": [("skipped", "known failure")] * 2,
             "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
             "test_listed": [("passed", None)] * 2,
+            "test_in_known_failure_class": [("passed", "class known failure")] * 2,
+        })
+
+    def test_exitfirst_drops_known_failures(self):
+        self.assertEqual(self._run_suite(rerun=True, extra_args=("-x",)), {
+            "test_code_skip_disabled_elsewhere": [("skipped", None)] * 2,
+            "test_listed": [("passed", None)] * 2,
         })
 
     def test_normal_mode_skips_known_failures(self):
@@ -922,6 +934,7 @@ class TestRerunCodeSkipCollection(TestCase):
             "test_known_failure_elsewhere": [("passed", None)],
             "test_listed": [("passed", None)],
             "test_not_listed": [("passed", None)],
+            "test_in_known_failure_class": [("skipped", None)],
         })
 
 
