@@ -139,9 +139,13 @@ AOTITorchError aoti_torch_delete_cuda_mem_pool(CUDAMemPoolHandle pool) {
       { delete reinterpret_cast<at::cuda::MemPool*>(pool); });
 }
 
-AOTITorchError aoti_torch_create_cuda_graph(CUDAGraphHandle* ret_graph) {
+AOTITorchError aoti_torch_create_cuda_graph(
+    int32_t keep_graph,
+    int64_t num_rng_states,
+    CUDAGraphHandle* ret_graph) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *ret_graph = reinterpret_cast<CUDAGraphHandle>(new at::cuda::CUDAGraph());
+    *ret_graph = reinterpret_cast<CUDAGraphHandle>(
+        new at::cuda::CUDAGraph(keep_graph != 0, num_rng_states));
   });
 }
 
@@ -152,10 +156,24 @@ AOTITorchError aoti_torch_delete_cuda_graph(CUDAGraphHandle graph) {
 
 AOTITorchError aoti_torch_cuda_graph_capture_begin(
     CUDAGraphHandle graph,
-    CUDAMemPoolHandle pool) {
+    CUDAMemPoolHandle pool,
+    int32_t capture_mode) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
     TORCH_CHECK(pool != nullptr, "Null CUDA memory pool handle");
+    TORCH_CHECK(
+        capture_mode == cudaStreamCaptureModeGlobal ||
+            capture_mode == cudaStreamCaptureModeThreadLocal ||
+            capture_mode == cudaStreamCaptureModeRelaxed,
+        "Invalid CUDA graph capture mode ",
+        capture_mode);
+    // Split so hipify keeps the name, which ROCm's allocator reports too.
+    TORCH_CHECK(
+        c10::cuda::CUDACachingAllocator::name() !=
+            "c"
+            "udaMallocAsync",
+        "CUDA graph capture isn't supported with "
+        "PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync");
     auto* mem_pool = reinterpret_cast<at::cuda::MemPool*>(pool);
     // On another device, the allocator would quietly route the capture to a
     // new pool on that device.
@@ -169,7 +187,7 @@ AOTITorchError aoti_torch_cuda_graph_capture_begin(
     // hosts would create one lazily inside the capture, which fails.
     at::cuda::detail::getDefaultCUDAGenerator(mem_pool->device());
     reinterpret_cast<at::cuda::CUDAGraph*>(graph)->capture_begin(
-        mem_pool->id(), cudaStreamCaptureModeThreadLocal);
+        mem_pool->id(), static_cast<cudaStreamCaptureMode>(capture_mode));
   });
 }
 
@@ -183,7 +201,12 @@ AOTITorchError aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph) {
 AOTITorchError aoti_torch_cuda_graph_replay(CUDAGraphHandle graph) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(graph != nullptr, "Null CUDA graph handle");
-    reinterpret_cast<at::cuda::CUDAGraph*>(graph)->replay();
+    auto* cuda_graph = reinterpret_cast<at::cuda::CUDAGraph*>(graph);
+    // As torch.cuda.CUDAGraph.replay does for keep_graph.
+    if (!cuda_graph->has_graph_exec()) {
+      cuda_graph->instantiate();
+    }
+    cuda_graph->replay();
   });
 }
 
