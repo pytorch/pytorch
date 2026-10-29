@@ -5002,7 +5002,7 @@ class TestPrecompileDynamoCapture(TestCase):
                 "    def forward(self, x):\n        torch._dynamo.graph_break()\n        return cos(x)\n"
                 "if save:\n    with capture(single, artifact_path=a, cache_path=c, backend='eager') as cap:\n"
                 "        cap(Model(), x)\nelse:\n    f = load(a, c)\n"
-                "    assert f.installed and f(Model(), x).equal(single(Model(), x))\n"
+                "    assert f.installed and f(Model(), x).equal(x.cos().sum(dim=0))\n"
             )
         for save in ("1", ""):
             argv = [self.dir, self.module_name, self.artifact, self.cache, save]
@@ -10418,6 +10418,16 @@ class TestPrecompileCustomOpRecording(TestCase):
             lib.impl(op, torch.Tensor.clone, "CPU")
         # apply() graph-breaks on dropped, and the graph before the break holds
         # LIN's parameter as an attribute, so output_graph bypasses the compile.
+        from torch._dynamo.precompile_package import _CapturePackage
+
+        recorded = []
+        add = _CapturePackage.add_graph_break_op
+
+        def rec(package, op, *args, **kwargs):
+            recorded.append(str(op))
+            return add(package, op, *args, **kwargs)
+
+        self.enterContext(mock.patch.object(_CapturePackage, "add_graph_break_op", rec))
         python_code = self._capture_module(
             "import torch\nclass Scale(torch.nn.Module):\n    def __init__(self):\n"
             "        super().__init__()\n        self.w = torch.nn.Parameter(torch.ones(4))\n"
@@ -10427,6 +10437,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             "def fn(x):\n    return torch.ops.precompile_bypassed.kept.default(scale(x.sin()))\n",
             tracer=DynamoTracer(require_complete=False),
         )
+        self.assertIn("precompile_bypassed.dropped.default", recorded)
         expected = (("precompile_bypassed::kept", ""),)
         self.assertIn(f"CUSTOM_OPS = {expected!r}", python_code)
 
