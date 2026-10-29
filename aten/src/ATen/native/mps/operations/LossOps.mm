@@ -53,25 +53,6 @@ static std::string reductionToString(int64_t reduction) {
   }
 }
 
-static MPSGraphTensor* reduceTensor(MPSGraphTensor* tensor,
-                                    int64_t reduction,
-                                    MPSGraph* mpsGraph,
-                                    NSUInteger axesCount) {
-  NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:axesCount];
-  for (NSUInteger i = 0; i < axesCount; i++)
-    axes[i] = @(i);
-
-  switch (reduction) {
-    case Reduction::Mean:
-      return [mpsGraph meanOfTensor:tensor axes:axes name:@"reductionMeanTensor"];
-    case Reduction::Sum:
-      return [mpsGraph reductionSumWithTensor:tensor axes:axes name:@"reductionSumTensor"];
-    default:
-      assert(reduction == Reduction::None);
-      return tensor;
-  }
-}
-
 // namespace to localize the CachedGraph struct for Binary Cross Entropy
 namespace BCELoss {
 
@@ -457,91 +438,13 @@ static void nllnd_loss_forward_impl(Tensor& output,
 // APIs exposed to at::native scope
 
 // HuberLoss
-
-Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
-  std::string op_name = __func__;
-  using namespace mps;
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      isFloatingType(input.scalar_type()), "\"huber_mps\" not implemented for '", input.scalar_type(), "'");
-  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
-  TORCH_CHECK(output.is_mps());
-
-  if (reduction == Reduction::None)
-    output.resize_(target.sizes());
-  if (reduction == Reduction::Sum)
-    output.resize_({});
-  if (reduction == Reduction::Mean)
-    output.resize_({});
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* targetTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    // huber's output keeps input's dtype even when the pair promotes, so the result is cast back.
-    const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
-    std::string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" +
-        getTensorsStringKey({input, target, output});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto inputPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      auto targetPlaceholder = mpsGraphRankedPlaceHolder(mpsGraph, target);
-      auto inputTensor = castMPSTensor(mpsGraph, inputPlaceholder, computeType);
-      auto targetTensor = castMPSTensor(mpsGraph, targetPlaceholder, computeType);
-
-      MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta shape:@[ @1 ] dataType:computeType];
-      MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f shape:@[ @1 ] dataType:computeType];
-
-      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                          secondaryTensor:targetTensor
-                                                                     name:nil];
-      MPSGraphTensor* absDiffTensor = [mpsGraph absoluteWithTensor:diffTensor name:nil];
-      MPSGraphTensor* firstCondTensor = [mpsGraph multiplicationWithPrimaryTensor:absDiffTensor
-                                                                  secondaryTensor:absDiffTensor
-                                                                             name:nil];
-      firstCondTensor = [mpsGraph multiplicationWithPrimaryTensor:firstCondTensor secondaryTensor:halfTensor name:nil];
-      MPSGraphTensor* secondCondTensor = [mpsGraph multiplicationWithPrimaryTensor:deltaTensor
-                                                                   secondaryTensor:halfTensor
-                                                                              name:nil];
-      secondCondTensor = [mpsGraph subtractionWithPrimaryTensor:absDiffTensor
-                                                secondaryTensor:secondCondTensor
-                                                           name:nil];
-      secondCondTensor = [mpsGraph multiplicationWithPrimaryTensor:deltaTensor
-                                                   secondaryTensor:secondCondTensor
-                                                              name:nil];
-      MPSGraphTensor* outputTensor =
-          [mpsGraph selectWithPredicateTensor:[mpsGraph lessThanOrEqualToWithPrimaryTensor:absDiffTensor
-                                                                           secondaryTensor:deltaTensor
-                                                                                      name:nil]
-                          truePredicateTensor:firstCondTensor
-                         falsePredicateTensor:secondCondTensor
-                                         name:nil];
-
-      newCachedGraph->inputTensor_ = inputPlaceholder;
-      newCachedGraph->targetTensor_ = targetPlaceholder;
-      newCachedGraph->outputTensor_ =
-          castMPSTensor(mpsGraph,
-                        reduceTensor(outputTensor, reduction, mpsGraph, input.sizes().size()),
-                        getMPSDataType(output.scalar_type()));
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor_, target);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-  return output;
+static void huber_mps_kernel(TensorIterator& iter, double delta) {
+  const auto dtype = iter.common_dtype();
+  TORCH_CHECK_NOT_IMPLEMENTED(mps::supportedFloatingType(dtype), "\"huber_mps\" not implemented for '", dtype, "'");
+  mps::lib.exec_binary_kernel(iter, "huber", delta, at::toOpMathType(dtype));
 }
 
-Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
-  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
-  Tensor output = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-  return huber_loss_out_mps(input, target, reduction, delta, output);
-}
+REGISTER_DISPATCH(huber_stub, &huber_mps_kernel)
 
 Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
                                     const Tensor& input,
