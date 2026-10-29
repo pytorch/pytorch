@@ -151,7 +151,7 @@ def _quantize_mxfp8_reference_nd(
 
 def _quantize_mxfp8_tma(
     input: torch.Tensor,
-    dim: tuple[int, int] | None,
+    dim: tuple[int, int],
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ):

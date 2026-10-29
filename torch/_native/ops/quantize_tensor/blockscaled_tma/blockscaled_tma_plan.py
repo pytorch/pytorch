@@ -5,6 +5,10 @@ from typing import NamedTuple
 import torch
 
 
+_QUANT_ORIENTATION_DIM_K = 0
+_QUANT_ORIENTATION_DIM_M = 1
+_QUANT_ORIENTATION_DIM_KM = 2
+
 _DIM_K_TILE_M_SIZE_128 = 128
 _DIM_K_MAX_TILE_K_SIZE_128 = 128
 _DIM_M_KM_SMALL_TILE_32_128 = (32, 128)
@@ -33,13 +37,20 @@ def select_blockscaled_tma_plan(
     K: int,
     *,
     input_dtype: torch.dtype,
-    do_dim_k: bool,
-    do_dim_m: bool,
+    quant_orientation_id: int,
     is_square_scaling: bool,
 ) -> BlockscaledTmaPlan:
     """Select the existing B200-tuned tile, cluster, masking, and grid policy."""
-    if not (do_dim_k or do_dim_m):
-        raise ValueError("at least one quantization axis is required")
+    if quant_orientation_id not in (
+        _QUANT_ORIENTATION_DIM_K,
+        _QUANT_ORIENTATION_DIM_M,
+        _QUANT_ORIENTATION_DIM_KM,
+    ):
+        raise ValueError(
+            f"unsupported quantization orientation: {quant_orientation_id}"
+        )
+    do_dim_k = quant_orientation_id != _QUANT_ORIENTATION_DIM_M
+    do_dim_m = quant_orientation_id != _QUANT_ORIENTATION_DIM_K
     scale_group_size = 32
 
     s_num_row_blk_k = s_num_col_blk_k = None
