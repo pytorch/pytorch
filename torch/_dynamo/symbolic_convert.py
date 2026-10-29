@@ -147,6 +147,7 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _graph_break_op_package,
     _tensor_device_types,
     counters,
     FrameState,
@@ -1098,6 +1099,26 @@ def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any
     return wrapper
 
 
+def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None:
+    from .variables.torch import BaseTorchVariable
+
+    # The instruction runs eagerly, so the ops it calls or passes must be
+    # registered when served. Lazy items are read, never realized.
+    vts: list[VariableTracker] = []
+    VariableTracker.visit(vts.append, popped)
+    devices = frozenset[str]()
+    for v in vts:
+        if isinstance(v, LazyVariableTracker):
+            devices |= _tensor_device_types(v.peek_value())
+        elif isinstance(v, TensorVariable) and v.device:
+            devices |= {v.device.type}
+    for vt in (v.unwrap() for v in popped):
+        if isinstance(vt, LazyVariableTracker):
+            package.add_graph_break_op(vt.peek_value(), device_types=devices)
+        elif isinstance(vt, BaseTorchVariable):
+            package.add_graph_break_op(vt.value, device_types=devices)
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1123,9 +1144,15 @@ def break_graph_if_unsupported(
                         "expected speculation.reason is not None to be true"
                     )
                 return handle_graph_break(self, inst, speculation.reason)
+            package = _graph_break_op_package(self)
+            stack = self.stack[:] if package else []
             try:
                 return inner_fn(self, inst)
             except (Unsupported, UserError) as excp:
+                # Before every fallback (try block, loop, skipped frame) and the
+                # restart that resumes after this instruction.
+                if package:
+                    _record_graph_break_ops(package, stack[len(self.stack) :])
                 if self.active_generic_context_managers:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:
@@ -1200,28 +1227,6 @@ def break_graph_if_unsupported(
             # naturally reconstructs the wrapper via LOAD_GLOBAL.
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
-
-            if (package := self.output.package) and package.records_graph_break_ops:
-                from .variables.torch import BaseTorchVariable
-
-                # The instruction runs eagerly, so the ops it calls or passes must be
-                # registered when served. Lazy items are read, never realized.
-                popped = self.stack[len(self.stack) - (int(push) - stack_effect) :]
-                vts: list[VariableTracker] = []
-                VariableTracker.visit(vts.append, popped)
-                devices = frozenset[str]()
-                for v in vts:
-                    if isinstance(v, LazyVariableTracker):
-                        devices |= _tensor_device_types(v.peek_value())
-                    elif isinstance(v, TensorVariable) and v.device:
-                        devices |= {v.device.type}
-                for vt in map(VariableTracker.unwrap, popped):
-                    if isinstance(vt, LazyVariableTracker):
-                        package.add_graph_break_op(
-                            vt.peek_value(), device_types=devices
-                        )
-                    elif isinstance(vt, BaseTorchVariable):
-                        package.add_graph_break_op(vt.value, device_types=devices)
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
