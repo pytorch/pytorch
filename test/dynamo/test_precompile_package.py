@@ -2736,8 +2736,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     with _capture_config():
                         raise RuntimeError("boom")
                 self.assertEqual(flags(), ambient)
-            self.assertEqual(len(logs.records), 1)
+            self.assertEqual(len(logs.records), 2)
             self.assertIn("autotune_at_compile_time=False", logs.output[0])
+            self.assertIn("multi_kernel=1 to 0", logs.output[1])
 
             # Config values are per thread, so a worker entering the scope
             # patches only itself and the main thread stays ambient.
