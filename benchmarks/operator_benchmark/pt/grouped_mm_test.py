@@ -11,8 +11,9 @@ Shapes follow the Primus-Turbo grouped GEMM benchmark
 K = moe_intermediate_size) projections with B = n_routed_experts / EP local experts
 for EP in (32, 16, 8), and M tokens routed to every expert.
 
-The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient tests
-time backward through all inputs (dX and dW) and through each input on its own.
+The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient test
+times backward through both inputs (dX and dW). Each test first checks the output, dX
+and dW against per-group matmuls with Primus-Turbo's tolerances.
 """
 
 # model: (n_routed_experts, moe_intermediate_size, hidden_size)
@@ -82,18 +83,48 @@ grouped_mm_configs_long_per_dtype = [
 ]
 
 
+# Primus-Turbo's check_allclose rtol and atol
+TOLERANCES = {torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.float32: 1e-4}
+
+
+def check_correctness(x, w, offs):
+    """Primus-Turbo's check: output, dX and dW against per-group matmuls."""
+    x_ref, w_ref = (t.detach().requires_grad_() for t in (x, w))
+    x, w = (t.detach().requires_grad_() for t in (x, w))
+    with torch.enable_grad():
+        out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
+        ends = offs.tolist()
+        groups = zip([0] + ends[:-1], ends)
+        ref = torch.cat([x_ref[s:e] @ w_ref[i].t() for i, (s, e) in enumerate(groups)])
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+        ref.backward(grad_out)
+    tol = TOLERANCES[x.dtype]
+    pairs = {"fwd": (out, ref), "dX": (x.grad, x_ref.grad), "dW": (w.grad, w_ref.grad)}
+    ok = {k: torch.allclose(a, b, rtol=tol, atol=tol) for k, (a, b) in pairs.items()}
+    status = "PASS" if all(ok.values()) else "FAIL"
+    details = ", ".join(f"{k}={v}" for k, v in ok.items())
+    shapes = f"x {tuple(x.shape)} w {tuple(w.shape)} {x.dtype}"
+    print(f"# Correctness Check: {status} ({details}) {shapes}")
+
+
 class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, case, B, M, N, K, device, dtype):
-        x_grad, w_grad = self.auto_set(), self.auto_set()
-        opts = {"device": device, "dtype": dtype}
+        # Both inputs need grad so the gradient test times dX and dW together, like Primus.
+        opts = {"device": device, "dtype": dtype, "requires_grad": True}
         self.inputs = {
-            "x": torch.randn(B * M, K, requires_grad=x_grad, **opts),
-            "w": torch.randn(B, N, K, requires_grad=w_grad, **opts),
+            "x": torch.randn(B * M, K, **opts),
+            "w": torch.randn(B, N, K, **opts),
             "offs": torch.arange(1, B + 1, device=device, dtype=torch.int32) * M,
         }
+        self.checked = False
         self.set_module_name("grouped_mm")
 
     def forward(self, x, w, offs):
+        # Once per test, on the first call, which is in the untimed warmup.
+        if not self.checked:
+            self.checked = True
+            check_correctness(x, w, offs)
         return torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
 
     def get_memory_traffic_bytes(self):
