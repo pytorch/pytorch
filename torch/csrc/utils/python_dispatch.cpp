@@ -495,6 +495,33 @@ static void pyobject_dispatch_bump_version(PyObject* obj) {
   }
 }
 
+// A Python DispatchKeySet for key_set. Creating a pybind11 instance costs
+// ~0.5-1.5 us per call, and Python can't change a DispatchKeySet (its methods
+// return new ones), so calls with the same key set share one object. A thread
+// sees few distinct key sets at a time. The cached objects are never released,
+// as a thread can outlive the interpreter.
+static py::object pyobject_dispatch_key_set_object(
+    c10::DispatchKeySet key_set) {
+  struct Entry {
+    uint64_t raw_repr;
+    PyObject* obj;
+  };
+  thread_local std::array<Entry, 4> cache{};
+  thread_local size_t next_slot = 0;
+  const uint64_t raw_repr = key_set.raw_repr();
+  for (const auto& entry : cache) {
+    if (entry.obj != nullptr && entry.raw_repr == raw_repr) {
+      return py::reinterpret_borrow<py::object>(entry.obj);
+    }
+  }
+  py::object obj = py::cast(key_set);
+  auto& slot = cache[next_slot];
+  next_slot = (next_slot + 1) % cache.size();
+  Py_XDECREF(slot.obj);
+  slot = {raw_repr, Py_NewRef(obj.ptr())};
+  return obj;
+}
+
 static PyObject* pyobject_dispatch_call_redispatch_cpp(
     PyObject* cpp_redispatch_fn,
     c10::DispatchKeySet key_set,
@@ -503,7 +530,7 @@ static PyObject* pyobject_dispatch_call_redispatch_cpp(
     Py_ssize_t nkwargs,
     PyObject* kwnames,
     Py_ssize_t op_args_start) {
-  py::object py_key_set = py::cast(key_set);
+  py::object py_key_set = pyobject_dispatch_key_set_object(key_set);
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
@@ -538,7 +565,7 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
     Py_ssize_t nkwargs,
     PyObject* kwnames,
     Py_ssize_t op_args_start) {
-  py::object py_key_set = py::cast(key_set);
+  py::object py_key_set = pyobject_dispatch_key_set_object(key_set);
   c10::SmallVector<PyObject*, 64> call_args;
   call_args.reserve(1 + nargs - op_args_start + nkwargs);
   call_args.push_back(py_key_set.ptr());
