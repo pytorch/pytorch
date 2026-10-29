@@ -3985,6 +3985,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def _graph_break_on_factory_requires_grad(
         self, args: list[VariableTracker], kwargs: "dict[str, VariableTracker]"
     ) -> NoReturn:
+        # Only name the flag where turning it off would trace the call.
+        flag_hint = (
+            [
+                "If the result is only used inside the compiled region, turn `torch._dynamo.config.graph_break_on_factory_requires_grad` off."
+            ]
+            if config.graph_break_on_factory_requires_grad
+            and self.value in get_factory_requires_grad_functions()
+            and "out" not in kwargs
+            else []
+        )
         unimplemented(
             gb_type="Attempted to use tensor creation function with requires_grad=True",
             context=f"fn={self.value}, args={args}, kwargs={kwargs}",
@@ -3992,7 +4002,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             hints=[
                 "Create the tensor outside the compiled region.",
                 "Do not set `requires_grad=True`.",
-                "If this is a tensor factory whose result is only used inside the compiled region, turn `torch._dynamo.config.graph_break_on_factory_requires_grad` off.",
+                *flag_hint,
                 *graph_break_hints.SUPPORTABLE,
             ],
         )

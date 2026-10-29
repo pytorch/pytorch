@@ -2150,10 +2150,18 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out, fn(x))
         self.assertEqual(cnt.frame_count, 2)
 
+    @parametrize("factory", ("ones", "full_tensor_fill"))
     @parametrize("dtype", (torch.int64, torch.bool))
-    def test_non_differentiable_dtype_raises_like_eager(self, dtype):
+    def test_non_differentiable_dtype_raises_like_eager(self, dtype, factory):
         def fn(x):
-            return torch.ones(4, dtype=dtype, requires_grad=True) + x
+            if factory == "ones":
+                t = torch.ones(4, dtype=dtype, requires_grad=True)
+            else:
+                # `full` infers the dtype from a tensor fill value.
+                t = torch.full((4,), torch.ones((), dtype=dtype), requires_grad=True)
+            # Returning a tensor that requires grad would graph break and fall
+            # back to eager, which raises the expected error regardless.
+            return t.detach() + x
 
         x = torch.ones(4, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE):
@@ -2271,6 +2279,21 @@ class GraphModule(torch.nn.Module):
         out = torch.compile(fn, backend="eager")(x)
         self.assertEqual(out, fn(x))
         self.assertTrue(out.requires_grad)
+
+    @torch._dynamo.config.patch(graph_break_on_factory_requires_grad=True)
+    def test_gated_graph_break_hint_only_for_factories(self):
+        # Turning the flag off would not trace these, so don't suggest it.
+        fns = (
+            lambda x: torch.asarray(x, requires_grad=True) * 2,
+            lambda x: torch.zeros(4, out=torch.empty(4), requires_grad=True) + x,
+        )
+        for fn in fns:
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+            ) as cm:
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+            self.assertNotIn("graph_break_on_factory_requires_grad", str(cm.exception))
 
 
 if __name__ == "__main__":
