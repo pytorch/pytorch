@@ -94,10 +94,11 @@ def _frozen_kernel_config() -> dict[str, object]:
     """The Triton config both precompile tracers lower under.
 
     A frozen DynamoTracer artifact replays each kernel with one recorded
-    config, so every kernel is tuned before replay. ``triton.multi_kernel=1``
-    is turned off: such a multi-kernel picks its sub-kernel by benchmarking at
-    first launch, which a frozen artifact cannot record. Warns once for each
-    user value overridden.
+    config, so every kernel is tuned before replay. A nonzero
+    ``triton.multi_kernel`` is turned off: a multi-kernel picks its sub-kernel
+    when the loaded module runs, by benchmarking at first launch or from the
+    serving process's ``triton.multi_kernel``, which a frozen artifact cannot
+    record. Warns once for each user value overridden.
     """
     import torch._inductor.config as inductor_config
 
@@ -108,12 +109,12 @@ def _frozen_kernel_config() -> dict[str, object]:
             "every kernel is tuned during capture, before the artifact is written",
         )
     frozen: dict[str, object] = {"triton.autotune_at_compile_time": True}
-    if inductor_config.triton.multi_kernel == 1:
+    if multi_kernel := inductor_config.triton.multi_kernel:
         torch._logging.warning_once(
             log,
-            "precompile capture overrides triton.multi_kernel=1 to 0: a frozen "
-            "artifact cannot record which sub-kernel a multi-kernel picks by "
-            "benchmarking at first launch",
+            f"precompile capture overrides triton.multi_kernel={multi_kernel} to 0: "
+            "a frozen artifact cannot record which sub-kernel a multi-kernel "
+            "picks when it first runs",
         )
         frozen["triton.multi_kernel"] = 0
     return frozen
@@ -141,7 +142,7 @@ def _capture_config(lowers_kernels: bool = True) -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
-    ``triton.multi_kernel=1`` is off (see _frozen_kernel_config). These Triton
+    ``triton.multi_kernel`` is off (see _frozen_kernel_config). These Triton
     overrides, and their warnings, apply only when ``lowers_kernels``: an
     eager-backend capture lowers no kernels.
     Under ``cpp_wrapper`` the forced flag also turns off
