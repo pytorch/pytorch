@@ -1,0 +1,52 @@
+diff --git a/test/cpython/v3_13/test_compare.py b/test/cpython/v3_13/test_compare.py
+index 8166b0eea306e3cd410b3fd719ad48610198c608..b0ab09a7ef6b02ed4147a2d9117cca21f721e238 100644
+--- a/test/cpython/v3_13/test_compare.py
++++ b/test/cpython/v3_13/test_compare.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_compare.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ """Test equality and order comparisons."""
+ import unittest
+ from test.support import ALWAYS_EQ
+@@ -5,7 +23,7 @@ from fractions import Fraction
+ from decimal import Decimal
+ 
+ 
+-class ComparisonSimpleTest(unittest.TestCase):
++class ComparisonSimpleTest(CPythonTestCase):
+     """Test equality and order comparisons for some simple cases."""
+ 
+     class Empty:
+@@ -119,7 +137,7 @@ class ComparisonSimpleTest(unittest.TestCase):
+         self.assertEqual(ALWAYS_EQ, y)
+ 
+ 
+-class ComparisonFullTest(unittest.TestCase):
++class ComparisonFullTest(CPythonTestCase):
+     """Test equality and ordering comparisons for built-in types and
+     user-defined classes that implement relevant combinations of rich
+     comparison methods.
+@@ -506,5 +524,5 @@ class ComparisonFullTest(unittest.TestCase):
+         self.assert_equality_only(d2, d3, True)
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

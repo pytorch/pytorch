@@ -1,13 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import io
 import logging
 import math
 import operator
 import os
 import random
 import sys
-import tempfile
 from functools import reduce
 
 import torch
@@ -118,21 +118,29 @@ class RendezvousEnvTest(TestCase):
     @requires_ucc()
     @retry_on_connect_failures
     def test_logging_init(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
-        os.environ["RANK"] = "0"
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
 
-        previous_handlers = logging.root.handlers
+            previous_handlers = list(logging.root.handlers)
 
-        c10d.init_process_group(backend="ucc", init_method="env://")
+            c10d.init_process_group(backend="ucc", init_method="env://")
 
-        current_handlers = logging.root.handlers
-        self.assertEqual(len(previous_handlers), len(current_handlers))
-        for current, previous in zip(current_handlers, previous_handlers):
-            self.assertEqual(current, previous)
+            current_handlers = logging.root.handlers
+            self.assertEqual(len(previous_handlers), len(current_handlers))
+            for current, previous in zip(current_handlers, previous_handlers):
+                self.assertEqual(current, previous)
 
-        c10d.destroy_process_group()
+            c10d.destroy_process_group()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
@@ -745,14 +753,21 @@ class DistributedDataParallelTest(
         # run the model for 6 iterations, with a checkpoint in the middle
         train_loop(ddp_withload, optimizer_withload, 3)
 
-        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict
-        checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
+        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict.
+        # Broadcast the serialized checkpoint instead of sharing a file, so that concurrent runs on
+        # the same host cannot collide on a fixed path under the shared temp directory.
         if self.rank == 0:
-            torch.save(ddp_withload.state_dict(), checkpoint_path)
+            buffer = io.BytesIO()
+            torch.save(ddp_withload.state_dict(), buffer)
+            object_list = [buffer.getvalue()]
+        else:
+            object_list = [None]
+        dist.broadcast_object_list(object_list)
 
-        dist.barrier()
         map_location = {"cuda:0": f"cuda:{self.rank:d}"}
-        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
+        ddp_state_dict = torch.load(
+            io.BytesIO(object_list[0]), map_location=map_location
+        )
 
         for model in [ddp_withload, model_withload]:
             for p in model.parameters():

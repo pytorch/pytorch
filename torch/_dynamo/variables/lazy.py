@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
 import collections
 import functools
 import inspect
+import operator
 from typing import Any, TYPE_CHECKING
 
 from .. import config
@@ -74,6 +76,13 @@ class ComputedLazyCache:
         op: Callable[..., Any],
         num_nodes: int,
     ) -> None:
+        name = op.__name__
+        if (
+            getattr(operator, name, None) is not op
+            and getattr(builtins, name, None) is not op
+        ):
+            # reconstruct() loads the op as operator.<name> or builtins.<name>
+            raise AssertionError(f"op {name} not reachable in operator or builtins")
         self.value = value
         self.lazy_vars = lazy_vars
         self.args = args
@@ -97,7 +106,16 @@ class ComputedLazyCache:
             if isinstance(lazy_var.realize(), SymNodeVariable):
                 any_symbolic = True
 
-        if any_symbolic:
+        if any_symbolic and self.op is str:
+            # SymNodeVariable has no tp_repr_impl; specialize instead
+            (arg,) = (arg.realize() for arg in self.args)
+            value = (
+                arg.evaluate_expr()
+                if isinstance(arg, SymNodeVariable)
+                else arg.as_python_constant()
+            )
+            self.vt = ConstantVariable.create(self.op(value))
+        elif any_symbolic:
             # The precomputed constant is stale; recompute symbolically
             from .builtin import BuiltinVariable
 
@@ -595,6 +613,20 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
             value = op(*values)
         except Exception:
             return None
+        # min/max return an operand; mixed types make the result type value-dependent
+        if op in (min, max) and len({type(v) for v in values}) > 1:
+            return None
+        if op in (operator.truediv, operator.floordiv, operator.mod):
+            # an int dividend can overflow when converted to float
+            kinds = [{bool: int, int: int, float: float}.get(type(v)) for v in values]
+            if None in kinds or (
+                kinds[0] is int and (kinds[1] is float or op is operator.truediv)
+            ):
+                return None
+            # an unguarded divisor could become zero on a later call
+            divisor = args[1]
+            if isinstance(divisor, LazyVariableTracker) and not divisor.is_realized():
+                return None
         if not ConstantVariable.is_base_literal(value):
             return None
         if not lazy_vars:
@@ -671,9 +703,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         from ..bytecode_transformation import create_call_function
 
         cache = self._cache
-        codegen.add_push_null(
-            lambda: codegen.load_import_from("operator", cache.op.__name__)
-        )
+        name = cache.op.__name__
+        module = "builtins" if getattr(builtins, name, None) is cache.op else "operator"
+        codegen.add_push_null(lambda: codegen.load_import_from(module, name))
         for arg in cache.args:
             codegen(arg)
         codegen.extend_output(create_call_function(len(cache.args), False))
