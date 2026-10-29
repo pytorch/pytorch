@@ -849,7 +849,7 @@ class ConstDictKeySource(ChainedSource):
     index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Cache one storage-order snapshot instead of walking the keys for each index.
+        # Reuse a storage-order snapshot across indices in both prologue and suffix codegen.
         codegen(DictKeysSource(self.base))
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
