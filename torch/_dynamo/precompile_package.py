@@ -1638,6 +1638,7 @@ class _CapturePackage(CompilePackage):
         # code or falls back to eager, so a bypassed compile's ops are dropped like
         # its backend graphs.
         self._compile_graph_break_op_names: set[tuple[str, str]] = set()
+        self._compile_graph_break_code: types.CodeType | None = None
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1664,6 +1665,7 @@ class _CapturePackage(CompilePackage):
         self, code: types.CodeType, global_scope: dict[str, object] | None = None
     ) -> Iterator[None]:
         self._compile_graph_break_op_names = set()
+        self._compile_graph_break_code = code
         with super().code_context(code, global_scope):
             yield
 
@@ -1675,8 +1677,12 @@ class _CapturePackage(CompilePackage):
 
     def record_eager_fallback(self, code: types.CodeType) -> None:
         super().record_eager_fallback(code)
-        self.graph_break_op_names |= self._compile_graph_break_op_names
+        # Only the ops of the compile that gave up on this frame, not those a
+        # bypassed compile of another frame left behind.
+        if code is self._compile_graph_break_code:
+            self.graph_break_op_names |= self._compile_graph_break_op_names
         self._compile_graph_break_op_names = set()
+        self._compile_graph_break_code = None
 
     def add_resume_function(
         self,
