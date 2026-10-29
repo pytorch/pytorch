@@ -22,6 +22,7 @@ from typing_extensions import TypeIs
 
 import torch
 import torch.fx
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.utils._pytree import SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -994,11 +995,10 @@ class RangeVariable(BaseListVariable):
         return r0.step() == r1.step()
 
     def range_count(self, x: VariableTracker) -> int:
-        # Based on CPython
-        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
-        x = x.as_python_constant()
-        if type(x) not in (bool, int, float):
-            return 0
+        # `count` and `sq_contains_impl` only send exact ints and bools here;
+        # other needles use equality-based iteration.
+        # range_contains_long: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c#L436-L480
+        x = specialize_symnode(x).as_python_constant()
 
         start, stop, step = self.start(), self.stop(), self.step()
 
@@ -1080,6 +1080,10 @@ class RangeVariable(BaseListVariable):
         else:
             return SourcelessBuilder.create(tx, not cmp)
 
+    def _specialize_bounds(self) -> "RangeVariable":
+        # Specialize symbolic bounds before using the guarded iterator path.
+        return RangeVariable([specialize_symnode(item) for item in self.items])
+
     def count(
         self,
         tx: "InstructionTranslatorBase",
@@ -1087,6 +1091,10 @@ class RangeVariable(BaseListVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
+
+        # Only exact ints and bools use CPython's arithmetic fast path.
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            return self._specialize_bounds().list_count(tx, args, kwargs)
 
         return SourcelessBuilder.create(tx, self.range_count(*args))
 
@@ -1098,10 +1106,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c (range_index)
         if maybe_get_python_type(args[0]) not in (int, bool):
-            # Specialize symbolic bounds before using the guarded iterator path.
-            iterator = RangeVariable(
-                [specialize_symnode(item) for item in self.items]
-            ).tp_iter_impl(tx)
+            iterator = self._specialize_bounds().tp_iter_impl(tx)
             if isinstance(iterator, variables.misc.DelayGraphBreakVariable):
                 return iterator.call_function(tx, [], {})
             return tx.inline_user_function_return(
@@ -2594,6 +2599,47 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(result)
 
+    def _bytearray_case_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        method_name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # upper(), lower() and title() are METH_NOARGS: Method.__call__
+        # enforces arity before this handler runs, so args/kwargs are
+        # always empty here (same no-arg pattern as list_copy).
+        result = getattr(self.data, method_name)()
+        return ByteArrayVariable(
+            result,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def bytearray_upper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "upper", args, kwargs)
+
+    def bytearray_lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "lower", args, kwargs)
+
+    def bytearray_title(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "title", args, kwargs)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
@@ -2606,6 +2652,9 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "upper": Method(bytearray_upper),
+        "lower": Method(bytearray_lower),
+        "title": Method(bytearray_title),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2637,8 +2686,8 @@ class SizeVariable(TupleVariable):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # torch.Size items may be TensorVariables wrapping scalar tensors with
-        # known constant values (node.meta["example_value"].constant).  Extract
-        # the actual int values so the hash matches eager torch.Size hashing.
+        # known constant values. Extract the actual int values so the hash
+        # matches eager torch.Size hashing.
         from .tensor import TensorVariable
 
         int_items: list[int] = []
@@ -2653,7 +2702,7 @@ class SizeVariable(TupleVariable):
                 example_value = (
                     meta.get("example_value") if isinstance(meta, dict) else None
                 )
-                constant = getattr(example_value, "constant", None)
+                constant = maybe_get_fake_constant(example_value)
                 if isinstance(constant, torch.Tensor) and constant.numel() == 1:
                     int_items.append(int(constant.item()))
                     continue
@@ -2812,7 +2861,8 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         elif isinstance(arg, TensorVariable):
             value = get_fake_value(arg.as_proxy().node, tx)
-            if value.constant is None or value.constant.numel() != 1:
+            constant = maybe_get_fake_constant(value)
+            if constant is None or constant.numel() != 1:
                 unimplemented(
                     gb_type="Indexing torch.Size with non-scalar tensor",
                     context=f"get_item_dyn {self} {arg}",
@@ -2821,7 +2871,7 @@ class SizeVariable(TupleVariable):
                     ),
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            index = value.constant.item()
+            index = constant.item()
         else:
             index = arg.as_python_constant()
 
