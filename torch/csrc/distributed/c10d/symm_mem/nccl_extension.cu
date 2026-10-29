@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <c10/util/irange.h>
 
 namespace c10d::nccl_extension {
 
@@ -44,7 +45,7 @@ __device__ inline void copy_bytes_vec16(
         if (misalign != 0) {
             size_t to_align = min(nbytes, 16 - misalign);
             if (tid == 0) {
-                for (size_t i = 0; i < to_align; ++i) {
+                for (const auto i : c10::irange(to_align)) {
                     dst_base[i] = src_base[i];
                 }
             }

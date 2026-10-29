@@ -40,7 +40,6 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **No backward-compatibility hacks** - Unused code is deleted completely, not renamed with underscores or marked with "removed" comments
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
-- [ ] **Agent guidance stated by intent** - Changes to agent guidance (`CLAUDE.md`, `.agents/skills/`, `REVIEW.md` files) state rules by intent and leave edge cases to the reader's judgment. Flag factual errors and contradictions with other guidance; don't ask for more exemptions, paths or limits to settle gray areas a reader can resolve locally
 
 ### Warnings and Logging
 
@@ -225,6 +224,7 @@ When reviewing changes to workflows, build scripts, or CI configuration:
 - [ ] **No cache-dependent binaries in sensitive contexts** - sccache-backed builds are susceptible to cache corruption; these artifacts should not access sensitive info or be published for general use
 - [ ] **Protected branch rules respected** - Changes to merge rules, release workflows, or deployment environments require extra scrutiny
 - [ ] **Immutable artifact references** - Docker images use immutable tags; no overwriting of published artifacts
+- [ ] **Third-party code pinned by commit SHA** - Pin dependencies (submodules, script clones/checkouts, `pip install git+`, pin files, Actions `uses:`) by full commit SHA, never mutable tags, branches, or no ref at all (first-party `pytorch/*` repos, including Actions refs and script clones, are exempt). Use the commit an upstream release tag points to (the `^{}` commit for annotated tags) and note the tag name. Shell scripts in `.ci/pytorch` read the SHA from `.github/ci_commit_pins/<repo>.txt` via `get_pinned_commit`, with the tag noted at the call site; other scripts may inline the SHA with a tag comment. Nightly pin bumps via `update-commit-hashes` in `.github/workflows/nightly.yml` are fine; do not add dependencies whose consumers the bump PR's CI does not exercise (e.g. schedule-only consumers), leaving bot-merged bumps untested; bump those by hand in reviewed PRs
 
 ### PyTorch API Security
 

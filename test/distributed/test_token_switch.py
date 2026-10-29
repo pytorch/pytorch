@@ -13,6 +13,10 @@ from torch.distributed._token_switch import (
     TokenSwitch,
     TokenSwitchNCCL,
 )
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -454,11 +458,23 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         per_expert_counts = torch.zeros(
             num_local_experts, dtype=torch.int32, device=self.device
         )
-        ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
+        self.assertEqual(routing.handle.get_num_recv_tokens(), NUM_TOKENS)
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
         self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
         torch.cuda.synchronize()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("dtype", [torch.float32, torch.int16, torch.bool])
+    def test_create_routing_invalid_dtype(self, dtype):
+        self._init()
+        ts = self.get_token_switch()
+        topk_idx = torch.zeros(NUM_TOKENS, TOP_K, dtype=dtype, device=self.device)
+        with self.assertRaisesRegex(
+            TypeError, "topk_idx must have dtype int32 or int64"
+        ):
+            ts.create_routing(topk_idx, layout="flat")
 
     @skip_if_lt_x_gpu(2)
     def test_dispatch(self):
@@ -1002,6 +1018,55 @@ class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
     @classmethod
     def backend_str(cls):
         return "nccl2"
+
+
+@requires_nccl_ep()
+class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @skip_if_lt_x_gpu(2)
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_dispatch_combine_roundtrip(self, device, dtype, layout):
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.cuda.set_device(device)
+        max_recv_tokens = self.world_size * NUM_TOKENS
+        cls = type(self)
+        if cls._cached_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            dist.barrier(pg)
+            cls._cached_token_switch = TokenSwitchNCCL(
+                pg, self.world_size, NUM_TOKENS, max_recv_tokens, TOKEN_SIZE_BYTES
+            )
+        ts = cls._cached_token_switch
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, device
+        )
+        topk_idx = topk_idx.to(dtype)
+        routing = ts.create_routing(topk_idx, layout=layout)
+        tokens = torch.full(
+            (NUM_TOKENS, HIDDEN), self.rank + 1, dtype=torch.bfloat16, device=device
+        )
+        dispatched, weights, indices = ts.dispatch(
+            routing, tokens, topk_weights, max_recv_tokens
+        )
+        src_rank = (self.rank - 1) % self.world_size
+        self.assertEqual(dispatched[:NUM_TOKENS], torch.full_like(tokens, src_rank + 1))
+        self.assertEqual(weights[:NUM_TOKENS], torch.ones_like(weights[:NUM_TOKENS]))
+        if layout == "flat":
+            self.assertEqual(indices.dtype, torch.int64)
+        else:
+            self.assertIsNone(indices)
+        combined = ts.combine(routing, dispatched[:NUM_TOKENS].contiguous())
+        self.assertEqual(combined, tokens)
+        self.assertEqual(topk_idx.dtype, dtype)
+
+
+instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
