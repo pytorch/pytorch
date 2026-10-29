@@ -5101,12 +5101,16 @@ class PythonWrapperCodegen(CodeGen):
         (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
         ``arg_names`` positionally, with ``constant_args`` bound here.
         """
+        from torch._higher_order_ops.user_kernel_hop import constant_key
+
         from ..runtime.cutedsl_user_kernel import CuteDSLKernelLauncher
 
+        # Every constant is a snapshot (a passed one is the side table's, a default
+        # is copied in split_args), so equal ones can share a launcher.
         cache_key = (
             id(kernel),
             arg_names,
-            tuple((k, type(v), repr(v)) for k, v in constant_args.items()),
+            tuple((k, constant_key(v)) for k, v in constant_args.items()),
         )
         if cache_key in self.user_defined_cutedsl_kernel_cache:
             return self.user_defined_cutedsl_kernel_cache[cache_key]
@@ -5114,11 +5118,13 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_cutedsl_launchers[name] = CuteDSLKernelLauncher(
             kernel.fn, arg_names, constant_args
         )
-        fn = kernel.fn
+        # Constants by name and type only: a repr can span lines or be huge.
+        fn = inspect.unwrap(kernel.fn)
+        types = ", ".join(f"{k}: {type(v).__name__}" for k, v in constant_args.items())
         self.header.writeline(
-            f"# {name}: CuTeDSL host function {fn.__module__}.{fn.__qualname__}, "
-            f"run(*{list(arg_names)}, stream) with constants {constant_args!r}, bound "
-            "when this module is loaded"
+            f"# {name}: CuTeDSL host function {getattr(fn, '__module__', None)}."
+            f"{getattr(fn, '__qualname__', kernel.name)}, run(*{list(arg_names)}, "
+            f"stream) with constants {{{types}}}, bound when this module is loaded"
         )
         self.user_defined_cutedsl_kernel_cache[cache_key] = name
         return name

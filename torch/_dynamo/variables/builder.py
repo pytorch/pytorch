@@ -1982,7 +1982,7 @@ class VariableBuilder:
                 None,
                 source=self.source,
                 kernel_source=kernel_source,
-                is_wrapper=True,
+                wrapper_type=type(value),
             )
         elif value is create_1d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=1)

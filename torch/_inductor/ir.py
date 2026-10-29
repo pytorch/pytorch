@@ -9139,8 +9139,8 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     torch._library.cutedsl.wrap_cutedsl.
 
     Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
-    generated code launches the host function (Python wrapper) or calls the C entry
-    point exported for it (C++ wrapper), on the wrapper's stream.
+    Python wrapper launches the host function on the current stream of the kernel's
+    device. The C++ wrappers refuse it.
     """
 
     def __init__(
@@ -9167,9 +9167,11 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     def split_args(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Kernel arguments passed at launch (tensors and runtime scalars, in
         signature order) and the constants the generated code binds once (Constexpr
-        arguments, None, objects). Parameters the call left out take their defaults
-        here."""
+        arguments, None, objects). Parameters the call left out take a copy of their
+        defaults, made here as the side table copies passed constants. Unlike those,
+        defaults are not guarded by Dynamo: changing one later does not recompile."""
         from torch._higher_order_ops.cutedsl_kernel_wrap import python_scalar
+        from torch._higher_order_ops.user_kernel_hop import _snapshot
 
         info = self.host_fn_info
         runtime_args: dict[str, Any] = {}
@@ -9180,7 +9182,7 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
             if name in self.ordered_kwargs_for_cpp_kernel:
                 value = self.get_kwargs_value(name)
             else:
-                value = info.defaults[name]
+                value = _snapshot(info.defaults[name])
             if isinstance(value, IRNode):
                 runtime_args[name] = value
             elif info.is_runtime_scalar(name, value):

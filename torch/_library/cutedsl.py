@@ -23,8 +23,7 @@ def _jit_executor_name(fn: Callable[..., Any]) -> str | None:
 
 
 def is_cutedsl_jit_function(obj: object) -> bool:
-    """Whether ``obj`` is a ``@cute.jit`` host function. Cheap enough for Dynamo's
-    VariableBuilder: it only imports cutlass once the function looks like one."""
+    """Whether ``obj`` is a ``@cute.jit`` host function."""
     if not inspect.isfunction(obj):
         return False
     dsl_cls = obj.__dict__.get("_dsl_cls")
@@ -38,10 +37,14 @@ def is_cutedsl_jit_function(obj: object) -> bool:
 
 
 def is_traceable_cutedsl_wrapper(obj: object) -> bool:
-    """Whether ``obj`` is what wrap_cutedsl returns, without importing the HOP
-    module (an instance implies it is imported)."""
+    """Whether ``obj`` is what wrap_cutedsl returns, or an instance of a subclass that
+    keeps its ``__call__`` (Dynamo traces one that overrides it as any object),
+    without importing the HOP module (an instance implies it is imported)."""
     module = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")
-    return module is not None and isinstance(obj, module.TraceableCuteDSLKernelWrapper)
+    if module is None:
+        return False
+    cls = module.TraceableCuteDSLKernelWrapper
+    return isinstance(obj, cls) and type(obj).__call__ is cls.__call__
 
 
 def _is_dsl_function(obj: object, module: str, qualname: str) -> bool:
@@ -112,11 +115,14 @@ def wrap_cutedsl(
         >>>
         >>> add = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
         >>>
-        >>> @torch.compile(fullgraph=True)
-        >>> def f(x, y):
-        >>>     out = torch.empty_like(x)
-        >>>     add(x, y, out, x.numel())
-        >>>     return out.relu()
+        >>> class M(torch.nn.Module):
+        >>>     def forward(self, x, y):
+        >>>         out = torch.empty_like(x)
+        >>>         add(x, y, out, x.numel())
+        >>>         return out.relu()
+        >>>
+        >>> x = torch.randn(1000, device="cuda")
+        >>> ep = torch.export.export(M(), (x, torch.randn_like(x)), strict=False)
     """
     from torch._higher_order_ops.cutedsl_kernel_wrap import (
         TraceableCuteDSLKernelWrapper,
