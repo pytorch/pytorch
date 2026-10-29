@@ -17,6 +17,7 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
+    join_dimensions,
     simplify_index_in_vec_range,
     SizeVarAllocator,
     stride_at_vec_range,
@@ -92,6 +93,31 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertIsNotNone(result)
         result2 = stride_at_vec_range(index, i, 16)
         self.assertIsNotNone(result2)
+
+    def test_simplify_index_in_vec_range_skips_full_simplify(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/133734"""
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        s1 = sympy.Symbol("s1", integer=True, positive=True)
+        base = 2 * s0 + 3 * s1
+        deep_expr = base
+        for k in range(1, 5):
+            deep_expr = FloorDiv((k + 3) * deep_expr * (base + k), k + 5)
+
+        index = deep_expr + ModularIndexing(i, 1, 16)
+        expected = deep_expr + i + sympy.Symbol("i_mod_c0")
+        original_simplify = sympy.simplify
+
+        def fail_simplify(expr):
+            raise AssertionError(f"unexpected sympy.simplify({expr})")
+
+        simplify_index_in_vec_range.cache_clear()
+        try:
+            sympy.simplify = fail_simplify
+            self.assertEqual(simplify_index_in_vec_range(index, i, 16), expected)
+        finally:
+            sympy.simplify = original_simplify
+            simplify_index_in_vec_range.cache_clear()
 
     def test_analyze_lane_contiguity(self):
         sizevars = SizeVarAllocator()
@@ -396,6 +422,17 @@ class TestIndexingSimplification(InductorTestCase):
         simplified = sizevars.simplify_with_ranges(expr6, {})
         self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
+
+        # terms without ModularIndexing or FloorDiv are left alone
+        expr7 = expr1 + 7 * i1 + 3
+        self.assertEqual(
+            join_dimensions(expr7), ModularIndexing(i0, 1, 128) + 7 * i1 + 3
+        )
+
+        # the FloorDiv pattern can simplify away: FloorDiv(64 * i0, 64) is i0, so
+        # the matching term has no FloorDiv
+        expr8 = ModularIndexing(64 * i0, 1, 64) + 64 * i0
+        self.assertEqual(join_dimensions(expr8), 64 * i0)
 
     def test_modular_indexing_pairs_merged(self):
         sizevars = SizeVarAllocator()
@@ -803,6 +840,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
         return feats
 
     def check(self, indices):
@@ -852,6 +890,7 @@ class TestIndexExprUpperBounds(InductorTestCase):
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
+        feats.indexing_node_schedule = [node]
         return feats
 
     def dep(self, index, var_names, sizes):
@@ -887,6 +926,17 @@ class TestIndexExprUpperBounds(InductorTestCase):
         d0 = sympy.Symbol("d0", integer=True)
         dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
         self.assertFalse(self.check([dep]))
+
+    def test_uses_indexing_schedule(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        regular = self.make_feats([self.dep(x0, [x0], [2])])
+        overflow = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(
+                reads=[self.dep(2**31 + x0, [x0], [2])], writes=[]
+            )
+        )
+        regular.indexing_node_schedule = [overflow]
+        self.assertTrue(regular.any_index_expr_overflows_int32())
 
 
 class TestEvaluateMinMax(InductorTestCase):
@@ -1397,6 +1447,41 @@ class ReductionInvariantIndexingTests(InductorTestCase):
     @config.patch(
         {
             "force_disable_caches": True,
+            "triton.persistent_reductions": False,
+        }
+    )
+    def test_loop_epilogue_indirect_load_scope(self):
+        def fn(x, source, index):
+            index = index.unsqueeze(-1)
+            selected = torch.gather(source, -2, index)
+            updated = selected + x.mean(dim=-1, keepdim=True)
+            return x / updated, source.scatter(-2, index, updated)
+
+        x = torch.ones(2, 2, 8, device=GPU_TYPE)
+        source = torch.arange(1, 17, device=GPU_TYPE, dtype=torch.float32).reshape(
+            2, 8, 1
+        )
+        index = torch.arange(2, device=GPU_TYPE).repeat(2, 1)
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True, dynamic=True),
+            x,
+            source,
+            index,
+            remove_quote=True,
+        )
+
+        self.assertEqual(fn(x, source, index), actual)
+        reduction_kernels = [kernel for kernel in kernels if "tl.sum(" in kernel]
+        self.assertEqual(1, len(reduction_kernels))
+        indirect_load = r"tl\.load\([^\n]*\+ \(tmp\d+"
+        FileCheck().check("for r0_offset in tl.range").check_regex(indirect_load).check(
+            "tl.store"
+        ).check_regex(indirect_load).run(reduction_kernels[0])
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(
+        {
+            "force_disable_caches": True,
             "triton.prefer_nd_tiling": True,
             "triton.tile_reductions": True,
         }
@@ -1711,13 +1796,14 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @parametrize("dense_indexing", [False, True])
     @config.patch(
         {
             "force_disable_caches": True,
             "triton.persistent_reductions": False,
         }
     )
-    def test_loop_epilogue_masked_index_load_scope(self):
+    def test_loop_epilogue_masked_index_load_scope(self, dense_indexing):
         def fn(index, mask, value):
             positions = torch.arange(index.numel(), device=index.device)
             masked_index = torch.ops.aten._unsafe_masked_index(
@@ -1731,16 +1817,20 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             torch.tensor([True, False] * 8, device=GPU_TYPE),
             torch.randn(16, 64, device=GPU_TYPE),
         )
-        actual, kernels = run_and_get_kernels(
-            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
-        )
+        with config.patch("triton.dense_indexing", dense_indexing):
+            actual, kernels = run_and_get_kernels(
+                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+            )
 
         self.assertEqual(fn(*inputs), actual)
         self.assertEqual(1, len(kernels))
         kernel = kernels[0]
-        FileCheck().check("for r0_offset in tl.range").check_regex(
-            REDUCTION_INVARIANT_X_LOAD
-        ).check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
+        check = FileCheck().check("for r0_offset in tl.range")
+        if dense_indexing:
+            check.check_regex(DENSE_X_INDEX_LOAD)
+        else:
+            check.check_regex(REDUCTION_INVARIANT_X_LOAD)
+        check.check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):

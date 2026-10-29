@@ -250,7 +250,7 @@ graph(%0 : Tensor,
   try {
     FLAGS_torch_jit_enable_rethrow_caught_exception = false;
     interp.run(stack);
-  } catch (std::runtime_error& e) {
+  } catch (c10::Error& e) {
     exception_handled = true;
     std::string exception_msg = e.what();
     EXPECT_THAT(
