@@ -99,7 +99,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable, FakeIdVariable
+from .constant import ConstantVariable
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -107,13 +107,7 @@ from .dicts import (
     DictViewVariable,
     pydict_checkexact,
 )
-from .lists import (
-    BaseListVariable,
-    ByteArrayVariable,
-    ListVariable,
-    TupleIteratorVariable,
-    TupleVariable,
-)
+from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
@@ -540,12 +534,14 @@ class BaseBuiltinVariable(VariableTracker):
         if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
-            from .descriptors import MethodDescriptorVariable
+            from .builder import VariableBuilder
 
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
                 owner = VariableTracker.build(tx, attr.__objclass__)
-            return MethodDescriptorVariable(attr, owner=owner, source=source)
+            return VariableBuilder.create_internal_method_descriptor(
+                attr, owner=owner, source=source
+            )
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
@@ -2347,6 +2343,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         a: VariableTracker | None,
         b: VariableTracker | None,
     ) -> VariableTracker | None:
+        from .builder import SourcelessBuilder
+
         if a is None or b is None:
             # a or b could be none if we reduce and _call_min_max_binary failed
             # to return something
@@ -2361,9 +2359,9 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
-                    tx, [a], {}
-                )
+                a = SourcelessBuilder.create_internal_torch_function(
+                    torch.tensor
+                ).call_function(tx, [a], {})
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -2387,7 +2385,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
                     fn = VariableTracker.build(tx, np.clip)
                 else:
-                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
+                    fn = SourcelessBuilder.create_internal_torch_function(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -2398,7 +2396,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     fn = VariableTracker.build(tx, np_fn)
                 else:
                     torch_fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchInGraphFunctionVariable(torch_fn)
+                    fn = SourcelessBuilder.create_internal_torch_function(torch_fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
@@ -3257,7 +3255,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     install_guard(arg.source.make_guard(guard_type))
             return VariableTracker.build(tx, real_id)
 
-        return FakeIdVariable(id(arg))
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_fake_id(id(arg))
 
     def call_deepcopy(
         self, tx: "InstructionTranslatorBase", x: VariableTracker
@@ -4205,7 +4205,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> ByteArrayVariable:
+    ) -> VariableTracker:
         all_args = [a.as_python_constant() for a in args]
         all_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         try:
@@ -4214,7 +4214,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
             raise_type_error(tx, str(e))
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=list(e.args))
-        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+        return VariableTracker.build(tx, result)
 
     def call_function(
         self,
@@ -4223,7 +4223,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 0 and not kwargs:
-            return ByteArrayVariable(bytearray(), mutation_type=ValueMutationNew())
+            return VariableTracker.build(tx, bytearray())
 
         if kwargs or len(args) >= 2:
             if not all(a.is_python_constant() for a in args) or not all(
@@ -4240,9 +4240,7 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
         try:
             unpacked = arg.unpack_var_sequence(tx)
             values = [v.as_python_constant() for v in unpacked]
-            return ByteArrayVariable(
-                bytearray(values), mutation_type=ValueMutationNew()
-            )
+            return VariableTracker.build(tx, bytearray(values))
         except NotImplementedError:
             pass
 
