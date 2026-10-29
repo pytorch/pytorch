@@ -126,13 +126,10 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
-from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
-    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
-    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -1129,23 +1126,6 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
-
-
-def convert_sizes_to_concrete_values(sizes: Sequence[Any]) -> list[int | None]:
-    # Preserve the same size wildcards before serialization loses SymInt provenance.
-    concrete_sizes = convert_to_concrete_values(sizes)
-    for i, dim in enumerate(sizes):
-        if (
-            concrete_sizes[i] in (0, 1)
-            and isinstance(dim, torch.SymInt)
-            and isinstance(dim.node, SymNode)
-            and dim.node.shape_env is not None
-        ):
-            expr = _get_placeholder_expr(dim.node)
-            if expr.is_Symbol and has_free_unbacked_symbols(expr):
-                # Runtime checks, not input guards, enforce this refinement.
-                concrete_sizes[i] = None
-    return concrete_sizes
 
 
 def _guard_device_index_is_current(
@@ -4369,7 +4349,7 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
-                size = convert_sizes_to_concrete_values(metadata["size"])
+                size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
                     value, output_graph.compile_on_one_rank
@@ -6397,15 +6377,7 @@ class CheckFunctionManager:
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
-                {
-                    source: {
-                        **metadata,
-                        "size": convert_sizes_to_concrete_values(metadata["size"]),
-                    }
-                    for source, metadata in (
-                        output_graph_guards_state.input_source_to_sizes_strides.items()
-                    )
-                },
+                output_graph_guards_state.input_source_to_sizes_strides,
             ),
             skip_guards_check=True,
         )

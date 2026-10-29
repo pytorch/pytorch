@@ -424,17 +424,22 @@ class ConstDictVariable(VariableTracker):
         return id(value) != id(other)
 
     def reconstruct_kvs_into_new_dict(self, codegen: "PyCodegen") -> None:
-        # Replay loads sourced keys by storage position and emits the modeled order.
-        if isinstance(
-            self.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
-        ):
-            self.install_dict_order_guard(codegen.tx, guard_keys=True)
         # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
+                # Literal-key updates preserve the input's order. Rebuilding the
+                # dictionary or loading keys by storage position depends on it.
+                if isinstance(
+                    self.mutation_type,
+                    (ValueMutationExisting, AttributeMutationExisting),
+                ) and (
+                    self.should_reconstruct_all
+                    or (key.vt.source is not None and key.vt.source.is_dict_key())
+                ):
+                    self.install_dict_order_guard(codegen.tx, guard_keys=True)
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
