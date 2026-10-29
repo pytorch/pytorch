@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <fmt/core.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
@@ -56,7 +57,7 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   auto keyPrefix = fmt::format("nccl_storekey_{}", generation_);
   std::vector<std::string> keys;
   keys.reserve(numIds);
-  for (int index = 0; index < numIds; ++index) {
+  for (const auto index : c10::irange(numIds)) {
     keys.push_back(
         numIds == 1 ? keyPrefix : fmt::format("{}_{}", keyPrefix, index));
   }
@@ -79,7 +80,7 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   store->wait(keys, timeout_);
   auto values = store->multiGet(keys);
   std::vector<ncclUniqueId> uniqueIds(numIds);
-  for (int index = 0; index < numIds; ++index) {
+  for (const auto index : c10::irange(numIds)) {
     TORCH_CHECK(
         values[index].size() == sizeof(ncclUniqueId),
         "Invalid NCCL unique ID size");
