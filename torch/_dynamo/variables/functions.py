@@ -446,11 +446,16 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name in ("__setattr__", "__delattr__"):
+            if not issubclass(args[0].python_type(), str):
+                raise_type_error(
+                    tx,
+                    f"attribute name must be string, not '{args[0].python_type_name()}'",
+                )
+            if self.python_type() is types.MethodType:
+                readonly_setter(self, tx, None)
             attr = args[0].as_python_constant()
             getset = self.lookup_tp_getset_member(attr)
             if getset is not None:
-                if self.python_type() is types.MethodType:
-                    readonly_setter(self, tx, None)
                 owner = (
                     self._get_mutation_owner(tx)
                     if istype(self, UserFunctionVariable)
@@ -3324,6 +3329,8 @@ class WrapperUserMethodVariable(BaseUserFunctionVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            return super().tp_getattro_impl(tx, name)
         return self.fn.tp_getattro_impl(tx, name)
 
     def get_function(self):
@@ -5221,6 +5228,14 @@ class StaticMethodVariable(VariableTracker):
         self.descriptor = descriptor
         self.initial_dict: dict[str, VariableTracker] = {}
 
+    def _get_metadata_owner(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        owner = self.descriptor
+        if istype(owner, UserMethodVariable):
+            owner = owner.im_func
+        if istype(owner, UserFunctionVariable):
+            owner = owner._get_mutation_owner(tx)
+        return owner
+
     @classmethod
     def create(
         cls, tx: "InstructionTranslatorBase", descriptor: VariableTracker
@@ -5229,6 +5244,7 @@ class StaticMethodVariable(VariableTracker):
 
         result = cls(descriptor, mutation_type=AttributeMutationNew())
         tx.output.side_effects.track_attribute_mutation_new(result)
+        owner = result._get_metadata_owner(tx)
         wrapped = (
             NO_SUCH_SUBOBJ
             if isinstance(
@@ -5248,16 +5264,14 @@ class StaticMethodVariable(VariableTracker):
             for name, value in staticmethod(cast(Any, wrapped)).__dict__.items():
                 if (
                     name == "__annotations__"
-                    and isinstance(descriptor, BaseUserFunctionVariable)
-                ) or tx.output.side_effects.has_pending_mutation_of_attr(
-                    descriptor, name
-                ):
-                    result.initial_dict[name] = generic_getattr(tx, descriptor, name)
+                    and isinstance(owner, BaseUserFunctionVariable)
+                ) or tx.output.side_effects.has_pending_mutation_of_attr(owner, name):
+                    result.initial_dict[name] = generic_getattr(tx, owner, name)
                 else:
                     result.initial_dict[name] = VariableTracker.build(
                         tx,
                         value,
-                        descriptor.source and AttrSource(descriptor.source, name),
+                        owner.source and AttrSource(owner.source, name),
                     )
             return result
         attrs = ("__module__", "__name__", "__qualname__", "__doc__")
@@ -5265,7 +5279,7 @@ class StaticMethodVariable(VariableTracker):
             attrs += ("__annotations__",)
         for name in attrs:
             try:
-                value = generic_getattr(tx, descriptor, name)
+                value = generic_getattr(tx, owner, name)
             except get_dynamo_observed_exception(AttributeError):
                 tx.exn_vt_stack.clear_current_exception()
                 continue
@@ -5296,7 +5310,7 @@ class StaticMethodVariable(VariableTracker):
         from .object_protocol import generic_getattr
 
         return self.get_dict_vt(tx).getitem_or_default(
-            name, lambda: generic_getattr(tx, self.descriptor, name)
+            name, lambda: generic_getattr(tx, self._get_metadata_owner(tx), name)
         )
 
     def _set_wrapped_attr(
@@ -5424,6 +5438,7 @@ class StaticMethodVariable(VariableTracker):
         # Restore copies whose wrapped slot changed, or whose custom getter
         # could depend on another pending attribute mutation.
         side_effects = codegen.tx.output.side_effects
+        owner = self._get_metadata_owner(codegen.tx)
         custom_getters = isinstance(
             self.descriptor,
             (UserDefinedObjectVariable, variables.UserDefinedClassVariable),
@@ -5440,23 +5455,20 @@ class StaticMethodVariable(VariableTracker):
         for name, value in self.initial_dict.items():
             annotations_changed = (
                 name == "__annotations__"
-                and isinstance(self.descriptor, BaseUserFunctionVariable)
+                and isinstance(owner, BaseUserFunctionVariable)
                 and (
-                    self.descriptor.annotations is not value
+                    owner.annotations is not value
                     or (
-                        isinstance(self.descriptor, UserFunctionVariable)
+                        isinstance(owner, UserFunctionVariable)
                         and value.source
-                        != (
-                            self.descriptor.source
-                            and AttrSource(self.descriptor.source, name)
-                        )
+                        != (owner.source and AttrSource(owner.source, name))
                     )
                 )
             )
             if (
                 custom_getters
                 or annotations_changed
-                or side_effects.has_pending_mutation_of_attr(self.descriptor, name)
+                or side_effects.has_pending_mutation_of_attr(owner, name)
             ):
                 codegen.dup_top()
                 codegen(value)

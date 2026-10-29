@@ -3512,6 +3512,16 @@
       ]
     }
   ],
+  "GB7778": [
+    {
+      "Gb_type": "Reconstruct exception without an allocator",
+      "Context": "Exception: {self.exc_type.__name__}",
+      "Explanation": "Dynamo did not track this exception's allocation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0207": [
     {
       "Gb_type": "sort with non-constant keys",

@@ -4814,18 +4814,28 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         return super().tp_init_impl(tx, args, kwargs)
 
     def _reconstruct_exception(self, codegen: "PyCodegen") -> None:
-        # ExceptionVariable._reconstruct_exception hardcodes `from builtins import
-        # <name>`, which is only correct for the true builtin exceptions it
-        # was designed to model. self.exc_type here is an arbitrary
-        # user-defined class, so import it from its actual defining module
-        # instead.
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                self.exc_type.__module__, self.exc_type.__name__
+        base_cls = self.base_cls_vt
+        if base_cls is None:
+            unimplemented(
+                gb_type="Reconstruct exception without an allocator",
+                context=f"Exception: {self.exc_type.__name__}",
+                explanation="Dynamo did not track this exception's allocation.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        )
+
+        def load_new() -> None:
+            codegen(base_cls)
+            codegen.append_output(codegen.create_load_attr("__new__"))
+
+        # __init__ was already traced, including kwargs and side effects.
+        # Allocate first; the shared replay restores final args and attributes.
+        codegen.add_push_null(load_new)
+        if self.cls_source is not None:
+            codegen(self.cls_source)
+        else:
+            codegen.load_import_from(self.exc_type.__module__, self.exc_type.__name__)
         codegen.foreach(self.initial_args)
-        codegen.call_function(len(self.initial_args), False)
+        codegen.call_function(1 + len(self.initial_args), False)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         ExceptionVariable.reconstruct(self, codegen)

@@ -3893,16 +3893,10 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        if (
-            istype(obj, variables.UserFunctionVariable)
-            and obj.source is not None
-            and obj.fn in tx.output.side_effects
-        ):
-            from .builder import VariableBuilder
-
-            tracked = VariableBuilder(tx, obj.source)._reuse_tracked_variable(obj.fn)
-            if tracked is not None:
-                obj = tracked
+        if istype(obj, variables.UserFunctionVariable):
+            # A discarded HOP trace can leave the VT marked but unregistered
+            # in the current side effects table.
+            obj = obj._get_mutation_owner(tx)
         if (
             istype(obj, variables.UserFunctionVariable)
             and obj.source is not None

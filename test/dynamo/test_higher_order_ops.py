@@ -2432,6 +2432,82 @@ def forward(self):
         self.assertEqual(inner.tag, 42)
         self.assertIs(attrs, inner.__dict__)
 
+    @parametrize("hop", ["cond", "checkpoint"])
+    @parametrize("read", ["dict", "staticmethod"])
+    @parametrize("name", ["__doc__", "tag"])
+    @parametrize("operation", ["store", "setattr", "set_method", "delete"])
+    def test_existing_function_read_then_outer_mutation(
+        self, hop, read, name, operation
+    ):
+        def existing():
+            "original"
+
+        existing.tag = "original"
+
+        def fn(pred, x, f):
+            def branch(y):
+                obj = staticmethod(f) if read == "staticmethod" else f
+                return y.sin() + len(obj.__dict__) * 0
+
+            if hop == "cond":
+                out = torch.cond(pred, branch, branch, (x,))
+            else:
+                out = torch.utils.checkpoint.checkpoint(branch, x, use_reentrant=False)
+            if operation == "store":
+                if name == "__doc__":
+                    f.__doc__ = "changed"
+                else:
+                    f.tag = "changed"
+            elif operation == "setattr":
+                setattr(f, name, "changed")
+            elif operation == "set_method":
+                f.__setattr__(name, "changed")
+            elif name == "__doc__":
+                del f.__doc__
+            else:
+                del f.tag
+            return out, f, getattr(f, name, None), hasattr(f, name)
+
+        x = torch.randn(4)
+        counter = CompileCounterWithBackend("eager")
+        result = torch.compile(fn, backend=counter, fullgraph=True)(
+            torch.tensor(True), x, existing
+        )
+        self.assertEqual(result[0], x.sin())
+        self.assertIs(result[1], existing)
+        expected = None if operation == "delete" else "changed"
+        present = name == "__doc__" or operation != "delete"
+        self.assertEqual(result[2:], (expected, present))
+        self.assertEqual(getattr(existing, name, None), expected)
+        self.assertEqual(hasattr(existing, name), present)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("read", ["dict", "staticmethod"])
+    @parametrize("name", ["__doc__", "tag"])
+    def test_cond_existing_function_side_effect_after_read(self, read, name):
+        def existing():
+            "original"
+
+        existing.tag = "original"
+
+        def fn(pred, x, f):
+            def branch(y):
+                obj = staticmethod(f) if read == "staticmethod" else f
+                size = len(obj.__dict__)
+                setattr(f, name, "changed")
+                return y.sin() + size * 0
+
+            return torch.cond(pred, branch, branch, (x,))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Unsafe side effect|Non-nullified side effect",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.tensor(True), torch.randn(4), existing
+            )
+        self.assertEqual(getattr(existing, name), "original")
+
     def test_cond_with_constant_pred(self):
         def test(pred, x):
             def true_fn(x):
