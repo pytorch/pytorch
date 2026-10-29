@@ -4006,8 +4006,9 @@ def capture(
     into a captured graph is likewise tuned on random tensors
     (``torch._inductor.config.triton.autotune_with_sample_inputs`` defaults to
     False), and the config it picks ships in the artifact.
-    ``triton.multi_kernel`` and ``multi_kernel_hints`` are turned off inside
-    the block, with a warning, because the artifact cannot record which
+    ``triton.multi_kernel`` and ``multi_kernel_hints`` are turned off, with a
+    warning, while each captured graph lowers (user code between captured calls
+    keeps the ambient config), because the artifact cannot record which
     sub-kernel a multi-kernel picks. A :class:`DynamoTracer` capture with grad
     enabled lowers each backward while the forward's tensors are still live,
     so peak device memory during the capture grows by roughly the backward's
