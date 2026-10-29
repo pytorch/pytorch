@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
+import sys
+import types
+import warnings
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -609,23 +612,27 @@ def _current_flags() -> _TracingFlags:
 def _session_flag(*attrs: str):
     """Hold session flags True; the session flags object lives in a
     per-thread TLS slot while the session is active."""
-    # Invariant: only _session_flag writes this key, and it never stashes the
-    # shared default, so stashed objects are safe to mutate.
-    flags = _current_flags()
-    fresh = flags is _flags
-    if fresh:
-        flags = _TracingFlags()
-    old_values = [(attr, getattr(flags, attr)) for attr in attrs]
+    # Copy-on-enter: every session mutates its own object, so a worker thread
+    # entering a session under a stash inherited from at::ThreadLocalState
+    # never writes the parent thread's object (#202042). A ThreadLocalState
+    # captured during the session (e.g. a deferred GraphTask) keeps reading
+    # the session values after the session ends - on purpose: that work
+    # belongs to the session that captured it.
+    current = _current_flags()
+    fresh = current is _flags
+    flags = _TracingFlags()
+    for attr in ("is_compiling", "is_exporting", "is_non_strict_tracing"):
+        setattr(flags, attr, getattr(current, attr))
     for attr in attrs:
         setattr(flags, attr, True)
     torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, flags)
     try:
         yield
     finally:
-        for attr, old_value in old_values:
-            setattr(flags, attr, old_value)
         if fresh:
             torch._C._remove_obj_from_tls(_SESSION_FLAGS_TLS_KEY)
+        else:
+            torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, current)
 
 
 def is_compiling() -> bool:
@@ -784,7 +791,10 @@ def is_exporting() -> bool:
     return _current_flags().is_exporting
 
 
-# BC for reading, since has some references out of this codebase are using them directly.
+# BC for reads: these were module globals for several releases and code
+# outside this codebase reads them directly. Writes are deprecated too: they
+# are warned about and ignored, since per-session flags have no process-wide
+# value to write (see _LegacyCompilerModule).
 _LEGACY_FLAG_NAMES = {
     "_is_compiling_flag": "is_compiling",
     "_is_exporting_flag": "is_exporting",
@@ -793,12 +803,27 @@ _LEGACY_FLAG_NAMES = {
 
 
 def __getattr__(name: str) -> Any:
-    # The flags above were module globals for several releases; forward the
-    # old names so downstream readers keep working (reads only - writing the
-    # old module attribute shadows the shim instead of setting the flag).
     if (flag := _LEGACY_FLAG_NAMES.get(name)) is not None:
         return getattr(_current_flags(), flag)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class _LegacyCompilerModule(types.ModuleType):
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in _LEGACY_FLAG_NAMES:
+            warnings.warn(
+                f"Setting torch.compiler.{name} is deprecated and ignored: "
+                "tracing flags are per-session now; enter a session with "
+                "torch.compiler._compile_session_context() or "
+                "torch.compiler._non_strict_tracing_context() instead",
+                FutureWarning,
+                stacklevel=2,
+            )
+            return
+        super().__setattr__(name, value)
+
+
+sys.modules[__name__].__class__ = _LegacyCompilerModule
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
