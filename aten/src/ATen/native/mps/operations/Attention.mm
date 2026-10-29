@@ -205,9 +205,18 @@ static void sdpa_vector_2pass_mps(const Tensor& q_,
   });
 }
 
+// The MPP kernel takes all full-width V/O slabs in one launch while the grid
+// stays below kGridThreadgroupsPerCore threadgroups per GPU core; past that,
+// one launch per slab keeps the slab's V hot across the wave (M4, M5 Pro).
+static constexpr int64_t kGridThreadgroupsPerCore = 8;
+// A QK dim in (128, kMppMaxSimdTile] with V/O past 128 keeps its exact
+// simdgroup tile: MPP would chunk QK and recompute the scores per V/O slab
+// (M5 Pro: 0.66x). Above it both kernels chunk and MPP wins.
+static constexpr int64_t kMppMaxSimdTile = 192;
+
 // Prefill: flash attention on simdgroup matrices (PrefillAttention.h) or, on
 // macOS 26.2+, Metal 4 cooperative tensors (MppAttention.h) for half and
-// bfloat on their exact tiles. One threadgroup per (Q block, head, batch).
+// bfloat. One threadgroup per (Q block, head, batch, V/O slab).
 static void sdpa_prefill_mps(const Tensor& q,
                              const Tensor& k,
                              const Tensor& v,
@@ -217,15 +226,20 @@ static void sdpa_prefill_mps(const Tensor& q,
                              float scale) {
   using namespace mps;
   // matmul2d cooperative_tensor's lane->element layout differs across Apple GPU
-  // generations (see MppAttention.h).
+  // generations (see MppAttention.h). Before Apple10's matrix units, MPP only
+  // beats the simdgroup kernel on an exact tile (M3 Ultra, M4).
   static const bool is_apple10_or_newer = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
-  const int64_t d = q.size(3), dv = v.size(3);
-  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && d == dv && k.size(2) > 0 &&
-      std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end();
-  const int64_t widest = std::max(d, dv);
-  const int64_t bd = use_mpp          ? d
-      : widest > kPrefillTiles.back() ? kChunkTile
-                                      : *std::lower_bound(kPrefillTiles.begin(), kPrefillTiles.end(), widest);
+  static const int64_t core_grid = kGridThreadgroupsPerCore * std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  const int64_t d = q.size(3), dv = v.size(3), widest = std::max(d, dv);
+  const bool exact_mpp_tile = d == dv &&
+      (std::binary_search(kMppTiles.begin(), kMppTiles.end(), d) || (!is_apple10_or_newer && d == kMppWideTile));
+  const bool exact_simd_tile = widest > kMppTiles.back() && widest <= kMppMaxSimdTile && dv > kMppTiles.back();
+  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && k.size(2) > 0 &&
+      (exact_mpp_tile || (is_apple10_or_newer && !exact_simd_tile));
+  const c10::ArrayRef<int> tiles = use_mpp ? c10::ArrayRef<int>(kMppTiles) : c10::ArrayRef<int>(kPrefillTiles);
+  const int64_t bd = use_mpp && exact_mpp_tile ? d
+      : widest > tiles.back()                  ? kChunkTile
+                                               : *std::lower_bound(tiles.begin(), tiles.end(), widest);
   const int64_t simdgroups = use_mpp ? kPrefillSimdgroups : prefill_simdgroups(bd);
   const int64_t bq = use_mpp ? kMppBQ : prefill_bq(bd);
 
@@ -240,41 +254,34 @@ static void sdpa_prefill_mps(const Tensor& q,
   }
 
   const auto dtype = scalarToMetalTypeString(q);
-  std::string kname;
-  if (use_mpp) {
-    const auto mpp_dtype = q.scalar_type() == kHalf ? "float16"sv : "bfloat16"sv;
-    const auto mpp_mask_dtype = !mask   ? mpp_dtype
-        : mask->scalar_type() == kBool  ? "bool_"sv
-        : mask->scalar_type() == kFloat ? "float32"sv
-                                        : mpp_dtype;
-    kname = fmt::format("prefill_attention_mpp_{}_{}_bq{}_bk{}_bd{}_wm{}_wn1_hm{:d}_dc{:d}_mask{}",
-                        is_apple10_or_newer ? "a10"sv : "a9"sv,
-                        mpp_dtype,
-                        kMppBQ,
-                        kMppBK,
-                        bd,
-                        kPrefillSimdgroups,
-                        mask.has_value(),
-                        is_causal,
-                        mpp_mask_dtype);
-  } else {
-    const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
-    kname = fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_pd{:d}_mask{}",
-                        dtype,
-                        bd,
-                        mask.has_value(),
-                        is_causal,
-                        d > bd,
-                        d != bd || dv != bd,
-                        mask_dtype);
-  }
+  const auto mask_dtype = mask ? scalarToMetalTypeString(*mask) : dtype;
+  const auto kname = use_mpp ? fmt::format("prefill_attention_mpp_{}_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_mask{}",
+                                           is_apple10_or_newer ? "a10"sv : "pre_a10"sv,
+                                           dtype,
+                                           bd,
+                                           mask.has_value(),
+                                           is_causal,
+                                           d > bd,
+                                           mask_dtype)
+                             : fmt::format("prefill_attention_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_pd{:d}_mask{}",
+                                           dtype,
+                                           bd,
+                                           mask.has_value(),
+                                           is_causal,
+                                           d > bd,
+                                           d != bd || dv != bd,
+                                           mask_dtype);
   const auto pso = lib.getPipelineStateForFunc(kname);
-  const MTLSize grid = MTLSizeMake(at::ceil_div(q.size(2), bq), q.size(1), q.size(0));
+  const int64_t nq = at::ceil_div(q.size(2), bq);
+  const int64_t step = use_mpp && nq * q.size(0) * q.size(1) < core_grid ? std::max(dv / bd * bd, bd) : bd;
   const MTLSize threadgroup = MTLSizeMake(c10::metal::simdgroup_size, simdgroups, 1);
   MPSStream* mpsStream = getCurrentMPSStream();
-  for (int64_t v0 = 0; v0 < dv; v0 += bd) {
-    const auto vs = v.narrow(3, v0, std::min(bd, dv - v0));
+  for (int64_t v0 = 0; v0 < dv; v0 += step) {
+    const auto vs = v.narrow(3, v0, std::min(step, dv - v0));
     const auto os = out.narrow(3, v0, vs.size(3));
+    const int64_t slabs = at::ceil_div(vs.size(3), bd);
+    TORCH_INTERNAL_ASSERT(vs.size(3) % slabs == 0);
+    const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * slabs);
     const PrefillAttnParams params{
         .B = c10::safe_conv<int32_t>(q.size(0)),
         .H = c10::safe_conv<int32_t>(q.size(1)),
@@ -283,7 +290,7 @@ static void sdpa_prefill_mps(const Tensor& q,
         .kL = c10::safe_conv<int32_t>(k.size(2)),
         .gqa_factor = c10::safe_conv<int32_t>(q.size(1) / k.size(1)),
         .scale = scale,
-        .Dv = c10::safe_conv<int32_t>(vs.size(3)),
+        .Dv = c10::safe_conv<int32_t>(vs.size(3) / slabs),
         .Q_strides = {q.stride(0), q.stride(1), q.stride(2)},
         .K_strides = {k.stride(0), k.stride(1), k.stride(2)},
         .V_strides = {vs.stride(0), vs.stride(1), vs.stride(2)},
