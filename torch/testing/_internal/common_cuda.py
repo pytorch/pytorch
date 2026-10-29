@@ -10,7 +10,7 @@ from typing import Any
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import (
-    _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
+    _restore_fp32_precision, _snapshot_fp32_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
     TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA)
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.utils._import_utils import _check_module_exists
@@ -463,24 +463,14 @@ _tf32_off_cudnn_ctx = None
 
 
 # The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
-# the backend-specific fp32_precision values. Restoring only one of them leaves
-# the two disagreeing, and every later read of allow_tf32 in the process then
-# raises "mix of the legacy and new APIs".
+# the backend-specific fp32_precision values, so all three are saved and
+# restored together, as stored rather than resolved.
 def _save_matmul_precision():
-    return (_get_legacy_float32_matmul_precision(),
-            torch.backends.cuda.matmul.fp32_precision,
-            torch.backends.mkldnn.matmul.fp32_precision)
+    return _snapshot_fp32_precision("float32_matmul_precision", "cuda.matmul", "mkldnn.matmul")
 
 
 def _restore_matmul_precision(saved):
-    legacy, cuda_precision, mkldnn_precision = saved
-    # set_float32_matmul_precision overwrites both backend-specific values, so
-    # it goes first. Restoring those as fp32_precision strings rather than as
-    # allow_tf32 booleans also preserves the "none" default, which allow_tf32
-    # cannot express (it yields "ieee", which the leak detector flags on ROCm).
-    _set_legacy_float32_matmul_precision(legacy)
-    torch.backends.cuda.matmul.fp32_precision = cuda_precision
-    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+    _restore_fp32_precision(saved)
 
 
 @contextlib.contextmanager

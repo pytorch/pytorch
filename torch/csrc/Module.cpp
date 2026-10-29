@@ -3354,24 +3354,44 @@ Call this whenever a new thread is created in order to propagate values from
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
       });
 
+  // raw=True reads and writes the setting as stored, before inheritance is
+  // resolved: "none", or "default" for the initial state of cuda conv/rnn,
+  // where it inherits. It lets code save and restore a setting exactly;
+  // writing back a resolved value would pin a setting that was inheriting.
   py_module.def(
       "_get_fp32_precision_getter",
-      [](const std::string& backend, const std::string& op) {
-        return at::precision2str(at::globalContext().float32Precision(
-            at::str2backend(backend), at::str2op(op)));
-      });
+      [](const std::string& backend, const std::string& op, bool raw) {
+        auto& ctx = at::globalContext();
+        const auto b = at::str2backend(backend);
+        const auto o = at::str2op(op);
+        if (!raw) {
+          return at::precision2str(ctx.float32Precision(b, o));
+        }
+        const auto p = ctx.rawFloat32Precision(b, o);
+        return p == at::Float32Precision::DEFAULT ? std::string("default")
+                                                  : at::precision2str(p);
+      },
+      py::arg("backend"),
+      py::arg("op"),
+      py::arg("raw") = false);
 
   py_module.def(
       "_set_fp32_precision_setter",
       [](const std::string& backend,
          const std::string& op,
-         const std::string& precision) {
+         const std::string& precision,
+         bool raw) {
         at::globalContext().setFloat32Precision(
             at::str2backend(backend),
             at::str2op(op),
-            at::str2precision(precision));
+            raw && precision == "default" ? at::Float32Precision::DEFAULT
+                                          : at::str2precision(precision));
         return precision;
-      });
+      },
+      py::arg("backend"),
+      py::arg("op"),
+      py::arg("precision"),
+      py::arg("raw") = false);
 
   py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {

@@ -359,8 +359,8 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if torch.cuda.is_available():
                 with torch._C.DisableTorchFunction():
                     cuda_rng_state = torch.cuda.get_rng_state()
-            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
-                "cuda", "matmul"
+            cuda_matmul_fp32_prec = torch.backends._get_fp32_precision_state(
+                "cuda.matmul"
             )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
@@ -390,9 +390,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if cuda_rng_state is not None:
                     with torch._C.DisableTorchFunction():
                         torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_fp32_precision_setter(
-                    "cuda", "matmul", cuda_matmul_fp32_prec
-                )
+                torch.backends._set_fp32_precision_state(cuda_matmul_fp32_prec)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 if not guards.check():
                     raise AssertionError(

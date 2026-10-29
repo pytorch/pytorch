@@ -67,7 +67,7 @@ TORCH_API void register_backend() {
                 ->rnn
 */
 
-Float32Backend str2backend(std::string_view name) {
+Float32Backend str2backend(const std::string& name) {
   if (name == "generic")
     return Float32Backend::GENERIC;
   else if (name == "cuda")
@@ -77,7 +77,7 @@ Float32Backend str2backend(std::string_view name) {
   TORCH_CHECK(false, "Unknown backend: ", name);
 }
 
-Float32Op str2op(std::string_view name) {
+Float32Op str2op(const std::string& name) {
   if (name == "all")
     return Float32Op::ALL;
   else if (name == "conv")
@@ -89,7 +89,7 @@ Float32Op str2op(std::string_view name) {
   TORCH_CHECK(false, "Unknown op: ", name);
 }
 
-Float32Precision str2precision(std::string_view name) {
+Float32Precision str2precision(const std::string& name) {
   if (name == "none")
     return Float32Precision::NONE;
   else if (name == "ieee")
@@ -100,8 +100,6 @@ Float32Precision str2precision(std::string_view name) {
     return Float32Precision::BF16;
   else if (name == "bfx9")
     return Float32Precision::BF16X9;
-  else if (name == "default")
-    return Float32Precision::DEFAULT;
   TORCH_CHECK(false, "Unknown precision: ", name);
 }
 
@@ -489,6 +487,12 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   return precision;
 }
 
+Float32Precision Context::rawFloat32Precision(Float32Backend backend, Float32Op op) const {
+  auto it = fp32_precision.find(std::make_pair(backend, op));
+  TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
+  return it->second;
+}
+
 void Context::setFloat32MatmulPrecision(const std::string &s) {
   auto match = [this](const std::string & s_) {
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
@@ -539,11 +543,13 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
         cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090,
         "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
   }
+  // DEFAULT is the initial state of cuda conv/rnn. It is not a public value;
+  // it is accepted here so that a saved rawFloat32Precision can be restored.
   TORCH_CHECK(
       p != Float32Precision::DEFAULT ||
           (backend == Float32Backend::CUDA &&
            (op == Float32Op::CONV || op == Float32Op::RNN)),
-      "precision 'default' is only supported for backend 'cuda' and ops 'conv' and 'rnn'");
+      "DEFAULT precision is only valid for backend 'cuda' and ops 'conv' and 'rnn'");
 
   it->second = p;
 }

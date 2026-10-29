@@ -32,7 +32,6 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
-#include <string_view>
 #include <unordered_map>
 
 namespace at {
@@ -66,9 +65,9 @@ enum class TORCH_API Float32Precision {
 
 enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 
-TORCH_API Float32Backend str2backend(std::string_view name);
-TORCH_API Float32Op str2op(std::string_view name);
-TORCH_API Float32Precision str2precision(std::string_view name);
+TORCH_API Float32Backend str2backend(const std::string& name);
+TORCH_API Float32Op str2op(const std::string& name);
+TORCH_API Float32Precision str2precision(const std::string& name);
 TORCH_API std::string precision2str(Float32Precision prec);
 TORCH_API CuDNNDepthwiseKernel str2cudnn_depthwise(const std::string& name);
 TORCH_API std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k);
@@ -406,6 +405,10 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
+  // The setting as stored, before inheritance is resolved (may be NONE or
+  // DEFAULT), so that it can be saved and restored exactly.
+  Float32Precision rawFloat32Precision(Float32Backend backend, Float32Op op)
+      const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(
       bool allow_reduced_precision,

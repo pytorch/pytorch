@@ -15537,17 +15537,11 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
-    )
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
         # Regression test: setting torch.backends.fp32_precision = "ieee"
         # must propagate to cudnn.conv and cudnn.rnn.
-        # Earlier tests can leave conv/rnn explicitly set; start from default.
-        torch.backends.cudnn.conv.fp32_precision = "default"
-        torch.backends.cudnn.rnn.fp32_precision = "default"
         self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
         self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
         with torch.backends.flags(fp32_precision="ieee"):
@@ -15555,6 +15549,99 @@ class TestFP32PrecisionFlags(TestCase):
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+
+    # The initial state: every setting inherits from its parent.
+    _INHERITING_FP32_PRECISION = {
+        "generic.all": "none",
+        "cuda.all": "none",
+        "cuda.conv": "default",
+        "cuda.rnn": "default",
+        "cuda.matmul": "none",
+        "mkldnn.all": "none",
+        "mkldnn.conv": "none",
+        "mkldnn.rnn": "none",
+        "mkldnn.matmul": "none",
+        "float32_matmul_precision": "highest",
+        "cudnn_allow_tf32": True,
+    }
+
+    def _assert_all_inherit_generic(self):
+        with torch.backends.flags(fp32_precision="ieee"):
+            for module in (
+                torch.backends.cudnn,
+                torch.backends.cudnn.conv,
+                torch.backends.cudnn.rnn,
+                torch.backends.cuda.matmul,
+                torch.backends.mkldnn.conv,
+                torch.backends.mkldnn.rnn,
+                torch.backends.mkldnn.matmul,
+            ):
+                self.assertEqual(module.fp32_precision, "ieee", msg=module)
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_restore_keeps_inheritance(self):
+        # Code that saves and restores the precision settings must put back
+        # what was stored, not the resolved values; writing those back pins
+        # settings that were inheriting, which then ignore their parent.
+        def export_linear():
+            torch.export.export(nn.Linear(2, 2), (torch.randn(1, 2),))
+            return contextlib.nullcontext()
+
+        restorers = {
+            "cudnn.flags": torch.backends.cudnn.flags,
+            "cudnn.flags(allow_tf32=False)": lambda: torch.backends.cudnn.flags(
+                allow_tf32=False
+            ),
+            "mkldnn.flags": torch.backends.mkldnn.flags,
+            "tf32_off": tf32_off,
+            "tf32_on": lambda: tf32_on(self),
+            "tf32_enabled": tf32_enabled,
+            "_ignore_backend_decomps": torch.export._trace._ignore_backend_decomps,
+            "torch.export.export": export_linear,
+        }
+        for name, make_ctx in restorers.items():
+            with self.subTest(name):
+                _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+                with make_ctx():
+                    pass
+                self.assertEqual(
+                    _snapshot_fp32_precision(), self._INHERITING_FP32_PRECISION
+                )
+                self._assert_all_inherit_generic()
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_restore_after_dynamo_compile(self):
+        # Dynamo restores cuda.matmul after tracing a frame.
+        _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+        with torch.backends.flags(fp32_precision="ieee"):
+            torch.compile(lambda x: x + 1, backend="eager")(torch.ones(1))
+        self.assertEqual(_snapshot_fp32_precision(), self._INHERITING_FP32_PRECISION)
+        self._assert_all_inherit_generic()
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_flags_still_pin_cudnn_tf32(self):
+        _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+        with torch.backends.cudnn.flags(), torch.backends.flags(fp32_precision="ieee"):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
+
+    def test_fp32_precision_default_is_not_public(self):
+        for module in (
+            torch.backends,
+            torch.backends.cudnn,
+            torch.backends.cudnn.conv,
+            torch.backends.cudnn.rnn,
+            torch.backends.cuda.matmul,
+        ):
+            # common_utils freezes the torch.backends and cudnn setters.
+            with (
+                patch.object(torch.backends.m, "flags_frozen", return_value=False),
+                self.assertRaisesRegex(RuntimeError, "Unknown precision: default"),
+            ):
+                module.fp32_precision = "default"
 
 
 class TestMemoryViz(TestCase):
