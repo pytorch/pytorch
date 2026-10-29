@@ -532,6 +532,11 @@ sycl::event scaled_matmul(
       (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
   const bool mat2_is_fp4 =
       (mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  if (mat1_is_fp4) {
+    TORCH_INTERNAL_ASSERT(
+        mat2_is_fp4,
+        "Both mat1 and mat2 must be Float4_e2m1fn_x2 when FP4 path is used");
+  }
   const int64_t K_multiplier = mat1_is_fp4 ? 2 : 1;
   const int64_t K = mat1.size(1) * K_multiplier;
   const int64_t N = mat2.size(1);

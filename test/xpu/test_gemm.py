@@ -1775,11 +1775,12 @@ def forward(self, x_1, w_1):
     @parametrize("recipe", ["tensorwise", "rowwise", "block128x128", "mxfp8", "mxfp4"])
     @parametrize("mat_a_dtype", [torch.bfloat16, torch.half, torch.float32])
     @parametrize("with_bias", [True, False])
-    def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias):
+    @parametrize("m", [0, 128])
+    def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias, m):
         from torch.nn.functional import ScalingType
 
         torch.manual_seed(0)
-        M, K, N = 128, 256, 256
+        M, K, N = m, 256, 256
         mat_a = torch.rand(M, K, device=device, dtype=mat_a_dtype)
         weight_nk = torch.rand(N, K, device=device, dtype=mat_a_dtype)
 
