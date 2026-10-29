@@ -34,6 +34,15 @@ from torch._native.ops.reductions import (
 )
 
 
+# A column count of 4 mod 8 declares 16-byte fp32 rows but 8-byte 16-bit rows.
+_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
+_TOL = {
+    torch.float32: {"atol": 1e-3, "rtol": 1e-4},
+    torch.bfloat16: {"atol": 1e-1, "rtol": 1.6e-2},
+    torch.float16: {"atol": 1e-2, "rtol": 1e-3},
+}
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelColTile(TestCase):
@@ -136,19 +145,19 @@ class TestKernelColTile(TestCase):
             got_nd, nd.double().sum(dim=(0, 1)).float(), atol=1e-3, rtol=1e-4
         )
 
-    def test_batched_columns_split_and_combine(self):
+    @parametrize("dtype", _DTYPES)
+    def test_batched_columns_split_and_combine(self, dtype):
         # (B, R, C) stage one offsets each batch's rows; cover both splits and combines.
         trait = T.SumOps(acc=cutlass.Float32)
         for npar in (1, 4):
-            for columns in (256, ct._C_THREAD_STAGE2):
-                x = torch.randn(3, 515, columns, device="cuda")
+            for columns in (260, ct._C_THREAD_STAGE2 + 4):
+                x = torch.randn(3, 515, columns, device="cuda").to(dtype)
                 with self.subTest(npar=npar, pc=3 * columns >= ct._C_THREAD_STAGE2):
                     (got,) = ct.reduce_batched_col_tile(
-                        trait, "batched_col", x, [torch.float32], 1, npar=npar
+                        trait, "batched_col", x, [dtype], 1, npar=npar
                     )
-                    torch.testing.assert_close(
-                        got, x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-4
-                    )
+                    want = x.double().sum(dim=1).to(dtype)
+                    torch.testing.assert_close(got, want, **_TOL[dtype])
 
     def test_batched_argmax_reports_the_reduced_index(self):
         # Batched views must report positions along the reduced axis, first tie winning.
@@ -165,9 +174,9 @@ class TestKernelColTile(TestCase):
             got, torch.full((2, 256), 100, device="cuda", dtype=torch.int32)
         )
 
-    def test_two_output_columns(self):
-        x = torch.randn(4097, 256, device="cuda")
-        f32 = [torch.float32, torch.float32]
+    @parametrize("dtype", _DTYPES)
+    def test_two_output_columns(self, dtype):
+        x = torch.randn(4097, 260, device="cuda").to(dtype)
         with torch.backends.python_native.cutedsl.disabled():
             var_mean, aminmax = torch.var_mean(x, dim=0), x.aminmax(dim=0)
         expected = {"var_mean": var_mean, "aminmax": aminmax}
@@ -177,24 +186,24 @@ class TestKernelColTile(TestCase):
         }
         for name, trait in traits.items():
             with self.subTest(trait=name):
-                got = ct.reduce_col_tile_2out(trait, f"{name}_col", x, f32)
+                got = ct.reduce_col_tile_2out(trait, f"{name}_col", x, [dtype, dtype])
                 for g, e in zip(got, expected[name]):
-                    torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
+                    torch.testing.assert_close(g, e, **_TOL[dtype])
 
-    def test_batched_two_output_columns(self):
+    @parametrize("dtype", _DTYPES)
+    def test_batched_two_output_columns(self, dtype):
         # Two-output batched views fold both outputs in stage two; cover both combines.
         trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-        f32 = [torch.float32, torch.float32]
-        for columns in (256, ct._C_THREAD_STAGE2):
-            x = torch.randn(3, 515, columns, device="cuda")
+        for columns in (260, ct._C_THREAD_STAGE2 + 4):
+            x = torch.randn(3, 515, columns, device="cuda").to(dtype)
             with torch.backends.python_native.cutedsl.disabled():
                 expected = torch.var_mean(x, dim=1)
             with self.subTest(pc=3 * columns >= ct._C_THREAD_STAGE2):
                 got = ct.reduce_batched_col_tile(
-                    trait, "batched_var_mean", x, f32, 2, npar=4
+                    trait, "batched_var_mean", x, [dtype, dtype], 2, npar=4
                 )
                 for g, e in zip(got, expected):
-                    torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
+                    torch.testing.assert_close(g, e, **_TOL[dtype])
 
     def test_batched_column_route_gate(self):
         # Middle-axis reductions use the batched kernel only where it measured faster.
@@ -265,27 +274,28 @@ class TestKernelColTile(TestCase):
                 for g, e in zip(got, expected):
                     torch.testing.assert_close(g, e, atol=1e-4, rtol=1e-4)
 
-    def test_value_index_columns_keep_the_first_tie(self):
+    @parametrize("dtype", _DTYPES)
+    def test_value_index_columns_keep_the_first_tie(self, dtype):
         # max.dim/min.dim project a value and the first tied index through stage two.
-        f32, i32 = torch.float32, torch.int32
+        i32 = torch.int32
         cases = (
             ("max", T.MaxDimOps(acc=cutlass.Float32), 10.0),
             ("min", T.MinDimOps(acc=cutlass.Float32), -10.0),
         )
         for name, trait, tie in cases:
-            for batches, columns in ((3, 256), (1, ct._C_THREAD_STAGE2)):
-                x = torch.randn(batches, 1100, columns, device="cuda")
+            for batches, columns in ((3, 260), (1, ct._C_THREAD_STAGE2 + 4)):
+                x = torch.randn(batches, 1100, columns, device="cuda").to(dtype)
                 x[:, 100] = tie
                 x[:, 900] = tie
                 with self.subTest(op=name, pc=batches * columns >= ct._C_THREAD_STAGE2):
                     vals, idx = ct.reduce_batched_col_tile(
-                        trait, f"{name}dim_batched", x, [f32, i32], 2, npar=4
+                        trait, f"{name}dim_batched", x, [dtype, i32], 2, npar=4
                     )
                     self.assertEqual(vals, torch.full_like(vals, tie))
                     self.assertEqual(idx, torch.full_like(idx, 100))
             two_out, batched = ct.reduce_col_tile_2out, ct.reduce_batched_col_tile
-            for shape, dim in (((1100, 8192), 0), ((2, 1100, 4096), 1)):
-                x = torch.randn(shape, device="cuda")
+            for shape, dim in (((1100, 8196), 0), ((2, 1100, 4100), 1)):
+                x = torch.randn(shape, device="cuda").to(dtype)
                 x.select(dim, 100).fill_(tie)
                 x.select(dim, 900).fill_(tie)
                 with (
@@ -296,7 +306,7 @@ class TestKernelColTile(TestCase):
                     ) as bat,
                 ):
                     key = f"{name}dim_route"
-                    vals, idx = kg.reduce_dim2(trait, key, x, dim, [f32, i32])
+                    vals, idx = kg.reduce_dim2(trait, key, x, dim, [dtype, i32])
                     self.assertEqual(two.call_count, int(x.dim() == 2))
                     self.assertEqual(bat.call_count, int(x.dim() == 3))
                     self.assertEqual(vals, torch.full_like(vals, tie))
@@ -378,6 +388,13 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(AssertionError, "vec must divide"):
             ct.reduce_col_tile(
                 T.SumOps(acc=cutlass.Float32), "badvec", x, torch.float32, vec=4
+            )
+
+    def test_explicit_npar_must_fit_int32_partials(self):
+        x = torch.randn(1, 1 << 20, device="cuda")
+        with self.assertRaisesRegex(ValueError, "overflows Int32"):
+            ct.reduce_col_tile(
+                T.SumOps(acc=cutlass.Float32), "bignpar", x, torch.float32, npar=4096
             )
 
     def test_explicit_sizes_must_be_positive(self):
@@ -569,7 +586,6 @@ class TestOrderedColDevice(TestCase):
 instantiate_parametrized_tests(TestOrderedColHost)
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
 instantiate_parametrized_tests(TestKernelColTile)
-
 
 if __name__ == "__main__":
     run_tests()
