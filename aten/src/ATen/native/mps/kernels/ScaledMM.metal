@@ -15,7 +15,6 @@ struct ScaledMMArgs {
   device const float* scale_a;
   device const float* scale_b;
   device const uchar* bias;
-  device const float* scale_result;
   threadgroup half* a_tile;
   threadgroup half* b_tile;
 };
@@ -61,9 +60,6 @@ inline void scaled_mm_store(
         ? float(reinterpret_cast<device const bfloat*>(args.bias)[col])
         : float(reinterpret_cast<device const half*>(args.bias)[col]);
   }
-  if (p.has_scale_result) {
-    value *= *args.scale_result;
-  }
   args.out[row * p.out_row_stride + col * p.out_col_stride] = T(value);
 }
 
@@ -77,7 +73,6 @@ kernel void scaled_mm(
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
     constant ScaledMMParams<>& p [[buffer(6)]],
-    device const float* scale_result [[buffer(7)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]],
     uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -97,8 +92,7 @@ kernel void scaled_mm(
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
   threadgroup float c_tile[tile * tile];
-  const ScaledMMArgs<T> args{
-      a, b, out, scale_a, scale_b, bias, scale_result, a_tile, b_tile};
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   const uint sg_row = sg / sg_grid * block;
   const uint sg_col = sg % sg_grid * block;
   simdgroup_float8x8 accum[frags][frags];
@@ -161,7 +155,6 @@ kernel void scaled_mm(
       device const float*,                                          \
       device const uchar*,                                          \
       constant ScaledMMParams<>&,                                   \
-      device const float*,                                          \
       uint2,                                                        \
       uint,                                                         \
       uint);
@@ -201,7 +194,6 @@ kernel void scaled_mm_few_rows(
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
     constant ScaledMMParams<>& p [[buffer(6)]],
-    device const float* scale_result [[buffer(7)]],
     uint group [[threadgroup_position_in_grid]],
     uint sg [[simdgroup_index_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
@@ -217,8 +209,7 @@ kernel void scaled_mm_few_rows(
       scaled_mm_alignment % scaled_mm_simdgroups == 0,
       "N must be a whole number of threadgroups");
   constexpr auto chunk = scaled_mm_few_rows_lane_chunk;
-  const ScaledMMArgs<T> args{
-      a, b, out, scale_a, scale_b, bias, scale_result, {}, {}};
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
   const uint col = group * scaled_mm_simdgroups + sg;
   const auto b_col = b + col * p.b_col_stride;
   float4 accum[rows] = {};
@@ -262,7 +253,6 @@ kernel void scaled_mm_few_rows(
       device const float*,                                               \
       device const uchar*,                                               \
       constant ScaledMMParams<>&,                                        \
-      device const float*,                                               \
       uint,                                                              \
       uint,                                                              \
       uint);
@@ -294,14 +284,12 @@ kernel void scaled_mm_mpp(
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
     constant ScaledMMParams<>& p [[buffer(6)]],
-    device const float* scale_result [[buffer(7)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_tile;
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
-  const ScaledMMArgs<T> args{
-      a, b, out, scale_a, scale_b, bias, scale_result, a_tile, b_tile};
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   using tile_t =
       tensor<threadgroup half, extents<int, tile, tile>, tensor_inline>;
   tile_t aa(a_tile, extents<int, tile, tile>());
@@ -352,7 +340,6 @@ kernel void scaled_mm_mpp(
       device const float*,                                                  \
       device const uchar*,                                                  \
       constant ScaledMMParams<>&,                                           \
-      device const float*,                                                  \
       uint2,                                                                \
       uint);
 
