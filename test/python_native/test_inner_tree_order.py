@@ -271,6 +271,48 @@ class TestInnerTreeOrder(TestCase):
                     ref = self._run(T.SumOps, x)
                 self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
 
+    def test_grouped_combine_matches_the_default_chain(self):
+        """Fold split partials in grouped global-memory links with the default chain's bits."""
+        grouped = rt._ITREE_ARCH[(10, 0)]._replace(combine_async=0)
+        combine_plan, combines = rt.itree_combine_plan, []
+
+        def capture(*args, **kwargs):
+            combines.append(combine_plan(*args, **kwargs))
+            return combines[-1]
+
+        def reduce(trait, x):
+            if x.is_contiguous():
+                return self._run(trait, x)
+            key = f"inner_tree_test_grouped_{trait.__name__}"
+            with _order_on():
+                return kg.reduce_dim(trait(acc=cutlass.Float32), key, x, [1], x.dtype)
+
+        torch.manual_seed(0)
+        base = torch.randn(3, 2 << 20, device="cuda")
+        cases = (
+            ("contiguous", T.SumOps, base[:, : 1 << 20].contiguous()),
+            ("strided", T.SumOps, base[:, ::2]),
+            ("strided_welford", T.WelfordOps, base[:, ::2]),
+        )
+        for name, trait, x in cases:
+            with self.subTest(name=name):
+                combines.clear()
+                with (
+                    mock.patch.object(rt, "_itree_arch", return_value=grouped),
+                    mock.patch.object(rt, "itree_combine_plan", side_effect=capture),
+                ):
+                    got = reduce(trait, x)
+                self.assertTrue(combines)
+                for c in combines:
+                    self.assertGreater(c.combine_grp, 1)
+                    self.assertEqual(c.combine_tile, 0)
+                    self.assertEqual(c.rows_per_block, rt._MULTIROW_ROWS_PER_BLOCK)
+                with mock.patch.object(
+                    rt, "_itree_arch", return_value=rt._ITREE_ARCH["default"]
+                ):
+                    ref = reduce(trait, x)
+                self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
+
     def test_misaligned_rows_skip_row_staging(self):
         """Serve misaligned multirow inputs unstaged; cp.async needs aligned rows."""
         with mock.patch.object(rt, "_itree_arch", return_value=rt._ITREE_ARCH[(9, 0)]):
