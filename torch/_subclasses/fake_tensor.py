@@ -3457,11 +3457,13 @@ class FakeTensorMode(TorchDispatchMode):
                         decomposition_table[func](*args, **kwargs)
                     )
 
-            with self:
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return maybe_propagate_real_tensors(r)
+            # Decomposes CompositeImplicitAutograd ops. Most ops have no such
+            # kernel, so check before paying to enter the mode.
+            if func._can_decompose():
+                with self:
+                    r = func.decompose(*args, **kwargs)
+                    if r is not NotImplemented:
+                        return maybe_propagate_real_tensors(r)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we don't need do anything but run them
