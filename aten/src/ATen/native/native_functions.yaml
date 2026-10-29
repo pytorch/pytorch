@@ -11993,14 +11993,12 @@
 - func: huber_loss.out(Tensor self, Tensor target, int reduction=Mean, float delta=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: huber_loss_out
-    MPS: huber_loss_out_mps
+    CPU, CUDA, MPS, XPU: huber_loss_out
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: huber_loss
-    MPS: huber_loss_mps
+    CPU, CUDA, MPS, XPU: huber_loss
 
 - func: huber_loss_backward.out(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
