@@ -527,6 +527,10 @@ def addmm(
         # doesn't check. tuned_addmm drops self, so check here.
         utils.check_same_device(self, mat1, allow_cpu_scalar_tensors=False)
         self.expand(mat1.shape[0], mat2.shape[1])
+    # The rewrites below compute in the input dtype, so leave aten.addmm.dtype
+    # to the tuned_addmm lowering.
+    if out_dtype is not None:
+        return NotImplemented
 
     def add_input(out: torch.Tensor) -> torch.Tensor:
         # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
@@ -693,7 +697,9 @@ def angle(x: torch.Tensor) -> torch.Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
-    ret = torch.where(x < 0, pi, 0.0)
+    # mps has no integer signbit and integers have no -0
+    is_neg = torch.signbit(x) if x.is_floating_point() else x < 0
+    ret = torch.where(is_neg, pi, 0.0)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 

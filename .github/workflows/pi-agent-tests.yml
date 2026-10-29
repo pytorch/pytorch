@@ -1,0 +1,63 @@
+# Owner(s): ["module: ci"]
+name: Pi agent tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/pi-agent-tests.yml"
+  pull_request:
+    paths:
+      - ".github/actions/pi-agent/**"
+      - ".github/workflows/pi-agent-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Test guard and session failure handling
+        run: python3 -m unittest discover -s .github/actions/pi-agent/tests -v
+      - name: Install pinned search tools
+        run: bash .github/actions/pi-agent/install-tools.sh
+      - name: Install real pi from the action lockfile
+        run: |
+          mkdir -p "$RUNNER_TEMP/pi-install"
+          cp .github/actions/pi-agent/package{,-lock}.json "$RUNNER_TEMP/pi-install/"
+          npm ci --prefix "$RUNNER_TEMP/pi-install" --ignore-scripts --no-fund --no-audit
+      - name: Exercise real offline file tools
+        env:
+          PI_OFFLINE: "1"
+          PI_SKIP_VERSION_CHECK: "1"
+          PI_TELEMETRY: "0"
+        run: |
+          export PI_CODING_AGENT_DIR="$RUNNER_TEMP/pi-test-config"
+          cp .github/actions/pi-agent/tests/real-tools.mjs "$RUNNER_TEMP/pi-install/real-tools.mjs"
+          node "$RUNNER_TEMP/pi-install/real-tools.mjs"

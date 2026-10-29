@@ -11,11 +11,13 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.fx_passes.replace_random import replace_random_passes
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
@@ -41,7 +43,9 @@ from torch._library.opaque_object import (
     get_opaque_type_name,
     register_custom_class,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
@@ -57,6 +61,7 @@ from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
+convert = torch.ops.prims.convert_element_type.default
 
 
 class OpaqueScaleFactor(CustomClassBase):
@@ -735,6 +740,35 @@ class TestPatternMatcher(TestCase):
         node = graph.call_function(torch.add, (x, y), {"alpha": 1})
         self.assertFalse(torch_add.match(node))
 
+    def test_failed_match_drops_traceback(self):
+        # A FailedMatch raised mid-match (here: one KeywordArg bound to two
+        # different nodes) is returned to the caller. Its traceback would hold
+        # the matcher frames and, via f_back, the whole calling stack (e.g. the
+        # real tensors of a backward that triggered compilation) in a cycle.
+        add = torch.ops.aten.add.Tensor
+        pattern = CallFunction(add, KeywordArg("x"), KeywordArg("x"))
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        m = pattern.match(graph.call_function(add, (x, y)))
+        self.assertFalse(m)
+        self.assertEqual(str(m), "kwarg mismatch: x")
+        self.assertIsNone(m.__traceback__)
+
+    def test_auto_functionalized_default_kwarg_matches(self):
+        # functionalization passes defaulted args too; patterns written against
+        # auto_functionalized usually omit them
+        lib = self.enterContext(torch.library._scoped_library("pm_af", "FRAGMENT"))
+        lib.define("quant(Tensor! result, Tensor input, int[]? group_shape=None) -> ()")
+        op = torch.ops.pm_af.quant.default
+        af = torch.ops.higher_order.auto_functionalized
+        pattern = CallFunction(af, op, result=KeywordArg("r"), input=KeywordArg("i"))
+        graph = torch.fx.Graph()
+        r, i = graph.placeholder("r"), graph.placeholder("i")
+        for group_shape, ok in ((None, True), ([1, 128], False)):
+            kwargs = {"result": r, "input": i, "group_shape": group_shape}
+            node = graph.call_function(af, (op,), kwargs)
+            self.assertEqual(bool(pattern.match(node)), ok)
+
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839
         args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
@@ -1011,8 +1045,8 @@ class TestPatternMatcher(TestCase):
         self, input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls
     ):
         def fn(x):
-            x = torch.ops.prims.convert_element_type.default(x, intermediate_dtype)
-            x = torch.ops.prims.convert_element_type.default(x, input_dtype)
+            x = convert(x, intermediate_dtype)
+            x = convert(x, input_dtype)
             return x
 
         x = torch.randn(8, device=GPU_TYPE, dtype=input_dtype)
@@ -1023,8 +1057,8 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), expected_calls)
 
         def fn_int(x):
-            x = torch.ops.prims.convert_element_type.default(x, torch.int32)
-            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+            x = convert(x, torch.int32)
+            x = convert(x, torch.float32)
             return x
 
         x = torch.randn(8, device=GPU_TYPE, dtype=torch.float32)
@@ -1032,6 +1066,255 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+    def _run_reuse_dtype_conversions(
+        self,
+        gm: torch.fx.GraphModule,
+        *,
+        expected_conversions: int,
+        expected_rewrites: int,
+    ) -> None:
+        counters.clear()
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversions(gm.graph)
+        gm.recompile()
+
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=convert, sort=False)),
+            expected_conversions,
+        )
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversions"],
+            expected_rewrites,
+        )
+
+    def test_reuse_conversion_across_views(self):
+        def fn(x, lhs, lhs_t):
+            x_bf16 = convert(x, torch.bfloat16)
+            x_t_bf16 = convert(aten.permute.default(x, [0, 2, 1]), torch.bfloat16)
+            out = aten.bmm.default(
+                lhs,
+                aten.expand.default(x_bf16, list(x_bf16.shape)),
+            )
+            out_t = aten.bmm.default(
+                lhs_t,
+                aten.expand.default(x_t_bf16, list(x_t_bf16.shape)),
+            )
+            return out, out_t
+
+        args = (
+            torch.randn(4, 5, 7, device=GPU_TYPE),
+            torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        expected = fn(*args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
+        conversion = next(node for node in gm.graph.nodes if node.target is convert)
+        replacement = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is aten.permute.default and node.args[0] is conversion
+        )
+        self.assertEqual(get_node_storage(replacement), get_node_storage(conversion))
+        torch.testing.assert_close(gm(*args), expected)
+
+    @inductor_config.patch(fallback_random=True)
+    def test_reuse_conversion_after_fallback_random_ordering(self):
+        def fn(x):
+            base = x.to(torch.bfloat16)
+            first_random = torch.rand_like(x)
+            viewed = x.permute(1, 0).to(torch.bfloat16)
+            second_random = torch.rand_like(x)
+            return base.sum(), first_random, viewed.sum(), second_random
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        torch.manual_seed(0)
+        expected = fn(x)
+        counters.clear()
+        torch.manual_seed(0)
+        actual = torch.compile(fn)(x)
+
+        self.assertEqual(counters["inductor"]["reuse_dtype_conversions"], 1)
+        torch.testing.assert_close(actual, expected)
+
+    # Reuse is safe when at most one conversion storage reaches a graph output,
+    # but must be skipped when both do to preserve output-output aliasing.
+    def test_reuse_conversion_allows_output_candidate_with_internal_base(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return aten.sum.default(base), viewed
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_conversion_allows_output_base_with_internal_candidate(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return base, aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_conversion_across_views_preserves_output_aliasing(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return base, viewed
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=2, expected_rewrites=0
+        )
+
+    def test_reuse_conversion_across_views_bails_on_set(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            aten.set_.default(x)
+            return aten.sum.default(base), aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=2, expected_rewrites=0
+        )
+
+    def test_reuse_conversion_across_views_invalid_view_replay(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.view.default(x, [2, 4]), torch.bfloat16)
+            return aten.sum.default(base), aten.sum.default(viewed)
+
+        x = torch.empty_strided(
+            (2, 2, 2), (1, 2, 1), device=GPU_TYPE, dtype=torch.float32
+        )
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=2, expected_rewrites=0
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_conversion_allows_different_intermediate_strides(self):
+        def fn(x):
+            x_bf16 = convert(x, torch.bfloat16)
+            x_t_bf16 = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        permuted_convert = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is convert
+            and isinstance(node.args[0], torch.fx.Node)
+            and node.args[0].target is aten.permute.default
+        )
+        # Simulate a valid intermediate layout different from
+        # permute(convert(x)); consumers constrain required strides at use.
+        permuted_convert.meta["val"] = torch.empty_strided(
+            (7, 5),
+            (5, 1),
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+        )
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    @parametrize(
+        "view,input_shape",
+        [
+            subtest(
+                (lambda x: aten.permute.default(x, [1, 0]), (5, 7)),
+                name="permute",
+            ),
+            subtest(
+                (lambda x: aten.transpose.int(x, 0, 1), (5, 7)),
+                name="transpose",
+            ),
+            subtest((lambda x: aten.t.default(x), (5, 7)), name="t"),
+            subtest(
+                (lambda x: aten.view.default(x, [6, 4]), (2, 3, 4)),
+                name="view",
+            ),
+            subtest(
+                (lambda x: aten.squeeze.dim(x, 0), (1, 5, 7)),
+                name="squeeze",
+            ),
+            subtest(
+                (lambda x: aten.unsqueeze.default(x, 0), (5, 7)),
+                name="unsqueeze",
+            ),
+            subtest(
+                (lambda x: aten.slice.Tensor(x, 0, 1, 5), (5, 7)),
+                name="slice",
+            ),
+            subtest(
+                (lambda x: aten.select.int(x, 0, 1), (5, 7)),
+                name="select",
+            ),
+            subtest(
+                (lambda x: aten.narrow.default(x, 0, 1, 3), (5, 7)),
+                name="narrow",
+            ),
+        ],
+    )
+    def test_reuse_conversion_across_supported_views(self, view, input_shape):
+        def fn(x):
+            x_bf16 = convert(x, torch.bfloat16)
+            viewed_bf16 = convert(view(x), torch.bfloat16)
+            return aten.sum.default(x_bf16), aten.sum.default(viewed_bf16)
+
+        x = torch.randn(*input_shape, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_conversion_across_views_symbolic_shapes(self):
+        def fn(x):
+            x_bf16 = convert(x, torch.bfloat16)
+            x_t_bf16 = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return aten.sum.default(x_bf16), aten.sum.default(x_t_bf16)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        gm = make_fx(fn, tracing_mode="symbolic")(x)
+        converted_permute = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is convert
+            and isinstance(node.args[0], torch.fx.Node)
+            and node.args[0].target is aten.permute.default
+        )
+        self.assertTrue(
+            any(
+                isinstance(size, torch.SymInt)
+                for size in converted_permute.meta["val"].size()
+            )
+        )
+        self._run_reuse_dtype_conversions(
+            gm, expected_conversions=1, expected_rewrites=1
+        )
 
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
@@ -1269,6 +1552,207 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 2, device=GPU_TYPE),
             torch.randn(2, 3, device=GPU_TYPE),
             torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_cat_splitwithsizes_negative_dim(self):
+        # cat on dim=1, split on dim=-1 name the same axis on a 2D input:
+        # the pair must be eliminated exactly as with positive dims (#196905).
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # the mirror: cat dim negative, split dim positive
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        self.common(fn, args, 1, 2)
+
+        # negative dims on both sides, on a 3D input where the normalization
+        # has to use the real rank
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -2)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -2
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, 4, device=GPU_TYPE),
+            torch.randn(2, 3, 4, device=GPU_TYPE),
+            torch.randn(2, 5, 4, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a true mismatch still rejects: on 3D, cat dim=-1 (axis 2) vs split
+        # dim=1, with the cat input count and split sizes in agreement so the
+        # dims are the only thing that can reject
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [0, 0, 0], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(4, 0, 2, device=GPU_TYPE),
+            torch.randn(4, 0, 3, device=GPU_TYPE),
+            torch.randn(4, 0, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # eager cat accepts any dim when every input is a legacy (0,) empty;
+        # the out-of-range dim must not crash extra_check
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], 0)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # a dim left at its default shows up as None in the graph; that
+        # default is 0 and must match an explicit cat(dim=0)
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 0)
+            return torch.split_with_sizes(cat, [2, 3, 5])
+
+        args = [
+            torch.randn(2, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a legacy 1D empty riding along in the cat inputs has a lower rank
+        # than the cat output; the extra_check must decline the match instead
+        # of indexing it on the canonical dim and raising
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], -1)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(2, 0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_negative_dim(self):
+        # the sibling direction: split on dim=1, cat on dim=-1 is the same
+        # axis and must pass through the same as positive dims (#196905).
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # negative dims on both sides also match
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], -1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # cat dim -1 vs split dim 0 is a true mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [1, 1], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # all-legacy-empty cat keeps rank 1 while the dim stays out of range;
+        # extra_check must compare raw rather than raise
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [0, 0], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_omitted_dim(self):
+        # dim defaults to 0 for both ops and aot autograd does not fill in
+        # defaults, so an omitted dim traces to a different arity. Both sides
+        # omitted must collapse exactly like the explicit case.
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        args = [
+            torch.randn(32, 2, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # only the split dim omitted: the default 0 must match an explicit
+        # cat(dim=0)
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 0)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # only the cat dim omitted
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # split's default dim 0 against an explicit cat dim 1 is a true
+        # mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [16, 16])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -2070,7 +2554,9 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(precompiled.search_fn_pattern),
-                    msg=lambda msg: f"{msg}\nFound mismatched pattern {precompiled.search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
+                    msg=lambda msg: (
+                        f"{msg}\nFound mismatched pattern {precompiled.search_fn.__name__}. Run torchgen/fuse/gen_patterns.py"
+                    ),
                 )
 
                 # Since we've already checked that the serialized patterns match
@@ -2718,7 +3204,8 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
-    def test_nested_replacement_args_do_not_percolate_tags(self):
+    @parametrize("symint_layout", ["none", "flat", "nested"])
+    def test_nested_replacement_args_do_not_percolate_tags(self, symint_layout):
         class DummyMatch:
             def __init__(self, outputs):
                 self.nodes = outputs
@@ -2738,7 +3225,7 @@ class TestPatternMatcher(TestCase):
         graph.output(old)
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
-        def replacement(args):
+        def replacement(args, *shape):
             a, b = args
             return torch.mul(a, b)
 
@@ -2747,11 +3234,16 @@ class TestPatternMatcher(TestCase):
         old.meta["recompute"] = torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
         old.meta["ac_graph_id"] = 1
 
+        args = [(sin, y)]
+        if symint_layout != "none":
+            symint = ShapeEnv().create_unbacked_symint()
+            args.append(symint if symint_layout == "flat" else (symint,))
+
         ReplacementPatternEntry.replace_with_graph(
             DummyMatch([old]),
             gm.graph,
             replacement_gm,
-            args=[(sin, y)],
+            args=args,
         )
 
         self.assertFalse(
@@ -2765,6 +3257,11 @@ class TestPatternMatcher(TestCase):
         graph_str = str(gm.graph)
         self.assertIn("torch.mul", graph_str)
         self.assertIn("operator.getitem", graph_str)
+        gm.graph.lint()
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and node is not sin:
+                self.assertEqual(node.meta["recompute"], old.meta["recompute"])
+                self.assertEqual(node.meta["ac_graph_id"], old.meta["ac_graph_id"])
 
     def test_fwd_only_generate_original_aten_meta(self):
         def f(x):
@@ -2893,8 +3390,10 @@ class TestPatternMatcher(TestCase):
         self.assertGreaterEqual(
             view_count_skip_noop,
             view_count_default,
-            lambda msg: f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
-            f"to be >= view count with remove_noop enabled ({view_count_default})",
+            lambda msg: (
+                f"{msg}\nExpected view count with remove_noop disabled ({view_count_skip_noop}) "
+                f"to be >= view count with remove_noop enabled ({view_count_default})"
+            ),
         )
 
     def test_bound_method_pattern_matcher(self):
@@ -3288,6 +3787,43 @@ class TestPatternMatcher(TestCase):
                 dtype,
                 msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
+
+    def test_meta_matches_specializes_backed_not_unbacked(self):
+        def meta_matches(shape_env, actual, expected):
+            with FakeTensorMode(shape_env=shape_env):
+                val = torch.empty(actual, 8)
+            node = torch.fx.Graph().placeholder("x")
+            node.meta["val"] = val
+            pattern = CallFunction(torch.ops.aten.mm.default, Arg(), Arg())
+            pattern.expected_meta = ((expected, 8), val.dtype, val.device)
+            num_guards = len(shape_env.guards)
+            matched = pattern._meta_matches(node)
+            return matched, shape_env.guards[num_guards:]
+
+        def backed(shape_env, hint, name):
+            return shape_env.create_unspecified_symint_and_symbol(
+                hint, ConstantSource(name), DimDynamic.DYNAMIC
+            )
+
+        # backed, equal at the hint: matches by guarding s0 == s1 + 1
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 4, "s1")
+        matched, guards = meta_matches(shape_env, s0, s1 + 1)
+        self.assertTrue(matched)
+        self.assertEqual(len(guards), 1)
+
+        # backed, not equal at the hint: rejected
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 5, "s1")
+        matched, _ = meta_matches(shape_env, s0, s1 + 1)
+        self.assertFalse(matched)
+
+        # unbacked: rejected without installing a guard
+        shape_env = ShapeEnv()
+        u0, u1 = shape_env.create_unbacked_symint(), shape_env.create_unbacked_symint()
+        matched, guards = meta_matches(shape_env, u0, u1 + 1)
+        self.assertFalse(matched)
+        self.assertEqual(guards, [])
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""

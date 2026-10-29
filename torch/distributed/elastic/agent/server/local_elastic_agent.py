@@ -116,7 +116,7 @@ class _AliveCallbackProxy:
 
 
 class LocalElasticAgent(SimpleElasticAgent):
-    """An implementation of :py:class:`torchelastic.agent.server.ElasticAgent` that handles host-local workers.
+    """An implementation of :py:class:`torch.distributed.elastic.agent.server.ElasticAgent` that handles host-local workers.
 
     This agent is deployed per host and is configured to spawn ``n`` workers.
     When using GPUs, ``n`` maps to the number of GPUs available on the host.
@@ -137,7 +137,9 @@ class LocalElasticAgent(SimpleElasticAgent):
     workers finish at different times, to prevent agents from viewing workers
     that finished early as a scale-down event. It is strongly advised that the
     user code deal with ensuring that workers are terminated in a synchronous
-    manner rather than relying on the exit_barrier_timeout.
+    manner rather than relying on the exit_barrier_timeout. The default value of
+    300 seconds can be overridden via the ``TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT``
+    environment variable or by passing ``exit_barrier_timeout`` explicitly.
 
     A named pipe based watchdog can be enabled in ```LocalElasticAgent``` if an
     environment variable ``TORCHELASTIC_ENABLE_FILE_TIMER`` with value 1 has
@@ -149,6 +151,13 @@ class LocalElasticAgent(SimpleElasticAgent):
     variable ```TORCHELASTIC_TIMER_FILE```, and this environment variable will
     be propagated to the worker processes to allow them to connect to the same
     named pipe that ```LocalElasticAgent``` uses.
+
+    If ``uninterruptible_state_timeout`` (or the
+    ``TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT`` environment variable) is set
+    to a positive number of seconds, a worker that stays in Linux uninterruptible
+    sleep (D-state) for that long marks the worker group ``UNHEALTHY``, which is
+    handled like a worker failure. The constructor argument takes precedence;
+    the check is disabled by default.
 
     Logs are written to the specified log directory. Each log line will be by default
     prefixed by ``[${role_name}${local_rank}]:`` (e.g. ``[trainer0]: foobar``).
@@ -173,15 +182,17 @@ class LocalElasticAgent(SimpleElasticAgent):
             return "do train"
 
         def main():
-            start_method="spawn"
-            shared_queue= multiprocessing.get_context(start_method).Queue()
+            start_method = "spawn"
+            shared_queue = multiprocessing.get_context(start_method).Queue()
             spec = WorkerSpec(
                         role="trainer",
                         local_world_size=nproc_per_process,
                         entrypoint=trainer,
                         args=("foobar",),
                         ...<OTHER_PARAMS...>)
-            agent = LocalElasticAgent(spec, start_method)
+            agent = LocalElasticAgent(
+                spec, logs_specs=DefaultLogsSpecs(), start_method=start_method
+            )
             results = agent.run()
 
             if results.is_failed():
@@ -201,7 +212,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                         entrypoint="/usr/local/bin/trainer",
                         args=("--trainer-args", "foobar"),
                         ...<OTHER_PARAMS...>)
-            agent = LocalElasticAgent(spec)
+            agent = LocalElasticAgent(spec, logs_specs=DefaultLogsSpecs())
             results = agent.run()
 
             if not results.is_failed():
@@ -214,7 +225,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         spec: WorkerSpec,
         logs_specs: LogsSpecs,
         start_method="spawn",
-        exit_barrier_timeout: float = 300,
+        exit_barrier_timeout: float | None = None,
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
         health_check_server: HealthCheckServer | None = None,
@@ -395,7 +406,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
-        self._shutdown()
+        self._shutdown(timeout=self._shutdown_timeout)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.

@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    skipMPS,
+    onlyCUDA,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -623,7 +623,6 @@ class TestPoolingNN(NNTestCase):
 class TestPoolingNNDevice(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -644,7 +643,6 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last)
@@ -668,7 +666,6 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, device):
         input = torch.randint(
@@ -694,7 +691,6 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, device):
         input = torch.randint(
@@ -815,7 +811,7 @@ class TestPoolingNNDevice(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
-    @expectedFailureMPS  # Error message does not match
+    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
@@ -1283,8 +1279,8 @@ torch.{device_type}.synchronize()
                 output_size = (2,) * numel
                 module = module_cls(output_size)
                 input = torch.randn((4,) * (numel + 1), device=device).to(dtype)
-                # MPS 2D supports int adaptive pool; 3D falls through.
-                if device.startswith("mps") and numel == 2:
+                # MPS supports int adaptive max pool2d
+                if device.startswith("mps") and numel == 2 and pool_type == "Max":
                     cm = contextlib.nullcontext()
                 else:
                     cm = self.assertRaisesRegex(
@@ -1293,7 +1289,6 @@ torch.{device_type}.synchronize()
                 with cm:
                     module(input)
 
-    @expectedFailureMPS  # TODO: fixme
     @gcIfJetson
     @dtypes(torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
@@ -1371,10 +1366,7 @@ torch.{device_type}.synchronize()
         "channels_last",
         [
             subtest(False, name="contiguous"),
-            # MPS channels_last avg_pool2d backward is broken (see test_avg_pool2d_nhwc)
-            # for C > 1 but computes the degenerate C == 1 configs correctly, so the
-            # failure is not uniform across the parametrized shapes; skip rather than xfail.
-            subtest(True, name="channels_last", decorators=[skipMPS]),
+            subtest(True, name="channels_last"),
         ],
     )
     @parametrize_test(
@@ -1491,6 +1483,56 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    @parametrize_test("layout", ["contiguous", "unbatched", "channels_last"])
+    @parametrize_test(
+        "pool_args",
+        [
+            subtest((2, 2, 0, 1, False), name="single_window"),
+            subtest((3, 1, 1, 1, False), name="overlapping"),
+            subtest((2, 3, 0, 1, False), name="gaps"),
+            subtest((2, 2, 0, 2, True), name="dilated_ceil"),
+        ],
+    )
+    @parametrize_test("grad_value", [0, 1])
+    def test_max_pool2d_backward_out_initializes(
+        self, device, dtype, layout, pool_args, grad_value
+    ):
+        shape = (3, 5, 7) if layout == "unbatched" else (2, 3, 5, 7)
+        memory_format = (
+            torch.channels_last
+            if layout == "channels_last"
+            else torch.contiguous_format
+        )
+        input = torch.arange(math.prod(shape), device=device, dtype=dtype).reshape(
+            shape
+        )
+        input = input.contiguous(memory_format=memory_format)
+        kernel_size, stride, padding, dilation, ceil_mode = pool_args
+        output, indices = F.max_pool2d(input, *pool_args, return_indices=True)
+        grad_output = torch.full_like(output, grad_value)
+        grad_input = torch.full_like(input, nan, memory_format=memory_format)
+
+        ref_input = input.cpu().detach().requires_grad_()
+        ref_output = F.max_pool2d(ref_input, *pool_args)
+        ref_output.backward(torch.full_like(ref_output, grad_value))
+        self.assertTrue((ref_input.grad == 0).any())
+
+        actual = torch.ops.aten.max_pool2d_with_indices_backward.grad_input(
+            grad_output,
+            input,
+            [kernel_size, kernel_size],
+            [stride, stride],
+            [padding, padding],
+            [dilation, dilation],
+            ceil_mode,
+            indices,
+            grad_input=grad_input,
+        )
+        self.assertEqual(actual.data_ptr(), grad_input.data_ptr())
+        self.assertEqual(actual, ref_input.grad)
+
     @onlyAccelerator
     @gcIfJetson
     def test_max_pool2d(self, device):
@@ -1562,6 +1604,14 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @largeTensorTest("5GB")
+    def test_max_pool3d_64bit_indices(self, device):
+        # Zero-stride input that needs 64-bit indexing, MPS reads it without materializing
+        x = torch.zeros(1, dtype=torch.half, device=device).expand(1, 1, 32769, 65536)
+        out, idx = F.max_pool3d(x, (1, 1, 3), (1, 32768, 65533), return_indices=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(idx.flatten().tolist(), [0, 65533, 2**31, 2**31 + 65533])
 
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
@@ -2026,7 +2076,6 @@ torch.{device_type}.synchronize()
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
-    @expectedFailureMPS  # Exception not raise
     @expectedFailureXLA
     @gcIfJetson
     def test_max_pool_nan_inf(self, device, dtype):
@@ -2035,33 +2084,40 @@ torch.{device_type}.synchronize()
                 fn_name = f"{adaptive}max_pool{num_dim}d"
                 fn = getattr(F, fn_name)
 
-                x = torch.full(
-                    [1, 1] + num_dim * [3],
-                    nan,
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=True,
+                # adaptive_max_pool3d is not implemented for MPS
+                ctx = (
+                    self.assertRaises(NotImplementedError)
+                    if device.startswith("mps") and adaptive and num_dim == 3
+                    else contextlib.nullcontext()
                 )
-                res = fn(x, 1 if adaptive else 3)
-                res.backward(torch.randn_like(res))
-                self.assertTrue(math.isnan(res.item()))
-                x.requires_grad_(False)
-                res = fn(x, 1 if adaptive else 3)
-                self.assertTrue(math.isnan(res.item()))
+                with ctx:
+                    x = torch.full(
+                        [1, 1] + num_dim * [3],
+                        nan,
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    res = fn(x, 1 if adaptive else 3)
+                    res.backward(torch.randn_like(res))
+                    self.assertTrue(math.isnan(res.item()))
+                    x.requires_grad_(False)
+                    res = fn(x, 1 if adaptive else 3)
+                    self.assertTrue(math.isnan(res.item()))
 
-                x2 = torch.full(
-                    [1, 1] + num_dim * [3],
-                    -inf,
-                    device=device,
-                    dtype=dtype,
-                    requires_grad=True,
-                )
-                res2 = fn(x2, 1 if adaptive else 3)
-                res2.backward(torch.randn_like(res2))
-                self.assertTrue(math.isinf(res2.item()))
-                x2.requires_grad_(False)
-                res2 = fn(x2, 1 if adaptive else 3)
-                self.assertTrue(math.isinf(res2.item()))
+                    x2 = torch.full(
+                        [1, 1] + num_dim * [3],
+                        -inf,
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    res2 = fn(x2, 1 if adaptive else 3)
+                    res2.backward(torch.randn_like(res2))
+                    self.assertTrue(math.isinf(res2.item()))
+                    x2.requires_grad_(False)
+                    res2 = fn(x2, 1 if adaptive else 3)
+                    self.assertTrue(math.isinf(res2.item()))
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
@@ -2290,7 +2346,7 @@ torch.{device_type}.synchronize()
                         fn(x, 6, stride=2, padding=0)
 
     @onlyAccelerator
-    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
+    @expectedFailureMPS  # adaptive_avg_pool3d is not implemented
     def test_pooling_bfloat16(self, device):
         _test_bfloat16_ops(
             self,
@@ -2448,7 +2504,9 @@ class TestPoolingNNMpsOnly(NNTestCase):
         self.assertEqual(out, expected)
 
 
-instantiate_device_type_tests(TestAvgPoolDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestAvgPoolDevice, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
