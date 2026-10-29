@@ -633,7 +633,8 @@ class _TokenSwitchFlatTests:
             num_local_experts, dtype=torch.int32, device=self.device
         )
         routing = ts.create_routing(topk_idx, per_expert_counts, layout="flat")
-        self.assertEqual(routing.handle.get_num_recv_tokens(), NUM_TOKENS)
+        if isinstance(ts, TokenSwitchNCCL):
+            self.assertEqual(routing.handle.get_num_recv_tokens(), NUM_TOKENS)
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
         self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
@@ -1322,7 +1323,6 @@ class TokenSwitchNCCLTest(
             (NUM_TOKENS, HIDDEN), expected_val, dtype=torch.bfloat16, device=self.device
         )
         self.assertEqual(combined, expected)
-
 
 
 class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):

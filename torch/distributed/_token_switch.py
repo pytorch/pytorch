@@ -204,9 +204,10 @@ class _CombineAutograd(torch.autograd.Function):
     ) -> tuple[None, None, torch.Tensor]:
         ts = ctx.ts
         H = ctx.expert_shape[-1]
-        grad_expert_full = grad_out_tokens.new_zeros(
-            ts.max_recv_tokens_per_rank, H, dtype=ctx.expert_dtype
-        )
+        # An expert_major input can have more rows than max_recv_tokens_per_rank
+        # (TokenSwitchMoRI.max_expert_major_slots_per_rank).
+        rows = max(ts.max_recv_tokens_per_rank, ctx.expert_shape[0])
+        grad_expert_full = grad_out_tokens.new_zeros(rows, H, dtype=ctx.expert_dtype)
         ts._combine_backward(
             ctx.routing,
             grad_out_tokens.to(ctx.expert_dtype).contiguous(),
@@ -627,6 +628,10 @@ class TokenSwitchMoRI(TokenSwitch):
         """
         if layout not in ("flat", "expert_major"):
             raise ValueError(f"layout must be 'flat' or 'expert_major'; got {layout!r}")
+        if topk_idx.dtype not in (torch.int32, torch.int64):
+            raise TypeError(
+                f"topk_idx must have dtype int32 or int64, got {topk_idx.dtype}"
+            )
         if topk_idx.shape[1] != self._top_k:
             raise ValueError(
                 f"top_k is fixed at {self._top_k}, got {topk_idx.shape[1]}"
@@ -757,7 +762,8 @@ class TokenSwitchMoRI(TokenSwitch):
             )
         self._fence_if_repeat("combine")
         if routing.layout == "flat":
-            out, _ = self._op.combine(expert_tokens.contiguous(), routing=mori_handle)
+            rows = expert_tokens[: self._recv_cap].contiguous()
+            out, _ = self._op.combine(rows, routing=mori_handle)
         else:
             # Sum each recv row's slots into MoRI's combine input buffer; MoRI skips
             # its own staging copy when handed that buffer.
