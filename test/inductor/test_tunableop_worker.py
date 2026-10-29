@@ -312,24 +312,26 @@ class TunableOpWorkerTest(TestCase):
             (EOFError(), "crash"),
             (RuntimeError("boom"), "error"),
         ):
-            with self.assertLogs(tunableop.log, level="WARNING") as logs:
-                _, outcome = self._submit_with_fault(exc)
-            self.assertEqual(outcome.status, status)
-            self.assertIsNone(outcome.time)
-            self.assertIn(status, "".join(logs.output))
-            # Warned once per kind; a repeat drops to debug.
-            with self.assertNoLogs(tunableop.log, level="WARNING"):
-                self._submit_with_fault(exc)
+            with self.subTest(status=status):
+                with self.assertLogs(tunableop.log, level="WARNING") as logs:
+                    _, outcome = self._submit_with_fault(exc)
+                self.assertEqual(outcome.status, status)
+                self.assertIsNone(outcome.time)
+                self.assertIn(status, "".join(logs.output))
+                # Warned once per kind; a repeat drops to debug.
+                with self.assertNoLogs(tunableop.log, level="WARNING"):
+                    self._submit_with_fault(exc)
 
     def test_job_raised_pipe_exception_is_an_error_not_a_timeout(self):
         # The discriminator is running, which a real pipe fault clears and a
         # child-raised exception does not.
         for exc in (TimeoutError("from the job"), EOFError("from the job")):
-            worker, outcome = self._submit_with_fault(exc, running=True)
-            self.assertEqual(outcome.status, "error")
-            self.assertIsNone(outcome.time)
-            self.assertIsNone(tunableop._worker)
-            self.assertEqual(worker.kill_calls, 1)
+            with self.subTest(exc=type(exc).__name__):
+                worker, outcome = self._submit_with_fault(exc, running=True)
+                self.assertEqual(outcome.status, "error")
+                self.assertIsNone(outcome.time)
+                self.assertIsNone(tunableop._worker)
+                self.assertEqual(worker.kill_calls, 1)
 
     def test_a_failure_before_the_worker_is_also_reported(self):
         # The caller is a compile, not a benchmark harness: anything submit()
@@ -719,13 +721,12 @@ class TunableopModeValidationTest(TestCase):
 
     def test_valid_modes_do_not_warn(self):
         tunableop._mode_warned = False
-        try:
-            for mode in ("off", "tune", "reuse"):
+        self.addCleanup(setattr, tunableop, "_mode_warned", False)
+        for mode in ("off", "tune", "reuse"):
+            with self.subTest(mode=mode):
                 with inductor_config.patch({"cuda.aten_tunableop_mode": mode}):
                     with self.assertNoLogs(tunableop.log, level="WARNING"):
                         tunableop.is_enabled()
-        finally:
-            tunableop._mode_warned = False
 
 
 class TunableOpRealWorkerTest(TestCase):
