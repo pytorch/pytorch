@@ -840,6 +840,9 @@ class _PyObjectDispatcher(Generic[_P, _T]):
     # (which ends up doing the expensive at::Tensor copies).
     dispatch: Callable[_P, _T]
     redispatch: Callable[Concatenate[DispatchKeySet, _P], _T]
+    # redispatch(keyset & _after_autograd_keyset, ...) under
+    # _AutoDispatchBelowAutograd, for an Autograd kernel's redispatch.
+    redispatch_below_autograd: Callable[Concatenate[DispatchKeySet, _P], _T]
 
 
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
@@ -992,13 +995,6 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def _is_pyobj_dispatcher_enabled(self) -> bool:
         return self._pyobj_dispatcher is not None
 
-    def _can_enable_pyobj_dispatch(self) -> bool:
-        # TODO(#187974): Support non-Tensor returns by normalizing Python kernel
-        # returns against the operator schema in the PyObject fast path.
-        return all(
-            isinstance(ret.type, torch.TensorType) for ret in self._schema.returns
-        )
-
     def _enable_pyobj_dispatch(self, enabled: bool = True) -> None:
         if self._is_pyobj_dispatcher_enabled() == enabled:
             return
@@ -1006,14 +1002,16 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
             self._pyobj_dispatcher = None
             self._op = self._cpp_dispatch_handle
             return
-        if not self._can_enable_pyobj_dispatch():
-            return
-        dispatch, redispatch = torch._C._dispatch_make_pyobj_dispatch_fns(
-            self._handle,
-            self._cpp_dispatch_handle,
-            self._handle.redispatch_boxed,
+        dispatch, redispatch, redispatch_below_autograd = (
+            torch._C._dispatch_make_pyobj_dispatch_fns(
+                self._handle,
+                self._cpp_dispatch_handle,
+                self._handle.redispatch_boxed,
+            )
         )
-        self._pyobj_dispatcher = _PyObjectDispatcher(dispatch, redispatch)
+        self._pyobj_dispatcher = _PyObjectDispatcher(
+            dispatch, redispatch, redispatch_below_autograd
+        )
         self._op = dispatch
 
     # This implements the pre-computation logic for the Python dispatcher.

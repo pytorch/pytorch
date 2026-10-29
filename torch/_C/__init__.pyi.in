@@ -1757,7 +1757,14 @@ class _DispatchModule:
         op_name_with_overload: str,
         dispatch: _dispatchkey,
     ) -> None: ...
-    def impl(self, name: str, dispatch: _dispatchkey, func: Callable) -> None: ...
+    def impl(
+        self,
+        name: str,
+        dispatch: _dispatchkey,
+        func: Callable,
+        with_keyset: _bool = False,
+        skip_if_no_grad: _bool = False,
+    ) -> None: ...
     def define(self, schema: str, alias: str = "") -> str: ...
     def fallback_fallthrough(self, dispatch: str = "") -> _DispatchModule: ...
     def fallback(
@@ -1791,7 +1798,7 @@ def _dispatch_make_pyobj_dispatch_fns(
     handle: _DispatchOperatorHandle,
     dispatch_cpp: Callable,
     redispatch_cpp: Callable,
-) -> tuple[Callable, Callable]: ...
+) -> tuple[Callable, Callable, Callable]: ...
 def _dispatch_find_schema_or_throw(
     name: str,
     overload_name: str,
