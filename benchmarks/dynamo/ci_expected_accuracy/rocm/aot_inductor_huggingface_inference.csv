@@ -78,6 +78,10 @@ PegasusForCausalLM,pass,0
 
 
 
+Qwen/Qwen2.5-0.5B-Instruct,fail_to_run,0
+
+
+
 Qwen/Qwen3-0.6B,fail_to_run,0
 
 
@@ -118,7 +122,15 @@ google/gemma-2-2b,fail_to_run,0
 
 
 
+google/gemma-3-1b-it,fail_to_run,0
+
+
+
 meta-llama/Llama-3.2-1B,fail_to_run,0
+
+
+
+openai/whisper-large-v3-turbo,fail_to_run,0
 
 
 
