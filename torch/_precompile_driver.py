@@ -90,6 +90,7 @@ def _import_custom_op_modules(served=(), import_served=None):
     still registers the active kernel it did at capture. Emitted as section 0 and
     called at exec time. The modules in ``served`` are imported with
     ``import_served``, which fails the load if they do not import."""
+    import contextlib
     import importlib
     import importlib.util
     import os
@@ -112,9 +113,11 @@ def _import_custom_op_modules(served=(), import_served=None):
 
     # The entry may register a served module find_spec cannot locate (a plugin
     # loader), so a module not found yet is looked up again after the entry imports.
+    # The module's own import then reports a failure, not the entry's.
     def import_or_entry(module, import_served):
         if not found(module) and ENTRY_MODULE in served:
-            import_served(ENTRY_MODULE)
+            with contextlib.suppress(Exception):
+                import_served(ENTRY_MODULE)
         import_served(module)
 
     # A module imported from inside another finished first, so the order alone
