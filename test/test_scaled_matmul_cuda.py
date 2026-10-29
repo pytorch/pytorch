@@ -3669,6 +3669,16 @@ class TestFP8Matmul(TestCase):
 
 
     @onlyCUDA
+    @unittest.skipIf(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM, "cuBLASLt FP8 grouped GEMM is supported")
+    def test_scaled_grouped_mm_cublaslt_unsupported_platform(self, device):
+        a = torch.empty(2, 16, 32, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.ones(1, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "cuBLASLt"):
+            scaled_grouped_mm_wrap(
+                a, a.transpose(-2, -1), scale, scale, ScalingType.TensorWise, ScalingType.TensorWise,
+            )
+
+    @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(IS_SM10X and "USE_MSLK" in torch.__config__.show(), "MSLK grouped GEMM is supported")
     def test_scaled_grouped_mm_mslk_unsupported_platform(self, device):
