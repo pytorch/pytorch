@@ -553,6 +553,122 @@ class SeamSummaryTest(TestCase):
         self.assertFalse(summary["formal_trace_complete"])
 
 
+class MultiGraphCoverageTest(TestCase):
+    def _calls(self):
+        return [
+            {
+                "ok": True,
+                "graph_kind": "forward",
+                "graph_kwargs": {"is_backward": False},
+                "pipeline_trace_stages": 8,
+                "num_generated_kernels": 7,
+                "kernels_before_fusion": 9,
+                "num_extern_calls": 18,
+                "function_names": ["relu"],
+            },
+            {
+                "ok": True,
+                "graph_kind": "backward",
+                "graph_kwargs": {"is_backward": True},
+                "pipeline_trace_stages": 8,
+                "num_generated_kernels": 0,
+                "kernels_before_fusion": 0,
+                "num_extern_calls": 39,
+                "function_names": [],
+            },
+        ]
+
+    def test_native_only_backward_preserves_forward_coverage(self):
+        summary = suite._summarize_seam_calls(self._calls())
+        self.assertTrue(summary["backward_cpp_evidence"])
+        self.assertEqual(
+            summary["coverage"],
+            {
+                "scope": "all_successful_seam_graphs",
+                "num_generated_kernels": 7,
+                "kernels_before_fusion": 9,
+                "kernels_removed_by_fusion": 2,
+                "num_extern_calls": 57,
+                "function_names": ["relu"],
+            },
+        )
+
+    def test_coverage_aggregation_does_not_depend_on_graph_order(self):
+        calls = self._calls()
+        self.assertEqual(
+            suite._summarize_seam_calls(calls)["coverage"],
+            suite._summarize_seam_calls(calls[::-1])["coverage"],
+        )
+
+    def test_rejected_graph_statistics_never_count(self):
+        calls = self._calls()
+        calls[0]["ok"] = False
+        coverage = suite._summarize_seam_calls(calls)["coverage"]
+        self.assertEqual(coverage["num_generated_kernels"], 0)
+        self.assertEqual(coverage["num_extern_calls"], 39)
+        self.assertEqual(coverage["function_names"], [])
+
+    def test_invalid_statistics_never_create_coverage(self):
+        for invalid in (True, "7", -7, None):
+            with self.subTest(invalid=invalid):
+                calls = self._calls()
+                calls[0]["num_generated_kernels"] = invalid
+                coverage = suite._summarize_seam_calls(calls)["coverage"]
+                self.assertEqual(coverage["num_generated_kernels"], 0)
+
+    def test_missing_before_fusion_statistics_are_not_invented(self):
+        calls = self._calls()
+        del calls[0]["kernels_before_fusion"]
+        coverage = suite._summarize_seam_calls(calls)["coverage"]
+        self.assertIsNone(coverage["kernels_before_fusion"])
+        self.assertIsNone(coverage["kernels_removed_by_fusion"])
+
+    def test_compile_variant_uses_all_graphs_not_last_collector(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        import torch._inductor.loops_ir_backend as backend
+
+        calls = self._calls()
+        gm = SimpleNamespace(graph=SimpleNamespace(nodes=[]))
+
+        class Benchmark(FakeBenchmark):
+            def invoke(self):
+                for call in calls:
+                    backend.compile_fx_loops_ir_output(
+                        gm, [], graph_kwargs=call["graph_kwargs"]
+                    )
+
+        def seam(_gm, _inputs, *, graph_kwargs):
+            call = calls[int(graph_kwargs["is_backward"])]
+            artifacts = backend._current_collector.get().artifacts
+            artifacts.clear()
+            for name in (
+                "num_generated_kernels",
+                "kernels_before_fusion",
+                "num_extern_calls",
+                "function_names",
+                "graph_kind",
+            ):
+                setattr(artifacts, name, call[name])
+            artifacts.pipeline_trace = tuple(SimpleNamespace() for _ in range(8))
+
+        bm = Benchmark(test="train")
+        with (
+            patch.object(backend, "compile_fx_loops_ir_output", seam),
+            patch.object(torch, "compile", return_value=bm.model),
+            patch.object(torch.cuda, "synchronize"),
+        ):
+            info = suite.compile_variant(bm, "strict_eager", "train")
+            self.assertIs(backend.compile_fx_loops_ir_output, seam)
+        self.assertEqual(info["last_graph_kind"], "backward")
+        self.assertTrue(info["backward_cpp_evidence"])
+        self.assertEqual(info["coverage"]["num_generated_kernels"], 7)
+        self.assertEqual(info["coverage"]["kernels_removed_by_fusion"], 2)
+        self.assertTrue(info["param_identity_preserved"])
+        self.assertTrue(info["optimizer_refs_preserved"])
+
+
 class Finding2InvokeContextsTest(TestCase):
     """Finding 2: non-staged steps must run genuine invoke() + run_contexts."""
 

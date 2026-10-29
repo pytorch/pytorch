@@ -1193,7 +1193,38 @@ def _summarize_seam_calls(seam_calls: list[dict[str, Any]]) -> dict[str, Any]:
             and call.get("graph_kwargs", {}).get("is_backward") is True
             for call in seam_calls
         )
-    kinds = sorted({_kind(c) for c in seam_calls if c.get("ok") is True})
+    successful_calls = [c for c in seam_calls if c.get("ok") is True]
+    kinds = sorted({_kind(c) for c in successful_calls})
+
+    def _count(call: dict[str, Any], name: str) -> int:
+        value = call.get(name)
+        return value if type(value) is int and value >= 0 else 0
+
+    generated = sum(_count(c, "num_generated_kernels") for c in successful_calls)
+    before_complete = bool(successful_calls) and all(
+        type(c.get("kernels_before_fusion")) is int
+        and c["kernels_before_fusion"] >= _count(c, "num_generated_kernels")
+        for c in successful_calls
+    )
+    before_fusion = (
+        sum(_count(c, "kernels_before_fusion") for c in successful_calls)
+        if before_complete
+        else None
+    )
+    coverage = {
+        "scope": "all_successful_seam_graphs",
+        "num_generated_kernels": generated,
+        "kernels_before_fusion": before_fusion,
+        "kernels_removed_by_fusion": before_fusion - generated
+        if before_fusion is not None
+        else None,
+        "num_extern_calls": sum(
+            _count(c, "num_extern_calls") for c in successful_calls
+        ),
+        "function_names": [
+            name for call in successful_calls for name in call.get("function_names", [])
+        ],
+    }
     try:
         trace_complete = bool(seam_calls) and all(
             isinstance(c.get("pipeline_trace_stages"), int)
@@ -1212,6 +1243,7 @@ def _summarize_seam_calls(seam_calls: list[dict[str, Any]]) -> dict[str, Any]:
         "backend_graph_kind": "+".join(k for k in kinds if k) or "unknown",
         "formal_trace_complete": bool(trace_complete),
         "collector_retains_only_last_graph": True,
+        "coverage": coverage,
         "calls": list(seam_calls),
     }
 
@@ -1295,6 +1327,7 @@ def compile_variant(benchmark: Any, mode: str, test: str) -> dict[str, Any]:
             )
             if artifacts is not None:
                 entry["num_generated_kernels"] = int(artifacts.num_generated_kernels)
+                entry["kernels_before_fusion"] = int(artifacts.kernels_before_fusion)
                 entry["num_extern_calls"] = int(artifacts.num_extern_calls)
                 entry["function_names"] = list(artifacts.function_names)
                 # Typed training admission (worker C, landed): real graph
@@ -1394,15 +1427,7 @@ def compile_variant(benchmark: Any, mode: str, test: str) -> dict[str, Any]:
     # helper so the failure path records the same evidence shape.
     summary = _summarize_seam_calls(seam_calls)
     info["num_seam_graphs"] = summary["num_seam_graphs"]
-    info["coverage"] = {
-        "num_generated_kernels": int(artifacts.num_generated_kernels),
-        "kernels_before_fusion": int(artifacts.kernels_before_fusion),
-        "kernels_removed_by_fusion": int(
-            artifacts.kernels_before_fusion - artifacts.num_generated_kernels
-        ),
-        "num_extern_calls": int(artifacts.num_extern_calls),
-        "function_names": list(artifacts.function_names),
-    }
+    info["coverage"] = summary["coverage"]
     info["triton_sources_available"] = sorted(artifacts.triton_sources)
     info["triton_ptx_available"] = sorted(artifacts.triton_ptx)
     # Last-graph formal provenance (the existing collector retains only the
@@ -1481,7 +1506,9 @@ def compile_variant(benchmark: Any, mode: str, test: str) -> dict[str, Any]:
         and opt_param_ids_before == opt_param_ids_after
     )
     if info.get("coverage", {}).get("num_generated_kernels", 0) <= 0:
-        error = RuntimeError("no generated C++ IR kernels executed (coverage gate)")
+        error = RuntimeError(
+            "no generated C++ IR kernels in successful graphs (coverage gate)"
+        )
         # Preserve per-graph evidence on the exception so the caller records
         # rejection/attempt data even for failed compiles (never a pass).
         error._loops_ir_seam_calls = list(seam_calls)  # type: ignore[attr-defined]
