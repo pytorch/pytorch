@@ -6,6 +6,7 @@ import csv
 import functools
 import importlib.metadata
 import io
+import itertools
 import json
 import os
 import shutil
@@ -34,12 +35,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_SLOW,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Skips before setUp spawns workers. The inductor_huggingface_tp job runs these.
+launches_processes = unittest.skipIf(
+    not TEST_WITH_SLOW, "launches processes; set PYTORCH_TEST_WITH_SLOW=1"
+)
 # Bind the namespace package explicitly: some CI images install pysbd, whose wheel
 # ships a regular top-level `benchmarks` package that would shadow the repo's.
 sys.modules["benchmarks"] = types.ModuleType("benchmarks")
@@ -57,8 +63,8 @@ def _require_transformers():
         version = importlib.metadata.version("transformers")
     except importlib.metadata.PackageNotFoundError:
         raise unittest.SkipTest("requires transformers") from None
-    if Version(version) < Version("5.13.0"):
-        raise unittest.SkipTest("requires transformers >= 5.13.0")
+    if Version(version) < Version("5.14.1"):
+        raise unittest.SkipTest("requires transformers >= 5.14.1")
 
 
 def _import_huggingface():
@@ -183,6 +189,10 @@ class BenchmarkRunnerTests(TestCase):
         args.profiler_trace_name = "profile"
         profile = mock.Mock()
         setup = mock.Mock() if mode != "generate" else None
+        request_tokens = {
+            "prefill": {"input_tokens_per_second": 6},
+            "decode": {"output_tokens_per_second": 10},
+        }.get(mode)
         model = torch.nn.Identity()
         model.name = "Qwen/Qwen3-0.6B"
         inputs = {
@@ -205,7 +215,13 @@ class BenchmarkRunnerTests(TestCase):
             ),
         ):
             common.speedup_experiment(
-                args, mock.Mock(), model, inputs, hf_llm=True, setup_fn=setup
+                args,
+                mock.Mock(),
+                model,
+                inputs,
+                hf_llm=True,
+                setup_fn=setup,
+                request_tokens=request_tokens,
             )
         _, headers, values = write.call_args_list[0].args
         row = dict(zip(headers, values))
@@ -298,6 +314,7 @@ class BenchmarkRunnerTests(TestCase):
                 inputs,
                 hf_llm=True,
                 setup_fn=setup,
+                request_tokens={"input_tokens_per_second": 6},
                 tp_group=group,
                 compilation_latency=1.0,
                 compression_ratio=1.0,
@@ -489,6 +506,7 @@ class HuggingFacePrefillTestCase(TestCase):
     @contextlib.contextmanager
     def _mock_pretrained(self):
         from benchmarks.dynamo import huggingface_llm_models as llm
+        from transformers import AutoConfig
 
         model = self._make_model("Llama", "cpu").model
         tokenizer = types.SimpleNamespace(vocab_size=32, eos_token_id=2)
@@ -499,6 +517,7 @@ class HuggingFacePrefillTestCase(TestCase):
             mock.patch.object(
                 llm.AutoModelForCausalLM, "from_pretrained", return_value=model
             ),
+            mock.patch.object(AutoConfig, "from_pretrained", return_value=model.config),
         ):
             yield
 
@@ -615,14 +634,57 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             )
         self.assertEqual(inputs["decode_ids"].shape, (2, 5))
 
+    @parametrize(
+        "failing_run, mismatch, status",
+        [
+            (2, None, "eager_1st_run_fail"),
+            (3, None, "eager_2nd_run_fail"),
+            (None, 0, "eager_two_runs_differ"),
+            (4, None, "fail_to_run"),
+            (None, 1, "fail_accuracy"),
+        ],
+    )
+    def test_non_tp_accuracy_failure_status(self, failing_run, mismatch, status):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args()
+        runner.args.performance, runner.args.accuracy = False, True
+        runner.hf_llm = True
+        runner.model_iter_fn = runner.prefill
+        model = self._make_model("Llama", "cpu")
+        inputs = {"input_ids": torch.randint(0, 32, (2, 4))}
+        # Runs: fp64 reference, two eager runs, compiled run. Comparisons: the two
+        # eager runs, then compiled against eager.
+        run_n_iterations, same = runner.run_n_iterations, common.same
+        runs, comparisons = itertools.count(1), itertools.count()
+
+        def run(*args, **kwargs):
+            if next(runs) == failing_run:
+                raise RuntimeError("injected failure")
+            return run_n_iterations(*args, **kwargs)
+
+        def compare(*args, **kwargs):
+            return next(comparisons) != mismatch and same(*args, **kwargs)
+
+        with (
+            mock.patch.object(runner, "run_n_iterations", run),
+            mock.patch.object(common, "same", compare),
+            mock.patch.object(common, "current_name", "tiny"),
+            mock.patch.object(common, "current_device", "cpu"),
+            mock.patch.object(common, "write_outputs"),
+            mock.patch.object(common, "output_signpost", return_value=0),
+        ):
+            optimize = torch._dynamo.optimize("eager", nopython=True)
+            result = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
+        self.assertEqual(result, status)
+
     def test_prompt_must_fit_generation_context(self):
         runner = self.huggingface.HuggingfaceRunner()
-        runner.args = self._runner_args("--prompt-length=2097")
-        with (
-            self._mock_pretrained(),
-            self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"),
-        ):
-            runner.load_model("cpu", "Qwen/Qwen3-0.6B", batch_size=1)
+        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=2096")
+        with self._mock_pretrained():
+            runner.validate_args(args)
+            args.prompt_length = 2097
+            with self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"):
+                runner.validate_args(args)
 
     @parametrize("mode", ("prefill", "decode"))
     def test_prefill_performance_run(self, mode):
@@ -669,6 +731,15 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 
 
 class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
+    def setUp(self):
+        super().setUp()
+        # Validate as on a machine without an accelerator, where -dcpu TP is allowed.
+        patcher = mock.patch.object(
+            torch.accelerator, "current_accelerator", return_value=None
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _tp_args(self, *extra, mode="decode"):
         return self._runner_args(
             "--tp-size=2", "--float32", "--disable-cudagraphs", *extra, mode=mode
@@ -703,6 +774,20 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
         args = self._runner_args("--tp-size=2", "--disable-cudagraphs")
         with self.assertRaisesRegex(ValueError, "--bfloat16, --float16, or --float32"):
             runner.validate_args(args)
+        args = self._tp_args("--backend=cudagraphs")
+        with self.assertRaisesRegex(ValueError, "a backend other than cudagraphs"):
+            runner.validate_args(args)
+
+    def test_cpu_tp_requires_no_accelerator(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        cuda = torch.device("cuda")
+        with (
+            mock.patch.object(
+                torch.accelerator, "current_accelerator", return_value=cuda
+            ),
+            self.assertRaisesRegex(ValueError, "requires a machine without an accel"),
+        ):
+            runner.validate_args(self._tp_args())
 
     @parametrize("use_inductor_flag", (False, True))
     def test_inductor_tp_requires_cuda(self, use_inductor_flag):
@@ -812,6 +897,11 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
             mock.patch.object(
                 common, "run_tp_worker_group", side_effect=launch_worker
             ) as launch,
+            mock.patch.object(
+                self.huggingface.AutoConfig,
+                "from_pretrained",
+                return_value=_tiny_causal_lm("Qwen3").config,
+            ),
             mock.patch.object(subprocess, "check_call") as check_call,
             mock.patch.object(common, "setup_determinism"),
         ):
@@ -953,6 +1043,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.cudagraph_trees import ExecutionState, get_manager
 
+        torch._dynamo.reset()
         model = self._make_model(model_type, device)
         inputs = torch.randint(0, 32, (2, 4), device=device)
         skips_before = counters["inductor"]["cudagraph_skips"]
@@ -1031,6 +1122,7 @@ def _tp_device():
 
 @skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
 @requires_distributed
+@launches_processes
 class TestTensorParallelHarness(MultiProcessTestCase):
     @property
     def world_size(self):
@@ -1084,9 +1176,6 @@ class TestTensorParallelHarness(MultiProcessTestCase):
         statuses = ["eager_1st_run_OOM", "eager_1st_run_fail"]
         self.assertEqual(runner.agree_on_status(statuses[self.rank]), statuses[0])
         self.assertEqual(runner.agree_on_status("pass"), "pass")
-        load_statuses = [None, "eager_fail_to_run"]
-        status = runner.agree_on_status(load_statuses[self.rank], ok_status=None)
-        self.assertEqual(status, "eager_fail_to_run")
 
 
 # Divisible by a TP size of 2, with tied embeddings like the benchmarked checkpoints.
@@ -1102,6 +1191,7 @@ TP_QWEN3_5_CONFIG = {"linear_num_key_heads": 2, "linear_num_value_heads": 4}
 
 @skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
 @requires_distributed
+@launches_processes
 class TestHuggingFaceTensorParallel(MultiProcessTestCase):
     @property
     def world_size(self):
@@ -1112,6 +1202,8 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
         _require_transformers()
         if _tp_device() != self.device_type:
             raise unittest.SkipTest("requires no accelerator or two CUDA devices")
+        if "backend_inductor" in self._testMethodName and self.device_type != "cuda":
+            raise unittest.SkipTest("Inductor TP requires CUDA/NCCL")
         self._spawn_processes()
 
     def _init_process_group(self, device):
@@ -1227,8 +1319,6 @@ class TestHuggingFaceTensorParallel(MultiProcessTestCase):
         from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
         from transformers import AutoModelForCausalLM
 
-        if backend == "inductor" and self.device_type != "cuda":
-            raise unittest.SkipTest("Inductor TP requires CUDA/NCCL")
         device = self._init_process_group(device)
         runner = _import_huggingface().HuggingfaceRunner()
         tolerance = {"atol": 1e-5, "rtol": 1e-4}
@@ -1462,17 +1552,17 @@ class TestTensorParallelResults(TestCase):
                     [{"name": "model", "accuracy": status, "graph_breaks": 0}],
                 )
 
+    @parametrize("tp", (False, True))
     @parametrize("accuracy", (False, True))
     @parametrize("failure_first", (False, True))
-    def test_tagged_failure_preserves_columns(self, accuracy, failure_first):
+    def test_tagged_failure_preserves_columns(self, tp, accuracy, failure_first):
+        tp_flags = ["--tp-size=2", "--hf-inference-mode=prefill", "--prompt-length=7"]
         args = common.parse_args(
             [
                 "--accuracy" if accuracy else "--performance",
                 "--tag=experiment",
                 "--inference",
-                "--tp-size=2",
-                "--hf-inference-mode=prefill",
-                "--prompt-length=7",
+                *(tp_flags if tp else []),
                 "-dcpu",
             ]
         )
@@ -1503,10 +1593,13 @@ class TestTensorParallelResults(TestCase):
                 rows = {row["name"]: row for row in csv.DictReader(f)}
         for row in rows.values():
             self.assertEqual(row["tag"], "experiment")
-            self.assertEqual(row["phase"], "prefill")
-            self.assertEqual(row["tp_size"], "2")
-            self.assertEqual(row["prompt_length"], "7")
-            self.assertEqual(row["decode_length"], "0")
+            if tp:
+                self.assertEqual(row["phase"], "prefill")
+                self.assertEqual(row["tp_size"], "2")
+                self.assertEqual(row["prompt_length"], "7")
+                self.assertEqual(row["decode_length"], "0")
+            else:
+                self.assertNotIn("phase", row)
         if accuracy:
             self.assertEqual(rows["failed"]["accuracy"], "timeout")
             self.assertEqual(rows["passed"]["accuracy"], "pass")
@@ -1750,16 +1843,9 @@ class TestTensorParallelPerfCli(TestCase):
         self.assertEqual(bool(deltas), matched)
         self.assertEqual(aggregates[config].paired_count, int(matched))
 
-    @parametrize("phase", ("prefill", "decode"))
-    @parametrize("selected_model", (None, "model"))
-    def test_tp_repro_preserves_workload(self, phase, selected_model):
+    def _repro(self, data, model=None):
         perf = self.perf_cli
-        config = (
-            f"inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_{phase}"
-        )
-        content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,1,2,2,64,8\nother,1,2,4,32,5\n"
-        data = perf.parse_csvs([(config, content)])
-        args = types.SimpleNamespace(device=None, attempt=1, model=selected_model)
+        args = types.SimpleNamespace(device=None, attempt=1, model=model)
         with (
             mock.patch.object(perf, "_resolve_head_runs", return_value={"a10g-4": 5}),
             mock.patch.object(perf, "fetch_run_meta"),
@@ -1771,7 +1857,18 @@ class TestTensorParallelPerfCli(TestCase):
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             perf.cmd_repro(args)
-        command = output.getvalue()
+        return output.getvalue()
+
+    @parametrize("phase", ("prefill", "decode"))
+    @parametrize("selected_model", (None, "model"))
+    def test_tp_repro_preserves_workload(self, phase, selected_model):
+        config = (
+            f"inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_{phase}"
+        )
+        content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,1,2,2,64,8\nother,1,2,4,32,5\n"
+        command = self._repro(
+            self.perf_cli.parse_csvs([(config, content)]), selected_model
+        )
         self.assertEqual(
             command.count("python benchmarks/dynamo/"), 1 if selected_model else 2
         )
@@ -1792,10 +1889,34 @@ class TestTensorParallelPerfCli(TestCase):
         else:
             self.assertNotIn("--decode-length", command)
 
+    def test_tp_repro_omits_failure_batch_size(self):
+        config = "inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode"
+        content = "name,speedup,abs_latency,batch_size,prompt_length,decode_length\nmodel,0.0,0.0,0,64,8\n"
+        command = self._repro(self.perf_cli.parse_csvs([(config, content)]))
+        self.assertIn("--only model", command)
+        self.assertIn("--prompt-length=64", command)
+        self.assertNotIn("--batch-size", command)
+
+    def test_non_tp_repro_dedups_and_sorts_commands(self):
+        configs = (
+            "inductor_with_cudagraphs_torchbench_amp_training_cuda",
+            "inductor_no_cudagraphs_huggingface_amp_training_cuda",
+            "inductor_no_cudagraphs_huggingface_amp_training_cuda",
+        )
+        content = "name,speedup,abs_latency\nmodel,1,2\n"
+        data = self.perf_cli.parse_csvs([(config, content) for config in configs])
+        output = self._repro(data)
+        self.assertIn("(2 commands)", output)
+        commands = [line for line in output.splitlines() if line.startswith("python")]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands, sorted(commands))
+        self.assertIn("huggingface.py", commands[0])
+
 
 @skipIfTorchDynamo("launches benchmark processes")
 @requires_distributed
 @unittest.skipIf(IS_WINDOWS, "relies on POSIX signals and sessions")
+@launches_processes
 class TestTensorParallelLaunch(TestCase):
     def _write_script(self, tmp, source):
         path = os.path.join(tmp, "worker.py")
@@ -1826,9 +1947,10 @@ class TestTensorParallelLaunch(TestCase):
                 time.sleep(600)
                 """,
             )
+            # Long enough for both workers to write their pids on a loaded runner.
             with self.assertRaises(subprocess.TimeoutExpired):
                 common.run_tp_worker_group(
-                    [sys.executable, script], 2, 10, os.environ.copy()
+                    [sys.executable, script], 2, 30, os.environ.copy()
                 )
             for rank in range(2):
                 with open(os.path.join(tmp, f"pid{rank}")) as f:
@@ -1948,7 +2070,7 @@ class TestTensorParallelLaunch(TestCase):
             )
             cmd = [sys.executable, script]
             with self.assertRaisesRegex(subprocess.CalledProcessError, "exit status"):
-                common.run_tp_worker_group(cmd, 2, 60, os.environ.copy())
+                common.run_tp_worker_group(cmd, 2, 300, os.environ.copy())
             with open(os.path.join(tmp, "failure_stage")) as f:
                 self.assertEqual(f.read(), stage)
             for rank in range(2):
@@ -1997,6 +2119,7 @@ with (
 @skipIfTorchDynamo("launches benchmark processes")
 @requires_distributed
 @unittest.skipIf(IS_WINDOWS, "relies on POSIX signals and sessions")
+@launches_processes
 class TestHuggingFaceTensorParallelLaunch(TestCase):
     def setUp(self):
         super().setUp()
@@ -2034,6 +2157,8 @@ class TestHuggingFaceTensorParallelLaunch(TestCase):
                 "--batch-size=2",
                 "--prompt-length=5",
                 f"--output={output}",
+                # Below the outer timeout, so the driver stops its torchrun group.
+                "--timeout=600",
                 *args,
             ],
             env=env,
