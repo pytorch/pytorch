@@ -52,7 +52,7 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T>& x) {
 //
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
-namespace _detail {
+HIDDEN_NAMESPACE_BEGIN(_detail)
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In libc++ complex square root is computed using polar form
@@ -83,7 +83,7 @@ c10::complex<T> compute_csqrt(const c10::complex<T>& z) {
   }
 
   // At this point, z is non-zero and finite
-  if (z.real() >= 0.0) {
+  if (z.real() >= T(0)) {
     auto t = std::sqrt((z.real() + std::abs(z)) * half);
     return c10::complex<T>(t, half * (z.imag() / t));
   }
@@ -130,7 +130,7 @@ C10_NOINLINE inline c10::complex<float> acos(const c10::complex<float>& in) {
 C10_NOINLINE inline c10::complex<double> acos(const c10::complex<double>& in) {
   return compute_cacos(in);
 }
-} // namespace _detail
+HIDDEN_NAMESPACE_END(_detail)
 #endif
 
 template <typename T>

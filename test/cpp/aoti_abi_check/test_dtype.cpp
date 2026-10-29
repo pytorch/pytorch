@@ -152,42 +152,54 @@ TEST(TestDtype, TestComplexTranscendentals) {
   const std::complex<float> reference_f(1.0f, 0.5f);
   const std::complex<double> reference_d(1.0, 0.5);
 
-  const auto expect_near = [](const auto& actual,
-                              const auto& expected,
-                              const auto tolerance) {
-    EXPECT_NEAR(actual.real(), expected.real(), tolerance);
-    EXPECT_NEAR(actual.imag(), expected.imag(), tolerance);
-  };
+  const auto expect_near =
+      [](const auto& actual, const auto& expected, const auto tolerance) {
+        EXPECT_NEAR(actual.real(), expected.real(), tolerance);
+        EXPECT_NEAR(actual.imag(), expected.imag(), tolerance);
+      };
 
-  expect_near(std::acos(value_f), std::acos(reference_f), 1e-5f);
-  expect_near(std::acosh(value_f), std::acosh(reference_f), 1e-5f);
-  expect_near(std::asin(value_f), std::asin(reference_f), 1e-5f);
-  expect_near(std::asinh(value_f), std::asinh(reference_f), 1e-5f);
-  expect_near(std::atan(value_f), std::atan(reference_f), 1e-5f);
-  expect_near(std::atanh(value_f), std::atanh(reference_f), 1e-5f);
-  expect_near(std::cos(value_f), std::cos(reference_f), 1e-5f);
-  expect_near(std::cosh(value_f), std::cosh(reference_f), 1e-5f);
-  expect_near(std::exp(value_f), std::exp(reference_f), 1e-5f);
-  expect_near(std::expm1(value_f), std::exp(reference_f) - 1.0f, 1e-5f);
-  expect_near(std::log(value_f), std::log(reference_f), 1e-5f);
-  expect_near(std::log10(value_f), std::log10(reference_f), 1e-5f);
-  expect_near(std::log1p(value_f), std::log(1.0f + reference_f), 1e-5f);
+  expect_near(torch::headeronly::acos(value_f), std::acos(reference_f), 1e-5f);
   expect_near(
-      std::log2(value_f), std::log(reference_f) / std::log(2.0f), 1e-5f);
+      torch::headeronly::acosh(value_f), std::acosh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::asin(value_f), std::asin(reference_f), 1e-5f);
   expect_near(
-      std::pow(value_f, value_f), std::pow(reference_f, reference_f), 1e-5f);
-  expect_near(std::pow(value_f, 2.0), std::pow(reference_f, 2.0), 1e-5);
-  expect_near(std::pow(2.0, value_f), std::pow(2.0, reference_f), 1e-5);
-  expect_near(std::sin(value_f), std::sin(reference_f), 1e-5f);
-  expect_near(std::sinh(value_f), std::sinh(reference_f), 1e-5f);
-  expect_near(std::sqrt(value_f), std::sqrt(reference_f), 1e-5f);
-  expect_near(std::tan(value_f), std::tan(reference_f), 1e-5f);
-  expect_near(std::tanh(value_f), std::tanh(reference_f), 1e-5f);
+      torch::headeronly::asinh(value_f), std::asinh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::atan(value_f), std::atan(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::atanh(value_f), std::atanh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::cos(value_f), std::cos(reference_f), 1e-5f);
+  expect_near(torch::headeronly::cosh(value_f), std::cosh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::exp(value_f), std::exp(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::expm1(value_f), std::exp(reference_f) - 1.0f, 1e-5f);
+  expect_near(torch::headeronly::log(value_f), std::log(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log10(value_f), std::log10(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log1p(value_f), std::log(1.0f + reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log2(value_f),
+      std::log(reference_f) / std::log(2.0f),
+      1e-5f);
+  expect_near(
+      torch::headeronly::pow(value_f, value_f),
+      std::pow(reference_f, reference_f),
+      1e-5f);
+  expect_near(
+      c10_complex_math::pow(value_f, 2.0), std::pow(reference_f, 2.0), 1e-5);
+  expect_near(::pow(2.0, value_f), std::pow(2.0, reference_f), 1e-5);
+  expect_near(torch::headeronly::sin(value_f), std::sin(reference_f), 1e-5f);
+  expect_near(torch::headeronly::sinh(value_f), std::sinh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::sqrt(value_f), std::sqrt(reference_f), 1e-5f);
+  expect_near(torch::headeronly::tan(value_f), std::tan(reference_f), 1e-5f);
+  expect_near(torch::headeronly::tanh(value_f), std::tanh(reference_f), 1e-5f);
 
-  expect_near(std::acos(value_d), std::acos(reference_d), 1e-12);
+  expect_near(torch::headeronly::acos(value_d), std::acos(reference_d), 1e-12);
   expect_near(
-      std::pow(value_d, value_d), std::pow(reference_d, reference_d), 1e-12);
-  expect_near(std::sqrt(value_d), std::sqrt(reference_d), 1e-12);
+      torch::headeronly::pow(value_d, value_d),
+      std::pow(reference_d, reference_d),
+      1e-12);
+  expect_near(::sqrt(value_d), std::sqrt(reference_d), 1e-12);
 }
 
 TEST(TestDtype, TestIsComplex) {
