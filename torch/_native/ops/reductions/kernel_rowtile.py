@@ -122,10 +122,19 @@ class _ItreeArch(NamedTuple):
     combine_unroll: int = (
         0  # staged fold unroll factor; 0 retains full static unrolling
     )
+    # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
+    # 0 keeps _ITREE_THREAD_ELEMS.
+    lowp_thread_elems: int = 0
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
 # an explicit row so changing the default cannot retune it.
+# combine_unroll, 128 MiB M=1 CUDA graphs on B200 (H100): full static unrolling compiled
+# fp32 var_mean for 115s (23s) and ran it at 1196us (608us); 128 runs it at 324us (410us)
+# and keeps full sums within 4% (3%) of full unrolling.
+# lowp_thread_elems, 128 MiB fp16/bf16 rows on B200 and H100: 32 runs sum, mean and norm
+# 1.45-1.64x and prod 1.11-1.18x at N=2049 and 4097, nansum up to 1.37x at N=12289, and no
+# trait below 0.95x for N=3000-12289; at N=1025 sum ran 0.65x, so narrower rows keep 64.
 _ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
     "default": _ItreeArch(
         split_stage_rows=0,
@@ -142,6 +151,8 @@ _ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
         stage_rows=True,
         combine_async=8,
         combine_max=512,
+        combine_unroll=128,
+        lowp_thread_elems=32,
     ),
     # B200 is the tuning anchor for the other constants in this file.
     # A 2K combine tile saves 1.1-2.5us at 128 MiB; 4K regresses 16-bit sums.
@@ -152,6 +163,8 @@ _ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
         stage_rows=False,
         combine_async=32,
         combine_max=2048,
+        combine_unroll=128,
+        lowp_thread_elems=32,
     ),
 }
 
@@ -166,10 +179,6 @@ def _itree_arch(
 # Default per-thread width for the order, in elements (k*vec*eff live in registers at once).
 # Fusing adjacent chunks keeps a full warp, and therefore coalesced loads, on each.
 _ITREE_THREAD_ELEMS = 64
-# Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N
-# (trait_itree_plan). B200 CUDA graphs, 128 MiB fp16/bf16 sums: 1.6x faster at N=2049 and
-# 4097 and within 4% for N=3000-12289, but 0.65x at N=1025, so narrower rows keep the default.
-_ITREE_LOWP_THREAD_ELEMS = 32
 _ITREE_LOWP_MIN_N = 2048
 
 # Vector-width multiplier; each doubling costs ~2x. `bte`, not this, fixes the bits.
@@ -435,22 +444,17 @@ def trait_itree_plan(
         return plan
     from . import traits as T
 
+    elems = _itree_arch(device).lowp_thread_elems
     if (
-        N <= _ITREE_LOWP_MIN_N
+        not elems
+        or N <= _ITREE_LOWP_MIN_N
         or itemsize > 2
         or not isinstance(
             trait, (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps)
         )
     ):
         return plan
-    return itree_plan(
-        N,
-        M,
-        itemsize,
-        thread_elems=_ITREE_LOWP_THREAD_ELEMS,
-        stage=stage,
-        device=device,
-    )
+    return itree_plan(N, M, itemsize, thread_elems=elems, stage=stage, device=device)
 
 
 def itree_combine_plan(
