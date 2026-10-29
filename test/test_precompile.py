@@ -11030,14 +11030,15 @@ class TestPrecompileCustomOpRecording(TestCase):
         lib.define("op(Tensor x) -> Tensor")
         lib.impl("op", torch.Tensor.clone, key)
         torch.library.register_fake("precompile_fake_helper::op", helper, lib=lib)
-        python_code = self._capture_module(
+        entry = self._module(
             "import torch\ndef fn(x):\n"
-            "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n",
-            tracer=DynamoTracer(),
+            "    return torch.ops.precompile_fake_helper.op.default(x) + 1\n"
         )
+        fn = importlib.import_module(entry).fn
+        python_code = self._capture_fn(fn, tracer=DynamoTracer())
         self.assertIn("CUSTOM_OPS = (('precompile_fake_helper::op', ''),)", python_code)
         # The op has no known module, so only the entry's is imported.
-        self.assertRegex(python_code, r"_MODULES = \('precompile_recording_\w+',\)")
+        self.assertIn(f"\nCUSTOM_OP_MODULES = {(entry,)!r}\n", python_code)
 
     @parametrize("mode", ["standalone", "installed"])
     def test_a_served_module_that_fails_to_import_fails_the_load(self, mode):

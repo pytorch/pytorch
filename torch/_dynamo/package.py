@@ -1426,10 +1426,10 @@ class CompilePackage:
         failed_op: object = None,
         device_types: frozenset[str] = frozenset(),
     ) -> None:
-        """Called with each ``OpOverload`` or ``OpOverloadPacket`` on the stack of an
-        instruction Dynamo graph-breaks on, which runs eagerly between graphs on
-        ``device_types``; and with the op that failed when fake tensors could not
-        run it for lack of a fake kernel or a data-dependent output value or shape."""
+        """Called with the target of an FX node fake tensors could not run, or with
+        an op on the stack of an instruction Dynamo graph-breaks on; either runs
+        eagerly on ``device_types``. Non-operator targets are ignored. ``failed_op``
+        comes only with a data-dependent, dynamic-shape or unsupported-op failure."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
