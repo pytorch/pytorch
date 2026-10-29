@@ -425,6 +425,19 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
         self.assertIn("synchronize_stream", code)
 
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    def test_user_stream_context_autotune_at_compile_time(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                y = x * 3
+            torch.cuda.current_stream().wait_stream(s)
+            return x * 2 + y
+
+        x = torch.randn(1024, device="cuda")
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+
     def test_multiple_stream_contexts(self):
         """Test compilation with multiple stream context switches."""
         from torch._inductor.utils import run_and_get_code
