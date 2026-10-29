@@ -18,10 +18,16 @@ def main():
                   "print(torch.version.git_version,torch.cuda.get_device_properties(0))"],
                  cwd=titan, name="titan-preflight", timeout=180)
     results = {}
+    metrics = {}
     selected_pins = {'candidate': controls.PINS['candidate']} if '--fusion-only' in sys.argv else controls.PINS
+    if '--boundary' in sys.argv:
+        selected_pins = {
+            'parent': ('https://github.com/triton-lang/triton.git', '7e013d6897e2037a73e8ddfe1aa2d8693d4bf349'),
+            'child': ('https://github.com/triton-lang/triton.git', '1d503a35275625d2c236605a42855bfd81267047'),
+        }
     for label, (repository, sha) in selected_pins.items():
         site = controls.build_pin(label, repository, sha)
-        phases = [(label, None)] + ([(label + "-implicit-fusion-restored", "1")] if label == "candidate" else [])
+        phases = [(label, None)] + ([(label + "-implicit-fusion-restored", "1")] if label in {'candidate', 'child'} else [])
         for phase, fma in phases:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(site) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
@@ -41,6 +47,22 @@ def main():
                          name=phase + "-original-sft", check=False, timeout=1800)
             log = (controls.REPORT / (phase + "-original-sft.log")).read_text(errors="replace")
             assert results[phase] in (0, 1) and ("LOSS_COMPARE" in log or "All tests passed" in log), phase
+            from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+            event_root = controls.REPORT / phase / 'sft/tb_baseline'
+            events = list(event_root.rglob('events.out.tfevents.*'))
+            assert events, str(event_root)
+            values = {}
+            for path in events:
+                accumulator = EventAccumulator(str(path))
+                accumulator.Reload()
+                for tag in ['loss_metrics/global_avg_loss', 'grad_norm']:
+                    if tag in accumulator.Tags()['scalars']:
+                        for value in accumulator.Scalars(tag):
+                            values.setdefault(tag, {})[value.step] = value.value
+            assert all(len(values.get(tag, {})) == 10 for tag in ['loss_metrics/global_avg_loss', 'grad_norm']), values
+            metrics[phase] = values
+            (controls.REPORT / 'metrics.json').write_text(json.dumps(metrics, indent=2))
             (controls.REPORT / "results.json").write_text(json.dumps(results, indent=2))
     print("TITAN_NATIVE_CONTROLS", json.dumps(results), flush=True)
 
