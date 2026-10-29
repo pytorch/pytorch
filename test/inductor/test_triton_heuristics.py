@@ -1977,6 +1977,36 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
+class TestKernelTemplateMemory(TestCase):
+    def test_choice_or_none_does_not_retain_generate_error(self):
+        # choice_or_none must not keep the NotImplementedError from generate():
+        # its traceback reaches the calling frames, which would then stay alive
+        # (here, a sentinel standing in for real tensors) until cyclic GC.
+        import gc
+        import weakref
+
+        from torch._inductor.codegen.common import KernelTemplate
+
+        class FailingTemplate(KernelTemplate):
+            def generate(self, **kwargs):
+                raise NotImplementedError("unsupported (test)")
+
+        class Sentinel:
+            pass
+
+        def run():
+            sentinel = Sentinel()
+            self.assertIsNone(FailingTemplate("failing").choice_or_none())
+            return weakref.ref(sentinel)
+
+        gc.collect()
+        gc.disable()
+        try:
+            self.assertIsNone(run()())
+        finally:
+            gc.enable()
+
+
 if __name__ == "__main__":
     if IS_LINUX:
         run_tests()
