@@ -2175,6 +2175,76 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
+@unittest.skipIf(
+    not ensure_nv_universal_gemm_available(), "cutlass.operators not available"
+)
+@instantiate_parametrized_tests
+class TestNVUniversalGemmDiscovery(TestCase):
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    @parametrize("padded_a", (False, True))
+    @parametrize("column_major_b", (False, True))
+    @parametrize(
+        "g,m,n,k",
+        (
+            (2, 16, 64, 64),
+            (8, 512, 4096, 14336),
+            (256, 2048, 4096, 7168),
+            (2, 32, 64, 7),
+        ),
+    )
+    def test_grouped_query_matches_provider(
+        self, dtype, padded_a, column_major_b, g, m, n, k
+    ):
+        import cutlass.operators
+        from cutlass.operators.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm import (
+            ContiguousOffset2D3DGemmDenseOperator,
+        )
+
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        a = torch.empty_strided(
+            (m, k), (k + 8 if padded_a else k, 1), device="meta", dtype=dtype
+        )
+        b_stride = (k * n, 1, k) if column_major_b else (k * n, n, 1)
+        b = torch.empty_strided((g, k, n), b_stride, device="meta", dtype=dtype)
+        out = torch.empty((m, n), device="meta", dtype=dtype)
+        offsets = torch.empty(g, device="meta", dtype=torch.int32)
+        args = cutlass.operators.GroupedGemmArguments(
+            a, b, out, accumulator_type=torch.float32, offsets=offsets
+        )
+        reference = kernel_cache._filter_supported(
+            ContiguousOffset2D3DGemmDenseOperator.generate_operators(lambda md: True),
+            args,
+            100,
+        )
+        with (
+            patch.object(kernel_cache, "_partition_cache", {}),
+            patch.object(kernel_cache, "_ops_by_name", {}),
+            patch.object(
+                kernel_cache,
+                "_get_kernel_cache",
+                side_effect=AssertionError("manifest used"),
+            ),
+        ):
+            (queried,) = kernel_cache.partition_compatible_kernels(
+                args,
+                100,
+                lambda md: 0,
+                1,
+                candidate_source="args",
+                classifier_key="grouped_query_test",
+            )
+            self.assertEqual(
+                {op.metadata.operator_name for op in queried},
+                {op.metadata.operator_name for op in reference},
+            )
+            self.assertEqual(bool(queried), column_major_b and k % 8 == 0)
+            for op in queried:
+                self.assertIs(
+                    kernel_cache.get_kernel_by_name(op.metadata.operator_name), op
+                )
+
+
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 class TestNVUniversalGemmScheduling(TestCase):
     def setUp(self):
@@ -3041,6 +3111,44 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 request.cudagraph_cold_cache_input_indices,
                 (1, 3) if cold_cache else (),
             )
+
+    @parametrize(
+        "variant,source,input_count",
+        (
+            (GemmVariant.GEMM, "args", 2),
+            (GemmVariant.GROUPED_GEMM, "args", 3),
+            (GemmVariant.SCALED_GEMM, "scaled", 4),
+        ),
+    )
+    def test_gemm_candidate_discovery_source(self, variant, source, input_count):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            kernel_cache,
+            nv_universal_gemm as nvgemm,
+        )
+
+        args = object()
+        with (
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+            patch.object(
+                nvgemm, "_create_dummy_tensor_from_layout", return_value=torch.empty(1)
+            ),
+            patch.object(nvgemm, "_create_gemm_arguments", return_value=args),
+            patch.object(nvgemm, "_get_scaled_gemm_modes", return_value=(None,) * 4),
+            patch.object(nvgemm, "get_cuda_arch", return_value=100),
+            patch.object(
+                kernel_cache, "partition_compatible_kernels", return_value=([], [])
+            ) as query,
+        ):
+            nvgemm._add_nv_gemm_choices_impl(
+                [],
+                SimpleNamespace(size=(32, 128)),
+                [MagicMock() for _ in range(input_count)],
+                variant,
+                torch.float32,
+            )
+        query.assert_called_once()
+        self.assertIs(query.call_args.args[0], args)
+        self.assertEqual(query.call_args.kwargs["candidate_source"], source)
 
     def test_grouped_gemm_candidates_sample_tile_shapes(self):
         from torch._inductor.codegen.nv_universal_gemm import (

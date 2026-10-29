@@ -941,9 +941,6 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    # Single-pass partition over the ~390K-entry kernel cache. The two-pass
-    # form below called `kernel.supports(args)` once per bucket -- i.e. twice
-    # per non-EFC-class kernel -- across the full cache.
     def _classify(metadata) -> int:
         if _include_efc_kernels_only(metadata):
             return 1  # efc bucket (with tile_M >= 128)
@@ -955,16 +952,11 @@ def _add_nv_gemm_choices_impl(
 
     # A baked bias-add requires an epilogue-fusion-capable (EFC) kernel, so
     # scan only EFC kernels -- skips supports() on the far larger non-EFC set.
-    # The args-filtered fast query is complete only for dense GEMM; scaled uses
-    # direct block-scaled sub-provider enumeration (get_operators under-generates
-    # operands from scaled args); anything else falls back to the full manifest.
-    candidate_source: Literal["args", "scaled", "manifest"]
-    if variant == GemmVariant.GEMM:
-        candidate_source = "args"
-    elif variant == GemmVariant.SCALED_GEMM:
-        candidate_source = "scaled"
-    else:
-        candidate_source = "manifest"
+    # Dense and grouped GEMM share argument-based discovery. Scaled operands
+    # need provider enumeration because the argument query misses valid designs.
+    candidate_source: Literal["args", "scaled"] = (
+        "scaled" if variant == GemmVariant.SCALED_GEMM else "args"
+    )
     is_nvfp4 = False
     # PDL is enabled only through the measured NVFP4 shape policy below. Do
     # not let the global generation default leak into other scaled formats.
