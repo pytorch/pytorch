@@ -3991,6 +3991,49 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, dx), torch.zeros(3, 4))
         self.assertEqual(torch.compile(fn, backend="aot_eager")(x, dx), fn(x, dx))
 
+    def test_custom_jvp_on_subclass_without_alias(self):
+        """A tensor that cannot be unpacked cannot hold a tangent, so it neither
+        crashes the tangent check nor fails its own guard."""
+
+        def nested():
+            return torch.nested.nested_tensor(
+                [torch.randn(2, 3), torch.randn(1, 3)], layout=torch.jagged
+            )
+
+        def fn(t):
+            return SinWithZeroJvp.apply(t) * 2
+
+        njt = nested()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(njt)
+        self.assertEqual(actual, fn(njt))
+
+        def g(n, t):
+            return SinWithZeroJvp.apply(t) * 2, n * 2
+
+        n, t = nested(), torch.ones(2)
+        with fwAD.dual_level():
+            actual = torch.compile(g, backend="eager")(n, t)
+        self.assertEqual(actual, g(n, t))
+
+    def test_custom_jvp_vmap_of_compiled_under_dual_level(self):
+        """The guard must unwrap a BatchedTensor input the same way the trace
+        check does, and see a tangent on a layer under it."""
+
+        class F(SinWithZeroJvp):
+            generate_vmap_rule = True
+
+        def fn(x):
+            return F.apply(x) * 2
+
+        x, dx = torch.randn(3, 4), torch.randn(3, 4)
+        with fwAD.dual_level():
+            actual = torch.vmap(torch.compile(fn, backend="eager"))(x)
+        self.assertEqual(actual, fn(x))
+
+        opt_fn = torch.compile(fn, backend="eager")
+        actual = torch.func.jvp(torch.vmap(opt_fn), (x,), (dx,))[1]
+        self.assertEqual(actual, torch.zeros(3, 4))
+
     def test_custom_jvp_after_forward_grad_re_enabled_at_same_level(self):
         """Re-enabling forward grad at an unchanged dual level must stay correct.
 

@@ -344,11 +344,35 @@ def _cow_tensor_matches(value: object, expected: object) -> bool:
     return actual is not _COW_TENSOR_UNSUPPORTED and actual == expected
 
 
+def _has_tangent(value: object) -> bool:
+    """Whether `value`, or a functorch layer under it, holds a forward-AD tangent.
+
+    `_unpack_dual` has no batching rule and a BatchedTensor never holds the
+    tangent (under jvp(vmap(f)) it is on an inner layer), so batched layers are
+    skipped. A tensor that cannot be unpacked, such as a subclass without
+    `aten.alias`, cannot hold a tangent either.
+    """
+    from torch._C._functorch import (
+        get_unwrapped,
+        is_batchedtensor,
+        is_functorch_wrapped_tensor,
+    )
+
+    while isinstance(value, torch.Tensor):
+        if not is_batchedtensor(value):
+            try:
+                dual = torch.autograd.forward_ad.unpack_dual(value, level=0)
+            except (RuntimeError, TypeError):
+                pass
+            else:
+                if dual.tangent is not None:
+                    return True
+        value = get_unwrapped(value) if is_functorch_wrapped_tensor(value) else None
+    return False
+
+
 def _has_no_tangent(value: object) -> bool:
-    try:
-        return torch.autograd.forward_ad.unpack_dual(value).tangent is None
-    except RuntimeError:
-        return False
+    return not _has_tangent(value)
 
 
 dunder_attrs_assumed_constants = (

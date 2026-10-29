@@ -52,7 +52,7 @@ from ..exc import (
     raise_value_error,
     unimplemented,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _has_tangent, GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
@@ -705,40 +705,37 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
-def _forward_ad_active(value: Any) -> bool:
-    """Whether a forward-AD tangent reaches an `apply` on `value`.
+def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
+    """Whether a forward-AD tangent can reach an `apply` on `value`.
 
-    A dual graph input already broke when it was wrapped, so a tangent here
-    comes from a dual made inside the frame (`dual_level()`,
-    `enter_dual_level()`, `torch.func.jvp`), which shows on the fake value. The
-    global `_current_level` is no use for that: Dynamo inlines
-    `enter_dual_level()`, so the global stays -1 while tracing, and a live level
-    says nothing about whether this input carries a tangent. Level 0 is the only
-    one there can be, since forward AD does not support nesting.
+    A dual made inside the frame (`dual_level()`, `enter_dual_level()`,
+    `torch.func.jvp`) shows on the fake value. The global `_current_level` is no
+    use for that: Dynamo inlines `enter_dual_level()`, so the global stays -1
+    while tracing, and a live level says nothing about whether this input
+    carries a tangent. Level 0 is the only one there can be, since forward AD
+    does not support nesting.
+
+    A dual graph input breaks when it is wrapped only if no functorch transform
+    is active. Under one, as in jvp(vmap(compile(f))), its fake value drops the
+    tangent, so when a dual level was live at frame entry, check the real value
+    of every graph input, since any of them may flow into `apply`.
     """
-    from torch._C._functorch import (
-        get_unwrapped,
-        is_batchedtensor,
-        is_functorch_wrapped_tensor,
-    )
-    from torch.autograd.forward_ad import unpack_dual
-
     has_dual = False
 
     def visit(vt: VariableTracker) -> None:
         nonlocal has_dual
-        if vt.is_tensor():
-            t = vt.as_proxy().node.meta.get("example_value")
-            # _unpack_dual has no batching rule and a BatchedTensor never holds
-            # the tangent (under jvp(vmap(f)) it is on an inner layer), so skip
-            # batched layers and check every other functorch layer.
-            while isinstance(t, torch.Tensor) and not has_dual:
-                if not is_batchedtensor(t):
-                    has_dual = unpack_dual(t, level=0).tangent is not None
-                t = get_unwrapped(t) if is_functorch_wrapped_tensor(t) else None
+        if vt.is_tensor() and not has_dual:
+            has_dual = _has_tangent(vt.as_proxy().node.meta.get("example_value"))
 
     VariableTracker.visit(visit, value)
-    return has_dual
+    if has_dual or tx.output.dual_level < 0:
+        return has_dual
+    for var in tx.output.input_source_to_var.values():
+        if var.is_tensor():
+            grapharg = var.as_proxy().node.meta.get("grapharg")
+            if grapharg is not None and _has_tangent(grapharg.example):
+                return True
+    return False
 
 
 class AutogradFunctionVariable(VariableTracker):
@@ -921,7 +918,7 @@ class AutogradFunctionVariable(VariableTracker):
         # forward-AD rules of the primitives it decomposes into.
         jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
         if jvp_fn is not torch.autograd.Function.jvp:
-            forward_ad = _forward_ad_active((args, kwargs))
+            forward_ad = _forward_ad_active(tx, (args, kwargs))
             if (requires_grad and torch.is_grad_enabled()) or forward_ad:
                 unimplemented(
                     gb_type="Unsupported custom jvp",
