@@ -3370,14 +3370,6 @@ def to_subclass(t: Any, cls: type) -> Any:
 dict_getitem = dict.__getitem__
 
 
-@torch.fx.wrap
-def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Use dict.keys() to match the iteration order of PyDict_Next used by
-    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
-    # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict.keys(d), n, n + 1))
-
-
 def set_base_iter(s: Iterable[T]) -> Iterator[T]:
     if isinstance(s, set):
         return set.__iter__(s)

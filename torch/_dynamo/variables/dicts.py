@@ -455,6 +455,13 @@ class ConstDictVariable(VariableTracker):
             # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
+                key_var = key.vt
+                if (
+                    not self.should_reconstruct_all
+                    and isinstance(key_var, ConstantVariable)
+                    and not _contains_nan(key_var.as_python_constant())
+                ):
+                    key_var = key_var.clone(source=None)
                 # Literal-key updates preserve the input's order. Rebuilding the
                 # dictionary or loading keys by storage position depends on it.
                 if isinstance(
@@ -462,10 +469,10 @@ class ConstDictVariable(VariableTracker):
                     (ValueMutationExisting, AttributeMutationExisting),
                 ) and (
                     self.should_reconstruct_all
-                    or (key.vt.source is not None and key.vt.source.is_dict_key())
+                    or (key_var.source is not None and key_var.source.is_dict_key())
                 ):
                     self.install_dict_order_guard(codegen.tx, guard_keys=True)
-                codegen(key.vt)
+                codegen(key_var)
                 codegen(value)
                 num_args += 1
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
@@ -1554,12 +1561,7 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         ):
             # Hook values use storage-position sources; their order matters, but
             # equivalent modules have different hook IDs unless keys are observed.
-            guard = (
-                GuardBuilder.ORDERED_DICT_KEYS_MATCH
-                if guard_keys
-                else GuardBuilder.ORDERED_DICT_ORDER_MATCH
-            )
-            install_guard(self.make_guard(guard))
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
