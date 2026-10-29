@@ -35,14 +35,16 @@ def main():
         env["TRITON_CACHE_DIR"] = str(controls.WORK / f"cache-{label}/triton")
         env["TORCHINDUCTOR_CACHE_DIR"] = str(controls.WORK / f"cache-{label}/inductor")
         probe = (
-            "import json,torch,triton; "
-            f"assert '{sha[:8]}' in triton.__version__, triton.__version__; "
+            "import json,torch,triton,importlib.metadata,pathlib; "
+            "v=importlib.metadata.version('triton'); "
+            f"assert '{sha[:8]}' in v, v; "
+            f"assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}), triton.__file__; "
             "x=torch.arange(65536,device='cuda',dtype=torch.int32).to(torch.int16).view(torch.bfloat16); "
             "e=x.abs(); c=torch.compile(torch.abs,options={'numerics':'strict','triton.autotune_pointwise':False})(x); "
             "bad=torch.nonzero(e.view(torch.int16)!=c.view(torch.int16)).flatten().cpu().tolist(); "
             "print(json.dumps(dict(torch_version=torch.__version__,torch_sha=torch.version.git_version,"
             "cuda=torch.version.cuda,device=str(torch.cuda.get_device_properties(0)),"
-            "triton_version=triton.__version__,triton_file=triton.__file__,"
+            "triton_version=triton.__version__,triton_distribution=v,triton_file=triton.__file__,"
             "mismatches=len(bad),examples=[dict(input=hex(i),eager=hex(e.view(torch.int16)[i].item()&65535),"
             "compiled=hex(c.view(torch.int16)[i].item()&65535)) for i in bad[:8]]),indent=2))"
         )

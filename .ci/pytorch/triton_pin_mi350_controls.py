@@ -174,12 +174,14 @@ def test_pin(label, site, sha, *, fusion=None):
     env["CUDA_CACHE_PATH"] = str(cache / "cuda")
     env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
     probe = (
-        "import json,torch,triton; "
+        "import json,torch,triton,importlib.metadata,pathlib; "
         "p=torch.cuda.get_device_properties(0); "
         "assert torch.version.hip and 'gfx950' in p.gcnArchName, str(p); "
-        f"assert '{sha[:8]}' in triton.__version__, triton.__version__; "
+        "v=importlib.metadata.version('triton'); "
+        f"assert '{sha[:8]}' in v, v; "
+        f"assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}), triton.__file__; "
         "print(json.dumps(dict(torch_version=torch.__version__,torch_sha=torch.version.git_version,"
-        "hip=torch.version.hip,device=str(p),triton_version=triton.__version__,triton_file=triton.__file__),indent=2))"
+        "hip=torch.version.hip,device=str(p),triton_version=triton.__version__,triton_distribution=v,triton_file=triton.__file__),indent=2))"
     )
     run(
         [sys.executable, "-c", probe],
