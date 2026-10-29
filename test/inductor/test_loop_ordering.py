@@ -106,18 +106,19 @@ class GetPwRedSplitsTest(MockSchedulerTest):
 
         node = self._fake_node([sympy.Integer(4096), sympy.Integer(4)])
 
-        with self.assertRaises(AssertionError):
+        # A member whose pointwise iteration count matches neither
+        # pointwise_numel nor pointwise_numel * red_numel cannot split into
+        # the group's frame. The numel-mismatch branch returns None
+        # unconditionally so optional analysis can give up gracefully.
+        self.assertIsNone(
             get_pw_red_splits(node, sympy.Integer(4096), sympy.Integer(16384))
-        for flag in ("none_if_not_divisible", "none_if_numel_mismatch"):
-            with self.subTest(flag=flag):
-                self.assertIsNone(
-                    get_pw_red_splits(
-                        node,
-                        sympy.Integer(4096),
-                        sympy.Integer(16384),
-                        **{flag: True},
-                    )
-                )
+        )
+        self.assertIsNone(
+            get_pw_red_splits(
+                node, sympy.Integer(4096), sympy.Integer(16384),
+                none_if_not_divisible=True,
+            )
+        )
 
     def test_member_spanning_the_full_frame_still_splits(self):
         from torch._inductor.tiling_utils import get_pw_red_splits
@@ -132,9 +133,9 @@ class GetPwRedSplitsTest(MockSchedulerTest):
 
     def test_full_frame_merged_dim_keeps_whole_frame_fallback(self):
         # A member spanning pointwise_numel * red_numel as one merged dim has
-        # no suffix splitting to red_numel. Only none_if_not_divisible declines
-        # it; none_if_numel_mismatch must not, so extract_normalized_read_writes
-        # keeps analyzing members it handled before #197078.
+        # no suffix splitting to red_numel. This is not the numel-mismatch
+        # case (the product matches), so get_pw_red_splits falls through to
+        # the whole-frame fallback instead of declining.
         from torch._inductor.tiling_utils import get_pw_red_splits
 
         node = self._fake_node([sympy.Integer(4096 * 16384)])
@@ -143,7 +144,6 @@ class GetPwRedSplitsTest(MockSchedulerTest):
             node,
             sympy.Integer(4096),
             sympy.Integer(16384),
-            none_if_numel_mismatch=True,
         )
         self.assertEqual(list(pw_splits), [sympy.Integer(4096 * 16384)])
         self.assertEqual(list(red_splits), [])
