@@ -361,4 +361,91 @@ REGISTER_SCALED_MM_MPP_WITH_OUT_T(half);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(float8_e4m3fn);
 
+#if __METAL_VERSION__ >= 410
+
+// Metal 4.1 MPP multiplies fp8 operands directly, without staging them as half
+// in threadgroup memory. A must be row-major and B column-major (both
+// K-contiguous), which is the layout cuBLASLt requires too.
+template <typename T>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_native(
+    device const float8_e4m3fn* a [[buffer(0)]],
+    device const float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
+    device const float* scale_result [[buffer(7)]],
+    uint2 group [[threadgroup_position_in_grid]]) {
+  constexpr auto tile = scaled_mm_native_tile;
+  // MPP rejects const-qualified element types
+  using fp8_tensor =
+      tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
+  using strides = array<int32_t, 2>;
+  const ScaledMMArgs<T> args{
+      a, b, out, scale_a, scale_b, bias, scale_result, {}, {}};
+  fp8_tensor ta(
+      reinterpret_cast<device uchar*>(const_cast<device float8_e4m3fn*>(a)),
+      dextents<int32_t, 2>(p.k, p.m),
+      strides{1, int32_t(p.a_row_stride)});
+  fp8_tensor tb(
+      reinterpret_cast<device uchar*>(const_cast<device float8_e4m3fn*>(b)),
+      dextents<int32_t, 2>(p.k, p.n),
+      strides{1, int32_t(p.b_col_stride)});
+  constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      tile,
+      tile,
+      static_cast<int>(dynamic_extent),
+      false,
+      true,
+      false,
+      mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
+  mpp::tensor_ops::matmul2d<desc, execution_simdgroups<scaled_mm_simdgroups>>
+      op;
+  auto accum = op.template get_destination_cooperative_tensor<
+      fp8_tensor,
+      fp8_tensor,
+      float>();
+  for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
+    if (accum.is_valid_element(i)) {
+      accum[i] = 0.0f;
+    }
+  }
+  const uint row_start = group.y * tile;
+  const uint col_start = group.x * tile;
+  auto a_tile = ta.slice(0, row_start);
+  auto b_tile = tb.slice(0, col_start);
+  op.run(a_tile, b_tile, accum);
+  for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
+    if (accum.is_valid_element(i)) {
+      const auto coord = accum.get_multidimensional_index(i);
+      const uint row = row_start + coord[1];
+      const uint col = col_start + coord[0];
+      if (row < p.m && col < p.n) {
+        scaled_mm_store(accum[i], row, col, args, p);
+      }
+    }
+  }
+}
+
+#define REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(T)              \
+  template [[host_name("scaled_mm_native_" #T)]] kernel void \
+  scaled_mm_native<T>(                                       \
+      device const float8_e4m3fn*,                           \
+      device const float8_e4m3fn*,                           \
+      device T*,                                             \
+      device const float*,                                   \
+      device const float*,                                   \
+      device const uchar*,                                   \
+      constant ScaledMMParams<>&,                            \
+      device const float*,                                   \
+      uint2);
+
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(half);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(bfloat);
+REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float8_e4m3fn);
+
+#endif // __METAL_VERSION__ >= 410
 #endif // C10_METAL_HAS_MPP
