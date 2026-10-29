@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import functools
 import glob
 import importlib
 import importlib.abc
@@ -19,7 +18,7 @@ import collections
 from pathlib import Path
 import errno
 import logging
-from typing import NamedTuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -528,111 +527,51 @@ PLAT_TO_VCVARS = {
 
 min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
 
-def _windows_arch() -> str:
-    return 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64'
-
-
 def _windows_cuda_lib_dir() -> str:
-    return os.path.join('lib', _windows_arch())
+    return os.path.join('lib', 'arm64' if sysconfig.get_platform().lower() == 'win-arm64' else 'x64')
 
 
-def _cuda_version_key(name: str) -> tuple[int, int] | None:
-    match = re.fullmatch(r'(\d+)\.(\d+)', name, re.ASCII)
-    return (int(match[1]), int(match[2])) if match else None
+def _windows_cudnn_dirs(home: str, /) -> tuple[str, str]:
+    """Return Windows cuDNN (include, library) directories.
 
+    Prefer a complete flat pair, then the exact torch CUDA version, then the
+    newest minor of the same major. Versioned pairs must contain both files.
+    Otherwise return the conventional flat paths, even if they do not exist.
+    """
+    include = os.path.join(home, 'include')
+    library = os.path.join(home, _windows_cuda_lib_dir())
+    flat = (include, library)
+    if not torch.version.cuda or (
+        os.path.isfile(os.path.join(include, 'cudnn.h'))
+        and os.path.isfile(os.path.join(library, 'cudnn.lib'))
+    ):
+        return flat
 
-class _CudnnDirs(NamedTuple):
-    include: str | None
-    library: str | None
+    cuda = Version(torch.version.cuda)
+    arch = os.path.basename(library)
+    candidates = []
+    # The graphical installer uses include/<CUDA version> and lib/<CUDA version>/<arch>.
+    for path in glob.glob(os.path.join(glob.escape(include), '*')):
+        name = os.path.basename(path)
+        match = re.fullmatch(r'(\d+)\.(\d+)', name, re.ASCII)
+        if match is None:
+            continue
+        version = (int(match[1]), int(match[2]))
+        lib = os.path.join(home, 'lib', name, arch)
+        if (
+            version[0] == cuda.major
+            and os.path.isfile(os.path.join(path, 'cudnn.h'))
+            and os.path.isfile(os.path.join(lib, 'cudnn.lib'))
+        ):
+            candidates.append((version, path, lib))
 
-
-def _existing_cudnn_lib(home: str, version: str | None) -> str | None:
-    middle = (version,) if version is not None else ()
-    path = os.path.join(home, 'lib', *middle, _windows_arch(), 'cudnn.lib')
-    return path if os.path.isfile(path) else None
-
-
-def _pick_cudnn_version(
-    qualified: list[tuple[tuple[int, int], str, str]],
-) -> tuple[tuple[int, int], str, str] | None:
-    # Exact torch CUDA version, else the newest minor of that same major.
-    # 13.10 ranks after 13.2. A different major is not used.
-    cuda = torch.version.cuda
-    if not qualified or not cuda:
-        return None
-    parsed = Version(cuda)
-    wanted = (parsed.major, parsed.minor)
-    for item in qualified:
-        if item[0] == wanted:
-            return item
-    same_major = [item for item in qualified if item[0][0] == wanted[0]]
-    if not same_major:
-        return None
-    return max(same_major)
-
-
-@functools.cache
-def _warn_cudnn_major_mismatch(
-    home: str, found: str, cuda: str | None,
-) -> None:
-    # Path lookup stays uncached. Only this log is keyed, so one install
-    # does not warn again from include_paths, library_paths, and ldflags.
-    if cuda:
-        logger.warning(
-            "cuDNN install at %s has CUDA %s, which does not match "
-            "torch CUDA %s. Those version directories are not used.",
-            home,
-            found,
-            cuda,
-        )
-        return
-    logger.warning(
-        "cuDNN install at %s has CUDA %s, but torch has no CUDA version. "
-        "Those version directories are not used.",
-        home,
-        found,
+    if not candidates:
+        return flat
+    wanted = (cuda.major, cuda.minor)
+    _, best_include, best_library = max(
+        candidates, key=lambda item: (item[0] == wanted, item[0])
     )
-
-
-def _resolve_cudnn_dirs() -> _CudnnDirs:
-    # Windows cuDNN 9 for CUDA 13+ nests include and lib under one
-    # <major.minor>. Callers already skip this on Linux.
-    home = CUDNN_HOME
-    if home is None:
-        return _CudnnDirs(None, None)
-    include_root = os.path.join(home, 'include')
-    flat_lib = _existing_cudnn_lib(home, None)
-    if os.path.isfile(os.path.join(include_root, 'cudnn.h')) and flat_lib:
-        return _CudnnDirs(include_root, os.path.dirname(flat_lib))
-    qualified: list[tuple[tuple[int, int], str, str]] = []
-    try:
-        names = os.listdir(include_root)
-    except OSError:
-        names = []
-    for name in names:
-        key = _cuda_version_key(name)
-        if key is None:
-            continue
-        library = _existing_cudnn_lib(home, name)
-        header = os.path.join(include_root, name, 'cudnn.h')
-        if library is None or not os.path.isfile(header):
-            continue
-        qualified.append((key, name, library))
-    chosen = _pick_cudnn_version(qualified)
-    if chosen is not None:
-        _key, name, library = chosen
-        return _CudnnDirs(
-            os.path.join(include_root, name), os.path.dirname(library))
-    if qualified:
-        found = ', '.join(name for _key, name, _library in sorted(qualified))
-        _warn_cudnn_major_mismatch(home, found, torch.version.cuda)
-    include = include_root if os.path.isdir(include_root) else None
-    if flat_lib is not None:
-        library_dir = os.path.dirname(flat_lib)
-    else:
-        flat_dir = os.path.join(home, _windows_cuda_lib_dir())
-        library_dir = flat_dir if os.path.isdir(flat_dir) else None
-    return _CudnnDirs(include, library_dir)
+    return best_include, best_library
 
 
 def get_cxx_compiler():
@@ -1640,6 +1579,15 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
+    On Windows, ``CUDNN_HOME`` (or ``CUDNN_PATH``) supplies the cuDNN root.
+    A flat ``include/cudnn.h`` and ``lib/<arch>/cudnn.lib`` pair takes
+    precedence. Otherwise, complete ``include/<CUDA version>`` and
+    ``lib/<CUDA version>/<arch>`` pairs are searched for PyTorch's CUDA major,
+    preferring the exact CUDA version, then the newest minor. A lone flat
+    header or library does not override a complete versioned pair. If none
+    qualifies, the conventional flat paths are used. For separately located
+    headers and libraries, pass explicit ``include_dirs`` and ``library_dirs``.
+
     .. warning::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
@@ -1927,6 +1875,9 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
     """
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
+    On Windows hosts, cuDNN paths for CUDA builds follow the resolution rules
+    documented in :func:`CUDAExtension`.
+
     Args:
         device_type: Defaults to "cpu".
     Returns:
@@ -1955,12 +1906,12 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
                 cuda_inc_path != '/usr/include':
 
             paths.append(cuda_inc_path)
-        if IS_WINDOWS:
-            cudnn_include = _resolve_cudnn_dirs().include
-            if cudnn_include is not None:
-                paths.append(cudnn_include)
-        elif CUDNN_HOME is not None:
-            paths.append(os.path.join(CUDNN_HOME, 'include'))
+        if CUDNN_HOME is not None:
+            if IS_WINDOWS:
+                cudnn_include, _ = _windows_cudnn_dirs(CUDNN_HOME)
+            else:
+                cudnn_include = os.path.join(CUDNN_HOME, 'include')
+            paths.append(cudnn_include)
     elif device_type == "xpu":
         paths.append(_join_sycl_home('include'))
         paths.append(_join_sycl_home('include', 'sycl'))
@@ -1970,6 +1921,10 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
 def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cross_target_platform: str | None = None) -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
+
+    On Windows hosts, cuDNN paths for CUDA builds follow the resolution rules
+    documented in :func:`CUDAExtension`. This does not apply when
+    ``cross_target_platform="windows"`` is specified.
 
     Args:
         device_type: Defaults to "cpu".
@@ -2008,12 +1963,12 @@ def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cro
                     lib_dir = 'lib'
 
             paths.append(_join_cuda_home(lib_dir))
-            if IS_WINDOWS:
-                cudnn_lib = _resolve_cudnn_dirs().library
-                if cudnn_lib is not None:
-                    paths.append(cudnn_lib)
-            elif CUDNN_HOME is not None:
-                paths.append(os.path.join(CUDNN_HOME, lib_dir))
+            if CUDNN_HOME is not None:
+                if IS_WINDOWS:
+                    _, cudnn_lib = _windows_cudnn_dirs(CUDNN_HOME)
+                else:
+                    cudnn_lib = os.path.join(CUDNN_HOME, lib_dir)
+                paths.append(cudnn_lib)
     elif device_type == "xpu":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')
@@ -2076,6 +2031,10 @@ def load(name,
     heuristics for finding the CUDA install directory are used, which usually
     work fine. If not, setting the ``CUDA_HOME`` environment variable is the
     safest option.
+
+    For CUDA builds on Windows, cuDNN paths follow the ``CUDNN_HOME``
+    resolution rules in :func:`CUDAExtension`. Use ``extra_include_paths``
+    and ``extra_ldflags`` to select custom header and library paths.
 
     SYCL support with mixed compilation is provided. Simply pass SYCL source
     files (``.sycl``) along with other sources. Such files will be detected
@@ -2852,8 +2811,8 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
             cuda_lib_dir = _windows_cuda_lib_dir()
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home(cuda_lib_dir)}')
             extra_ldflags.append('cudart.lib')
-            cudnn_lib = _resolve_cudnn_dirs().library
-            if cudnn_lib is not None:
+            if CUDNN_HOME is not None:
+                _, cudnn_lib = _windows_cudnn_dirs(CUDNN_HOME)
                 extra_ldflags.append(f'/LIBPATH:{cudnn_lib}')
         elif not IS_HIP_EXTENSION:
             extra_lib_dir = "lib64"
