@@ -2,42 +2,55 @@
 
 import os
 import sys
+import unittest
 
 import torch
-import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms._quantization.quantization as quant
 from torch.distributed.algorithms._quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
+    requires_accelerator_dist_backend,
     requires_gloo,
-    requires_nccl,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
 )
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+# The BFP16 quantization kernels (quantization::_FloatToBfloat16Quantized and
+# its inverse) are only registered for CPU and CUDA in
+# torch/csrc/distributed/c10d/quantization/, so BFP16 collectives cannot run on
+# XPU yet.
+_BFP16_XPU_SKIP_MSG = (
+    "XPU lacks quantization::_FloatToBfloat16Quantized; "
+    "see https://github.com/intel/torch-xpu-ops/issues/4941"
+)
+
+
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -46,13 +59,22 @@ if not dist.is_available():
     sys.exit(0)
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
         value = size
     if device_id is None:
         return torch.empty(size, dtype=dtype).fill_(value)
     else:
-        return torch.empty(size, dtype=dtype).fill_(value).cuda(device_id)
+        return (
+            torch.empty(size, dtype=dtype)
+            .fill_(value)
+            .to(torch.device(device_type, device_id))
+        )
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -63,38 +85,34 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
-if BACKEND == "gloo" or BACKEND == "nccl":
+ACCELERATOR_BACKEND = dist.get_default_backend_for_device(device_type)
+if BACKEND in ("gloo", "nccl", "xccl"):
 
-    class DistQuantizationTests(MultiProcessTestCase):
-        def setUp(self):
-            super().setUp()
-            self._spawn_processes()
-            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+    @unittest.skipIf(
+        not dist.is_backend_available(BACKEND)
+        or (
+            (BACKEND == "nccl" or BACKEND == "xccl")
+            and torch.accelerator.device_count() < int(os.environ["WORLD_SIZE"])
+        ),
+        "Requested distributed backend or devices unavailable",
+    )
+    class DistQuantizationTests(MultiProcContinuousTest):
+        world_size = int(os.environ["WORLD_SIZE"])
+        timeout = dist.distributed_c10d._get_default_timeout(BACKEND)
 
-        def tearDown(self):
-            super().tearDown()
-            try:
-                os.remove(self.file_name)
-            except OSError:
-                pass
+        @classmethod
+        def backend_str(cls):
+            return BACKEND
 
         @property
         def op_timeout_sec(self):
             return 1
-
-        @property
-        def world_size(self):
-            return int(os.environ["WORLD_SIZE"])
 
         @requires_gloo()
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports all_gather_fp16"
         )
         def test_all_gather_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
-            )
             group = list(range(self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
@@ -106,27 +124,20 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             BACKEND != "gloo", "Only gloo backend supports all_gather_fp16"
         )
         def test_all_gather_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
-            )
             group = list(range(self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
                 group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.BFP16
             )
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16"
+            BACKEND != ACCELERATOR_BACKEND,
+            f"Only {ACCELERATOR_BACKEND} backend supports all_to_all_fp16",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm_multiprocess
         def test_all_to_all_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -134,23 +145,22 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 group,
                 group_id,
                 self.rank,
-                cuda=True,
+                use_accelerator=True,
                 rank_to_GPU=rank_to_GPU,
                 dtype=torch.float32,
                 qtype=DQuantType.FP16,
             )
+            dist.destroy_process_group(group_id)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only nccl backend supports all_to_all_fp16"
+            BACKEND != ACCELERATOR_BACKEND,
+            f"Only {ACCELERATOR_BACKEND} backend supports all_to_all_fp16",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm_multiprocess
+        @skip_but_pass_in_sandcastle_if(TEST_XPU, _BFP16_XPU_SKIP_MSG)
         def test_all_to_all_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -158,22 +168,20 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 group,
                 group_id,
                 self.rank,
-                cuda=True,
+                use_accelerator=True,
                 rank_to_GPU=rank_to_GPU,
                 dtype=torch.float32,
                 qtype=DQuantType.BFP16,
             )
+            dist.destroy_process_group(group_id)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only nccl backend supports all_to_all_single_fp16"
+            BACKEND != ACCELERATOR_BACKEND,
+            f"Only {ACCELERATOR_BACKEND} backend supports all_to_all_single_fp16",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_all_to_all_single_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -181,22 +189,21 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 group,
                 group_id,
                 self.rank,
-                cuda=True,
+                use_accelerator=True,
                 rank_to_GPU=rank_to_GPU,
                 dtype=torch.float32,
                 qtype=DQuantType.FP16,
             )
+            dist.destroy_process_group(group_id)
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl", "Only nccl backend supports all_to_all_single_bfp16"
+            BACKEND != ACCELERATOR_BACKEND,
+            f"Only {ACCELERATOR_BACKEND} backend supports all_to_all_single_bfp16",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_but_pass_in_sandcastle_if(TEST_XPU, _BFP16_XPU_SKIP_MSG)
         def test_all_to_all_single_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -204,18 +211,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 group,
                 group_id,
                 self.rank,
-                cuda=True,
+                use_accelerator=True,
                 rank_to_GPU=rank_to_GPU,
                 dtype=torch.float32,
                 qtype=DQuantType.BFP16,
             )
+            dist.destroy_process_group(group_id)
 
         def _test_all_gather(
             self,
             group,
             group_id,
             rank,
-            cuda=False,
+            use_accelerator=False,
             rank_to_GPU=None,
             dtype=torch.float,
             qtype=None,
@@ -228,9 +236,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 expected_tensors = [
                     _build_tensor([dest + 1, dest + 1], i, dtype=dtype) for i in group
                 ]
-                if cuda:
-                    tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+                if use_accelerator:
+                    tensor = tensor.to(torch.device(device_type, rank_to_GPU[rank][0]))
+                    tensors = [
+                        t.to(torch.device(device_type, rank_to_GPU[rank][0]))
+                        for t in tensors
+                    ]
                 allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
                 allgather(tensors, tensor, group=group_id, async_op=False)
 
@@ -242,7 +253,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             group,
             group_id,
             rank,
-            cuda=False,
+            use_accelerator=False,
             rank_to_GPU=None,
             dtype=torch.float,
             qtype=None,
@@ -260,12 +271,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 expected_tensors = [
                     torch.ones([rank + 1, size], dtype=dtype) * i for i in group
                 ]
-                if cuda:
-                    in_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in in_tensors]
-                    expected_tensors = [
-                        t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors
-                    ]
-                    out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
+                if use_accelerator:
+                    dev = torch.device(device_type, rank_to_GPU[rank][0])
+                    in_tensors = [t.to(dev) for t in in_tensors]
+                    expected_tensors = [t.to(dev) for t in expected_tensors]
+                    out_tensors = [t.to(dev) for t in out_tensors]
                 quantize_alltoall = quant.auto_quantize(
                     dist.all_to_all, qtype, quant_loss=None
                 )
@@ -278,7 +288,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             group,
             group_id,
             rank,
-            cuda=False,
+            use_accelerator=False,
             rank_to_GPU=None,
             dtype=torch.float,
             qtype=DQuantType.FP16,
@@ -292,11 +302,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 expected_tensor = torch.cat(
                     [torch.ones([rank + 1, size], dtype=dtype) * i for i in group]
                 )
-                if cuda:
-                    rank_to_GPU = rank_to_GPU[rank][0]
-                    in_tensor = in_tensor.cuda(rank_to_GPU)
-                    expected_tensor = expected_tensor.cuda(rank_to_GPU)
-                    out_tensor = out_tensor.cuda(rank_to_GPU)
+                if use_accelerator:
+                    dev = torch.device(device_type, rank_to_GPU[rank][0])
+                    in_tensor = in_tensor.to(dev)
+                    expected_tensor = expected_tensor.to(dev)
+                    out_tensor = out_tensor.to(dev)
                     quantize_alltoall_single = quant.auto_quantize(
                         dist.all_to_all_single, qtype, quant_loss=None
                     )
