@@ -1504,10 +1504,6 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout ", sparse_.layout());
   TORCH_CHECK(dense.layout() == kStrided,
       "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout ", dense.layout());
-  TORCH_CHECK(t.sparse_dim() == 2,
-      "sspaddmm: Argument #1: matrices expected, got ", t.sparse_dim(), "D tensor");
-  TORCH_CHECK(t.dense_dim() == 0,
-      "sspaddmm: Argument #1: scalar values expected, got ", t.dense_dim(), "D values");
   TORCH_CHECK(sparse_.sparse_dim() == 2,
       "sspaddmm: Argument #2: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0,
@@ -1525,6 +1521,11 @@ SparseTensor& _sspaddmm_out_cpu(
   // NB: This has to occur before the checks, because r may alias t.
   // See test_saddmm
   get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
+
+  TORCH_CHECK(t.sparse_dim() == 2,
+      "sspaddmm: Argument #1: matrices expected, got ", t.sparse_dim(), "D tensor");
+  TORCH_CHECK(t.dense_dim() == 0,
+      "sspaddmm: Argument #1: scalar values expected, got ", t.dense_dim(), "D values");
 
   TORCH_CHECK(dense.size(0) == dim_j,
       "sspaddmm: Argument #3: Expected dim 0 size ", dim_j, ", got ", dense.size(0));
