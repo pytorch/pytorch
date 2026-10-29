@@ -1859,6 +1859,17 @@ class TestRangeContains(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(), (True, True, True, True, True, False, False))
 
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + (x.shape[0] in range(10))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for size in (3, 12):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
     def test_negative_step_and_strided(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn():
