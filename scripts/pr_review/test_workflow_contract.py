@@ -1223,6 +1223,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "Read(//tmp/pr-diff.txt),"
             "Read(//tmp/pr-files.txt),"
             "Read(//tmp/pr-comments.json),"
+            # Changes since the commit the latest automated review saw.
+            "Read(//tmp/pr-interdiff.txt),"
             # pr-review's sub-agents. They inherit this session's rules.
             "Agent"
         ),
@@ -2696,6 +2698,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
             "PR_COMMENTS",

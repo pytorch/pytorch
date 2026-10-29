@@ -391,6 +391,22 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
             [(i["id"], i["role"]) for i in out["items"]], [(50, fpc.AUTOMATED)]
         )
 
+    def test_the_commit_the_latest_review_saw_is_handed_on(self):
+        old, new = "1" * 40, "2" * 40
+        api = FakeApi(
+            reviews=[{**ours(50), "commit_id": old}, {**ours(51), "commit_id": new}]
+        )
+        self.assertEqual(
+            fpc.collect(api, REPO, PR, "3" * 40)["previous_review_sha"], new
+        )
+        # A re-run on the same commit, no earlier review, or a malformed id: nothing to compare.
+        self.assertEqual(fpc.collect(api, REPO, PR, new)["previous_review_sha"], "")
+        self.assertEqual(
+            fpc.collect(FakeApi(), REPO, PR, new)["previous_review_sha"], ""
+        )
+        bad = FakeApi(reviews=[{**ours(), "commit_id": "not-a-sha"}])
+        self.assertEqual(fpc.collect(bad, REPO, PR, new)["previous_review_sha"], "")
+
     def test_inline_comments_say_which_commit_and_review_they_belong_to(self):
         api = FakeApi(
             reviews=[ours()],
