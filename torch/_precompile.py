@@ -2135,10 +2135,27 @@ _KERNEL_KEYS = (
 )
 
 
+def _graph_kernel_keys(gm: torch.fx.GraphModule | None) -> tuple[str, ...]:
+    """The ``_KERNEL_KEYS`` an artifact of ``gm`` runs kernels under: the composite
+    keys and the backends of the devices its tensors are on."""
+    if gm is None:
+        return _KERNEL_KEYS
+    backends = {
+        torch._C._dispatch_key_for_device(leaf.device.type)
+        for module in gm.modules()
+        if isinstance(graph := getattr(module, "graph", None), torch.fx.Graph)
+        for node in graph.nodes
+        for leaf in pytree.tree_leaves(node.meta.get("val"))
+        if isinstance(leaf, torch.Tensor)
+    }
+    return tuple(k for k in _KERNEL_KEYS if k in backends or k.startswith("Composite"))
+
+
 def _write_custom_op_imports(
     buf: PySourceBuilder,
     modules: tuple[str, ...],
     ops: tuple[tuple[str, str], ...],
+    keys: tuple[str, ...] = _KERNEL_KEYS,
     call: bool = True,
 ) -> None:
     # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
@@ -2156,15 +2173,14 @@ def _write_custom_op_imports(
     buf.writeline(f"CUSTOM_OPS = {ops!r}")
     # A kernel is often registered by a module other than the op's own, so the
     # schema alone does not show the op can run.
-    registered = {
-        key: set(torch._C._dispatch_get_registrations_for_dispatch_key(key))
-        for key in _KERNEL_KEYS
-    }
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     kernels = {}
     for name, overload in ops:
         qualname = f"{name}.{overload}" if overload else name
-        if keys := tuple(k for k in _KERNEL_KEYS if qualname in registered[k]):
-            kernels[qualname] = keys
+        if not torch._C._dispatch_has_kernel(qualname):
+            continue
+        if found := tuple(k for k in keys if has_kernel(qualname, k)):
+            kernels[qualname] = found
     buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
     buf.writeline("def _import_custom_op_modules():")
     buf.writeline("    import importlib")
@@ -2228,7 +2244,8 @@ def _build_python_source(
     buf.writeline("")
     op_names = _called_op_names(graph_python)
     if ops := _custom_ops(op_names):
-        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops)
+        keys = _graph_kernel_keys(compiled._gm)
+        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2284,7 +2301,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline("")
     op_names = _op_names(gm)
     if ops := _custom_ops(op_names):
-        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops)
+        keys = _graph_kernel_keys(gm)
+        _write_custom_op_imports(buf, _custom_op_modules(ops)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -3903,10 +3921,11 @@ def load(
     Before anything else runs, the artifact imports the modules in its
     ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
     and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
-    for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the backend and
-    composite keys it had a kernel for at capture). A module that fails to import
-    only warns when those ops and kernels are registered anyway, e.g. by a module
-    the server imported under another name.
+    for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
+    and the backend keys of the devices the graph's tensors were on, that it had a
+    kernel for at capture). A module that fails to import only warns when those ops
+    and kernels are registered anyway, e.g. by a module the server imported under
+    another name.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
