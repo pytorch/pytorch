@@ -797,6 +797,21 @@ def forward(self, primals_1):
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
+    def test_set__intermediate_onto_input_is_alias_of_input(self):
+        def f(a):
+            out = torch.empty_like(a)
+            out.set_(a)
+            out.mul_(2)
+            return out
+
+        a = torch.ones(4)
+        out = aot_function(f, nop)(a)
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        out.add_(1)
+        self.assertEqual(a, torch.full((4,), 3.0))
+
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
     )

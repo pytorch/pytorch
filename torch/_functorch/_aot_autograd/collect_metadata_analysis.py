@@ -302,6 +302,15 @@ def run_functionalized_fw_and_collect_metadata(
             for idx, inpt in enumerate(flat_f_args)
             if isinstance(inpt, Tensor)
         }
+        # set_() only updates the inner FunctionalTensorWrapper's storage, not the
+        # outer FunctionalTensor's, so outputs that were set_() onto an input can
+        # only be matched to it through the inner storage.
+        inp_inner_storage_refs = {
+            StorageWeakRef(inpt.elem.untyped_storage()): idx
+            for idx, inpt in enumerate(flat_f_args)
+            if isinstance(inpt, FunctionalTensor)
+            and not torch._functionalize_was_storage_changed(inpt.elem)  # type: ignore[attr-defined]
+        }
 
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
         inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
@@ -457,6 +466,11 @@ def run_functionalized_fw_and_collect_metadata(
             ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
                 o.elem
             )
+            inner_storage = (
+                StorageWeakRef(o.elem.untyped_storage())
+                if functional_tensor_storage_changed
+                else None
+            )
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)
@@ -546,6 +560,9 @@ alias each other from a multi-output view call"
                     raise AssertionError("curr_storage must not be None")
                 base_idx = inp_storage_refs[curr_storage]
                 output_type = OutputType.is_input
+            elif inner_storage in inp_inner_storage_refs:
+                base_idx = inp_inner_storage_refs[inner_storage]
+                output_type = OutputType.alias_of_input
 
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.

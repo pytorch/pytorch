@@ -20578,6 +20578,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
 
+    def test_set_intermediate_onto_input_aliases_input(self):
+        def fn(x):
+            out = torch.empty_like(x)
+            out.set_(x)
+            out.add_(3)
+            return out
+
+        x_eager = torch.arange(4, dtype=torch.float32, device=self.device)
+        x_compiled = x_eager.clone()
+
+        out_eager = fn(x_eager)
+        out_compiled = torch.compile(fn, backend="inductor", fullgraph=True)(x_compiled)
+        self.assertEqual(
+            out_compiled.untyped_storage().data_ptr(),
+            x_compiled.untyped_storage().data_ptr(),
+        )
+
+        out_eager.add_(100)
+        out_compiled.add_(100)
+        self.assertEqual(x_eager, x_compiled)
+        self.assertEqual(out_eager, out_compiled)
+
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
             return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
