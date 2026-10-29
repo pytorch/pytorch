@@ -946,9 +946,7 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
         )
 
         batches = [(), (3,)]
-        # With 32 KB of threadgroup memory, eig_qr_iterate keeps H in
-        # threadgroup memory up to n = 62 and in device memory above that,
-        # so test a few sizes above and below the cutoff
+        # Test sizes surrounding 32 KB threadgroup memory cutoff
         ns = [32, 62, 63, 150]
 
         for batch, n in product(batches, ns):

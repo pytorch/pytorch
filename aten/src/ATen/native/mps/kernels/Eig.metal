@@ -6,8 +6,7 @@
 using namespace metal;
 
 // See Note [linalg.eig for MPS]
-// Helper functions and kernels for linalg.eig. Matrices are column-major:
-// element (i, j) of an n x n matrix M is `M[i + j * n]`.
+// Matrices are column-major: element (i, j) of n x n matrix M is `M[i + j * n]`
 namespace eig {
 
 constant constexpr float kEps = numeric_limits<float>::epsilon();
@@ -23,14 +22,10 @@ inline float abs1(float2 z) {
 // eq. (4.4), with complex s so that G is unitary], represents a rotation of a
 // vector in the plane spanned by basis vectors e_i and e_j. It is the identity
 // matrix except for four elements:
-//   G[i, i] = c
-//   G[i, j] = s
-//   G[j, i] = -s^*
-//   G[j, j] = c
-// However, we don't have to form the full Givens matrix and calculate the full
-// `G H G^*` matrix multiplications when applying a Givens rotation. Instead we
-// can just apply the rotation directly to the rows or columns that the Givens
-// rotation will affect.
+//   G[i, i] = c       G[i, j] = s
+//   G[j, i] = -s^*    G[j, j] = c
+// We don't form the full Givens matrix or do full `G A G^-1` matmuls. We apply
+// the Givens rotation directly to the rows or columns it affects
 struct Givens {
   float c;
   float2 s;
@@ -63,10 +58,6 @@ inline void rotate_columns(Givens g, thread float2& a, thread float2& b) {
   const float2 a_new = g.c * a + c10::metal::mul(c10::metal::conj(g.s), b);
   b = g.c * b - c10::metal::mul(g.s, a);
   a = a_new;
-}
-
-inline packed_float3 pack_givens(Givens g) {
-  return packed_float3(g.c, g.s.x, g.s.y);
 }
 
 inline Givens unpack_givens(packed_float3 v) {
@@ -130,10 +121,8 @@ int find_active_window(
 }
 
 // The shift mu for a QR step on the active window ending at row ihi. Most of
-// the time, this is the Wilkinson shift (See Note [linalg.eig for MPS]). But
-// the Wilkinson shift alone does not always converge, so for every 10
-// iterations where deflation has not occurred yet, we use an exceptional shift
-// to break out of cycles.
+// the time, use Wilkinson shift. Every 10 iterations where deflation has not
+// occurred yet, use an exceptional shift to break out of non-convergent cycles.
 template <typename P, typename I>
 float2 qr_shift(P H, I n, int ihi, int its) {
   // Pick out the lower right 2x2 corner of the active window:
@@ -144,15 +133,11 @@ float2 qr_shift(P H, I n, int ihi, int its) {
   const float2 d = H[ihi + ihi * n];
   const float2 c = H[ihi + (ihi - 1) * n];
   if (its > 0 && its % 10 == 0) {
-    // 10th iteration without deflation, apply exceptional shift, based on
-    // LAPACK's xLAHQR.
+    // Every 10th iteration where deflation has not happened yet, apply
+    // exceptional shift, based on LAPACK's xLAHQR.
     return d + float2(0.75f * abs1(c), 0.0f);
   }
-  // Eigenvalues of the 2x2 corner are:
-  //   l (+/-) r
-  // where
-  //   l = (a + d) / 2
-  //   r = sqrt((a - d)^2 + 4 b c) / 2
+  // Eigenvalues 2x2 matrix are: (a + d) / 2  +/-  sqrt((a - d)^2 + 4 b c) / 2
   // As in LAPACK's xLAHQR, u = sqrt(b) sqrt(c) stands in for sqrt(b c), and x
   // and u are divided by s before squaring them, so that tiny or huge entries
   // can't underflow or overflow.
@@ -234,7 +219,7 @@ void chase_bulge(
         H[k + (k - 1) * n] = x;
         H[(k + 1) + (k - 1) * n] = float2(0);
       }
-      rotations[k] = pack_givens(g);
+      rotations[k] = packed_float3(g.c, g.s.x, g.s.y);
     }
     matrix_barrier<P>();
   }
