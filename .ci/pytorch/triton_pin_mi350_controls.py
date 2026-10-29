@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -159,7 +160,29 @@ def build_pin(label, repository, sha):
             indent=2,
         )
     )
+    if label in PINS:
+        debug = ROOT / 'test/debug/triton-pin-native-wheels' / label
+        debug.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(wheels[0], debug / wheels[0].name)
     return site
+
+
+def configure_fusion(env, fusion):
+    for key in ('TRITON_DEFAULT_FP_FUSION', 'TRITON_ALLOW_FP_FUSION',
+                'TRITON_FORCE_DISABLE_FP_FUSION'):
+        env.pop(key, None)
+    if fusion is not None:
+        env['TRITON_DEFAULT_FP_FUSION'] = str(fusion)
+        env['TRITON_ALLOW_FP_FUSION'] = '1'
+
+
+def fusion_provenance(fusion):
+    code = ('language=triton.knobs.language; '
+            "print('FUSION_CONTROL',language.fp_fusion_enabled(True),"
+            'language.fp_fusion_enabled(None)); ')
+    if fusion is not None:
+        code += 'assert language.fp_fusion_enabled(True), "Implicit fusion control was not enabled"; '
+    return code
 
 
 def test_pin(label, site, sha, *, fusion=None):
@@ -167,9 +190,7 @@ def test_pin(label, site, sha, *, fusion=None):
     env["PYTHONPATH"] = str(site) + (
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
-    env.pop("TRITON_DEFAULT_FP_FUSION", None)
-    if fusion is not None:
-        env["TRITON_DEFAULT_FP_FUSION"] = str(fusion)
+    configure_fusion(env, fusion)
     cache = WORK / f"cache-{label}"
     env["TRITON_CACHE_DIR"] = str(cache / "triton")
     env["TORCHINDUCTOR_CACHE_DIR"] = str(cache / "inductor")
@@ -182,6 +203,7 @@ def test_pin(label, site, sha, *, fusion=None):
         "v=importlib.metadata.version('triton'); "
         f"assert '{sha[:8]}' in v, v; "
         f"assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}), triton.__file__; "
+        + fusion_provenance(fusion) +
         "print(json.dumps(dict(torch_version=torch.__version__,torch_sha=torch.version.git_version,"
         "hip=torch.version.hip,device=str(p),triton_version=triton.__version__,triton_distribution=v,triton_file=triton.__file__),indent=2))"
     )
@@ -253,12 +275,13 @@ def main():
     )
     results = {}
     sites = {}
-    for label, (repository, sha) in PINS.items():
+    selected_pins = {'candidate': PINS['candidate']} if '--fusion-only' in sys.argv else PINS
+    for label, (repository, sha) in selected_pins.items():
         sites[label] = build_pin(label, repository, sha)
         results[label] = test_pin(label, sites[label], sha)
         (REPORT / "results.json").write_text(json.dumps(results, indent=2))
-    results["candidate-old-fma-default"] = test_pin(
-        "candidate-old-fma-default",
+    results["candidate-implicit-fusion-restored"] = test_pin(
+        "candidate-implicit-fusion-restored",
         sites["candidate"],
         PINS["candidate"][1],
         fusion=1,

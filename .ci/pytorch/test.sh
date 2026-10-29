@@ -2485,8 +2485,12 @@ test_torchtitan() {
     export OUTPUT_DIR="${RUNNER_TEMP}/artifacts-to-be-uploaded"
   fi
 
-  if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_controls" ]]; then
-    python ../.ci/pytorch/triton_pin_titan_controls.py
+  if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_controls" || "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_controls" ]]; then
+    local pin_control_args=()
+    if [[ "${TEST_CONFIG}" == "torchtitan_triton_pin_fusion_controls" ]]; then
+      pin_control_args+=(--fusion-only)
+    fi
+    python ../.ci/pytorch/triton_pin_titan_controls.py "${pin_control_args[@]}"
     popd
     return
   fi
@@ -2624,6 +2628,10 @@ fi
 
 if [[ "${TEST_CONFIG}" == "triton_pin_controls" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_controls.py
+fi
+
+if [[ "${TEST_CONFIG}" == "triton_pin_mi350_fusion" ]]; then
+  exec python .ci/pytorch/triton_pin_mi350_controls.py --fusion-only
 fi
 
 if [[ "${TEST_CONFIG}" == "onnx" ]]; then

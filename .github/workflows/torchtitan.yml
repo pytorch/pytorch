@@ -14,6 +14,10 @@ on:
         type: string
         default: ''
         description: Reuse an existing native diagnostic PyTorch/AO/comms build.
+      fusion-only:
+        type: boolean
+        default: false
+        description: Test candidate implicit-fusion opt-in against its default.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -75,7 +79,7 @@ jobs:
       # torchtitan_h100_integration disabled pending runner availability
       test-matrix: |
         { include: [
-          { config: "torchtitan_triton_pin_controls", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
+          { config: "${{ github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -110,7 +114,7 @@ jobs:
       timeout-minutes: 180
       test-matrix: |
         { include: [
-          { config: "torchtitan_triton_pin_controls", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
+          { config: "${{ github.event.inputs.fusion-only == 'true' && 'torchtitan_triton_pin_fusion_controls' || 'torchtitan_triton_pin_controls' }}", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-189-704-a10g-8" }
         ]}
       python-version: '3.12'
       compiler: gcc11

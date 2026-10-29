@@ -18,21 +18,22 @@ def main():
                   "print(torch.version.git_version,torch.cuda.get_device_properties(0))"],
                  cwd=titan, name="titan-preflight", timeout=180)
     results = {}
-    for label, (repository, sha) in controls.PINS.items():
+    selected_pins = {'candidate': controls.PINS['candidate']} if '--fusion-only' in sys.argv else controls.PINS
+    for label, (repository, sha) in selected_pins.items():
         site = controls.build_pin(label, repository, sha)
-        phases = [(label, None)] + ([(label + "-old-fma-default", "1")] if label == "candidate" else [])
+        phases = [(label, None)] + ([(label + "-implicit-fusion-restored", "1")] if label == "candidate" else [])
         for phase, fma in phases:
             env = os.environ.copy()
             env["PYTHONPATH"] = str(site) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
             env["TRITON_CACHE_DIR"] = str(controls.WORK / phase / "triton-cache")
             env["TORCHINDUCTOR_CACHE_DIR"] = str(controls.WORK / phase / "inductor-cache")
-            env.pop("TRITON_DEFAULT_FP_FUSION", None)
-            if fma is not None:
-                env["TRITON_DEFAULT_FP_FUSION"] = fma
+            controls.configure_fusion(env, fma)
+            env['TORCHINDUCTOR_FORCE_DISABLE_CACHES'] = '1'
             env["CUDA_VISIBLE_DEVICES"] = "0,1"
             probe = ("import triton,importlib.metadata,pathlib,torch; v=importlib.metadata.version('triton'); "
                      f"assert '{sha[:8]}' in v,v; assert pathlib.Path(triton.__file__).resolve().is_relative_to({str(site)!r}); "
-                     "print(v,triton.__file__,torch.version.git_version)")
+                     + controls.fusion_provenance(fma)
+                     + "print(v,triton.__file__,torch.version.git_version)")
             controls.run([sys.executable, "-c", probe], cwd=titan, env=env, name=phase + "-provenance", timeout=180)
             results[phase] = controls.run([sys.executable, "-m", "tests.integration_tests.run_tests",
                          "--test_suite", "features", "--test_name", "sft", "--ngpu", "2",
