@@ -282,6 +282,17 @@ jobs:
           # shellcheck disable=SC2156
           find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
+      - name: Preserve native s390x codegen controls
+        if: always() && matrix.config == 'triton_pin_s390_controls'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-s390x-codegen-${{ github.run_id }}
+          path: |
+            test/debug/triton-pin-s390-controls/**/*
+            test/test-reports/triton-pin-s390-controls/**/*
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Cleanup docker
         if: always()
         shell: bash

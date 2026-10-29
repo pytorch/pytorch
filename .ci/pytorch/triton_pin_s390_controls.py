@@ -79,6 +79,10 @@ def main():
                         "truth_at_original_failure": truth[1][1, 1, 4, 1].item()})
     (REPORT / "results.json").write_text(json.dumps(summary, indent=2))
     print("S390_LAYOUT_CONTROLS", json.dumps(summary, indent=2), flush=True)
+    if captures:
+        from triton_pin_s390_codegen_controls import investigate
+
+        investigate(captures[-1], REPORT, DEBUG)
 
 
 if __name__ == "__main__":
