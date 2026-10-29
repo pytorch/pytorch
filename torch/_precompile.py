@@ -2050,8 +2050,8 @@ def _custom_op_modules(
     op_names: Iterable[tuple[str, str]], keys: tuple[str, ...]
 ) -> tuple[str, ...]:
     """The modules registering the ops among ``op_names`` and their active kernels
-    for ``keys``, in the order their imports finished, so that importing them again
-    registers any overriding kernel last."""
+    for ``keys``, in the order their imports finished, which load replays with the
+    modules of overriding kernels last."""
     file_modules = functools.cache(_file_modules)
     modules: set[str | None] = set()
     for op_name, overload in op_names:
@@ -2101,7 +2101,10 @@ def _graph_kernel_keys(
         for leaf in pytree.tree_leaves((vals, list(example_inputs)))
         if isinstance(leaf, torch.Tensor)
     }
-    return (*sorted(backends - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
+    # Many per-backend keys, e.g. QuantizedMeta, have names the dispatcher cannot
+    # parse back, so no kernel can be checked under them.
+    parseable = {k for k in backends if torch._C._parse_dispatch_key(k) is not None}
+    return (*sorted(parseable - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
 
 
 def _write_custom_op_imports(
@@ -3815,7 +3818,7 @@ def load(
     before the flag existed cannot honor it, so passing the flag for either
     raises ``PrecompileError``.
 
-    Before anything else runs, the artifact imports the modules in its
+    Before anything else runs, a MakeFxTracer artifact imports the modules in its
     ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
     and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
     for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
@@ -3832,7 +3835,7 @@ def load(
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
     example, a captured source changed since capture), or if a custom op the
-    artifact calls, or one of its captured kernels, is not registered once its
+    MakeFxTracer artifact calls, or one of its captured kernels, is not registered once its
     imports ran, or if a captured overriding kernel is no longer the active one. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.

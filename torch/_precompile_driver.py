@@ -96,7 +96,10 @@ def _import_custom_op_modules():
     import torch
 
     import_errors = {}
-    for module in CUSTOM_OP_MODULES:
+    # A module imported from inside another finished first, so the order alone
+    # would import an override nested in the module it overrides before that one.
+    owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
+    for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
         try:
             importlib.import_module(module)
         # Not just ImportError: e.g. importing torch.distributed.device_mesh before
