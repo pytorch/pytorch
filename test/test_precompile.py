@@ -9929,7 +9929,7 @@ class TestPrecompileCustomOpRecording(TestCase):
             import torch.onnx.ops
             import torch._dynamo.tensor_version_op
             import torch._inductor.inductor_prims
-            from torch._precompile import _TORCH_LAZY_OP_NAMESPACES, _TORCH_OP_NAMESPACES, _custom_op_module, _custom_op_modules, _file_modules, _library_op_module
+            from torch._precompile import _file_modules, _op_registration
             if torch.distributed.is_available():
                 import torch.distributed.fsdp
                 import torch.distributed.pipelining
@@ -9940,19 +9940,12 @@ class TestPrecompileCustomOpRecording(TestCase):
             file_modules = functools.cache(_file_modules)
             for name in torch._C._dispatch_get_all_op_names():
                 op_name, _, overload = name.partition(".")
-                ns = op_name.split("::")[0]
-                debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
-                if ns in _TORCH_LAZY_OP_NAMESPACES:
-                    continue
-                if ".py:" not in debug:
-                    if ns not in _TORCH_OP_NAMESPACES:
-                        reported.add(ns)
-                elif (module := _custom_op_module(op_name, overload) or _library_op_module(op_name, overload, file_modules)) is None:
-                    reported.add(ns)
-                else:
+                kind, module = _op_registration(op_name, overload, file_modules)
+                if kind == "unrecorded":
+                    reported.add(op_name.split("::")[0])
+                elif kind == "module":
                     modules.setdefault(module, []).append([op_name, overload])
-            chains = {m: [_custom_op_modules(ops)[0], ops] for m, ops in modules.items()}
-            print(json.dumps({"reported": sorted(reported), "modules": chains}))
+            print(json.dumps({"reported": sorted(reported), "modules": modules}))
             """
         )
         # Only a source build records C++ schemas under torch/, so they are checked
@@ -9971,14 +9964,13 @@ class TestPrecompileCustomOpRecording(TestCase):
             import importlib, json, os, sys
             import torch
             modules = json.load(sys.stdin)
-            for module, (chain, ops) in sorted(modules.items()):
+            for module, ops in sorted(modules.items()):
                 sys.stdout.flush()
                 if os.fork() != 0:
                     assert os.waitstatus_to_exitcode(os.wait()[1]) == 0, module
                     continue
                 try:
-                    for name in chain:
-                        importlib.import_module(name)
+                    importlib.import_module(module)
                     for op_name, overload in ops:
                         try:
                             torch._C._dispatch_find_schema_or_throw(op_name, overload)
