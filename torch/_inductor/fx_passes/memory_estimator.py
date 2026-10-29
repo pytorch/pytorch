@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.fx as fx
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
@@ -106,11 +107,11 @@ class GraphAliasTracker:
 
         storages: OrderedSet[StorageKey] = OrderedSet()
 
-        def collect_storage(tensor: torch._subclasses.FakeTensor) -> None:
+        def collect_storage(tensor: torch.Tensor) -> None:
             storages.add(StorageKey(tensor.untyped_storage(), tensor.device))
 
-        # Use tree_map_only to handle FakeTensors in nested structures
-        tree_map_only(torch._subclasses.FakeTensor, collect_storage, val)
+        # Use tree_map_only to handle fake tensors in nested structures
+        tree_map_only(is_fake_tensor, collect_storage, val)
 
         return storages
 

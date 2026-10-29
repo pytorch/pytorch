@@ -39,7 +39,7 @@ __device__ static IndexType getBin(
     at::acc_type<input_t, /*is_cuda=*/true> minvalue,
     at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
     int64_t nbins) {
-  IndexType bin = (int)(((bVal - minvalue)) * nbins / (maxvalue - minvalue));
+  IndexType bin = static_cast<IndexType>((bVal - minvalue) * nbins / (maxvalue - minvalue));
   // (only applicable for histc)
   // while each bin is inclusive at the lower end and exclusive at the higher,
   // i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
@@ -421,6 +421,9 @@ Tensor _histc_cuda(
 }
 
 Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
+  // Keep message in sync with histogramdd_prepare_out (Histogram.cpp:132).
+  TORCH_CHECK(self.dtype() == result.dtype(), "torch.histogram: input tensor and hist tensor should",
+      " have the same dtype, but got input ", self.dtype(), " and hist ", result.dtype());
   auto ret = _histc_cuda(self, bins, min, max);
   resize_output(result, ret.sizes());
   result.copy_(ret);

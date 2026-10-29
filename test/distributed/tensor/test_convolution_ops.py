@@ -20,7 +20,9 @@ from torch.testing._internal.common_distributed import run_subtests
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    LocalDTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -44,11 +46,8 @@ def _conv_fn(
         module.register_parameter(name, dist_param)
 
 
-class DistConvolutionOpsTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 2
-        return 2
+class DistConvolutionOpsTest(DTensorContinuousTestBase):
+    world_size = 2
 
     @with_comms
     def test_downsampling_convolution(self):
@@ -232,41 +231,6 @@ class DistConvolutionOpsTest(DTensorTestBase):
         x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
         out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
         self.assertEqual(out_dt, out)
-
-    @with_tf32_off
-    @with_comms
-    def test_conv2d_no_bias_compile(self):
-        """Test Conv2d with bias=False in compile mode (Issue #167091)
-
-        Regression test: Previously this would fail during torch.compile
-        tracing with AssertionError when bias_spec was None.
-        """
-        device_mesh = self.build_device_mesh()
-
-        def conv_fn(x, w):
-            return F.conv2d(x, w, bias=None, padding=1)
-
-        compiled_fn = torch.compile(conv_fn)
-
-        # Create tensors
-        x = torch.randn(1, 4, 5, 5, device=self.device_type)
-        w = torch.randn(8, 4, 3, 3, device=self.device_type)
-
-        # Distribute tensors
-        x_dt = distribute_tensor(x, device_mesh, [Replicate()])
-        w_dt = distribute_tensor(w, device_mesh, [Replicate()])
-
-        # Test eager mode for comparison
-        result_eager = conv_fn(x_dt, w_dt)
-
-        # Test compiled mode - this should not crash
-        result_compiled = compiled_fn(x_dt, w_dt)
-
-        # Verify shape is correct (the key regression test)
-        self.assertEqual(result_compiled.shape, torch.Size([1, 8, 5, 5]))
-
-        # Verify numerical correctness
-        self.assertEqual(result_compiled.to_local(), result_eager.to_local())
 
     @with_comms
     def test_conv2d_no_bias_backward(self):
@@ -470,8 +434,50 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(x_dt.grad.full_tensor(), x_ref.grad)
 
 
+class DistConvolutionCompileTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @with_tf32_off
+    @with_comms
+    def test_conv2d_no_bias_compile(self):
+        """Test Conv2d with bias=False in compile mode (Issue #167091)
+
+        Regression test: Previously this would fail during torch.compile
+        tracing with AssertionError when bias_spec was None.
+        """
+        device_mesh = self.build_device_mesh()
+
+        def conv_fn(x, w):
+            return F.conv2d(x, w, bias=None, padding=1)
+
+        compiled_fn = torch.compile(conv_fn)
+
+        # Create tensors
+        x = torch.randn(1, 4, 5, 5, device=self.device_type)
+        w = torch.randn(8, 4, 3, 3, device=self.device_type)
+
+        # Distribute tensors
+        x_dt = distribute_tensor(x, device_mesh, [Replicate()])
+        w_dt = distribute_tensor(w, device_mesh, [Replicate()])
+
+        # Test eager mode for comparison
+        result_eager = conv_fn(x_dt, w_dt)
+
+        # Test compiled mode - this should not crash
+        result_compiled = compiled_fn(x_dt, w_dt)
+
+        # Verify shape is correct (the key regression test)
+        self.assertEqual(result_compiled.shape, torch.Size([1, 8, 5, 5]))
+
+        # Verify numerical correctness
+        self.assertEqual(result_compiled.to_local(), result_eager.to_local())
+
+
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
+    base_class=LocalDTensorContinuousTestBase,
     # Send / recv ops are not supported
     skipped_tests=[
         "test_conv_backward_none_grad_inp",
@@ -479,12 +485,16 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
         "test_downsampling_convolution",
         "test_conv2d_batch_shard_strided",
         # New tests for Issue #167091 - use send/recv via tp_convolution
-        "test_conv2d_no_bias_compile",
         "test_conv2d_no_bias_backward",
         "test_conv2d_module_no_bias",
         "test_conv1d_batch_shard",
         "test_conv3d_batch_shard",
     ],
+)
+
+DistConvolutionCompileTestWithLocalTensor = create_local_tensor_test_class(
+    DistConvolutionCompileTest,
+    skipped_tests=["test_conv2d_no_bias_compile"],
 )
 
 if __name__ == "__main__":

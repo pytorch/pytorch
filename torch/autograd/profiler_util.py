@@ -581,6 +581,8 @@ class EventMetadata(NamedTuple):
     context: int | None
     channel: int | None
     channel_type: int | None
+    # ROCm reports the HSA queue a kernel or copy was dispatched to; None on CUDA.
+    hsa_queue: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -630,6 +632,7 @@ _EVENT_METADATA_KEYS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "context": ("context", int),
     "channel": ("channel", int),
     "channel_type": ("channel_type", int),
+    "hsa_queue": ("hsa_queue", int),
     "bytes": ("bytes", int),
     "memory bandwidth (GB/s)": ("bandwidth_gb_s", float),
     "Collective name": ("collective_name", _to_str),
@@ -713,8 +716,7 @@ class FunctionEvent(FormattedTimesMixin):
             used in exported traces. Use
             ``_ExperimentalConfig(expose_kineto_event_metadata=True)`` to expose
             Kineto activity metadata. Available fields vary by activity and backend.
-        metadata_json (str): Deprecated. Use event_metadata instead.
-        event_metadata (EventMetadata): Additional metadata in structured format.
+        event_metadata (EventMetadata): Deprecated. Use metadata instead.
         structured_input_shapes (List[List[int] | List[List[int]]]): Like ``input_shapes``
             but distinguishes TensorList inputs.  Plain tensor inputs are ``List[int]``;
             TensorList inputs are ``List[List[int]]`` containing one shape per tensor in the list.
@@ -770,7 +772,6 @@ class FunctionEvent(FormattedTimesMixin):
         is_user_annotation=False,
         is_python_function=False,
         activity_type=None,
-        metadata_json=None,
         flow_id=None,
         flow_type=None,
         flow_start=None,
@@ -827,14 +828,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
-        self._metadata_json = metadata_json
         self.flow_id: int | None = flow_id
         self.flow_type: int | None = flow_type
         self.flow_start: bool | None = flow_start
         self.external_id: int = external_id
         self.linked_correlation_id: int = linked_correlation_id
         self.metadata: dict[str, Any] | None = typed_metadata
-        self.event_metadata: EventMetadata | None = (
+        self._event_metadata: EventMetadata | None = (
             _build_metadata(extra_meta) if extra_meta else None
         )
         # pyrefly: ignore [bad-assignment]
@@ -901,11 +901,11 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     @deprecated(
-        "`metadata_json` is deprecated. Use `event_metadata` instead.",
+        "`event_metadata` is deprecated. Use `metadata` instead.",
         category=FutureWarning,
     )
-    def metadata_json(self):
-        return self._metadata_json
+    def event_metadata(self):
+        return self._event_metadata
 
     @property
     @deprecated(
