@@ -12342,9 +12342,9 @@ op_db: list[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-                # torch-xpu-ops/issues/4321
-                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                             dtypes=(torch.int64,)),
+               # torch-xpu-ops/issues/4321
+               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
+                            dtypes=(torch.int64,)),
                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
                DecorateInfo(unittest.skip("XPU complex arange is unsupported; see intel/torch-xpu-ops#5668"),
                             'TestDecomp', 'test_comprehensive',
@@ -12362,7 +12362,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
             )),
-           )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
            inplace_variant=torch.Tensor.cauchy_,
@@ -15435,8 +15434,6 @@ op_db: list[OpInfo] = [
             # all dtypes hit this -- not just float32.
             DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
                          "TestJit", "test_variant_consistency_jit"),
-            # MPS fp16/bf16 accuracy mismatch (same as unchunked variant).
-            DecorateInfo(unittest.skip("Inconsistent accuracy"),
             # acc_policy="auto" accumulates fp16/bf16 in fp32 on CPU only, so the
             # CPU reference is more precise than MPS by design.
             DecorateInfo(unittest.skip("CPU uses fp32 accumulation"),
@@ -22167,7 +22164,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_noncontiguous_samples", device_type="xpu"),
-             DecorateInfo(unittest.expectedFailure, "TestCommon",
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
                           "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="xpu"),
@@ -22198,7 +22195,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "TestDecomp",
                 "test_comprehensive",
                 device_type="xpu",
-             ),
+            ),
         )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
