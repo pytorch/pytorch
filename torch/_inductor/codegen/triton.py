@@ -87,6 +87,7 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
+    is_strict_cuda_triton,
     is_welford_reduction,
     Placeholder,
     prefix_is_pointwise,
@@ -1346,14 +1347,6 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
-    def _strict_cuda_pointwise() -> bool:
-        return (
-            config.strict_pointwise
-            and torch.version.hip is None
-            and V.graph.get_current_device_or_throw().type == "cuda"
-        )
-
-    @staticmethod
     @override
     def to_dtype(
         x,
@@ -1410,7 +1403,7 @@ class TritonOverrides(OpOverrides):
         if (
             dtype in (torch.uint8, torch.int8, torch.int16)
             and (src_dtype is None or src_dtype.is_floating_point)
-            and TritonOverrides._strict_cuda_pointwise()
+            and is_strict_cuda_triton(device=V.graph.get_current_device_or_throw())
         ):
             # CUDA narrows through int32; c10 routes uint8 through int64 instead.
             intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
@@ -1619,7 +1612,7 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
-            if TritonOverrides._strict_cuda_pointwise():
+            if is_strict_cuda_triton(device=V.graph.get_current_device_or_throw()):
                 # Eager preserves the input's negative zero and NaN payload.
                 zero = ops.constant(0, torch.int32)
                 return ops.where(ops.lt(x, zero), zero, x)
@@ -2302,7 +2295,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
-        if TritonOverrides._strict_cuda_pointwise():
+        if is_strict_cuda_triton(device=V.graph.get_current_device_or_throw()):
             # CUDA eager uses exp and correctly rounded division at opmath precision.
             return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"

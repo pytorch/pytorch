@@ -5087,18 +5087,14 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
-def is_strict_cuda_triton(device: torch.device | None = None) -> bool:
-    if not (
+def is_strict_cuda_triton(device: torch.device) -> bool:
+    """Flag strict mode for cuda triton operations."""
+    return (
         config.strict_pointwise
         and config.cuda_backend == "triton"
         and torch.version.hip is None
-    ):
-        return False
-    if device is None:
-        from torch._inductor.virtualized import V
-
-        device = V.graph.get_current_device_or_throw()
-    return device.type == "cuda"
+        and device.type == "cuda"
+    )
 
 
 def device_supports_fp64(device: torch.device | None) -> bool:

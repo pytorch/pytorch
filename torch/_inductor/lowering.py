@@ -7955,13 +7955,6 @@ def _div_trunc_cuda_scalar(a: TensorBox | IRNode, b: int | float) -> TensorBox:
 
     Match eager CUDA by computing the reciprocal and product in FP32, then
     rounding to the tensor's dtype after truncation.
-
-    Args:
-        a: Tensor dividend.
-        b: Python scalar divisor.
-
-    Returns:
-        The pointwise result with the dividend's shape and dtype.
     """
 
     def fn(value):
@@ -8000,12 +7993,11 @@ def div_mode(a, b, rounding_mode=None):
             return truncdiv(a, b)
         if (
             isinstance(a, (TensorBox, IRNode))
-            and is_strict_cuda_triton(a.get_device())
+            and (device := a.get_device()) is not None
+            and is_strict_cuda_triton(device)
             and isinstance(b, (int, float))
-            and a.get_dtype() in (torch.bfloat16, torch.float16)
+            and a.get_dtype() in (torch.bfloat16, torch.float16, torch.float32)
         ):
-            # CUDA eager computes a * reciprocal(b) in FP32 for scalar divisors.
-            # Keep the division and product in FP32, then round the op result.
             return _div_trunc_cuda_scalar(a, b)
         return trunc(div(a, b))
     return div(a, b)

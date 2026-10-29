@@ -377,7 +377,7 @@ class StrictNumericsCompileTest(TestCase):
             self.assertEqual(counter.frame_count, 2)
 
     @config.patch(force_disable_caches=True)
-    @dtypes(torch.float16, torch.bfloat16)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
     @parametrize("divisor", (3.8125, 1.00000004))
