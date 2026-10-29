@@ -104,6 +104,33 @@ enable_auto_functionalized_v2 = (
 # add some debug printouts
 debug = False
 
+# Separately lower FX to the experimental C++ LoopsIR and print it. Execution
+# still uses normal Inductor codegen; unsupported experimental ops are errors.
+experimental_cpp_loops_ir_dump = (
+    os.environ.get("TORCHINDUCTOR_CPP_LOOPS_IR_DUMP", "0") == "1"
+)
+
+# Optional strict C++ LoopsIR path inside the normal Inductor compile.
+# Default off so the stock route is unchanged. When True, the normal AOT /
+# post-grad pipeline still runs, then _InProcessFxCompile.codegen_and_compile
+# delegates to the loops_ir_backend helper instead of GraphLowering. The flag
+# is part of the portable config snapshot, so it separates FX-cache entries.
+# Usable via torch.compile(..., backend="inductor",
+# options={"experimental_cpp_ir": True}).
+experimental_cpp_ir = os.environ.get("TORCHINDUCTOR_EXPERIMENTAL_CPP_IR", "0") == "1"
+
+# Numerical policy for the experimental C++ LoopsIR lane. Portable (part of
+# the config snapshot, so it separates FX-cache entries). Valid values are
+# "strict_eager" (compatibility-preserving default: preserve eager bits) and
+# "inductor" (follow stock Inductor's effective numerical choices). Validated
+# only when the CPP lane is enabled (see fx_passes/cpp_ir_strict.py); stock
+# path (lane off) never reads this.
+# Usable via options={"experimental_cpp_ir": True,
+# "experimental_cpp_ir_numerics": "strict_eager"}.
+experimental_cpp_ir_numerics = os.environ.get(
+    "TORCHINDUCTOR_EXPERIMENTAL_CPP_IR_NUMERICS", "strict_eager"
+)
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
