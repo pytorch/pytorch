@@ -2588,6 +2588,10 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
+if [[ "${TEST_CONFIG}" == "triton_pin_l4_controls" ]]; then
+  exec python .ci/pytorch/triton_pin_l4_controls.py
+fi
+
 if [[ "${TEST_CONFIG}" == "triton_pin_controls" ]]; then
   exec python .ci/pytorch/triton_pin_mi350_controls.py
 fi
