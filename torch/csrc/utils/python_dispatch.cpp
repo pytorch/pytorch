@@ -14,20 +14,28 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
 
-#include <c10/util/irange.h>
+#include <array>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -85,6 +93,28 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
+// Whether autograd needs to see a call with these arguments: grad mode is on
+// and a Tensor among them (or in a list among them) requires grad.
+static bool any_requires_grad(c10::ArrayRef<c10::IValue> arguments) {
+  if (!at::GradMode::is_enabled()) {
+    return false;
+  }
+  for (const auto& ivalue : arguments) {
+    if (ivalue.isTensor()) {
+      if (ivalue.toTensor().requires_grad()) {
+        return true;
+      }
+    } else if (ivalue.isList()) {
+      for (const auto& elem : ivalue.toListRef()) {
+        if (elem.isTensor() && elem.toTensor().requires_grad()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
@@ -92,17 +122,23 @@ class PythonKernelHolder : public c10::OperatorKernel {
   bool with_keyset_;
   // If "with_op", then we expect the op as first arg (or second if keyset)
   bool with_op_;
+  // An Autograd kernel that only redispatches below Autograd when grad mode
+  // is off or no input requires grad, so the dispatcher can do that itself
+  // without calling into Python (torch.library.custom_op's).
+  bool skip_if_no_grad_;
 
  public:
   PythonKernelHolder(
       py::object func,
       c10::DispatchKey dispatch_key,
       bool with_keyset = false,
-      bool with_op = false)
+      bool with_op = false,
+      bool skip_if_no_grad = false)
       : func_(func.release().ptr(), getPyInterpreter()),
         dispatch_key_(dispatch_key),
         with_keyset_(with_keyset),
-        with_op_(with_op) {}
+        with_op_(with_op),
+        skip_if_no_grad_(skip_if_no_grad) {}
 
   PyObject* func(c10::impl::PyInterpreter* interpreter) const {
     return func_.ptr(interpreter);
@@ -116,10 +152,22 @@ class PythonKernelHolder : public c10::OperatorKernel {
     return with_op_;
   }
 
+  bool skip_if_no_grad() const {
+    return skip_if_no_grad_;
+  }
+
   void operator()(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack) {
+    if (skip_if_no_grad_ &&
+        !any_requires_grad(
+            torch::jit::last(*stack, op.schema().arguments().size()))) {
+      at::AutoDispatchBelowAutograd guard;
+      op.redispatchBoxed(keyset & c10::after_autograd_keyset, stack);
+      return;
+    }
+
     // Figure out if we can handle it hermetically, or if we have
     // to double dispatch
 
@@ -193,6 +241,54 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
+// Bumps a mutated Tensor's version counter, as torch.autograd.graph.
+// increment_version does: inference tensors don't have one.
+static void bump_mutated_version(const at::Tensor& t) {
+  if (!t.is_inference()) {
+    torch::autograd::impl::bump_version(t);
+  }
+}
+
+// The ADInplaceOrView kernel of a custom op that mutates some of its arguments
+// and returns no views of them: bumps the version counter of each mutated
+// Tensor, then redispatches past ADInplaceOrView. (The generic fallback,
+// autogradNotImplementedInplaceOrViewFallback, only bumps mutated returns.)
+// PyObject dispatch does the same itself, without leaving the fast path.
+class MutationVersionBumpKernel : public c10::OperatorKernel {
+ public:
+  explicit MutationVersionBumpKernel(std::vector<size_t> mutated_args)
+      : mutated_args_(std::move(mutated_args)) {}
+
+  // Indices of the mutated arguments in the schema.
+  const std::vector<size_t>& mutated_args() const {
+    return mutated_args_;
+  }
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    const auto arguments =
+        torch::jit::last(*stack, op.schema().arguments().size());
+    for (const auto i : mutated_args_) {
+      const auto& arg = arguments[i];
+      if (arg.isTensor()) {
+        bump_mutated_version(arg.toTensor());
+      } else if (arg.isList()) {
+        for (const auto& elem : arg.toListRef()) {
+          if (elem.isTensor()) {
+            bump_mutated_version(elem.toTensor());
+          }
+        }
+      }
+    }
+    op.redispatchBoxed(keyset & c10::after_ADInplaceOrView_keyset, stack);
+  }
+
+ private:
+  std::vector<size_t> mutated_args_;
+};
+
 // @todo sahanp: Afait only register is used in the codebase. This can be
 // removed / simplified
 static torch::_RegisterOrVerify register_or_verify() {
@@ -217,14 +313,20 @@ static py::object ophandle_call_boxed(
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
+struct PyObjectDispatchSchema;
+
 // Function that performs PyObject dispatch
 struct PyObjectDispatchFunc {
   PyObject_HEAD
   PyObject* cpp_dispatch_fn;
   PyObject* cpp_redispatch_fn;
+  // A weak reference to the OpOverload, which __torch_function__ handlers get
+  // as `func`. A strong one would be a cycle: the OpOverload holds this object.
+  PyObject* op_overload_ref;
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  PyObjectDispatchSchema* schema_info;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
 };
@@ -236,8 +338,12 @@ struct PyObjectRedispatchFunc {
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
+  PyObjectDispatchSchema* schema_info;
   c10::impl::PyInterpreter* interpreter;
   vectorcallfunc vectorcall;
+  // Redispatch below Autograd: mask the key set with after_autograd_keyset
+  // and exclude the Autograd keys for the call.
+  bool below_autograd;
 };
 
 // ORs the dispatch keys from `obj` into key_set
@@ -273,67 +379,6 @@ static c10::DispatchKeySet pyobject_dispatch_compute_keyset(
       });
   return extractor.getDispatchKeySetFromRawDispatchKeySet(
       c10::DispatchKeySet::from_raw_repr(key_set));
-}
-
-// NOTE [PyObject dispatch argument normalization]
-// The C++ dispatcher normalizes (args, kwargs) in the following sense:
-// - all kw-only args are passed as kwargs, everything else is passed as args
-// - there are some conversions from types to C++ dispatcher types, e.g.
-//   passing in "cuda" for a Device gets it converted to a torch.device.
-//
-// This happens in torch::jit::toIValue in
-// torch/csrc/jit/python/pybind_utils.cpp. Since we're trying to avoid
-// conversion to IValue, we have to manually implement normalization here.
-//
-// TODO(#187974): normalization is incomplete and will just return false which
-// leads to falling back to the C++ Dispatcher. We'll build out this path
-// some more in the future.
-static bool pyobject_dispatch_try_normalize_args(
-    const c10::FunctionSchema& schema,
-    PyObject* const* args,
-    Py_ssize_t nargs,
-    PyObject* kwnames,
-    c10::SmallVector<PyObject*, 64>& normalized_args,
-    std::vector<py::object>& owned_args) {
-  const auto& schema_args = schema.arguments();
-  if ((kwnames != nullptr && PyTuple_GET_SIZE(kwnames) != 0) ||
-      static_cast<size_t>(nargs) != schema_args.size()) {
-    return false;
-  }
-  for (const auto i : c10::irange(static_cast<size_t>(nargs))) {
-    const auto& type = schema_args[i].real_type();
-    if (type->kind() == c10::TypeKind::TensorType) {
-      if (!THPVariable_Check(args[i])) {
-        return false;
-      }
-      continue;
-    }
-
-    if (type->kind() != c10::TypeKind::ListType) {
-      return false;
-    }
-    auto list_type = type->cast<c10::ListType>();
-    if (list_type->getElementType()->kind() != c10::TypeKind::TensorType) {
-      return false;
-    }
-
-    PyObject* list = PySequence_List(args[i]);
-    if (list == nullptr) {
-      PyErr_Clear();
-      return false;
-    }
-    if (normalized_args.empty()) {
-      normalized_args.assign(args, args + nargs);
-    }
-    normalized_args[i] = list;
-    owned_args.emplace_back(py::reinterpret_steal<py::object>(list));
-    for (Py_ssize_t j = 0; j < PyList_GET_SIZE(list); ++j) {
-      if (!THPVariable_Check(PyList_GET_ITEM(list, j))) {
-        return false;
-      }
-    }
-  }
-  return true;
 }
 
 static bool pyobject_dispatch_arg_has_torch_function(PyObject* arg) {
@@ -375,6 +420,75 @@ static bool pyobject_dispatch_has_torch_function(
     }
   }
   return false;
+}
+
+// Hands a call to its __torch_function__ handlers, as the C++ entry point does
+// (_maybe_handle_torch_function in pybind_utils.cpp), but without converting
+// the arguments for pybind11 or looking the OpOverload up again. Returns a null
+// object if no handler applies after all or the OpOverload is gone; the caller
+// then uses the C++ entry point.
+static py::object pyobject_dispatch_handle_torch_function(
+    PyObjectDispatchFunc* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames) {
+  const Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  const auto num_args = static_cast<size_t>(nargs + nkwargs);
+  std::vector<PyObject*> overloaded_args;
+  for (const auto i : c10::irange(num_args)) {
+    is_tensor_and_append_overloaded(args[i], &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        args[i], &overloaded_args, num_args, /*throw_error=*/false);
+  }
+  if (overloaded_args.empty() && !at::impl::torch_function_mode_enabled()) {
+    return py::object();
+  }
+  PyObject* op_overload = nullptr;
+  TORCH_CHECK_PYTHON(
+      PyWeakref_GetRef(self->op_overload_ref, &op_overload) >= 0);
+  if (op_overload == nullptr) {
+    return py::object();
+  }
+  auto func = py::reinterpret_steal<py::object>(op_overload);
+  auto py_args = py::reinterpret_steal<py::object>(PyTuple_New(nargs));
+  TORCH_CHECK_PYTHON(py_args);
+  for (const auto i : c10::irange(nargs)) {
+    PyTuple_SET_ITEM(py_args.ptr(), i, Py_NewRef(args[i]));
+  }
+  py::dict py_kwargs;
+  if (kwnames != nullptr) {
+    for (const auto i : c10::irange(nkwargs)) {
+      TORCH_CHECK_PYTHON(
+          PyDict_SetItem(
+              py_kwargs.ptr(), PyTuple_GET_ITEM(kwnames, i), args[nargs + i]) >=
+          0);
+    }
+  }
+  // With no names, errors name the op by func's __module__ and __name__.
+  PyObject* result = handle_torch_function_no_python_arg_parser(
+      overloaded_args,
+      py_args.ptr(),
+      py_kwargs.ptr(),
+      /*func_name=*/nullptr,
+      func.ptr(),
+      /*module_name=*/nullptr);
+  TORCH_CHECK_PYTHON(result != nullptr);
+  return py::reinterpret_steal<py::object>(result);
+}
+
+// MutationVersionBumpKernel's version bumps, on a PyObject dispatch argument.
+static void pyobject_dispatch_bump_version(PyObject* obj) {
+  if (THPVariable_Check(obj)) {
+    bump_mutated_version(THPVariable_Unpack(obj));
+  } else if (PyList_Check(obj) || PyTuple_Check(obj)) {
+    const Py_ssize_t len = PySequence_Fast_GET_SIZE(obj);
+    PyObject** items = PySequence_Fast_ITEMS(obj);
+    for (const auto i : c10::irange(len)) {
+      if (THPVariable_Check(items[i])) {
+        bump_mutated_version(THPVariable_Unpack(items[i]));
+      }
+    }
+  }
 }
 
 static PyObject* pyobject_dispatch_call_redispatch_cpp(
@@ -434,6 +548,597 @@ static PyObject* pyobject_dispatch_call_python_with_keyset(
       kwnames);
 }
 
+// The Python types PyObject dispatch can check a value against cheaply.
+struct PyObjectDispatchType {
+  enum class Kind : uint8_t {
+    Tensor,
+    TensorList,
+    Int,
+    Float,
+    Bool,
+    Str,
+    Other,
+  };
+  Kind kind = Kind::Other;
+  bool optional = false;
+};
+
+static PyObjectDispatchType pyobject_dispatch_type(c10::TypePtr type) {
+  using Kind = PyObjectDispatchType::Kind;
+  PyObjectDispatchType result;
+  if (const auto* opt = type->castRaw<c10::OptionalType>()) {
+    result.optional = true;
+    type = opt->getElementType();
+  }
+  switch (type->kind()) {
+    case c10::TypeKind::TensorType:
+      result.kind = Kind::Tensor;
+      break;
+    case c10::TypeKind::IntType:
+    case c10::TypeKind::SymIntType:
+      result.kind = Kind::Int;
+      break;
+    case c10::TypeKind::FloatType:
+    case c10::TypeKind::SymFloatType:
+      result.kind = Kind::Float;
+      break;
+    case c10::TypeKind::BoolType:
+    case c10::TypeKind::SymBoolType:
+      result.kind = Kind::Bool;
+      break;
+    case c10::TypeKind::StringType:
+      result.kind = Kind::Str;
+      break;
+    case c10::TypeKind::ListType:
+      if (type->castRaw<c10::ListType>()->getElementType()->kind() ==
+          c10::TypeKind::TensorType) {
+        result.kind = Kind::TensorList;
+      }
+      break;
+    default:
+      break;
+  }
+  return result;
+}
+
+// NOTE [PyObject dispatch argument normalization]
+// Before calling a Python kernel, the C++ Dispatcher converts (args, kwargs)
+// to IValues and back (see parseIValuesToPyArgsKwargs), which normalizes them:
+// - every argument is filled in, omitted ones from their defaults;
+// - the kernel gets the positional arguments up to the last one that differs
+//   from its default, and the kwarg-only arguments that differ from their
+//   defaults, as kwargs;
+// - values are converted to the schema's types, e.g. "cuda" for a Device
+//   becomes a torch.device and a tuple for an int[] becomes a list.
+// PyObject dispatch does the same without IValues when every argument already
+// has the Python type that the round trip would produce (an exact int for an
+// int, a list or tuple of Tensors for a Tensor[], ...). Otherwise
+// pyobject_dispatch_try_normalize_args returns false and the caller falls back
+// to the C++ Dispatcher.
+struct PyObjectDispatchArg {
+  enum class Kind : uint8_t {
+    Tensor,
+    TensorList,
+    OptionalTensorList,
+    Int,
+    Float,
+    Bool,
+    Str,
+    ScalarType,
+    Layout,
+    Device,
+    Scalar,
+    IntList,
+    FloatList,
+    Unsupported,
+  };
+  Kind kind = Kind::Unsupported;
+  bool optional = false;
+  bool has_default = false;
+  // The default as a Python object, or null if we can't produce it cheaply.
+  py::object default_value;
+  py::object name;
+};
+
+struct PyObjectDispatchSchema {
+  std::vector<PyObjectDispatchArg> args;
+  std::vector<PyObjectDispatchType> returns;
+  // The common case of a single, non-optional Tensor return.
+  bool returns_one_tensor = false;
+  // Arguments before this index are positional, the rest kwarg-only.
+  size_t num_positional = 0;
+  // Every argument is a positional Tensor or Tensor? without a default, so a
+  // call passing them all positionally needs no normalization.
+  bool only_tensors = true;
+};
+
+static PyObjectDispatchArg::Kind pyobject_dispatch_kind(const c10::TypePtr& t) {
+  using Kind = PyObjectDispatchArg::Kind;
+  switch (t->kind()) {
+    case c10::TypeKind::TensorType:
+      return Kind::Tensor;
+    case c10::TypeKind::IntType:
+    case c10::TypeKind::SymIntType:
+      return Kind::Int;
+    case c10::TypeKind::FloatType:
+    case c10::TypeKind::SymFloatType:
+      return Kind::Float;
+    case c10::TypeKind::BoolType:
+    case c10::TypeKind::SymBoolType:
+      return Kind::Bool;
+    case c10::TypeKind::StringType:
+      return Kind::Str;
+    case c10::TypeKind::ScalarTypeType:
+      return Kind::ScalarType;
+    case c10::TypeKind::LayoutType:
+      return Kind::Layout;
+    case c10::TypeKind::DeviceObjType:
+      return Kind::Device;
+    case c10::TypeKind::NumberType:
+      return Kind::Scalar;
+    case c10::TypeKind::ListType: {
+      const auto& elem = t->castRaw<c10::ListType>()->getElementType();
+      switch (elem->kind()) {
+        case c10::TypeKind::TensorType:
+          return Kind::TensorList;
+        case c10::TypeKind::IntType:
+        case c10::TypeKind::SymIntType:
+          return Kind::IntList;
+        case c10::TypeKind::FloatType:
+          return Kind::FloatList;
+        case c10::TypeKind::OptionalType:
+          return elem->castRaw<c10::OptionalType>()->getElementType()->kind() ==
+                  c10::TypeKind::TensorType
+              ? Kind::OptionalTensorList
+              : Kind::Unsupported;
+        default:
+          return Kind::Unsupported;
+      }
+    }
+    default:
+      return Kind::Unsupported;
+  }
+}
+
+static py::object pyobject_dispatch_default(
+    PyObjectDispatchArg::Kind kind,
+    const c10::IValue& value) {
+  using Kind = PyObjectDispatchArg::Kind;
+  if (value.isNone()) {
+    return py::none();
+  }
+  switch (kind) {
+    case Kind::Int:
+      return value.isInt() ? torch::jit::toPyObject(value) : py::object();
+    case Kind::Float:
+      return value.isDouble() ? torch::jit::toPyObject(value) : py::object();
+    case Kind::Bool:
+      return value.isBool() ? torch::jit::toPyObject(value) : py::object();
+    case Kind::Str:
+      return value.isString() ? torch::jit::toPyObject(value) : py::object();
+    case Kind::Scalar:
+      return value.isInt() || value.isDouble() || value.isBool()
+          ? torch::jit::toPyObject(value)
+          : py::object();
+    case Kind::IntList:
+    case Kind::FloatList:
+      return value.isList() ? torch::jit::toPyObject(value) : py::object();
+    case Kind::ScalarType:
+      return value.isInt()
+          ? py::reinterpret_borrow<py::object>(
+                reinterpret_cast<PyObject*>(torch::getTHPDtype(
+                    static_cast<c10::ScalarType>(value.toInt()))))
+          : py::object();
+    case Kind::Layout:
+      return value.isInt()
+          ? py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+                torch::getTHPLayout(static_cast<c10::Layout>(value.toInt()))))
+          : py::object();
+    default:
+      return py::object();
+  }
+}
+
+static bool pyobject_dispatch_is_int64(PyObject* obj) {
+  if (!PyLong_CheckExact(obj)) {
+    return false;
+  }
+  int overflow = 0;
+  PyLong_AsLongLongAndOverflow(obj, &overflow);
+  return overflow == 0;
+}
+
+static std::unique_ptr<PyObjectDispatchSchema> make_pyobject_dispatch_schema(
+    const c10::FunctionSchema& schema) {
+  auto info = std::make_unique<PyObjectDispatchSchema>();
+  for (const auto& arg : schema.arguments()) {
+    PyObjectDispatchArg a;
+    c10::TypePtr type = arg.real_type();
+    if (const auto* opt = type->castRaw<c10::OptionalType>()) {
+      a.optional = true;
+      type = opt->getElementType();
+    }
+    a.kind = pyobject_dispatch_kind(type);
+    if (arg.default_value().has_value()) {
+      a.has_default = true;
+      a.default_value = pyobject_dispatch_default(a.kind, *arg.default_value());
+    }
+    info->only_tensors = info->only_tensors &&
+        a.kind == PyObjectDispatchArg::Kind::Tensor && !a.has_default &&
+        !arg.kwarg_only();
+    a.name = py::reinterpret_steal<py::object>(
+        PyUnicode_InternFromString(arg.name().c_str()));
+    if (!arg.kwarg_only()) {
+      info->num_positional++;
+    }
+    info->args.push_back(std::move(a));
+  }
+  for (const auto& ret : schema.returns()) {
+    info->returns.push_back(pyobject_dispatch_type(ret.real_type()));
+  }
+  info->returns_one_tensor = info->returns.size() == 1 &&
+      info->returns[0].kind == PyObjectDispatchType::Kind::Tensor &&
+      !info->returns[0].optional;
+  return info;
+}
+
+// Returns whether `obj` is exactly what the IValue round trip would give the
+// kernel for `arg`. Lists are replaced by a new list, as the round trip does.
+static bool pyobject_dispatch_check_value(
+    const PyObjectDispatchArg& arg,
+    PyObject*& obj,
+    std::vector<py::object>& owned_args) {
+  using Kind = PyObjectDispatchArg::Kind;
+  if (obj == Py_None) {
+    return arg.optional;
+  }
+  switch (arg.kind) {
+    case Kind::Tensor:
+      return THPVariable_Check(obj);
+    case Kind::Int:
+      return pyobject_dispatch_is_int64(obj);
+    case Kind::Float:
+      return PyFloat_CheckExact(obj);
+    case Kind::Bool:
+      return PyBool_Check(obj);
+    case Kind::Str:
+      return PyUnicode_CheckExact(obj);
+    case Kind::ScalarType:
+      return THPDtype_Check(obj);
+    case Kind::Layout:
+      return THPLayout_Check(obj);
+    case Kind::Device:
+      return THPDevice_Check(obj);
+    case Kind::Scalar:
+      return PyBool_Check(obj) || PyFloat_CheckExact(obj) ||
+          pyobject_dispatch_is_int64(obj);
+    case Kind::TensorList:
+    case Kind::OptionalTensorList:
+    case Kind::IntList:
+    case Kind::FloatList: {
+      if (!PyList_CheckExact(obj) && !PyTuple_CheckExact(obj)) {
+        return false;
+      }
+      PyObject* list = PySequence_List(obj);
+      if (list == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      owned_args.emplace_back(py::reinterpret_steal<py::object>(list));
+      for (Py_ssize_t i = 0; i < PyList_GET_SIZE(list); ++i) {
+        PyObject* item = PyList_GET_ITEM(list, i);
+        bool ok = false;
+        switch (arg.kind) {
+          case Kind::TensorList:
+            ok = THPVariable_Check(item);
+            break;
+          case Kind::OptionalTensorList:
+            ok = item == Py_None || THPVariable_Check(item);
+            break;
+          case Kind::IntList:
+            ok = pyobject_dispatch_is_int64(item);
+            break;
+          default:
+            ok = PyFloat_CheckExact(item);
+            break;
+        }
+        if (!ok) {
+          return false;
+        }
+      }
+      obj = list;
+      return true;
+    }
+    case Kind::Unsupported:
+      return false;
+  }
+  return false;
+}
+
+// Whether `obj` is equal to arg's default, compared the way the C++
+// Dispatcher compares IValues. Arguments whose default we don't have as a
+// Python object never get here (see pyobject_dispatch_try_normalize_args).
+static bool pyobject_dispatch_is_default(
+    const PyObjectDispatchArg& arg,
+    PyObject* obj) {
+  PyObject* default_value = arg.default_value.ptr();
+  if (default_value == nullptr) {
+    return false;
+  }
+  if (obj == default_value) {
+    return true;
+  }
+  if (obj == Py_None || default_value == Py_None ||
+      Py_TYPE(obj) != Py_TYPE(default_value)) {
+    return false;
+  }
+  const int result = PyObject_RichCompareBool(obj, default_value, Py_EQ);
+  if (result < 0) {
+    // Can't happen for the exact types that get here; treat as not equal.
+    PyErr_Clear();
+    return false;
+  }
+  return result == 1;
+}
+
+// A fast-path call's arguments after pyobject_dispatch_try_normalize_args.
+struct PyObjectDispatchArgs {
+  // Every argument in schema order, for the dispatch key set and C++ kernels.
+  PyObject* const* all = nullptr;
+  // The kernel's vectorcall arguments: the positional ones, then the values
+  // for `kwnames`.
+  PyObject* const* call = nullptr;
+  Py_ssize_t call_nargs = 0;
+  PyObject* kwnames = nullptr;
+  // Backing storage, unless `all` and `call` are the caller's arguments.
+  c10::SmallVector<PyObject*, 64> all_storage;
+  c10::SmallVector<PyObject*, 64> call_storage;
+  py::object kwnames_storage;
+  std::vector<py::object> owned;
+};
+
+// The common case, which needs no normalization: the operator only takes
+// Tensors, and they are all passed positionally.
+static bool pyobject_dispatch_only_tensors(
+    const PyObjectDispatchSchema& info,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames) {
+  if (!info.only_tensors || kwnames != nullptr ||
+      static_cast<size_t>(nargs) != info.args.size()) {
+    return false;
+  }
+  for (const auto i : c10::irange(nargs)) {
+    PyObject* obj = args[i];
+    if (!THPVariable_Check(obj) && !(obj == Py_None && info.args[i].optional)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// See NOTE [PyObject dispatch argument normalization].
+static bool pyobject_dispatch_try_normalize_args(
+    const c10::FunctionSchema& schema,
+    const PyObjectDispatchSchema& info,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    PyObjectDispatchArgs& out) {
+  const size_t num_args = info.args.size();
+  if (static_cast<size_t>(nargs) > info.num_positional) {
+    return false;
+  }
+  auto& all_args = out.all_storage;
+  all_args.assign(num_args, nullptr);
+  std::copy(args, args + nargs, all_args.begin());
+  const Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
+  for (Py_ssize_t k = 0; k < nkwargs; ++k) {
+    PyObject* key = PyTuple_GET_ITEM(kwnames, k);
+    size_t idx = num_args;
+    for (size_t i = 0; i < num_args && idx == num_args; ++i) {
+      if (info.args[i].name.ptr() == key ||
+          PyUnicode_Compare(info.args[i].name.ptr(), key) == 0) {
+        idx = i;
+      }
+    }
+    if (idx == num_args || all_args[idx] != nullptr) {
+      return false;
+    }
+    all_args[idx] = args[nargs + k];
+  }
+  for (const auto i : c10::irange(num_args)) {
+    const auto& arg = info.args[i];
+    if (all_args[i] == nullptr) {
+      if (!arg.default_value) {
+        return false;
+      }
+      all_args[i] = arg.default_value.ptr();
+    } else if (
+        (arg.has_default && !arg.default_value) ||
+        !pyobject_dispatch_check_value(arg, all_args[i], out.owned)) {
+      return false;
+    }
+  }
+
+  const auto split = splitPythonKernelArgs(schema, [&](size_t i) {
+    return pyobject_dispatch_is_default(info.args[i], all_args[i]);
+  });
+  auto& call_args = out.call_storage;
+  call_args.assign(all_args.begin(), all_args.begin() + split.num_positional);
+  // An omitted list argument was filled in with the operator's default list.
+  // Give the kernel its own copy, as the IValue round trip does, so mutating it
+  // can't change the default.
+  for (const auto i : c10::irange(split.num_positional)) {
+    if (call_args[i] == info.args[i].default_value.ptr() &&
+        PyList_CheckExact(call_args[i])) {
+      PyObject* copy =
+          PyList_GetSlice(call_args[i], 0, PyList_GET_SIZE(call_args[i]));
+      if (copy == nullptr) {
+        PyErr_Clear();
+        return false;
+      }
+      out.owned.emplace_back(py::reinterpret_steal<py::object>(copy));
+      call_args[i] = copy;
+    }
+  }
+  out.call_nargs = static_cast<Py_ssize_t>(split.num_positional);
+  c10::SmallVector<size_t, 8> kwarg_indices;
+  for (size_t i = split.kwarg_only_start; i < num_args; ++i) {
+    if (!pyobject_dispatch_is_default(info.args[i], all_args[i])) {
+      kwarg_indices.push_back(i);
+    }
+  }
+  if (!kwarg_indices.empty()) {
+    PyObject* names =
+        PyTuple_New(static_cast<Py_ssize_t>(kwarg_indices.size()));
+    if (names == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    out.kwnames_storage = py::reinterpret_steal<py::object>(names);
+    out.kwnames = names;
+    for (const auto j : c10::irange(kwarg_indices.size())) {
+      PyObject* name = info.args[kwarg_indices[j]].name.ptr();
+      Py_INCREF(name);
+      PyTuple_SET_ITEM(names, static_cast<Py_ssize_t>(j), name);
+      call_args.push_back(all_args[kwarg_indices[j]]);
+    }
+  }
+  out.all = all_args.data();
+  out.call = call_args.data();
+  return true;
+}
+
+// Whether a kernel's return value is already what the C++ Dispatcher's round
+// trip through IValues would give the caller. A Tensor[] still needs copying
+// into a new list.
+static bool pyobject_dispatch_result_ok(
+    const PyObjectDispatchType& type,
+    PyObject* obj) {
+  using Kind = PyObjectDispatchType::Kind;
+  if (obj == Py_None) {
+    return type.optional;
+  }
+  switch (type.kind) {
+    case Kind::Tensor:
+      return THPVariable_Check(obj);
+    case Kind::Int:
+      return pyobject_dispatch_is_int64(obj);
+    case Kind::Float:
+      return PyFloat_CheckExact(obj);
+    case Kind::Bool:
+      return PyBool_Check(obj);
+    case Kind::Str:
+      return PyUnicode_CheckExact(obj);
+    case Kind::TensorList:
+      if (!PyList_CheckExact(obj)) {
+        return false;
+      }
+      for (Py_ssize_t i = 0; i < PyList_GET_SIZE(obj); ++i) {
+        if (!THPVariable_Check(PyList_GET_ITEM(obj, i))) {
+          return false;
+        }
+      }
+      return true;
+    case Kind::Other:
+      return false;
+  }
+  return false;
+}
+
+// The C++ Dispatcher converts a Python kernel's return value to IValues
+// (pushPyOutToStack) and back (createPyObjectForStack). Return `result` (a
+// new reference) if it already is what that would produce; otherwise do
+// exactly that round trip, including its errors.
+static PyObject* pyobject_dispatch_normalize_result(
+    const c10::OperatorHandle& op,
+    const PyObjectDispatchSchema& info,
+    PyObject* result) {
+  if (C10_LIKELY(info.returns_one_tensor && THPVariable_Check(result))) {
+    return result;
+  }
+  auto owned = py::reinterpret_steal<py::object>(result);
+  const auto& returns = info.returns;
+  if (returns.empty()) {
+    if (result == Py_None) {
+      return owned.release().ptr();
+    }
+  } else if (returns.size() == 1) {
+    if (pyobject_dispatch_result_ok(returns[0], result)) {
+      if (returns[0].kind == PyObjectDispatchType::Kind::TensorList &&
+          result != Py_None) {
+        return PyList_GetSlice(result, 0, PyList_GET_SIZE(result));
+      }
+      return owned.release().ptr();
+    }
+  } else if (
+      PyTuple_CheckExact(result) &&
+      static_cast<size_t>(PyTuple_GET_SIZE(result)) == returns.size()) {
+    bool ok = true;
+    for (size_t i = 0; i < returns.size() && ok; ++i) {
+      ok =
+          returns[i].kind != PyObjectDispatchType::Kind::TensorList &&
+          pyobject_dispatch_result_ok(
+              returns[i], PyTuple_GET_ITEM(result, static_cast<Py_ssize_t>(i)));
+    }
+    if (ok) {
+      return owned.release().ptr();
+    }
+  }
+  torch::jit::Stack stack;
+  pushPyOutToStack(op, &stack, std::move(owned), "PythonKernelHolder");
+  return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
+}
+
+// Whether autograd needs to see a call with these arguments; like
+// any_requires_grad, but for the PyObject arguments of a fast-path call.
+static bool pyobject_dispatch_any_requires_grad(
+    PyObject* const* args,
+    Py_ssize_t n) {
+  if (!at::GradMode::is_enabled()) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < n; ++i) {
+    PyObject* obj = args[i];
+    if (THPVariable_Check(obj)) {
+      if (THPVariable_Unpack(obj).requires_grad()) {
+        return true;
+      }
+    } else if (PyList_CheckExact(obj) || PyTuple_CheckExact(obj)) {
+      PyObject** items = PySequence_Fast_ITEMS(obj);
+      for (Py_ssize_t j = 0; j < PySequence_Fast_GET_SIZE(obj); ++j) {
+        if (THPVariable_Check(items[j]) &&
+            THPVariable_Unpack(items[j]).requires_grad()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// The kernel for the dispatch key set is a C++ kernel, which needs IValues
+// anyway: convert the arguments here and call the Dispatcher, instead of going
+// back through the Python entry point. `args` are all of the operator's
+// arguments, in schema order.
+static PyObject* pyobject_dispatch_call_cpp(
+    const c10::OperatorHandle& op,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  const auto& schema = op.schema();
+  torch::jit::Stack stack;
+  stack.reserve(nargs);
+  for (const auto i : c10::irange(nargs)) {
+    stack.push_back(torch::jit::argumentToIValue(schema, i, args[i]));
+  }
+  {
+    pybind11::gil_scoped_release no_gil;
+    op.callBoxed(&stack);
+  }
+  return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
+}
+
 template <typename Func>
 static PyObject* pyobject_dispatch_with_keyset(
     Func* self,
@@ -442,7 +1147,9 @@ static PyObject* pyobject_dispatch_with_keyset(
     PyObject* const* args,
     Py_ssize_t nargs,
     PyObject* kwnames,
-    Py_ssize_t op_args_start) {
+    Py_ssize_t op_args_start,
+    // For a top-level dispatch: every argument in schema order.
+    PyObject* const* all_args = nullptr) {
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   // TODO(#187974): Figure out why we need a special case to send the Python
   // key back to the C++ Dispatcher.
@@ -460,6 +1167,28 @@ static PyObject* pyobject_dispatch_with_keyset(
   // If there's no Python kernel, call back to the C++ Dispatcher
   const auto* holder =
       kernel_function.template boxedKernelFunctor<PythonKernelHolder>();
+  if (holder == nullptr && all_args != nullptr && !skip_torch_function) {
+    if (const auto* bump =
+            kernel_function
+                .template boxedKernelFunctor<MutationVersionBumpKernel>()) {
+      for (const auto i : bump->mutated_args()) {
+        pyobject_dispatch_bump_version(all_args[i]);
+      }
+      return pyobject_dispatch_with_keyset(
+          self,
+          key_set & c10::after_ADInplaceOrView_keyset,
+          skip_torch_function,
+          args,
+          nargs,
+          kwnames,
+          op_args_start,
+          all_args);
+    }
+    return pyobject_dispatch_call_cpp(
+        *self->handle,
+        all_args,
+        static_cast<Py_ssize_t>(self->schema_info->args.size()));
+  }
   if (C10_UNLIKELY(holder == nullptr || holder->with_op())) {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
@@ -469,6 +1198,21 @@ static PyObject* pyobject_dispatch_with_keyset(
         nkwargs,
         kwnames,
         op_args_start);
+  }
+  if (C10_UNLIKELY(holder->skip_if_no_grad()) && !skip_torch_function &&
+      !pyobject_dispatch_any_requires_grad(
+          args + op_args_start, nargs - op_args_start + nkwargs)) {
+    // See PythonKernelHolder::operator().
+    at::AutoDispatchBelowAutograd guard;
+    return pyobject_dispatch_with_keyset(
+        self,
+        key_set & c10::after_autograd_keyset,
+        skip_torch_function,
+        args,
+        nargs,
+        kwnames,
+        op_args_start,
+        all_args);
   }
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
@@ -487,7 +1231,8 @@ static PyObject* pyobject_dispatch_with_keyset(
   if (result == nullptr) {
     return nullptr;
   }
-  return result;
+  return pyobject_dispatch_normalize_result(
+      *self->handle, *self->schema_info, result);
 }
 
 static PyObject* pyobject_dispatch_vectorcall(
@@ -498,35 +1243,65 @@ static PyObject* pyobject_dispatch_vectorcall(
   HANDLE_TH_ERRORS
   auto* self = reinterpret_cast<PyObjectDispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+  // A __torch_function__ handler set the one-hop flag to skip
+  // __torch_function__ for this call (torch.overrides); the C++ entry point
+  // consumes it.
+  if (C10_UNLIKELY(torch::peek_should_skip_torch_function())) {
+    return PyObject_Vectorcall(
+        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  bool skip_torch_function = torch::peek_should_skip_torch_function();
   if (C10_UNLIKELY(
-          !skip_torch_function &&
           pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
+    if (auto result = pyobject_dispatch_handle_torch_function(
+            self, args, nargs, kwnames)) {
+      return result.release().ptr();
+    }
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
-  c10::SmallVector<PyObject*, 64> normalized_args;
-  std::vector<py::object> owned_args;
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // The C++ Dispatcher records each call for the profiler (RecordFunction in
+  // Dispatcher::callBoxed); let it handle the call while anything listens.
+  // This check doesn't sample callbacks: callBoxed does, and sampling here too
+  // would record a call with probability p^2 instead of p.
+  if (C10_UNLIKELY(at::hasCallbacks())) {
+    return PyObject_Vectorcall(
+        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
+  }
+#endif
+  const auto& info = *self->schema_info;
+  const auto num_args = static_cast<Py_ssize_t>(info.args.size());
+  auto dispatch = [&](PyObject* const* all_args,
+                      PyObject* const* call_args,
+                      Py_ssize_t call_nargs,
+                      PyObject* call_kwnames) {
+    auto key_set = pyobject_dispatch_compute_keyset(
+        self->handle->dispatchKeyExtractor(), all_args, num_args);
+    return pyobject_dispatch_with_keyset(
+        self,
+        key_set,
+        /*skip_torch_function=*/false,
+        call_args,
+        call_nargs,
+        call_kwnames,
+        0,
+        all_args);
+  };
+  if (C10_LIKELY(pyobject_dispatch_only_tensors(info, args, nargs, kwnames))) {
+    return dispatch(args, args, nargs, nullptr);
+  }
+  PyObjectDispatchArgs normalized;
   if (!pyobject_dispatch_try_normalize_args(
-          self->handle->schema(),
-          args,
-          nargs,
-          kwnames,
-          normalized_args,
-          owned_args)) {
+          self->handle->schema(), info, args, nargs, kwnames, normalized)) {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
-  PyObject* const* op_args =
-      normalized_args.empty() ? args : normalized_args.data();
-  auto key_set = pyobject_dispatch_compute_keyset(
-      self->handle->dispatchKeyExtractor(), op_args, nargs);
-  if (C10_UNLIKELY(skip_torch_function)) {
-    key_set = key_set.remove(c10::DispatchKey::Python);
-  }
-  return pyobject_dispatch_with_keyset(
-      self, key_set, skip_torch_function, op_args, nargs, kwnames, 0);
+  return dispatch(
+      normalized.all,
+      normalized.call,
+      normalized.call_nargs,
+      normalized.kwnames);
   END_HANDLE_TH_ERRORS
 }
 
@@ -539,30 +1314,33 @@ static PyObject* pyobject_redispatch_vectorcall(
   auto* self = reinterpret_cast<PyObjectRedispatchFunc*>(callable);
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
-  bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
-    return PyObject_Vectorcall(
-        self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
   if (nargs == 0) {
     PyErr_SetString(
         PyExc_TypeError,
         "redispatch() expected redispatch(keyset, *args, **kwargs)");
     return nullptr;
   }
-
-  PyObject* raw_key_set = PyObject_CallMethod(args[0], "raw_repr", nullptr);
-  if (raw_key_set == nullptr) {
+  c10::DispatchKeySet key_set;
+  try {
+    key_set = py::handle(args[0]).cast<c10::DispatchKeySet>();
+  } catch (const py::cast_error&) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "redispatch() expected a DispatchKeySet as its first argument");
     return nullptr;
   }
-  auto raw_repr = PyLong_AsUnsignedLongLong(raw_key_set);
-  Py_DECREF(raw_key_set);
-  if (PyErr_Occurred()) {
-    return nullptr;
+  std::optional<at::AutoDispatchBelowAutograd> below_autograd_guard;
+  if (self->below_autograd) {
+    below_autograd_guard.emplace();
+    key_set = key_set & c10::after_autograd_keyset;
   }
-  auto key_set = c10::DispatchKeySet::from_raw_repr(raw_repr);
+  bool skip_torch_function = torch::peek_should_skip_torch_function();
+  if (C10_UNLIKELY(
+          !skip_torch_function &&
+          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
+    return pyobject_dispatch_call_redispatch_cpp(
+        self->cpp_redispatch_fn, key_set, args, nargs, nkwargs, kwnames, 1);
+  }
   if (C10_UNLIKELY(skip_torch_function)) {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
@@ -574,13 +1352,16 @@ static PyObject* pyobject_redispatch_vectorcall(
 static void pyobject_dispatch_dealloc(PyObjectDispatchFunc* self) {
   Py_XDECREF(self->cpp_dispatch_fn);
   Py_XDECREF(self->cpp_redispatch_fn);
+  Py_XDECREF(self->op_overload_ref);
   delete self->handle;
+  delete self->schema_info;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static void pyobject_redispatch_dealloc(PyObjectRedispatchFunc* self) {
   Py_XDECREF(self->cpp_redispatch_fn);
   delete self->handle;
+  delete self->schema_info;
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
@@ -596,15 +1377,22 @@ static PyObject* make_pyobject_dispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_dispatch_fn,
     PyObject* cpp_redispatch_fn,
+    PyObject* op_overload,
     vectorcallfunc vectorcall) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  auto schema_info = make_pyobject_dispatch_schema(handle.schema());
+  auto op_overload_ref =
+      py::reinterpret_steal<py::object>(PyWeakref_NewRef(op_overload, nullptr));
+  TORCH_CHECK_PYTHON(op_overload_ref);
   auto* result = PyObject_New(PyObjectDispatchFunc, &PyObjectDispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_dispatch_fn);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
+  result->op_overload_ref = op_overload_ref.release().ptr();
   result->handle = owned_handle.release();
+  result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
   return reinterpret_cast<PyObject*>(result);
@@ -613,23 +1401,28 @@ static PyObject* make_pyobject_dispatch_func(
 static PyObject* make_pyobject_redispatch_func(
     const c10::OperatorHandle& handle,
     PyObject* cpp_redispatch_fn,
-    vectorcallfunc vectorcall) {
+    vectorcallfunc vectorcall,
+    bool below_autograd) {
   auto owned_handle = std::make_unique<c10::OperatorHandle>(handle);
+  auto schema_info = make_pyobject_dispatch_schema(handle.schema());
   auto* result =
       PyObject_New(PyObjectRedispatchFunc, &PyObjectRedispatchFuncType);
   TORCH_CHECK_PYTHON(result != nullptr);
   Py_INCREF(cpp_redispatch_fn);
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->handle = owned_handle.release();
+  result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
   result->vectorcall = vectorcall;
+  result->below_autograd = below_autograd;
   return reinterpret_cast<PyObject*>(result);
 }
 
 static py::tuple make_pyobj_dispatch_fns(
     const py::object& py_handle,
     const py::object& cpp_dispatch_fn,
-    const py::object& cpp_redispatch_fn) {
+    const py::object& cpp_redispatch_fn,
+    const py::object& op_overload) {
   TORCH_CHECK(
       PyCallable_Check(cpp_dispatch_fn.ptr()),
       "cpp_dispatch_fn must be callable");
@@ -641,12 +1434,84 @@ static py::tuple make_pyobj_dispatch_fns(
       handle,
       cpp_dispatch_fn.ptr(),
       cpp_redispatch_fn.ptr(),
+      op_overload.ptr(),
       pyobject_dispatch_vectorcall));
-  auto redispatch =
-      py::reinterpret_steal<py::object>(make_pyobject_redispatch_func(
-          handle, cpp_redispatch_fn.ptr(), pyobject_redispatch_vectorcall));
-  return py::make_tuple(std::move(dispatch), std::move(redispatch));
+  auto make_redispatch = [&](bool below_autograd) {
+    return py::reinterpret_steal<py::object>(make_pyobject_redispatch_func(
+        handle,
+        cpp_redispatch_fn.ptr(),
+        pyobject_redispatch_vectorcall,
+        below_autograd));
+  };
+  return py::make_tuple(
+      std::move(dispatch), make_redispatch(false), make_redispatch(true));
 }
+
+// _AutoDispatchBelowAutograd, as a plain extension type: it's entered on hot
+// paths (custom op and higher-order op autograd), and a pybind11 class costs
+// several times as much to create, enter and exit. Like the
+// py_context_manager_DEPRECATED binding it replaces, it takes the guard when
+// created and releases it on __exit__ or when destroyed.
+using AutoDispatchBelowAutogradGuard =
+    std::optional<at::AutoDispatchBelowAutograd>;
+
+struct PyAutoDispatchBelowAutograd {
+  PyObject_HEAD
+  // Constructed in auto_dispatch_below_autograd_new; tp_alloc doesn't run C++
+  // constructors.
+  AutoDispatchBelowAutogradGuard guard;
+};
+
+static PyObject* auto_dispatch_below_autograd_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (PyTuple_GET_SIZE(args) != 0 ||
+      (kwargs != nullptr && PyDict_GET_SIZE(kwargs) != 0)) {
+    PyErr_SetString(
+        PyExc_TypeError, "_AutoDispatchBelowAutograd() takes no arguments");
+    return nullptr;
+  }
+  PyObject* self = type->tp_alloc(type, 0);
+  if (self != nullptr) {
+    new (&reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)->guard)
+        AutoDispatchBelowAutogradGuard(std::in_place);
+  }
+  return self;
+}
+
+static void auto_dispatch_below_autograd_dealloc(PyObject* self) {
+  reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)
+      ->guard.~AutoDispatchBelowAutogradGuard();
+  Py_TYPE(self)->tp_free(self);
+}
+
+static PyObject* auto_dispatch_below_autograd_enter(
+    PyObject* /*self*/,
+    PyObject* /*unused*/) {
+  Py_RETURN_NONE;
+}
+
+static PyObject* auto_dispatch_below_autograd_exit(
+    PyObject* self,
+    PyObject* const* /*args*/,
+    Py_ssize_t /*nargs*/) {
+  reinterpret_cast<PyAutoDispatchBelowAutograd*>(self)->guard.reset();
+  Py_RETURN_NONE;
+}
+
+static std::array<PyMethodDef, 3> auto_dispatch_below_autograd_methods = {{
+    {"__enter__", auto_dispatch_below_autograd_enter, METH_NOARGS, nullptr},
+    {"__exit__",
+     castPyCFunctionFast(auto_dispatch_below_autograd_exit),
+     METH_FASTCALL,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr},
+}};
+
+static PyTypeObject PyAutoDispatchBelowAutogradType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 // A small RAII guard that lets you explicitly *remove* a key from the TLS
 // exclude set.
@@ -703,6 +1568,23 @@ void initDispatchBindings(PyObject* module) {
   PyObjectRedispatchFuncType.tp_vectorcall_offset =
       offsetof(PyObjectRedispatchFunc, vectorcall);
   TORCH_CHECK_PYTHON(PyType_Ready(&PyObjectRedispatchFuncType) >= 0);
+
+  PyAutoDispatchBelowAutogradType.tp_name =
+      "torch._C._AutoDispatchBelowAutograd";
+  PyAutoDispatchBelowAutogradType.tp_basicsize =
+      sizeof(PyAutoDispatchBelowAutograd);
+  PyAutoDispatchBelowAutogradType.tp_flags = Py_TPFLAGS_DEFAULT;
+  PyAutoDispatchBelowAutogradType.tp_new = auto_dispatch_below_autograd_new;
+  PyAutoDispatchBelowAutogradType.tp_dealloc =
+      auto_dispatch_below_autograd_dealloc;
+  PyAutoDispatchBelowAutogradType.tp_methods =
+      auto_dispatch_below_autograd_methods.data();
+  TORCH_CHECK_PYTHON(PyType_Ready(&PyAutoDispatchBelowAutogradType) >= 0);
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
+          module,
+          "_AutoDispatchBelowAutograd",
+          reinterpret_cast<PyObject*>(&PyAutoDispatchBelowAutogradType)) >= 0);
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
@@ -857,8 +1739,14 @@ void initDispatchBindings(PyObject* module) {
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
              py::object func,
-             bool with_keyset) {
+             bool with_keyset,
+             bool skip_if_no_grad) {
             HANDLE_TH_ERRORS
+            TORCH_CHECK(
+                !skip_if_no_grad || dispatch == c10::DispatchKey::Autograd ||
+                    c10::isIncludedInAlias(
+                        dispatch, c10::DispatchKey::Autograd),
+                "skip_if_no_grad is only supported for Autograd kernels");
             auto& lib = self.cast<torch::Library&>();
             if (func.is(py::module::import("torch.library")
                             .attr("fallthrough_kernel"))) {
@@ -873,7 +1761,11 @@ void initDispatchBindings(PyObject* module) {
                       dispatch,
                       CppFunction::makeFromBoxedFunctor(
                           std::make_unique<PythonKernelHolder>(
-                              func, dispatch, with_keyset))),
+                              func,
+                              dispatch,
+                              with_keyset,
+                              /*with_op=*/false,
+                              skip_if_no_grad))),
                   register_or_verify());
               python_registrations_.withLock([&](auto& regs) {
                 regs[lib._resolve(name)].insert_or_assign(
@@ -888,7 +1780,8 @@ void initDispatchBindings(PyObject* module) {
           py::arg("name"),
           py::arg("dispatch"),
           py::arg("func"),
-          py::arg("with_keyset") = false)
+          py::arg("with_keyset") = false,
+          py::arg("skip_if_no_grad") = false)
       .def(
           "define",
           [](const py::object& self,
@@ -953,7 +1846,25 @@ void initDispatchBindings(PyObject* module) {
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
-          py::arg("name"));
+          py::arg("name"))
+      .def(
+          "register_mutation_version_bump",
+          [](const py::object& self,
+             const char* name,
+             std::vector<size_t> mutated_args) {
+            HANDLE_TH_ERRORS
+            auto& lib = self.cast<torch::Library&>();
+            lib.impl(
+                name,
+                c10::DispatchKey::ADInplaceOrView,
+                torch::CppFunction::makeFromBoxedFunctor(
+                    std::make_unique<MutationVersionBumpKernel>(
+                        std::move(mutated_args))));
+            END_HANDLE_TH_ERRORS_PYBIND
+          },
+          "",
+          py::arg("name"),
+          py::arg("mutated_args"));
 
   m.def(
       "_dispatch_library",
@@ -1377,8 +2288,6 @@ void initDispatchBindings(PyObject* module) {
   py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
       m, "_SetExcludeDispatchKeyGuard");
 
-  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
-      m, "_AutoDispatchBelowAutograd");
   py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
       m, "_AutoDispatchBelowADInplaceOrView");
 

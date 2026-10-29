@@ -317,6 +317,29 @@ class TestPythonRegistration(TestCase):
         after = torch._C._dispatch_tls_local_exclude_set().raw_repr()
         self.assertEqual(before, after)
 
+    def test_auto_dispatch_below_autograd_restores_tls(self) -> None:
+        def exclude_set():
+            return torch._C._dispatch_tls_local_exclude_set().raw_repr()
+
+        def autograd_excluded():
+            return torch._C._dispatch_tls_is_dispatch_key_excluded(
+                torch.DispatchKey.AutogradOther
+            )
+
+        before = exclude_set()
+        with torch._C._AutoDispatchBelowAutograd():
+            self.assertTrue(autograd_excluded())
+        self.assertEqual(exclude_set(), before)
+        with self.assertRaisesRegex(ValueError, "boom"):
+            with torch._C._AutoDispatchBelowAutograd():
+                raise ValueError("boom")
+        self.assertEqual(exclude_set(), before)
+        # Creating it takes the guard; destroying it releases the guard.
+        guard = torch._C._AutoDispatchBelowAutograd()
+        self.assertTrue(autograd_excluded())
+        del guard
+        self.assertEqual(exclude_set(), before)
+
     def test_dispatchkeyset_pickle(self) -> None:
         keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
         serialized = pickle.dumps(keyset)
