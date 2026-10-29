@@ -26,10 +26,11 @@ class TestColumnConfig(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
-        itemsize = 2 if dtype == torch.bfloat16 else 4
+        itemsize = dtype.itemsize
         args = dict(
             rows=(size << 20) // (columns * itemsize),
             columns=columns,
+            batches=1,
             nfields=1,
             itemsize=itemsize,
         )
@@ -43,6 +44,17 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.threads_per_block, 32)
         self.assertEqual(cfg.npar, 256)
         self.assertEqual(cfg.vec, 4)
+        # Half-width elements double the reduced rows in the same bytes.
+        cfg = self.select(dtype=torch.float16, size=16, columns=256)
+        self.assertEqual(cfg.npar, 512)
+        self.assertEqual(cfg.vec, 4)
+
+    def test_partitions_keep_int32_partial_indices(self):
+        """Cap default partitions at Int32 partial indices; reject explicit overflow."""
+        cfg = self.select(rows=1 << 20, columns=1 << 20)
+        self.assertEqual(cfg.npar, (1 << 31) >> 20)
+        with self.assertRaisesRegex(ValueError, "overflows Int32"):
+            self.select(rows=1 << 20, columns=1 << 20, npar=4096)
 
     @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
     def test_explicit_geometry_disables_policy(self, kwargs):
