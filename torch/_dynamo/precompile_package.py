@@ -165,6 +165,13 @@ def _capture_config() -> Iterator[None]:
             "precompile capture overrides triton.autotune_at_compile_time=False: "
             "a frozen artifact needs every kernel tuned before replay",
         )
+    if inductor_config.triton.multi_kernel:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides triton.multi_kernel=%s to 0: "
+            "the artifact does not record which sub-kernel a multi-kernel picks",
+            inductor_config.triton.multi_kernel,
+        )
     # TODO: drop the bundled_autotune_remote_cache patch once
     # AutotuneCacheBundler keeps one bundle per compiled module rather than one
     # per CompileContext, which fixes every eager-backward caller.
