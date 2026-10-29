@@ -896,12 +896,7 @@ void closeGlobalCallbackSession() {
   auto& session = globalCallbackSession();
   session.markClosed();
   if (!session.drain()) {
-    // Draining timed out. Remove the global state so a later disableProfiler()
-    // cannot finalize a trace that callbacks may still be writing to.
     LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
-    if (auto state_ptr = ProfilerStateBase::pop(/*global=*/true)) {
-      state_ptr->removeCallback();
-    }
   }
 }
 

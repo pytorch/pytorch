@@ -1299,6 +1299,11 @@ started.wait()
             timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stderr.count("Process is exiting without stopping the profiler"),
+            1,
+            proc.stderr,
+        )
 
     @parametrize("close_while_active", [False, True])
     def test_global_callback_session_close(self, close_while_active):
