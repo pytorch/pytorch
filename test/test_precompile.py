@@ -36,7 +36,6 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
-from torch._inductor.utils import is_big_gpu
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -61,7 +60,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
 from torch.utils._triton import has_triton_package
 
 
@@ -9352,9 +9351,7 @@ class TestPrecompileRuntimeCache(TestCase):
         torch.testing.assert_close(out, _user_stream_fn(x))
 
     @skipIfCrossRef
-    @unittest.skipUnless(
-        TEST_CUDA and HAS_TRITON and is_big_gpu(), "requires Triton GEMM templates"
-    )
+    @unittest.skipUnless(TEST_CUDA and IS_BIG_GPU, "requires Triton GEMM templates")
     @torch._inductor.config.patch(
         multi_kernel_hints=[64, 256],
         max_autotune_gemm=True,

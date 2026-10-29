@@ -6281,13 +6281,14 @@ def _(x):
         try:
             with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
                 exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
-                kernels = {"__name__": "kernel_callers_kernels", "f": ops["f"]}
+                # Named like a skipped module, but not a submodule of one.
+                kernels = {"__name__": "functools_ext", "f": ops["f"]}
                 exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
                 self.assertEqual(
                     ops["f"]._backend_fn_callers,
                     {
                         "CompositeExplicitAutograd": "kernel_callers_ops",
-                        "CPU": "kernel_callers_kernels",
+                        "CPU": "functools_ext",
                     },
                 )
                 self.assertEqual(
