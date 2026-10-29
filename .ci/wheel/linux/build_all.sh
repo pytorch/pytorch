@@ -48,6 +48,13 @@ for desired in ${DESIRED_PYTHONS}; do
     PYTORCH_FINAL_PACKAGE_DIR="${out_dir}" \
         bash "${SCRIPTPATH}/build.sh"
 
+    # BOLT keeps the unoptimized libtorch_python, relinked per interpreter, in
+    # build/lib/prebolt; keep one copy per Python before the next iteration.
+    prebolt_python="${PYTORCH_ROOT}/build/lib/prebolt/libtorch_python.so"
+    if [[ -f "${prebolt_python}" ]]; then
+        mv "${prebolt_python}" "${prebolt_python%.so}-${desired}.so"
+    fi
+
     iter_elapsed=$(( $(date +%s) - iter_start ))
     echo "::endgroup::"
 
