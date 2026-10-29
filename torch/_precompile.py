@@ -1812,8 +1812,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     lock them, _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION
     for the pickled guard state.
     """
-    import ast
-
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1997,14 +1995,14 @@ def _file_modules() -> dict[str, str]:
     return modules
 
 
-def _torch_op_module(
+def _library_op_module(
     op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
 ) -> str | None:
     """The module whose import registers ``op_name``, if a ``torch.library.Library``
     created in a loaded module defines it. ``file_modules`` is ``_file_modules``."""
     debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
     path = debug.removeprefix("registered at ").rpartition(":")[0]
-    if not path or path.startswith(_TORCH_OP_HELPERS):
+    if not path.endswith(".py") or path.startswith(_TORCH_OP_HELPERS):
         return None
     return file_modules().get(os.path.realpath(path))
 
@@ -2014,7 +2012,7 @@ def _custom_op_modules(op_names: Iterable[tuple[str, str]]) -> tuple[str, ...]:
     file_modules = functools.cache(_file_modules)
     modules = {
         _custom_op_module(op_name, overload)
-        or _torch_op_module(op_name, overload, file_modules)
+        or _library_op_module(op_name, overload, file_modules)
         for op_name, overload in op_names
     }
     return tuple(sorted(m for m in modules if m is not None))
@@ -2042,44 +2040,47 @@ def _write_custom_op_imports(
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
     buf.writeline(f"CUSTOM_OPS = {ops!r}")
-    buf.writeline("import importlib as _importlib")
-    buf.writeline("import warnings as _warnings")
-    buf.writeline("import torch as _torch")
-    buf.writeline("_import_errors = {}")
-    buf.writeline("for _module in CUSTOM_OP_MODULES:")
-    buf.writeline("    try:")
-    buf.writeline("        _importlib.import_module(_module)")
+    buf.writeline("def _import_custom_op_modules():")
+    buf.writeline("    import importlib")
+    buf.writeline("    import warnings")
+    buf.writeline("    import torch")
+    buf.writeline("    import_errors = {}")
+    buf.writeline("    for module in CUSTOM_OP_MODULES:")
+    buf.writeline("        try:")
+    buf.writeline("            importlib.import_module(module)")
     # Not just ImportError: e.g. importing torch.distributed.device_mesh before
     # torch.distributed.tensor raises ValueError.
-    buf.writeline("    except Exception as _e:")
-    buf.writeline("        _import_errors[_module] = _e")
-    buf.writeline("_missing = []")
-    buf.writeline("for _name, _overload in CUSTOM_OPS:")
-    buf.writeline("    try:")
-    buf.writeline("        _torch._C._dispatch_find_schema_or_throw(_name, _overload)")
-    buf.writeline("    except RuntimeError:")
+    buf.writeline("        except Exception as e:")
+    buf.writeline("            import_errors[module] = e")
+    buf.writeline("    missing = []")
+    buf.writeline("    for name, overload in CUSTOM_OPS:")
+    buf.writeline("        try:")
+    buf.writeline("            torch._C._dispatch_find_schema_or_throw(name, overload)")
+    buf.writeline("        except RuntimeError:")
     buf.writeline(
-        '        _missing.append(f"{_name}.{_overload}" if _overload else _name)'
+        '            missing.append(f"{name}.{overload}" if overload else name)'
     )
-    buf.writeline("if _missing:")
-    buf.writeline("    raise _torch.compiler.PrecompileError(")
+    buf.writeline("    if missing:")
+    buf.writeline("        raise torch.compiler.PrecompileError(")
     buf.writeline(
-        '        f"this artifact calls custom ops not registered here: {_missing}. "'
-    )
-    buf.writeline(
-        '        "Import the modules registering them before loading it. Modules "'
+        '            f"this artifact calls custom ops not registered here: {missing}. "'
     )
     buf.writeline(
-        "        f\"that failed to import: {sorted(_import_errors) or 'none'}.\""
-    )
-    buf.writeline("    ) from next(iter(_import_errors.values()), None)")
-    buf.writeline("for _module, _e in _import_errors.items():")
-    buf.writeline(
-        '    _warnings.warn(f"importing custom op module {_module!r} raised {_e!r}; "'
+        '            "Import the modules registering them before loading it. Modules "'
     )
     buf.writeline(
-        '    "the ops this artifact calls are registered, so it loads anyway")'
+        "            f\"that failed to import: {sorted(import_errors) or 'none'}.\""
     )
+    buf.writeline("        ) from next(iter(import_errors.values()), None)")
+    buf.writeline("    for module, e in import_errors.items():")
+    buf.writeline(
+        '        warnings.warn(f"importing custom op module {module!r} raised {e!r}; "'
+    )
+    buf.writeline(
+        '        "the ops this artifact calls are registered, so it loads anyway")'
+    )
+    buf.writeline("_import_custom_op_modules()")
+    buf.writeline("del _import_custom_op_modules")
     buf.writeline("")
 
 
@@ -2093,7 +2094,8 @@ def _build_python_source(
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
     op_names = _called_op_names(graph_python)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    if ops := _custom_ops(op_names):
+        _write_custom_op_imports(buf, _custom_op_modules(ops), ops)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -2148,7 +2150,8 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
     op_names = _op_names(gm)
-    _write_custom_op_imports(buf, _custom_op_modules(op_names), _custom_ops(op_names))
+    if ops := _custom_ops(op_names):
+        _write_custom_op_imports(buf, _custom_op_modules(ops), ops)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
