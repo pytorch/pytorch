@@ -3272,6 +3272,9 @@ class PrecompiledModule(PrecompiledRunnable):
         # multi_kernel_N. Its autotune_at_compile_time is redundant (inductor's
         # compile_to_python already patches it) and is passed only so the two tracers
         # cannot drift.
+        # TODO: drop the multi-kernel overrides here once
+        # PythonWrapperCodegen._write_multi_kernel_defs emits multi-kernel defs outside
+        # the compile-time autotune block too.
         options: dict[str, object] = {"size_asserts": True, **_frozen_kernel_config()}
         if capture.fake_mode is not None and hasattr(_ind_config, "scalar_asserts"):
             options["scalar_asserts"] = True

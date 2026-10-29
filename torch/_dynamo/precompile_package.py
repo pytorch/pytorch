@@ -105,6 +105,13 @@ def _frozen_kernel_config() -> dict[str, object]:
     """
     import torch._inductor.config as inductor_config
 
+    # TODO: drop the multi_kernel_hints override, and the MakeFxTracer
+    # triton.multi_kernel one, once PythonWrapperCodegen._write_multi_kernel_defs
+    # emits multi-kernel defs outside the compile-time autotune block too.
+    multi_kernel_reason = (
+        "a frozen artifact does not record which sub-kernel a multi-kernel picks, "
+        "and under autotune_at_compile_time the wrapper never defines multi_kernel_N"
+    )
     if inductor_config.triton.autotune_at_compile_time is False:
         torch._logging.warning_once(
             log,
@@ -114,16 +121,16 @@ def _frozen_kernel_config() -> dict[str, object]:
     if inductor_config.triton.multi_kernel:
         torch._logging.warning_once(
             log,
-            "precompile capture overrides triton.multi_kernel=%s to 0: "
-            "the artifact does not record which sub-kernel a multi-kernel picks",
+            "precompile capture overrides triton.multi_kernel=%s to 0: %s",
             inductor_config.triton.multi_kernel,
+            multi_kernel_reason,
         )
     if inductor_config.multi_kernel_hints:
         torch._logging.warning_once(
             log,
-            "precompile capture overrides multi_kernel_hints=%s to []: "
-            "the artifact does not record which sub-kernel a multi-kernel picks",
+            "precompile capture overrides multi_kernel_hints=%s to []: %s",
             str(inductor_config.multi_kernel_hints),
+            multi_kernel_reason,
         )
     return {
         "triton.autotune_at_compile_time": True,
@@ -133,7 +140,7 @@ def _frozen_kernel_config() -> dict[str, object]:
 
 
 @contextlib.contextmanager
-def _capture_config() -> Iterator[None]:
+def _capture_config(lowers_kernels: bool = True) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
@@ -154,9 +161,9 @@ def _capture_config() -> Iterator[None]:
     anyway. Each kernel's synthetic arguments are allocated while the captured
     forward's tensors are still live, so peak device memory during capture
     grows by roughly the backward's working set.
-    ``triton.multi_kernel`` and ``multi_kernel_hints`` are off: a multi-kernel
-    picks its sub-kernel on first launch and the artifact does not record the
-    choice.
+    ``triton.multi_kernel`` and ``multi_kernel_hints`` are off (see
+    _frozen_kernel_config). These Triton overrides, and their warnings, apply
+    only when ``lowers_kernels``: an eager-backend capture lowers no kernels.
     Under ``cpp_wrapper`` the forced flag also turns off
     ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
     keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
@@ -212,7 +219,7 @@ def _capture_config() -> Iterator[None]:
         inductor_config.patch(
             {
                 "bundled_autotune_remote_cache": False,
-                **_frozen_kernel_config(),
+                **(_frozen_kernel_config() if lowers_kernels else {}),
             }
         ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
@@ -2026,7 +2033,7 @@ class PrecompileSession(Generic[_P, _R]):
         )
         try:
             with (
-                _capture_config(),
+                _capture_config(lowers_kernels=self._backend == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
             ):
                 return self._compiled(*args, **kwargs)
