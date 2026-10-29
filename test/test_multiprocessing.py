@@ -84,6 +84,47 @@ def _test_cuda_ipc_deadlock_learner(queue, iterations):
         time.sleep(0.01)
 
 
+def _test_cuda_ipc_collect_during_export():
+    import torch.cuda._gpu_trace as gpu_trace
+
+    test_case = TestCase()
+    # Match CUDA_IPC_REF_COUNTER_FILE_SIZE in torch/csrc/CudaIPCTypes.h.
+    # This must exceed CUDA_IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
+    counter_file_size = 10000
+    tensors = [
+        torch.empty(1, dtype=torch.uint8, device="cuda")
+        for _ in range(counter_file_size + 1)
+    ]
+    handles = []
+    collections = 0
+
+    def collect(_stream):
+        nonlocal collections
+        torch.cuda.ipc_collect()
+        collections += 1
+
+    try:
+        # Exhaust the first counter file and the IPC event allowance.
+        for i in range(counter_file_size):
+            handles.append(tensors[i].untyped_storage()._share_cuda_())
+        torch._C._activate_gpu_trace()
+        gpu_trace.register_callback_for_stream_synchronization(collect)
+        # Collect during stream synchronization for the first slot in a new file.
+        handles.append(tensors[-1].untyped_storage()._share_cuda_())
+        test_case.assertEqual(collections, 1)
+        test_case.assertEqual(handles[0][5], 0)
+        test_case.assertEqual(handles[-2][5], counter_file_size - 1)
+        test_case.assertEqual(handles[-1][5], 0)
+        test_case.assertEqual(handles[-2][7], False)
+        test_case.assertEqual(handles[-1][7], False)
+        test_case.assertNotEqual(handles[-1][4], handles[0][4])
+    finally:
+        for handle in handles:
+            torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+        tensors.clear()
+        torch.cuda.ipc_collect()
+
+
 def simple_fill(queue, event):
     data = queue.get()
     data[0][:] = 4
@@ -877,6 +918,19 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
 
         for p in processes.values():
             self.assertFalse(p.is_alive())
+
+    def test_cuda_ipc_collect_during_export(self):
+        ctx = mp.get_context("spawn")
+        p = ctx.Process(target=_test_cuda_ipc_collect_during_export)
+        p.start()
+        try:
+            p.join(60)
+            self.assertFalse(p.is_alive(), "CUDA IPC collection during export hung")
+            self.assertEqual(p.exitcode, 0, "CUDA IPC export crashed during collection")
+        finally:
+            if p.is_alive():
+                p.terminate()
+                p.join()
 
     @slowTest
     def test_cuda_send_many(self, name=None, size=5, count=100000):
