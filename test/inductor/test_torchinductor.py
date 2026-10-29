@@ -20400,6 +20400,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_cuda_and_triton
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_launch_dependents(self):
+        def fn(x, y):
+            return y * x.sum(dim=0) + y  # two reduction kernels, one pointwise
+
+        x, y = [torch.randn(2048, 2048, device=GPU_TYPE) for _ in range(2)]
+        # The autotuned split sum adds the 2048 rows in another order than eager.
+        # Reading a sum before it's written would be off by about the sum itself.
+        self.common(fn, (x, y), atol=1e-2, rtol=1e-2)
+        code = run_and_get_triton_code(torch.compile(fn), x, y)
+        num_launches = code.count("if triton_helpers.launches_dependents(")
+        self.assertGreater(num_launches, 1)
+        self.assertEqual(num_launches, code.count("@triton.jit"))
+        self.assertEqual(num_launches, code.count("gdc_launch_dependents"))
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
             "triton.enable_pdl": True,

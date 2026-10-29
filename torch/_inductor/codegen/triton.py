@@ -55,6 +55,7 @@ from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
+    DeviceProperties,
     get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -5101,6 +5102,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     new_lines.pop(previous_launch)
                 previous_launch = len(new_lines)
             new_lines.append(l)
+        if previous_launch is not None:
+            props = DeviceProperties.create(V.graph.get_current_device_or_throw())
+            sms = props.multi_processor_count
+            threads = props.max_threads_per_multi_processor
+            launches = f"triton_helpers.launches_dependents({sms}, {threads})"
+            new_lines[previous_launch] = new_lines[previous_launch].replace(
+                self.GDC_LAUNCH, f"if {launches}: {self.GDC_LAUNCH}"
+            )
         code._lines = new_lines
         # gdc_wait only covers the direct predecessor, so a kernel that exits
         # without waiting lets its dependents start before older kernels finish.
