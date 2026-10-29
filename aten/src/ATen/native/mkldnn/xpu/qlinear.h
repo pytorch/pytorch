@@ -82,7 +82,7 @@ class QLinearOnednnXPU final {
       at::Tensor weight,
       std::optional<torch::List<int64_t>> input_shape);
 
-  C10_API static Tensor woq_scaled_mm(
+  static Tensor woq_scaled_mm(
       const Tensor& mat_a,
       const Tensor& mat_b,
       const at::ITensorListRef& scale_b_list,
