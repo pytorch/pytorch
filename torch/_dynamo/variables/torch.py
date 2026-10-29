@@ -2635,6 +2635,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
+        def handle_guard_size_oblivious(
+            self, tx: "InstructionTranslatorBase", expr: VariableTracker
+        ) -> VariableTracker | None:
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return VariableTracker.build(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
+                        expr.sym_num
+                    ),
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
         def handle_guard_or_true(
             self, tx: "InstructionTranslatorBase", expr: VariableTracker

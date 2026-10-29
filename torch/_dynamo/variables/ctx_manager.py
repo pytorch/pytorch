@@ -43,8 +43,8 @@ from ..utils import (
     is_safe_constant,
 )
 from .base import VariableTracker
+from .descriptors import MethodDescriptorVariable
 from .functions import (
-    MethodDescriptorVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
