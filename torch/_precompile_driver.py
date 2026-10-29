@@ -112,7 +112,7 @@ def _import_custom_op_modules(served=(), import_served=None):
 
     # The entry may register a served module find_spec cannot locate (a plugin
     # loader), so a module not found yet is looked up again after the entry imports.
-    def import_or_entry(module):
+    def import_or_entry(module, import_served):
         if not found(module) and ENTRY_MODULE in served:
             import_served(ENTRY_MODULE)
         import_served(module)
@@ -122,7 +122,7 @@ def _import_custom_op_modules(served=(), import_served=None):
     owners = {m for o in CUSTOM_OP_OVERRIDE_MODULES.values() for m in o.values()}
     for module in sorted(CUSTOM_OP_MODULES, key=lambda m: m in owners):
         if import_served is not None and module in served:
-            import_or_entry(module)
+            import_or_entry(module, import_served)
             continue
         try:
             importlib.import_module(module)
@@ -134,7 +134,7 @@ def _import_custom_op_modules(served=(), import_served=None):
     # before section 0 runs.
     for module in served:
         if not found(module) and import_served is not None:
-            import_or_entry(module)
+            import_or_entry(module, import_served)
     missing = []
     has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
     for name, overload in CUSTOM_OPS:
