@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "op_autotune_region.h"
 #include "op_candidates.h"
 
 namespace py = pybind11;
@@ -692,6 +693,40 @@ void bindCandidates(py::module_& m) {
         py::arg("context"));
 }
 
+void bindAutotuneRegion(py::module_& m) {
+  py::class_<FrontierRoot>(m, "FrontierRoot")
+      .def_readonly("root", &FrontierRoot::root)
+      .def_readonly("elements", &FrontierRoot::elements)
+      .def_readonly("dtype", &FrontierRoot::dtype)
+      .def_readonly("is_cpu", &FrontierRoot::is_cpu);
+  py::class_<AutotuneRegion>(m, "AutotuneRegion")
+      .def_readonly("baseline", &AutotuneRegion::baseline)
+      .def_readonly("frontier", &AutotuneRegion::frontier)
+      .def_readonly("input_frontier", &AutotuneRegion::input_frontier)
+      .def_readonly("extra_frontier", &AutotuneRegion::extra_frontier)
+      .def_readonly("signature", &AutotuneRegion::signature)
+      .def_readonly("input_bindings", &AutotuneRegion::input_bindings)
+      .def_readonly("extra_bindings", &AutotuneRegion::extra_bindings)
+      .def_readonly("output_binding", &AutotuneRegion::output_binding)
+      .def_readonly("output_layout", &AutotuneRegion::output_layout)
+      .def_readonly("consumed_nodes", &AutotuneRegion::consumed_nodes)
+      .def_readonly("placement", &AutotuneRegion::placement)
+      .def_readonly("produces", &AutotuneRegion::produces)
+      .def_readonly("eliminated_buffers", &AutotuneRegion::eliminated_buffers)
+      .def_readonly("has_cpu_frontier", &AutotuneRegion::has_cpu_frontier)
+      .def_readonly("cuda_generated_safe", &AutotuneRegion::cuda_generated_safe)
+      .def("canonical", &AutotuneRegion::canonical);
+  m.def("autotune_region_version", &autotuneRegionVersion);
+  m.def("autotune_region_cuda_safe", &autotuneRegionCudaSafe, py::arg("region"));
+  m.def("require_autotune_region_cuda_safe", &requireAutotuneRegionCudaSafe, py::arg("region"));
+  m.def("extract_autotune_region",
+        &extractAutotuneRegion,
+        py::arg("program"),
+        py::arg("variant"),
+        py::arg("cpu_roots") = std::set<std::string>{},
+        py::arg("shared_nodes") = std::vector<size_t>{});
+}
+
 } // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -705,5 +740,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   bindDecode(m);
   bindRegions(m);
   bindCandidates(m);
+  bindAutotuneRegion(m);
   bindRejection(m);
 }
