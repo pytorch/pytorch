@@ -940,7 +940,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
         torch.manual_seed(0)
@@ -2103,8 +2103,6 @@ class TestFP8Matmul(TestCase):
         # the CUTLASS fallback depending on CUDA version / arch.
         if torch.version.hip and output_dtype is not torch.bfloat16:
             raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-        if "mps" in device and not wrap_v2:
-            raise unittest.SkipTest("MPS only implements _scaled_mm_v2")
 
         M, K, N = 256, 512, 768
         torch.manual_seed(42)
