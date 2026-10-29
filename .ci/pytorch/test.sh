@@ -2421,7 +2421,8 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e .
+  # PyArrow 26 requires NumPy 2, but the CI image uses NumPy 1.26.
+  pip_install -e . "pyarrow<26"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)
