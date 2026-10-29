@@ -2996,9 +2996,9 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
-    custom_op_modules: tuple[str, ...],
-    custom_ops: tuple[tuple[str, str], ...],
-    custom_op_keys: tuple[str, ...],
+    custom_op_modules: tuple[str, ...] = (),
+    custom_ops: tuple[tuple[str, str], ...] = (),
+    custom_op_keys: tuple[str, ...] = (),
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 

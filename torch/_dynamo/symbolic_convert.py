@@ -1200,6 +1200,18 @@ def break_graph_if_unsupported(
             if self.parent is not None:
                 self._maybe_replace_warnings_warn_on_stack(inst)
 
+            if (package := self.output.package) is not None:
+                from .variables.torch import BaseTorchVariable
+
+                # The instruction runs eagerly, so the ops it calls or passes must be
+                # registered when it is served.
+                popped = self.stack[len(self.stack) - (int(push) - stack_effect) :]
+                tensors = [v for v in popped if isinstance(v, TensorVariable)]
+                devices = frozenset(v.device.type for v in tensors if v.device)
+                for vt in popped:
+                    if isinstance(vt, BaseTorchVariable):
+                        package.add_graph_break_op(vt.value, device_types=devices)
+
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
                 self, reason=reason, stack_pops=int(push) - stack_effect
