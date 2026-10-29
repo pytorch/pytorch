@@ -670,6 +670,25 @@ class SetExcludeDispatchKeyGuard {
   bool old;
 };
 
+// What FakeTensorMode's in_kernel_invocation_manager sets up to run a kernel
+// on a FakeTensor's meta storage, as one guard: __torch_dispatch__ disabled and
+// Meta in the TLS include set. On exit it restores the TLS dispatch keys rather
+// than removing Meta, which could leave Dense (implied by Meta) included.
+class MetaKernelInvocationGuard {
+ public:
+  MetaKernelInvocationGuard() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    local_keyset.included_ =
+        local_keyset.included_ | c10::DispatchKeySet(c10::DispatchKey::Meta);
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  }
+
+ private:
+  // Declared in this order so the preserved TLS state excludes Python.
+  torch::DisableTorchDispatch disable_torch_dispatch_;
+  c10::impl::ForceDispatchKeyGuard preserve_dispatch_keys_;
+};
+
 // Thread-local stack used to save/restore the local dispatch key set around a
 // torch.compile'd call (see compile_wrapper in eval_frame.py). Keeping the
 // saved keyset in C++ avoids materializing it as a (registered) pybind11
@@ -1370,6 +1389,8 @@ void initDispatchBindings(PyObject* module) {
       c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
   py_context_manager<c10::impl::ForceDispatchKeyGuard>(
       m, "_PreserveDispatchKeyGuard");
+  py_context_manager<MetaKernelInvocationGuard>(
+      m, "_MetaKernelInvocationGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
