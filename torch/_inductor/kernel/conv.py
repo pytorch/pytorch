@@ -12,6 +12,7 @@ from .. import config, ir
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
+    emulate_lowp_output_cast,
     fallback_handler,
     lowerings as L,
     register_lowering,
@@ -571,9 +572,12 @@ def convolution(
         if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
             # we should not add bias when the output channel is 0
             return result
-        return L[aten.add](
+        result = L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
+        # The peeled add is not user-visible, so the conv's declared rounded
+        # output must be reproduced for fused consumers (see #201296).
+        return emulate_lowp_output_cast(result)
 
     x.realize()
     weight.realize()
@@ -764,7 +768,7 @@ def convolution(
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    if use_ck_conv_template(layout) and not transposed:
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
