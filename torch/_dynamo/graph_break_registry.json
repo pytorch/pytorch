@@ -75,6 +75,17 @@
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "{cls.__name__} defines a C __hash__ that Dynamo cannot trace into.",
+      "Hints": [
+        "Use torch._dynamo.allow_c_slot({cls.__name__}) to ",
+        "register it as safe if its slots are pure and ",
+        "deterministic.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Untraceable C tp_hash",
       "Context": "hash_impl {self}",
       "Explanation": "{cls.__name__} defines a C __hash__ that Dynamo cannot trace into.",
       "Hints": [
@@ -189,6 +200,15 @@
     }
   ],
   "GB0871": [
+    {
+      "Gb_type": "Non-constant __hash__ return",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "__hash__ returned a non-constant {type(result).__name__}.",
+      "Hints": [
+        "Ensure that your custom __hash__ function returns an integer.",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Non-constant __hash__ return",
       "Context": "hash_impl {self}",
@@ -873,6 +893,16 @@
       "Explanation": "Attempted to construct an Enum value that is non-constant (e.g. int, string) or is not an acceptable value for the Enum. Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB6745": [
+    {
+      "Gb_type": "Missing tp_hash_impl override",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "{type(self).__name__} wraps {type(real_val).__name__} which has a non-default tp_hash. Add a tp_hash_impl override to {type(self).__name__}.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -4900,6 +4930,14 @@
     }
   ],
   "GB0682": [
+    {
+      "Gb_type": "Non-constant GetAttrVariable hash",
+      "Context": "tp_hash_impl {self}",
+      "Explanation": "Cannot hash {self} because Dynamo doesn't know how to represent the type of the getattr() result, which is not a constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Non-constant GetAttrVariable hash",
       "Context": "hash_impl {self}",

@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for hash_impl: unified hash() / __hash__ protocol in Dynamo."""
+"""Tests for tp_hash_impl: unified hash() / __hash__ protocol in Dynamo."""
 
 import sys
 
@@ -590,7 +590,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self._assert_hash_equals(len)
 
     def test_hash_list_type(self):
-        """hash(list) exercises the as_python_constant fallback in base hash_impl."""
+        """hash(list) exercises the as_python_constant fallback in base tp_hash_impl."""
         self._assert_hash_equals(list)
 
     # --- C tp_hash types ---

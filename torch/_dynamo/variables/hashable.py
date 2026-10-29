@@ -120,7 +120,7 @@ class HashableTracker:
             return
 
         # Compute hash via the tp_hash slot (generic_hash_impl).
-        # For unhashable types, hash_impl raises ObservedTypeError.
+        # For unhashable types, tp_hash_impl raises ObservedTypeError.
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         from .object_protocol import generic_hash_impl
