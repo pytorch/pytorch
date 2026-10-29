@@ -94,23 +94,27 @@ def _frozen_kernel_config() -> dict[str, object]:
     """The Triton config both precompile tracers lower under.
 
     A frozen DynamoTracer artifact replays each kernel with one recorded
-    config, so every kernel is tuned before replay and no multi-kernel picks
-    its sub-kernel at first launch. Under autotune_at_compile_time the
-    Python wrapper emits multi-kernel defs only into the compile-time
-    autotune block (_write_multi_kernel_defs), so a module calls an undefined
-    multi_kernel_N (NameError on the first call). That holds for a
-    MakeFxTracer module and, for any tracer, for the size-hint multi-kernels
-    ``multi_kernel_hints`` builds whatever ``triton.multi_kernel`` is, so both
-    are off. Warns once for each user value overridden.
+    config, so every kernel is tuned before replay. Under
+    autotune_at_compile_time the Python wrapper emits multi-kernel defs only
+    into the compile-time autotune block (_write_multi_kernel_defs), so a
+    module calls an undefined multi_kernel_N (NameError on the first call).
+    That holds for any tracer and every multi-kernel: ``triton.multi_kernel``
+    at any nonzero value, and the size-hint multi-kernels
+    ``multi_kernel_hints`` builds whatever ``triton.multi_kernel`` is, so
+    both are off. Only ``triton.multi_kernel=1`` also picks its sub-kernel by
+    benchmarking at first launch, which a frozen artifact cannot record;
+    size-hint multi-kernels pick from the runtime shapes and
+    ``triton.multi_kernel >= 2`` picks sub-kernel ``multi_kernel - 2``.
+    Warns once for each user value overridden.
     """
     import torch._inductor.config as inductor_config
 
-    # TODO: drop the multi_kernel_hints override, and the MakeFxTracer
-    # triton.multi_kernel one, once PythonWrapperCodegen._write_multi_kernel_defs
-    # emits multi-kernel defs outside the compile-time autotune block too.
-    multi_kernel_reason = (
-        "a frozen artifact does not record which sub-kernel a multi-kernel picks, "
-        "and under autotune_at_compile_time the wrapper never defines multi_kernel_N"
+    # TODO: drop the multi_kernel_hints and triton.multi_kernel >= 2 overrides,
+    # and the MakeFxTracer triton.multi_kernel=1 one, once
+    # PythonWrapperCodegen._write_multi_kernel_defs emits multi-kernel defs
+    # outside the compile-time autotune block too.
+    name_error_reason = (
+        "under autotune_at_compile_time the wrapper never defines multi_kernel_N"
     )
     if inductor_config.triton.autotune_at_compile_time is False:
         torch._logging.warning_once(
@@ -119,18 +123,24 @@ def _frozen_kernel_config() -> dict[str, object]:
             "every kernel is tuned during capture, before the artifact is written",
         )
     if inductor_config.triton.multi_kernel:
+        reason = name_error_reason
+        if inductor_config.triton.multi_kernel == 1:
+            reason += (
+                ", and a frozen artifact cannot record which sub-kernel a "
+                "multi-kernel picks by benchmarking at first launch"
+            )
         torch._logging.warning_once(
             log,
             "precompile capture overrides triton.multi_kernel=%s to 0: %s",
             inductor_config.triton.multi_kernel,
-            multi_kernel_reason,
+            reason,
         )
     if inductor_config.multi_kernel_hints:
         torch._logging.warning_once(
             log,
             "precompile capture overrides multi_kernel_hints=%s to []: %s",
             str(inductor_config.multi_kernel_hints),
-            multi_kernel_reason,
+            name_error_reason,
         )
     return {
         "triton.autotune_at_compile_time": True,
