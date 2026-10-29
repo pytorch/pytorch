@@ -8,6 +8,7 @@
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/dispatch/ObservedOperators.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
@@ -323,6 +324,9 @@ struct PyObjectDispatchFunc {
   // A weak reference to the OpOverload, which __torch_function__ handlers get
   // as `func`. A strong one would be a cycle: the OpOverload holds this object.
   PyObject* op_overload_ref;
+  // Whether RecordFunction callbacks see calls to this op (see
+  // c10::ObservedOperators).
+  bool is_observed;
   // PyObject_New does not run C++ constructors, so keep non-trivial C++
   // state behind pointers and delete it in tp_dealloc.
   c10::OperatorHandle* handle;
@@ -1124,6 +1128,7 @@ static bool pyobject_dispatch_any_requires_grad(
 // arguments, in schema order.
 static PyObject* pyobject_dispatch_call_cpp(
     const c10::OperatorHandle& op,
+    c10::DispatchKeySet key_set,
     PyObject* const* args,
     Py_ssize_t nargs) {
   const auto& schema = op.schema();
@@ -1134,7 +1139,9 @@ static PyObject* pyobject_dispatch_call_cpp(
   }
   {
     pybind11::gil_scoped_release no_gil;
-    op.callBoxed(&stack);
+    // Not callBoxed: the key set is already computed, and PyObject dispatch
+    // has already recorded the call.
+    op.redispatchBoxed(key_set, &stack);
   }
   return torch::jit::createPyObjectForStack(std::move(stack)).release().ptr();
 }
@@ -1186,6 +1193,7 @@ static PyObject* pyobject_dispatch_with_keyset(
     }
     return pyobject_dispatch_call_cpp(
         *self->handle,
+        key_set,
         all_args,
         static_cast<Py_ssize_t>(self->schema_info->args.size()));
   }
@@ -1235,6 +1243,57 @@ static PyObject* pyobject_dispatch_with_keyset(
       *self->handle, *self->schema_info, result);
 }
 
+// A top-level PyObject dispatch, recorded with RecordFunction as
+// Dispatcher::callBoxed records a call.
+static PyObject* pyobject_dispatch_recorded(
+    PyObjectDispatchFunc* self,
+    at::StepCallbacks step_callbacks,
+    c10::DispatchKeySet key_set,
+    PyObject* const* all_args,
+    PyObject* const* call_args,
+    Py_ssize_t call_nargs,
+    PyObject* call_kwnames) {
+  const auto& handle = *self->handle;
+  const auto& schema = handle.schema();
+  at::RecordFunction guard(std::move(step_callbacks));
+  const auto dispatch_key = key_set.highestPriorityTypeId();
+  if (guard.needsInputs()) {
+    torch::jit::Stack inputs;
+    inputs.reserve(schema.arguments().size());
+    for (const auto i : c10::irange(schema.arguments().size())) {
+      inputs.push_back(torch::jit::argumentToIValue(schema, i, all_args[i]));
+    }
+    c10::Dispatcher::runRecordFunction(
+        guard,
+        std::cref(schema),
+        dispatch_key,
+        key_set,
+        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
+  } else {
+    c10::Dispatcher::runRecordFunction(
+        guard, std::cref(schema), dispatch_key, key_set);
+  }
+  PyObject* result = pyobject_dispatch_with_keyset(
+      self,
+      key_set,
+      /*skip_torch_function=*/false,
+      call_args,
+      call_nargs,
+      call_kwnames,
+      0,
+      all_args);
+  if (result != nullptr && C10_UNLIKELY(guard.needsOutputs())) {
+    torch::jit::Stack outputs;
+    pushPyOutToStack(
+        handle,
+        &outputs,
+        py::reinterpret_borrow<py::object>(result),
+        "PyObject dispatch");
+    guard.setOutputs(std::move(outputs));
+  }
+  return result;
+}
+
 static PyObject* pyobject_dispatch_vectorcall(
     PyObject* callable,
     PyObject* const* args,
@@ -1260,16 +1319,6 @@ static PyObject* pyobject_dispatch_vectorcall(
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // The C++ Dispatcher records each call for the profiler (RecordFunction in
-  // Dispatcher::callBoxed); let it handle the call while anything listens.
-  // This check doesn't sample callbacks: callBoxed does, and sampling here too
-  // would record a call with probability p^2 instead of p.
-  if (C10_UNLIKELY(at::hasCallbacks())) {
-    return PyObject_Vectorcall(
-        self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
-  }
-#endif
   const auto& info = *self->schema_info;
   const auto num_args = static_cast<Py_ssize_t>(info.args.size());
   auto dispatch = [&](PyObject* const* all_args,
@@ -1278,6 +1327,24 @@ static PyObject* pyobject_dispatch_vectorcall(
                       PyObject* call_kwnames) {
     auto key_set = pyobject_dispatch_compute_keyset(
         self->handle->dispatchKeyExtractor(), all_args, num_args);
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+    // Record the call for profilers and other observers, as
+    // Dispatcher::callBoxed does. This samples callbacks only for calls the
+    // fast path handles, so calls it hands to the C++ Dispatcher are sampled
+    // once, there.
+    auto step_callbacks =
+        at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+    if (C10_UNLIKELY(step_callbacks.has_value() && self->is_observed)) {
+      return pyobject_dispatch_recorded(
+          self,
+          std::move(*step_callbacks),
+          key_set,
+          all_args,
+          call_args,
+          call_nargs,
+          call_kwnames);
+    }
+#endif
     return pyobject_dispatch_with_keyset(
         self,
         key_set,
@@ -1391,6 +1458,8 @@ static PyObject* make_pyobject_dispatch_func(
   result->cpp_dispatch_fn = cpp_dispatch_fn;
   result->cpp_redispatch_fn = cpp_redispatch_fn;
   result->op_overload_ref = op_overload_ref.release().ptr();
+  result->is_observed =
+      c10::ObservedOperators::isObserved(handle.operator_name());
   result->handle = owned_handle.release();
   result->schema_info = schema_info.release();
   result->interpreter = getPyInterpreter();
