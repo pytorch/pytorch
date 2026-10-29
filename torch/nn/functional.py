@@ -7483,7 +7483,21 @@ def scaled_grouped_mm(
     For TensorWise scaling, each float32 scale contains either a single value shared by all groups
     or one value per group in a contiguous 1D tensor. Both inputs must use the same scale layout.
     TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
-    It supports bfloat16, float16, and float32 outputs. Other scaling recipes require bfloat16 output.
+    It supports bfloat16, float16, and float32 outputs.
+
+    Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs
+    1x128/1x128, 1x128/128x128, and 128x128/1x128 with float32 scales and two
+    ``float8_e4m3fn`` inputs. Each group packs
+    its scales separately. For outer extent ``O`` (M for A, N for B), let ``L = ceil(K / 128)``.
+    A 1x128 group stores ``O * L`` values with the outer dimension contiguous; a 128x128
+    group stores ``round_up(L, 4) * ceil(O / 128)`` values with the padded K-block dimension
+    contiguous. Scales are contiguous, with 16-byte-aligned group starts. A 3D operand uses
+    shape ``(groups, values_per_group)``; a 2D operand uses a 1D tensor concatenating
+    the flattened group scales in offset order, covering only the groups selected by ``offs``. M and N must be multiples
+    of 4. These recipes support bfloat16, float16, and float32 outputs and require
+    ``use_fast_accum=False``. Swizzle metadata must be omitted or ``NO_SWIZZLE``.
+
+    Other scaling recipes require bfloat16 output.
 
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
@@ -7494,7 +7508,8 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: output dtype; TensorWise accepts bfloat16, float16, or float32, other recipes require bfloat16
+        output_dtype: output dtype; TensorWise and Hopper block scaling accept bfloat16, float16, or float32,
+          other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """

@@ -34,7 +34,11 @@ __global__ void populate_cublas_grouped_args_kernel(
     int64_t* __restrict__ alphaPtr_out, int64_t* __restrict__ betaPtr_out,
     float* __restrict__ alpha_ptr, float* __restrict__ beta_ptr,
     int64_t base_scale_a, int64_t base_scale_b,
+    int64_t scale_a_bytes, int64_t scale_b_bytes,
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
+    bool blockwise_variable_a, bool blockwise_variable_b,
+    CublasGroupedScaleLayout scale_layout_a,
+    CublasGroupedScaleLayout scale_layout_b,
     int64_t* __restrict__ scalePtrA_out, int64_t* __restrict__ scalePtrB_out) {
   int i = threadIdx.x;
 
@@ -80,9 +84,18 @@ __global__ void populate_cublas_grouped_args_kernel(
     group_start = static_cast<int64_t>(start_val);
   }
 
-  m_out[i] = m_is_delta ? static_cast<IndexType>(delta) : cublas_m;
-  n_out[i] = n_is_delta ? static_cast<IndexType>(delta) : cublas_n;
-  k_out[i] = k_is_delta ? static_cast<IndexType>(delta) : cublas_k;
+  const int64_t group_m = m_is_delta ? delta : cublas_m;
+  const int64_t group_n = n_is_delta ? delta : cublas_n;
+  const int64_t group_k = k_is_delta ? delta : cublas_k;
+  m_out[i] = static_cast<IndexType>(group_m);
+  n_out[i] = static_cast<IndexType>(group_n);
+  k_out[i] = static_cast<IndexType>(group_k);
+  CUDA_KERNEL_ASSERT(
+      (!cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_a) ||
+       group_m % 4 == 0) && "scale_a requires group M divisible by 4\n");
+  CUDA_KERNEL_ASSERT(
+      (!cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_b) ||
+       group_n % 4 == 0) && "scale_b requires group N divisible by 4\n");
 
   lda_out[i] = lda_val;
   ldb_out[i] = ldb_val;
@@ -97,11 +110,58 @@ __global__ void populate_cublas_grouped_args_kernel(
   alphaPtr_out[i] = reinterpret_cast<int64_t>(alpha_ptr);
   betaPtr_out[i] = reinterpret_cast<int64_t>(beta_ptr);
 
-  // Per-batch scalar scales use one float32 value per group.
-  if (scalePtrA_out != nullptr) {
+  // Variable-size scale offsets: exclusive prefix-sum over per-group scale
+  // sizes via parallel scan.
+  // cuBLAS-A scale: getScaleTensorSize(inner=K, outer=M)
+  // cuBLAS-B scale: getScaleTensorSize(inner=K, outer=N)
+  const bool scan_a = (scalePtrA_out != nullptr) && blockwise_variable_a;
+  const bool scan_b = (scalePtrB_out != nullptr) && blockwise_variable_b;
+  if (scan_a || scan_b) {
+    extern __shared__ int64_t scale_scan[];
+    int64_t* s_a = scale_scan;
+    int64_t* s_b = scale_scan + blockDim.x;
+    const int64_t size_a = scan_a
+        ? cublas_grouped_scale_size_bytes(scale_layout_a, group_k, group_m)
+        : 0;
+    const int64_t size_b = scan_b
+        ? cublas_grouped_scale_size_bytes(scale_layout_b, group_k, group_n)
+        : 0;
+    s_a[i] = size_a;
+    s_b[i] = size_b;
+    __syncthreads();
+
+    // Hillis-Steele inclusive scan over both A and B sizes at once.
+    for (int stride = 1; stride < blockDim.x; stride <<= 1) {
+      const int64_t add_a = i >= stride ? s_a[i - stride] : 0;
+      const int64_t add_b = i >= stride ? s_b[i - stride] : 0;
+      __syncthreads();
+      s_a[i] += add_a;
+      s_b[i] += add_b;
+      __syncthreads();
+    }
+
+    const int64_t offset_a = s_a[i] - size_a;
+    const int64_t offset_b = s_b[i] - size_b;
+
+    if (scan_a) {
+      CUDA_KERNEL_ASSERT(
+          offset_a <= scale_a_bytes && size_a <= scale_a_bytes - offset_a &&
+          "scale_a is too small for the grouped block scale layout\n");
+      scalePtrA_out[i] = base_scale_a + offset_a;
+    }
+    if (scan_b) {
+      CUDA_KERNEL_ASSERT(
+          offset_b <= scale_b_bytes && size_b <= scale_b_bytes - offset_b &&
+          "scale_b is too small for the grouped block scale layout\n");
+      scalePtrB_out[i] = base_scale_b + offset_b;
+    }
+  }
+
+  // Uniform stride (3D/3D or per-batch scalar scales): direct indexed offset.
+  if (scalePtrA_out != nullptr && !blockwise_variable_a) {
     scalePtrA_out[i] = base_scale_a + i * scale_a_stride_bytes;
   }
-  if (scalePtrB_out != nullptr) {
+  if (scalePtrB_out != nullptr && !blockwise_variable_b) {
     scalePtrB_out[i] = base_scale_b + i * scale_b_stride_bytes;
   }
 }
@@ -124,7 +184,11 @@ void launch_populate_cublas_grouped_args(
     int64_t b_offs_stride, int64_t b_idx_stride,
     int64_t d_offs_stride, int64_t d_idx_stride,
     int64_t base_scale_a, int64_t base_scale_b,
+    int64_t scale_a_bytes, int64_t scale_b_bytes,
     int64_t scale_a_stride_bytes, int64_t scale_b_stride_bytes,
+    bool blockwise_variable_a, bool blockwise_variable_b,
+    CublasGroupedScaleLayout scale_layout_a,
+    CublasGroupedScaleLayout scale_layout_b,
     int64_t* scalePtrA_out, int64_t* scalePtrB_out,
     cudaStream_t stream) {
   IndexType* m_arr   = reinterpret_cast<IndexType*>(args.buf.data_ptr());
@@ -150,7 +214,10 @@ void launch_populate_cublas_grouped_args(
   args.ldbArray = ldb_arr;
   args.lddArray = ldd_arr;
 
-  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, 0, stream>>>(
+  const bool scan_scales = (scalePtrA_out != nullptr && blockwise_variable_a) ||
+      (scalePtrB_out != nullptr && blockwise_variable_b);
+  const size_t shared_bytes = scan_scales ? 2 * batchCount * sizeof(int64_t) : 0;
+  populate_cublas_grouped_args_kernel<IndexType><<<1, batchCount, shared_bytes, stream>>>(
       offs, base_A, base_B, base_D,
       static_cast<IndexType>(cublas_m), static_cast<IndexType>(cublas_n), static_cast<IndexType>(cublas_k),
       m_is_delta, n_is_delta, k_is_delta,
@@ -164,7 +231,10 @@ void launch_populate_cublas_grouped_args(
       args.alphaPtrArray, args.betaPtrArray,
       args.alphaScalar, args.betaScalar,
       base_scale_a, base_scale_b,
+      scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
+      blockwise_variable_a, blockwise_variable_b,
+      scale_layout_a, scale_layout_b,
       scalePtrA_out, scalePtrB_out);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -298,10 +368,20 @@ cublasGroupedArgs::cublasGroupedArgs(
 
   const int64_t base_scale_a = scale_a ? reinterpret_cast<int64_t>(scale_a->data_ptr()) : 0;
   const int64_t base_scale_b = scale_b ? reinterpret_cast<int64_t>(scale_b->data_ptr()) : 0;
-  const int64_t scale_a_stride_bytes = mata_needs_ptr
+  const int64_t scale_a_bytes = scale_a ? scale_a->numel() * scale_a->element_size() : 0;
+  const int64_t scale_b_bytes = scale_b ? scale_b->numel() * scale_b->element_size() : 0;
+
+  // Byte stride between consecutive groups' scale data.
+  // For per-batch scalars and 3D block scales, stride(0) selects a group.
+  // Blockwise 2D scales use explicit flags to select variable-size offsets.
+  const bool mata_blockwise = cublas_grouped_scale_is_blockwise(mata_layout);
+  const bool matb_blockwise = cublas_grouped_scale_is_blockwise(matb_layout);
+  const bool blockwise_variable_a = mata_blockwise && a_is_2d;
+  const bool blockwise_variable_b = matb_blockwise && b_is_2d;
+  const int64_t scale_a_stride_bytes = (mata_needs_ptr && !blockwise_variable_a)
       ? scale_a->stride(0) * scale_a->element_size()
       : 0;
-  const int64_t scale_b_stride_bytes = matb_needs_ptr
+  const int64_t scale_b_stride_bytes = (matb_needs_ptr && !blockwise_variable_b)
       ? scale_b->stride(0) * scale_b->element_size()
       : 0;
 
@@ -337,7 +417,10 @@ cublasGroupedArgs::cublasGroupedArgs(
       b_offs_stride, b_idx_stride,
       d_offs_stride, d_idx_stride,
       base_scale_a, base_scale_b,
+      scale_a_bytes, scale_b_bytes,
       scale_a_stride_bytes, scale_b_stride_bytes,
+      blockwise_variable_a, blockwise_variable_b,
+      mata_layout, matb_layout,
       scaleAPtrArray, scaleBPtrArray,
       stream);
 }
