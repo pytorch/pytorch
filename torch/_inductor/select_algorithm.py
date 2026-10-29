@@ -3861,13 +3861,10 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
-        # Bind to a local: entering the dynamic_dims_mask context below drops
-        # the narrowing on self.bmreq, since a context manager could reassign it.
-        bmreq = self.bmreq
-        if bmreq is None:
+        if self.bmreq is None:
             raise AssertionError("self.bmreq must not be None")
         # pyrefly: ignore[missing-attribute]
-        bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         mask = self.tunable_dyn_dims_mask
         # TunableOp only exists in CUDA/ROCm builds; gate on the output device
         # so a non-empty mask on a CPU op does not hit a missing _C binding.
@@ -3875,8 +3872,8 @@ class ExternKernelCaller(ChoiceCaller):
             with torch.cuda.tunable.dynamic_dims_mask(
                 M=mask[0], N=mask[1], K=mask[2], BATCH=mask[3]
             ):
-                return bmreq.benchmark(*args, out=out)
-        return bmreq.benchmark(*args, out=out)
+                return self.bmreq.benchmark(*args, out=out)
+        return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
         """
