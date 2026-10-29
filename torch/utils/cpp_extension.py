@@ -3151,7 +3151,13 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + ['-fPIC', '-std=c++20'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + common_cflags + extra_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        # extra_cflags are host compiler flags. On Windows that compiler is cl.exe,
+        # so they use MSVC syntax (/O2, /std:c++17, ...), which hipcc's clang driver
+        # reads as input file paths. Keep them away from hipcc there, as the CUDA
+        # branch below and BuildExtension's Windows HIP path already do; device
+        # flags belong in extra_cuda_cflags.
+        hip_host_cflags = [] if IS_WINDOWS else extra_cflags
+        cuda_flags = ['-DWITH_HIP'] + common_cflags + hip_host_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags = cuda_flags + ['-std=c++20']
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         cuda_flags += extra_cuda_cflags

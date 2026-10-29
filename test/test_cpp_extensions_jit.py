@@ -233,6 +233,54 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
 
+    def test_hip_jit_keeps_msvc_cflags_away_from_hipcc_on_windows(self):
+        # load() also hands extra_cflags to hipcc for HIP extensions. On Windows they
+        # are cl.exe flags, which hipcc's clang driver reads as input file paths.
+        ce = torch.utils.cpp_extension
+
+        def ninja_flags(is_windows, extra_cflags):
+            captured = {}
+            with (
+                mock.patch.object(ce, "IS_WINDOWS", is_windows),
+                mock.patch.object(ce, "IS_HIP_EXTENSION", True),
+                mock.patch.object(ce, "COMMON_HIP_FLAGS", list(ce.COMMON_HIP_FLAGS)),
+                mock.patch.object(ce, "include_paths", return_value=[]),
+                mock.patch.object(ce, "library_paths", return_value=[]),
+                mock.patch.object(ce, "_prepare_ldflags", return_value=[]),
+                mock.patch.object(
+                    ce, "_get_rocm_arch_flags", return_value=["--offload-arch=gfx1201"]
+                ),
+                mock.patch.object(
+                    ce,
+                    "_write_ninja_file",
+                    side_effect=lambda **kw: captured.update(kw),
+                ),
+            ):
+                ce._write_ninja_file_to_build_library(
+                    path="build.ninja",
+                    name="ext",
+                    sources=["kernel.cu"],
+                    extra_cflags=extra_cflags,
+                    extra_cuda_cflags=["-O3"],
+                    extra_sycl_cflags=[],
+                    extra_ldflags=[],
+                    extra_include_paths=[],
+                    with_cuda=True,
+                    with_sycl=False,
+                    is_standalone=False,
+                )
+            return captured["cflags"], captured["cuda_cflags"]
+
+        cflags, hip_flags = ninja_flags(True, ["/O2", "/std:c++17"])
+        self.assertIn("/O2", cflags)
+        self.assertNotIn("/O2", hip_flags)
+        self.assertNotIn("/std:c++17", hip_flags)
+        self.assertIn("-O3", hip_flags)
+
+        # Linux keeps passing them: GNU-style host flags are valid for clang.
+        _, hip_flags = ninja_flags(False, ["-O3", "-DFOO"])
+        self.assertIn("-DFOO", hip_flags)
+
     def test_inline_jit_generated_bindings_gil_not_used(self):
         variants = (
             ("default", {}, False),
