@@ -875,22 +875,28 @@ class CustomOpDef:
         if not (schema._is_view_op() or schema.is_mutable):
             return
 
+        if not schema._is_view_op():
+            # Bumps the version of each mutated argument, then redispatches
+            # past ADInplaceOrView, in C++.
+            mutated_args = [
+                i
+                for i, a in enumerate(schema.arguments)
+                if a.alias_info is not None and a.alias_info.is_write
+            ]
+            self._lib.m.register_mutation_version_bump(self._name, mutated_args)  # type: ignore[union-attr]
+            return
+
         self._lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
 
         if schema.is_mutable:
             self._register_mutation_version_bump(schema)
 
     def _register_mutation_version_bump(self, schema: _C.FunctionSchema) -> None:
+        # For a mutable view op; see _register_adinplaceorview_dispatcher_impl.
         mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
-
-        is_view = schema._is_view_op()
-        if is_view:
-            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
-                f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
-            )
-        else:
-            op = self._opoverload
-            after_ADInplaceOrView_keyset = _C._after_ADInplaceOrView_keyset
+        original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+            f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
+        )
 
         def adinplaceorview_impl(keyset, *args, **kwargs):
             # The dispatcher normalizes non-keyword-only arguments into args.
@@ -901,12 +907,8 @@ class CustomOpDef:
             for key in mutated_keys:
                 if key in kwargs:
                     increment_version(kwargs[key])
-            if is_view:
-                # View ops need the C++ fallback for aliasing tracking
-                return original_kernel.call_boxed(keyset, *args, **kwargs)
-            # Non-view mutable ops: increment_version is sufficient,
-            # redispatch directly past ADInplaceOrView to the backend.
-            return op.redispatch(keyset & after_ADInplaceOrView_keyset, *args, **kwargs)
+            # View ops need the C++ fallback for aliasing tracking
+            return original_kernel.call_boxed(keyset, *args, **kwargs)
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
