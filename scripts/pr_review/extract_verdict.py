@@ -58,7 +58,9 @@ VERDICTS = {"ready_for_human_review", "changes_requested"}
 SEVERITIES = {"info", "minor", "major"}
 
 MAX_FINDINGS = 25
-MAX_MESSAGE = 600
+# Stage B's prompt asks for at most 1200 characters, leaving room for the
+# escaping neutralize() adds; a message that still overflows ends in TRUNCATED.
+MAX_MESSAGE = 1500
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (
@@ -153,6 +155,23 @@ _HTML_TAG = re.compile(r"<[^>]*>")
 # first: a tag that VANISHES is what lets `https:<i></i>//evil` reassemble, and
 # the blob check downstream is calibrated to see that reassembly happen.
 _HTML_ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
+
+# The inverse of `neutralize` and `neutralize_path`: what their output may look
+# like. `build` holds its own result to it and the publish job re-checks the
+# artifact against it, so the producer and the check live here together.
+# neutralize() strips every backslash, then adds them only before `[`, `]` and
+# the `#` of a defused reference; neutralize_path() only before `[]()@#*_`.
+_STRAY_BACKSLASH = re.compile(r"\\(?![\[\]#])")
+_UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
+# neutralize() caps AFTER escaping, so a capped string can end in a cut entity.
+_BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;|(?:a(?:mp?)?|lt?|gt?)?\Z)")
+_FINDING_KEYS = ("path", "line", "severity", "message")
+# The space keeps the dots from completing a token, such as `www` into a URL.
+TRUNCATED = " ..."
+# A cut entity is allowed only at the very end; it must go before TRUNCATED.
+_PARTIAL_ENTITY = re.compile(r"&(?:a(?:mp?)?|lt?|gt?)?\Z")
+# Anchored at a token start: unanchored, each retry backtracks through long tokens.
+_PARTIAL_TOKEN = re.compile(r"(?<!\S)\S+\Z")
 
 
 class Rejected(Exception):
@@ -363,12 +382,12 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     bracket, so they cannot reconstitute the ``\\/\\/host`` case that strip
     exists for.
 
-    NOT DONE HERE, and it is a real gap: markdown STRUCTURE the attacker writes
-    is not escaped, so a summary can still forge a heading, a table, a
-    horizontal rule or a fenced block. Nothing renders these strings today — the
-    row carries no findings and Dr.CI rendering is unbuilt — so this is latent.
-    It has to be closed in the same change that starts rendering, and the right
-    escaping depends on that renderer.
+    NOT DONE HERE: markdown STRUCTURE the attacker writes is not escaped, so a
+    summary can still forge a heading, a table, a horizontal rule or a fenced
+    block. The renderer has to contain it. The Dr.CI renderer proposed in
+    pytorch/test-infra#8972 does, by putting the summary and findings inside a
+    code fence longer than any backtick run they hold. Any surface that renders
+    these strings needs its own containment.
     """
     text = "".join(c for c in text[:cap] if _ALLOWED_CHARS.match(c))
     text = text.replace("\\", "")
@@ -403,7 +422,12 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # meaning; `neutralize_path` already makes the same trade for paths.
     text = text.replace("[", "\\[").replace("]", "\\]")
     text = _URL.sub(_LINK_MARKER, text)
-    text = _XREF.sub(r"\1\\# \2", text)
+    # To a fixed point: one pass misses a chained `a/b#1/c#2`, because the
+    # `/c#2` match starts inside the `a/b#1` one. The defused `\# 1` then
+    # supplies the non-word character the next match needs, and it was left as
+    # a live `1/c#2`. Each pass defuses at least one `#`, so this terminates.
+    while (defused := _XREF.sub(r"\1\\# \2", text)) != text:
+        text = defused
     text = _MENTION.sub(r"@ \1", text)
     text = _ISSUE_REF.sub(r"\\# \1", text)
     for char, escaped in _HTML_ESCAPES:
@@ -411,6 +435,43 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     # Capped on the way out as well as in: escaping GROWS the string, and one
     # place deciding the length beats every caller re-truncating.
     return _drop_dangling_escape(text[:cap])
+
+
+def neutralize_message(message: str) -> str:
+    """`neutralize` a finding message to MAX_MESSAGE, ending a cut in TRUNCATED.
+
+    The input is sliced to MAX_MESSAGE first, as `neutralize` would, so its
+    quadratic cost stays bounded; only the output is allowed to grow before the
+    cut, which escaping can make up to 5x longer.
+
+    A cut can leave text that fails a check the whole message passed: half a
+    128-hex digest is a blob, a cut entity mid-string is a bare `&`. So whole
+    tokens are dropped from the end until the result passes the publish check,
+    and a message with no passing prefix comes back empty, which `build` drops.
+    Only failures the cut causes are repaired this way: a message that fails the
+    check whole (a blob neutralize() joined, say) is returned whole, so `build`
+    drops it as `failed_publish_check`.
+    """
+    src = message[:MAX_MESSAGE]
+    if len(src) < len(message) and not message[MAX_MESSAGE].isspace():
+        # The input slice is a cut too: drop the token it split.
+        src = _PARTIAL_TOKEN.sub("", src) or src
+    full = neutralize(src, 5 * MAX_MESSAGE).strip()
+    if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
+        return full
+    if not is_neutral_prose(full, len(full)):
+        return full
+    kept = full[: MAX_MESSAGE - len(TRUNCATED)]
+    if len(kept) < len(full) and not full[len(kept)].isspace():
+        # Back up to a word boundary, unless the text is one long token.
+        kept = _PARTIAL_TOKEN.sub("", kept) or kept
+    while kept.strip():
+        out = _drop_dangling_escape(kept.rstrip())
+        out = _PARTIAL_ENTITY.sub("", out).rstrip() + TRUNCATED
+        if is_neutral_prose(out, MAX_MESSAGE):
+            return out
+        kept = _PARTIAL_TOKEN.sub("", kept.rstrip())
+    return ""
 
 
 def unquote_git_path(path: str) -> str:
@@ -486,13 +547,94 @@ def _is_repo_path(path: str) -> bool:
     # the charset check on the assembled result, which rejects the ENTIRE
     # review rather than the one finding. Dropping it here costs that finding
     # alone and leaves the rest of the review publishable.
-    if not _PATH_CHARS.match(path):
+    # fullmatch: `$` also matches before a final newline, so `.match` let
+    # `x.py\n` through.
+    if not _PATH_CHARS.fullmatch(path):
         return False
     # Bound the ESCAPED length, so a published path is always the exact
     # validated name rather than a half-name cut mid-escape.
     if len(neutralize_path(path)) > MAX_PATH:
         return False
     return not any(part in ("", ".", "..") for part in path.split("/"))
+
+
+def _is_published_text(value: object, cap: int) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= cap
+        and _ALLOWED_CHARS.fullmatch(value) is not None
+        and not _carries_blob(value)
+    )
+
+
+def _carries_blob(text: str) -> bool:
+    # `build` refuses these in its result; the publish job has to as well.
+    try:
+        check_no_encoded_blob(text, "published string")
+    except Rejected:
+        return True
+    return False
+
+
+def is_neutral_prose(value: object, cap: int) -> bool:
+    """Whether `value` is text `neutralize` could have produced."""
+    return (
+        _is_published_text(value, cap)
+        and "<" not in value
+        and ">" not in value
+        and not _BARE_AMPERSAND.search(value)
+        and not _STRAY_BACKSLASH.search(value)
+        and not _UNESCAPED_BRACKET.search(value)
+        and not any(p.search(value) for p in (_URL, _XREF, _MENTION, _ISSUE_REF))
+    )
+
+
+def is_neutral_path(value: object) -> bool:
+    """Whether `value` is `neutralize_path` of a valid repo-relative path."""
+    if (
+        not isinstance(value, str)
+        or len(value) > MAX_PATH
+        or not _PATH_CHARS.fullmatch(value)
+        or _carries_blob(value)
+    ):
+        return False
+    raw = "".join(
+        c for i, c in enumerate(value) if not (c == "\\" and value[i + 1 : i + 2])
+    )
+    return _is_repo_path(raw) and neutralize_path(raw) == value
+
+
+def is_publishable_finding(item: object) -> bool:
+    """Whether `item` is one finding in exactly the shape `build` emits."""
+    if not isinstance(item, dict) or set(item) != set(_FINDING_KEYS):
+        return False
+    line = item["line"]
+    return (
+        is_neutral_path(item["path"])
+        and is_neutral_prose(item["message"], MAX_MESSAGE)
+        and isinstance(item["severity"], str)
+        and item["severity"] in SEVERITIES
+        and isinstance(line, int)
+        and not isinstance(line, bool)
+        and 0 < line <= MAX_LINE
+    )
+
+
+def published_findings(verdict: dict) -> list[dict]:
+    """The findings of a verdict that may be published, capped at MAX_FINDINGS.
+
+    A finding that does not match the shape is dropped, not repaired.
+    """
+    raw = verdict.get("findings")
+    if not isinstance(raw, list):
+        return []
+    kept: list[dict] = []
+    for item in raw:
+        if len(kept) >= MAX_FINDINGS:
+            break
+        if is_publishable_finding(item):
+            kept.append({key: item[key] for key in _FINDING_KEYS})
+    return kept
 
 
 def parse_diff(diff_text: str) -> dict[str, set[int]]:
@@ -706,7 +848,7 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "bad_severity"})
             continue
 
-        clean_message = neutralize(message, MAX_MESSAGE).strip()[:MAX_MESSAGE].strip()
+        clean_message = neutralize_message(message)
         if not clean_message:
             # e.g. a message consisting only of `<b></b>`: it survives the
             # non-empty check above but neutralizes to nothing, and an empty
@@ -714,25 +856,30 @@ def sanitize_findings(  # noqa: C901
             drop({"path": path, "reason": "message_empty_after_neutralize"})
             continue
 
-        kept.append(
-            {
-                # Neutralized like every other published string. It was the one
-                # that was not — `drop()` neutralized its copy while the KEPT
-                # copy was merely truncated, and the kept one is the copy that
-                # gets rendered. A path is attacker-chosen text: `@handle`,
-                # `[label](target)` and `#1234` are all legal in a filename, so
-                # `touch '@pytorchbot [rebase](//evil) #1.py'` @lint-ignore
-                # was enough to put a live mention and a live link into a
-                # bot-authored surface, with no diff trickery at all.
-                #
-                # `neutralize_path`, not `neutralize`: this one has to stay the
-                # NAME of the file it was validated against.
-                "path": neutralize_path(path)[:MAX_PATH],
-                "line": line,
-                "severity": severity.lower(),
-                "message": clean_message,
-            }
-        )
+        finding = {
+            # Neutralized like every other published string. It was the one
+            # that was not — `drop()` neutralized its copy while the KEPT
+            # copy was merely truncated, and the kept one is the copy that
+            # gets rendered. A path is attacker-chosen text: `@handle`,
+            # `[label](target)` and `#1234` are all legal in a filename, so
+            # `touch '@pytorchbot [rebase](//evil) #1.py'` @lint-ignore
+            # was enough to put a live mention and a live link into a
+            # bot-authored surface, with no diff trickery at all.
+            #
+            # `neutralize_path`, not `neutralize`: this one has to stay the
+            # NAME of the file it was validated against.
+            "path": neutralize_path(path)[:MAX_PATH],
+            "line": line,
+            "severity": severity.lower(),
+            "message": clean_message,
+        }
+        # The publish job drops a finding that fails this, so drop it HERE.
+        # It catches a message that fails uncut, which neutralize_message()
+        # returns whole, and any bug in the producer above.
+        if not is_publishable_finding(finding):
+            drop({"path": path, "line": line, "reason": "failed_publish_check"})
+            continue
+        kept.append(finding)
     return kept, dropped, dropped_total
 
 
@@ -766,6 +913,9 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     summary = neutralize(summary_raw, MAX_SUMMARY).strip()[:MAX_SUMMARY].strip()
     if not summary:
         raise Rejected("summary is empty after neutralization")
+    # The publish job refuses the whole review on this, so refuse it here.
+    if not is_neutral_prose(summary, MAX_SUMMARY):
+        raise Rejected("summary fails the publish-side check")
 
     findings_raw = obj.get("findings")
     if not isinstance(findings_raw, list):
@@ -786,9 +936,9 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
 
     # And the other direction, which is the one an attacker wants. A clean
     # verdict alongside a `major` finding is a contradiction the rubric forbids
-    # ("say ready_for_human_review when no major finding is present"), and the
-    # publish job acts on the VERDICT, not on the findings — so it would move
-    # the PR to the terminal label while the artifact records a major problem
+    # ("say ready_for_human_review when no major finding is present"), and
+    # Dr. CI acts on the recorded VERDICT, not on the findings - so it would
+    # mark the PR ready for review while the artifact records a major problem
     # nothing downstream reads.
     #
     # Read off the CLAIM, not off `kept`, and that distinction is the whole
