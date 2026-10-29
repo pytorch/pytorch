@@ -421,13 +421,11 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-fsspec
-#Description: torch runtime dependency. In the Linux CI images this means the
-# torch wheel install at test time finds it already satisfied, so it upgrades
-# when the image is rebuilt rather than on every run. macOS, Windows and s390x
-# install this file at test time, so there fsspec, like the file's other
-# unpinned entries, still resolves to the newest release on each run.
-#Pinned versions:
+fsspec==2026.9.0
+#Description: torch runtime dependency. Pinned here so the Linux images ship it
+# and the torch wheel install at test time finds it already satisfied, instead of
+# downloading the newest release on every run.
+#Pinned versions: 2026.9.0
 #test that import: distributed/checkpoint/test_fsspec.py
 
 cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
