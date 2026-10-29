@@ -547,6 +547,9 @@ def itree_combine_plan(
         ),
         0,
     )
+    if not tile_n:
+        # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
+        rpb = _MULTIROW_ROWS_PER_BLOCK
     return _ItreePlan(
         "combine",
         1,
