@@ -83,10 +83,10 @@ Issues are a way to report feedback or make suggestions. PyTorch uses issues to 
 ```mermaid
 flowchart LR
     new[New issue] --> ai(AI triage)
-    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
+    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; /<br/>#quot;oncall: *#quot; labels"]
     ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
     triaged --> mtriage("Module-level triage<br/>any module maintainer")
-    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
+    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; /<br/>#quot;needs research#quot; /<br/>#quot;needs design#quot; /<br/>#quot;actionable#quot; / #quot;won't fix#quot;"]
     full -- "remove the label to request<br/>re-evaluation" --> triaged
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
@@ -125,22 +125,22 @@ Two other labels are orthogonal to the states above:
 ```mermaid
 flowchart TD
     draft[Draft PR] -- author marks ready --> ready[Ready PR]
-    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ready --> ai("AI triage<br/>CODEOWNERS,<br/>#quot;module: *#quot;, linked issue")
     ai -- fails pre-conditions --> closed[Closed]
-    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
+    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;,<br/>one reviewer per module"]
     ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
     triaged --> pre(Pre-review)
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
     pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
-    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review<br/>by maintainer<br/>#quot;ready for review#quot;"]
     auto -- changes needed --> dev
     dev -- "#quot;no automated review#quot;" --> rfr
     rfr --> review(Human review)
     review -- "needs significant changes,<br/>automated review enabled" --> dev
     review -- "needs significant changes,<br/>#quot;no automated review#quot;" --> rfr
     review -- any reviewer accepts --> accepted[Accepted]
-    ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
+    ready --> gl("GreenLight<br/>merge_rules.yaml<br/>authors only") --> accepted
     accepted -- "@pytorchbot merge" --> merged[Merged]
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
