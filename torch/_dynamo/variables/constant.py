@@ -342,10 +342,11 @@ class ConstantVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
+            return SourcelessBuilder.create_internal_builtin(str.format).call_function(
                 tx,
                 [self, *args],
                 kwargs,
