@@ -1,6 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
-# Smoke-test K0 compilation and dispatch on a middle-dimension reduction, which forces
-# the general path. Override OpInfo suites provide full numerical coverage.
+# Smoke-test K0 compilation and dispatch on non-adjacent reduced axes, which have no
+# column view and so force the general path. Override OpInfo suites provide full
+# numerical coverage.
 
 import pathlib
 import re
