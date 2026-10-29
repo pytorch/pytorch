@@ -513,23 +513,17 @@ def _blockscaled_tma_impl(
     )
 
 
-def _blockscaled_tma_impl_dual(
-    input: torch.Tensor,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-    **kwargs: object,
-) -> _FourTensorOutput:
-    r"""_blockscaled_tma_impl_dual(input, is_square_scaling, is_scale_swizzled, **kwargs) -> tuple[Tensor, Tensor, Tensor, Tensor]
+def _blockscaled_tma_impl_dual(input: torch.Tensor) -> _FourTensorOutput:
+    r"""_blockscaled_tma_impl_dual(input) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize both matrix axes of a 2D or 3D tensor in one kernel launch.
+
+    Uses 1x32 scaling blocks and swizzled scales.
 
     Args:
         input (Tensor): 2D or 3D CUDA tensor with the layout and dtypes
             described by :func:`_blockscaled_tma_impl`. Both matrix dimensions
             must be divisible by 32.
-        is_square_scaling (bool): Must be ``False``.
-        is_scale_swizzled (bool): Must be ``True``.
-        **kwargs: No additional keyword arguments are accepted.
 
     Returns:
         tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_k, s_k, q_m, s_m)``.
@@ -540,16 +534,15 @@ def _blockscaled_tma_impl_dual(
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
-        >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x, False, True)
+        >>> q_k, s_k, q_m, s_m = _blockscaled_tma_impl_dual(x)
     """
     return cast(
         _FourTensorOutput,
         _run_blockscaled_tma(
             input,
             (-2, -1),
-            is_square_scaling,
-            is_scale_swizzled,
+            False,
+            True,
             dual=True,
-            **kwargs,
         ),
     )
