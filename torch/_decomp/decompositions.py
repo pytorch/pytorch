@@ -5924,8 +5924,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Tensor | None = None,
     scale: float | None = None,
 ) -> tuple[Tensor, Tensor]:
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
@@ -5942,8 +5940,6 @@ def scaled_dot_product_flash_attention_for_cpu(
         lambda: "q, k, v should have the same head size",
     )
 
-    # For these 4D CPU inputs, the current math implementation returns a
-    # contiguous (and therefore dense) output of shape (N, H, L, E).
     output, attn = aten._scaled_dot_product_attention_math.default(
         query,
         key,
@@ -5955,7 +5951,6 @@ def scaled_dot_product_flash_attention_for_cpu(
         scale=scale,
         enable_gqa=query.size(1) != key.size(1),
     )
-
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
@@ -5979,27 +5974,11 @@ def scaled_dot_product_flash_attention_for_cpu(
     # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
-
-    # Native/meta allocate empty_like(query), so match the query's physical
-    # dim order, e.g. (L, N, H, E) for MHA and (N, L, H, E) for BERT-style inputs.
-    output_has_same_layout_as_input = all(
-        statically_known_true(actual == expected)
-        for actual, expected in zip(output.stride(), query.stride())
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
     )
-
-    # TODO: Preserve exact native output strides for singleton/empty dimensions.
-    # The contiguous clone below can normalize these strides; additional handling
-    # and regression tests are needed.
-    if not output_has_same_layout_as_input:
-        physical_order, _ = utils.compute_elementwise_output_logical_to_physical_perm(
-            query
-        )
-        inverse_order = utils.invert_perm(physical_order)
-        output = (
-            output.permute(physical_order)
-            .clone(memory_format=torch.contiguous_format)
-            .permute(inverse_order)
-        )
     return output, attn
 
 

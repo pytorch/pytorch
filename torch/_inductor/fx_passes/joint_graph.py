@@ -15,7 +15,11 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch._inductor.fx_utils import get_node_storage
+from torch._inductor.fx_utils import (
+    get_node_storage,
+    rank_agnostic_device,
+    rank_agnostic_passes,
+)
 from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
@@ -472,8 +476,11 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
-        # handle device_put op
-        if node.target == prims.device_put.default:
+        # handle device_put, and current_device since it feeds constructors' device
+        if node.target in (
+            prims.device_put.default,
+            torch.ops.coor.current_device.default,
+        ):
             return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
@@ -487,7 +494,7 @@ class UniformValueConstantFolder(ConstantFolder):
             # Don't specialize symbolic value.
             if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 new_args = [[1], value]
-                return aten.full.default(*new_args, **node.kwargs)
+                return aten.full.default(*new_args, **kwargs)
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
@@ -696,7 +703,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
-                        "device": fake_tensor.device,
+                        "device": rank_agnostic_device(graph, fake_tensor.device),
                         "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
@@ -797,6 +804,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
+@rank_agnostic_passes()
 def joint_graph_passes(
     graph: torch.fx.GraphModule,
     input_device: torch.device | None = None,
@@ -909,7 +917,8 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
 
     if len(user_devices) == 1 and "val" in node.meta:
         (user_device,) = user_devices
-        if device.type != user_device.type:
+        # Under compile-on-one-rank, device may be a current_device() node.
+        if node.meta["val"].device.type != user_device.type:
             repl = match.graph.call_function(
                 torch.ops.prims.iota.default,
                 (length,),
@@ -917,7 +926,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
                     "start": start,
                     "step": step,
                     "dtype": dtype,
-                    "device": user_device,
+                    "device": rank_agnostic_device(match.graph, user_device),
                     "requires_grad": requires_grad,
                 },
             )
