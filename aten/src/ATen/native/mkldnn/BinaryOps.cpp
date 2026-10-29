@@ -51,6 +51,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/Eltwise.h>
 
 namespace at::native {
 
@@ -125,9 +126,9 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
 
   // for zero_dim tensor
   if (other.ndimension() == 0) {
-    ideep::eltwise_forward::compute(
-      x, z, ideep::algorithm::eltwise_linear,
-      ideep::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
+    mkldnn::eltwise_forward(
+      x, z, dnnl::algorithm::eltwise_linear,
+      dnnl::prop_kind::forward_inference, /*alpha*/ other.item().to<float>());
 
     return result;
   } else {

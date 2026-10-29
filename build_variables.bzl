@@ -1266,6 +1266,9 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/UnaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Utils.cpp",
     "aten/src/ATen/native/mkldnn/Matmul.cpp",
+    "aten/src/ATen/native/mkldnn/detail/Eltwise.cpp",
+    "aten/src/ATen/native/mkldnn/detail/Prelu.cpp",
+    "aten/src/ATen/native/mkldnn/detail/Softmax.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     # This is moved to aten_cpu because some of the custom ops use empty_with_tail_padding
     # which was available only within aten_native_cpu. Ideally the right fix is to make
