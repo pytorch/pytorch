@@ -2182,18 +2182,20 @@ def _op_registration(
         return "lazy", _CUDA_INIT
     if ns in _TORCH_LAZY_OP_NAMESPACES:
         return "lazy", _TORCH_LAZY_OP_NAMESPACES[ns]
+    module = None
     if ns == "prims":
         # torch._prims._make_prim defines every prim from its own function.
-        op = getattr(
-            getattr(torch.ops.prims, op_name.split("::")[1]), overload or "default"
-        )
-        modules = (sys.modules.get(name) for name in _TORCH_PRIM_MODULES)
+        op = getattr(getattr(torch.ops.prims, name), overload or "default")
+        modules = (sys.modules.get(m) for m in _TORCH_PRIM_MODULES)
         owners = (m for m in modules if m and any(v is op for v in vars(m).values()))
         module = next((m.__name__ for m in owners), None)
-    else:
+    if module is None:
         module = _custom_op_module(op_name, overload) or _library_op_module(
             op_name, overload, file_modules
         )
+        # A prim another module makes with _make_prim is registered from torch._prims.
+        if ns == "prims" and module in _TORCH_PRIM_MODULES:
+            module = None
     if module is not None:
         return "module", module
     return ("torch" if _torch_cpp_op(op_name, overload) else "unrecorded"), ""
@@ -2212,6 +2214,30 @@ class _CustomOpModules(NamedTuple):
     # The custom ops with a kernel for the keys no importable module is known to
     # register (a torch helper's, a C++ extension's or __main__'s).
     unrecorded_kernels: tuple[tuple[str, str], ...] = ()
+    # The ``(op, key)`` of those kernels registered from __main__, by a C++
+    # extension, or by a custom_op's register_kernel outside the op's module. Other
+    # kernels registered through a torch helper may be the op's module's own.
+    untracked_kernels: tuple[tuple[str, str], ...] = ()
+
+
+def _custom_op_kernel_modules(op_name: str) -> dict[str, str]:
+    """The modules of the functions a ``torch.library.custom_op`` op's
+    ``register_kernel`` kernels run, by key."""
+    from torch._library.custom_ops import OPDEFS
+
+    if (opdef := OPDEFS.get(op_name)) is None:
+        return {}
+    modules: dict[str, str] = {}
+    for device_type, wrapped in opdef._backend_fns.items():
+        # register_kernel stores a wrapper closing over the registered function.
+        fn = inspect.getclosurevars(inspect.unwrap(wrapped)).nonlocals.get("fn")
+        if (module := getattr(fn, "__module__", None)) is None:
+            continue
+        key = "CompositeExplicitAutograd"
+        if device_type is not None:
+            key = torch._C._dispatch_key_for_device(device_type)
+        modules[key] = module
+    return modules
 
 
 def _custom_op_modules(
@@ -2223,6 +2249,8 @@ def _custom_op_modules(
     modules: set[str] = set()
     unrecorded: set[tuple[str, str]] = set()
     unrecorded_kernels: set[tuple[str, str]] = set()
+    untracked_kernels: set[tuple[str, str]] = set()
+    torch_dir = os.path.join(os.path.realpath(_TORCH_DIR), "")
     lazy: dict[str, set[str]] = {}
     file_modules = functools.cache(_file_modules)
     for op_name, overload in op_names:
@@ -2240,21 +2268,36 @@ def _custom_op_modules(
         if kind == "torch" or value.partition(".")[0] == "torch":
             continue
         qualname = f"{op_name}.{overload}" if overload else op_name
-        if any(k not in kernels and has_kernel(qualname, k) for k in keys):
-            unrecorded_kernels.add((op_name, overload))
+        missing = [k for k in keys if k not in kernels and has_kernel(qualname, k)]
+        if not missing:
+            continue
+        unrecorded_kernels.add((op_name, overload))
+        pattern = r"^(\w+)(?:\[alias\])?: registered at (.+):\d+ ::"
+        dump = torch._C._dispatch_dump(qualname)
+        paths = dict(re.findall(pattern, dump, re.MULTILINE))
+        fn_modules = _custom_op_kernel_modules(op_name)
+        for k in (k for k in missing if k in paths):
+            fn_module = fn_modules.get(k, value)
+            foreign = fn_module != value and fn_module.partition(".")[0] != "torch"
+            if foreign or not os.path.realpath(paths[k]).startswith(torch_dir):
+                untracked_kernels.add((op_name, k))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
     return _CustomOpModules(
-        ordered, tuple(sorted(unrecorded)), lazy_ops, tuple(sorted(unrecorded_kernels))
+        ordered,
+        tuple(sorted(unrecorded)),
+        lazy_ops,
+        tuple(sorted(unrecorded_kernels)),
+        tuple(sorted(untracked_kernels)),
     )
 
 
 def _warn_unregistered_ops(
     found: _CustomOpModules, fallback_modules: Sequence[str] = ()
 ) -> None:
-    """Warns about the ops ``found`` says torch defines only at runtime or no
-    module registers, naming the ``fallback_modules`` the artifact imports in case
-    they register the latter."""
+    """Warns about the ops ``found`` says torch defines only at runtime, or that
+    no module registers or registers a kernel of, naming the ``fallback_modules``
+    the artifact imports in case they register the latter."""
     for setup, ops in found.lazy:
         log.warning(
             "torch.compiler.precompile: the captured graphs call %s, which torch "
@@ -2263,7 +2306,9 @@ def _warn_unregistered_ops(
             ", ".join(ops),
             setup,
         )
-    if not (names := sorted({op_name for op_name, _ in found.unrecorded})):
+    names = sorted({op_name for op_name, _ in found.unrecorded})
+    kernels = [f"{n} ({k})" for n, k in found.untracked_kernels if n not in names]
+    if not names and not kernels:
         return
     serves = (
         f"The artifact imports {', '.join(fallback_modules)}, the modules its "
@@ -2273,17 +2318,28 @@ def _warn_unregistered_ops(
         else "The artifact serves only where something else registers them before "
         "it is loaded."
     )
-    log.warning(
-        "torch.compiler.precompile: the captured graphs call %s, which no "
-        "importable module is known to register: defined in __main__, defined "
-        "with torch.library.define or torch._custom_ops.custom_op, or a C++ op "
-        "without set_python_module. %s "
-        "Define a Python op with torch.library.custom_op in an importable module, "
-        "and give a C++ op m.set_python_module; for a library's ops, import that "
-        "library before loading the artifact.",
-        ", ".join(names),
-        serves,
-    )
+    if names:
+        log.warning(
+            "torch.compiler.precompile: the captured graphs call %s, which no "
+            "importable module is known to register: defined in __main__, defined "
+            "with torch.library.define or torch._custom_ops.custom_op, or a C++ op "
+            "without set_python_module. %s "
+            "Define a Python op with torch.library.custom_op in an importable "
+            "module, and give a C++ op m.set_python_module; for a library's ops, "
+            "import that library before loading the artifact.",
+            ", ".join(names),
+            serves,
+        )
+    if kernels:
+        log.warning(
+            "torch.compiler.precompile: the captured graphs run the kernels %s, "
+            "which no recorded module is known to register: registered from "
+            "__main__, by a C++ extension, or by register_kernel outside the op's "
+            "module. %s Register the kernel in the op's module, or load the "
+            "extension in it, before loading the artifact.",
+            ", ".join(kernels),
+            serves,
+        )
 
 
 def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
