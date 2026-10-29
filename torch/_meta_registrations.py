@@ -234,7 +234,8 @@ def meta__transformer_encoder_layer_fwd(
     # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
     if guard_or_false(src.numel() == 0):
         return src.clone()
-    return torch.empty_like(src)
+    # The kernel's result comes out of layer_norm / addmm, so it is contiguous.
+    return torch.empty_like(src, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
@@ -574,6 +575,12 @@ def meta_randint_low(
 @register_meta([aten.rand.default, aten.rand.out])
 @out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is not None:
+        torch._check_not_implemented(
+            dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+            or dtype.is_complex,
+            lambda: f'"check_uniform_bounds" not implemented for {dtype}',
+        )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -3954,19 +3961,27 @@ def nonzero(self):
     )
 
 
+def _check_index_tensor_types(indices):
+    # Mirrors checkIndexTensorTypes(allow_int=true) in
+    # aten/src/ATen/native/IndexingUtils.h
+    for index in indices:
+        if index is not None:
+            torch._check_index(
+                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+            )
+
+
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
+    _check_index_tensor_types(indices)
     result: list[Tensor | None] = []
     for i, index in enumerate(indices):
         if index is not None:
-            torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, int, byte or bool tensors",
-            )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.uint8, torch.bool]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
@@ -4305,7 +4320,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    expected_dim = 2 if w.fake_device.type == "xpu" else 4
+    is_xpu = device_hint(w) == "xpu"
+    expected_dim = 2 if is_xpu else 4
     torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
@@ -4315,7 +4331,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    dim_n = w.size(0) if w.fake_device.type == "xpu" else w.size(0) * 8
+    dim_n = w.size(0) if is_xpu else w.size(0) * 8
     return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
@@ -5030,6 +5046,7 @@ def meta_rrelu_with_noise_(
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return torch.empty_like(self)
 
 
@@ -5050,12 +5067,13 @@ def meta__masked_scale(self, mask, scale):
 @register_meta(aten.masked_scatter_)
 def meta_masked_scatter_(self, mask, source):
     torch._check(
-        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
-    )
-    torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
         f"dtypes but got {self.dtype} and {source.dtype}",
+    )
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: f"masked_scatter_ only supports boolean masks, but got mask with dtype {mask.dtype}",
     )
     return self
 
@@ -5075,6 +5093,7 @@ def meta_masked_scatter_backward(self, mask, sizes):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return self
 
 
@@ -5975,11 +5994,11 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
-    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
-    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
+    # Only CPU, CUDA and XPU sample 5D bicubic; the trace refuses it elsewhere, as
+    # eager does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
         interpolation_mode != GridSamplerInterpolation.BICUBIC.value
-        or device_hint(input) in ("cpu", "cuda"),
+        or device_hint(input) in ("cpu", "cuda", "xpu"),
         lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
         f"on {device_hint(input)}",
     )
@@ -6794,43 +6813,10 @@ def meta__scaled_dot_product_attention_math_for_mps(
     scale: float | None = None,
     enable_gqa: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    def ensure_4d(x):
-        if x.dim() == 3:
-            return x.unsqueeze(0), True
-        elif x.dim() > 4:
-            batch_size = 1
-            for i in range(x.dim() - 3):
-                batch_size *= x.shape[i]
-            return x.reshape(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
-        else:
-            return x, False
-
     batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
-    query = query.expand(*batch_shape, *query.shape[-3:])
-    q_, unsqueezed = ensure_4d(query)
-    k_, _ = ensure_4d(key)
-    v_, _ = ensure_4d(value)
-
-    batch_size, num_head, q_size, _ = q_.shape
-    _, _, max_seq_length, value_head_size = v_.shape
-
-    def sdpa_general_mps():
-        out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
-        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
-        if unsqueezed:
-            if query.dim() == 3:
-                out = out.squeeze(0)
-                attn = attn.squeeze(0)
-            else:
-                out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
-                attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
-                out = out.view(out_shape)
-                attn = attn.view(attn_shape)
-        return out, attn
-
-    # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
-    # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
-    return sdpa_general_mps()
+    out = query.new_empty((*batch_shape, *query.shape[-3:-1], value.size(-1)))
+    # The attention weights are never materialized; the kernel returns an empty tensor.
+    return out, query.new_empty(0)
 
 
 @register_meta([aten._scaled_dot_product_efficient_attention])
@@ -9459,6 +9445,7 @@ cpp_meta_supports_symint_ops = {
     aten.as_strided_.default,
     aten.zeros.default,
     aten.detach.default,
+    aten.alias.default,
     aten.view_as_real.default,
     aten.view_as_complex.default,
     aten.set_.source_Storage_storage_offset,
@@ -9467,6 +9454,16 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
+    aten.add.Tensor,
+    aten.sub.Tensor,
+    aten.mul.Tensor,
+    aten.div.Tensor,
+    aten.add_.Tensor,
+    aten.bitwise_and.Tensor,
+    aten.le.Tensor,
+    aten.le.Scalar,
+    aten.eq.Tensor,
+    aten.ne.Scalar,
 }
 
 
