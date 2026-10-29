@@ -12,9 +12,10 @@ import operator_benchmark as op_bench
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
+    evaluate_gfx_arch_within,
+    mx_scale_swizzle,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
-    mx_scale_swizzle,
     rocm_mx_swizzle,
     SM90OrLater,
 )
@@ -392,9 +393,12 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         scale_a = mx_scale_swizzle(scale_a, x_lp.dtype)
         scale_b = mx_scale_swizzle(scale_b, y_lp.dtype)
 
-        # gfx950 and gfx1250 request SWIZZLE_32_8. Other ROCm archs stay unswizzled.
+        # gfx950 requests SWIZZLE_32_8. gfx1250 requests SWIZZLE_128.
+        # Other ROCm archs stay unswizzled.
         if torch.version.hip is None:
             swizzle_type = SwizzleType.SWIZZLE_32_4_4
+        elif swizzle_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+            swizzle_type = SwizzleType.SWIZZLE_128
         else:
             swizzle_type = (
                 SwizzleType.SWIZZLE_32_8 if swizzle_32_8 else SwizzleType.NO_SWIZZLE

@@ -239,6 +239,8 @@ def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
     """
     if not torch.version.hip and "xpu" not in device:
         return SwizzleType.SWIZZLE_32_4_4
+    if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(mat_dtype):
+        return SwizzleType.SWIZZLE_128
     return SwizzleType.SWIZZLE_32_8 if rocm_mx_swizzle(mat_dtype) else SwizzleType.NO_SWIZZLE
 
 
@@ -902,14 +904,14 @@ class TestFP8Matmul(TestCase):
         x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
         y_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
 
-        # K=128 makes the gfx1250 permutation the identity, so these linear
-        # scales are already a valid SWIZZLE_32_8 buffer. gfx1250 rejects
-        # NO_SWIZZLE. gfx950 still accepts it.
+        # K=128 makes the gfx1250 order a no-op, so these linear scales are
+        # already a valid SWIZZLE_32_8 buffer. gfx1250 rejects NO_SWIZZLE.
+        # gfx950 still accepts it.
         gfx1250_swizzle = {}
         if evaluate_gfx_arch_within(["gfx1250"]):
             gfx1250_swizzle = {
-                "swizzle_a": SwizzleType.SWIZZLE_32_8,
-                "swizzle_b": SwizzleType.SWIZZLE_32_8,
+                "swizzle_a": SwizzleType.SWIZZLE_128,
+                "swizzle_b": SwizzleType.SWIZZLE_128,
             }
         out = scaled_mm_wrap(
             x,
@@ -2766,7 +2768,7 @@ class TestFP8Matmul(TestCase):
         elif torch.version.hip:
             A_scale = to_mx_swizzled_gfx1250(A_scale, BLOCK_SIZE)
             B_scale = to_mx_swizzled_gfx1250(B_scale, BLOCK_SIZE)
-            swizzle = [SwizzleType.SWIZZLE_32_8, SwizzleType.NO_SWIZZLE]
+            swizzle = [SwizzleType.SWIZZLE_128, SwizzleType.NO_SWIZZLE]
         else:
             swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.NO_SWIZZLE]
 
@@ -3225,13 +3227,15 @@ class TestFP8Matmul(TestCase):
         )
         if not torch.version.hip:
             swizzle = SwizzleType.SWIZZLE_32_4_4
+        elif evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(x_lowp.dtype):
+            swizzle = SwizzleType.SWIZZLE_128
         elif rocm_mx_swizzle(x_lowp.dtype):
             swizzle = SwizzleType.SWIZZLE_32_8
         else:
             swizzle = SwizzleType.NO_SWIZZLE
 
         num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
-        if swizzle == SwizzleType.SWIZZLE_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+        if swizzle == SwizzleType.SWIZZLE_128:
             # gfx1250 groups 128/block K-scales (4 for MX, 8 for NVFP4).
             group = 128 // BLOCK_SIZE_K
             padded_num_k_blocks = ceil_div(num_k_blocks, group) * group
@@ -3556,10 +3560,9 @@ class TestFP8Matmul(TestCase):
         mat_dtype = torch.float4_e2m1fn_x2 if fp4 else torch.float8_e4m3fn
 
         def scale_numel(rows, k, swizzle):
+            if swizzle == SwizzleType.SWIZZLE_128:
+                return rows * round_up(ceil_div(k, 32), 4)
             if swizzle == SwizzleType.SWIZZLE_32_8:
-                # gfx1250 pads K-blocks to a multiple of 4 and does not tile rows.
-                if evaluate_gfx_arch_within(["gfx1250"]):
-                    return rows * round_up(ceil_div(k, 32), 4)
                 return round_up(rows, 32) * round_up(ceil_div(k, 32), 8)
             stored_k = k // 2 if fp4 else k
             rows_eff = rows * 2 if fp4 else rows
@@ -3589,7 +3592,7 @@ class TestFP8Matmul(TestCase):
             with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
                 with self.assertRaisesRegex(
                     NotImplementedError,
-                    "gfx1250 MX block scaling requires SWIZZLE_32_8",
+                    "gfx1250 MX block scaling requires SWIZZLE_128",
                 ):
                     ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
         else:
@@ -3602,18 +3605,20 @@ class TestFP8Matmul(TestCase):
 
         if not rocm_mx_swizzle(mat_dtype):
             return
-        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(32, 16, 32)):
-            with self.assertRaisesRegex(ValueError, "K must be a multiple of 32 for SWIZZLE_32_8"):
-                ones_mm(32, 16, 32, SwizzleType.SWIZZLE_32_8)
-        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(8, 32, 16)):
+        swizzle = SwizzleType.SWIZZLE_128 if evaluate_gfx_arch_within(["gfx1250"]) else SwizzleType.SWIZZLE_32_8
+        swizzle_name = "SWIZZLE_128" if swizzle == SwizzleType.SWIZZLE_128 else "SWIZZLE_32_8"
+        with self.subTest(swizzle=swizzle_name, mkn=(32, 16, 32)):
+            with self.assertRaisesRegex(ValueError, f"K must be a multiple of 32 for {swizzle_name}"):
+                ones_mm(32, 16, 32, swizzle)
+        with self.subTest(swizzle=swizzle_name, mkn=(8, 32, 16)):
             # N stays a multiple of 16: _scaled_mm_v2 requires that of mat2
             # regardless of swizzle. M is not.
-            got = ones_mm(8, 32, 16, SwizzleType.SWIZZLE_32_8)
+            got = ones_mm(8, 32, 16, swizzle)
             self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
         if evaluate_gfx_arch_within(["gfx1250"]) and fp4:
-            with self.subTest(swizzle="SWIZZLE_32_8", mkn=(3, 32, 16)):
-                with self.assertRaisesRegex(ValueError, "gfx1250 MX FP4 SWIZZLE_32_8"):
-                    ones_mm(3, 32, 16, SwizzleType.SWIZZLE_32_8)
+            with self.subTest(swizzle="SWIZZLE_128", mkn=(3, 32, 16)):
+                with self.assertRaisesRegex(ValueError, "gfx1250 MX FP4 SWIZZLE_128"):
+                    ones_mm(3, 32, 16, SwizzleType.SWIZZLE_128)
 
 
     @onlyAccelerator
@@ -3676,7 +3681,7 @@ class TestFP8Matmul(TestCase):
 
         # SWIZZLE_32_4_4 has no ROCm scale mode, so it must be rejected rather
         # than silently handed to hipBLASLt as unswizzled.
-        with self.assertRaisesRegex(ValueError, "must both be NO_SWIZZLE or both be SWIZZLE_32_8"):
+        with self.assertRaisesRegex(ValueError, "must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128"):
             scaled_mm(
                 A, B.t(),
                 A_scale, ScalingType.BlockWise1x32,
@@ -3710,13 +3715,13 @@ class TestFP8Matmul(TestCase):
             wrong_a = to_blocked(A_scale, swizzle_32_8=True)
             with self.assertRaisesRegex(
                 ValueError,
-                f"SWIZZLE_32_8 scale_a should have {expected} elements",
+                f"SWIZZLE_128 scale_a should have {expected} elements",
             ):
                 scaled_mm(
                     A, B.t(),
                     wrong_a, ScalingType.BlockWise1x32,
                     to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
-                    swizzle_a=SwizzleType.SWIZZLE_32_8, swizzle_b=SwizzleType.SWIZZLE_32_8,
+                    swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
                     output_dtype=torch.bfloat16,
                 )
             return
@@ -3766,13 +3771,13 @@ class TestFP8Matmul(TestCase):
             A, B.t(),
             to_mx_swizzled_gfx1250(A_scale), ScalingType.BlockWise1x32,
             to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
-            swizzle_a=SwizzleType.SWIZZLE_32_8, swizzle_b=SwizzleType.SWIZZLE_32_8,
+            swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
             output_dtype=torch.bfloat16,
         )
         sqnr = compute_error(C_ref, C).item()
-        self.assertGreater(sqnr, sqnr_target, f"SWIZZLE_32_8 gave sqnr {sqnr}")
+        self.assertGreater(sqnr, sqnr_target, f"SWIZZLE_128 gave sqnr {sqnr}")
 
-        with self.assertRaisesRegex(NotImplementedError, "gfx1250 MX block scaling requires SWIZZLE_32_8"):
+        with self.assertRaisesRegex(NotImplementedError, "gfx1250 MX block scaling requires SWIZZLE_128"):
             scaled_mm(
                 A, B.t(),
                 A_scale, ScalingType.BlockWise1x32,
@@ -3818,7 +3823,7 @@ class TestFP8Matmul(TestCase):
             # v1 hard-wires NO_SWIZZLE. gfx1250 cannot read that order.
             with self.assertRaisesRegex(
                 NotImplementedError,
-                "gfx1250 MX block scaling requires SWIZZLE_32_8",
+                "gfx1250 MX block scaling requires SWIZZLE_128",
             ):
                 scaled_mm_wrap(A, B.t(), A_scale.flatten(), B_scale.flatten(),
                                out_dtype=torch.bfloat16, wrap_v2=False)

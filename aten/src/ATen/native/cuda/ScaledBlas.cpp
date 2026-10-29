@@ -180,7 +180,7 @@ int64_t blockwise_1x16_numel_gfx1250(int64_t rows, int64_t k_unpacked) {
 }
 
 // gfx950 takes SWIZZLE_32_8 as the 32x8 tile: MX FP4 from ROCm 7.13, MX FP8
-// from 7.14. gfx1250 also requests SWIZZLE_32_8, for both MX and NVFP4.
+// from 7.14. gfx1250 requests SWIZZLE_128 for both MX and NVFP4.
 bool prefers_swizzle_32_8([[maybe_unused]] const at::Tensor& t) {
 #if ROCM_VERSION >= 71300
   const bool version_supported =
@@ -207,49 +207,54 @@ bool is_gfx1250_nvfp4() {
 #endif
 }
 
-int64_t mx_swizzle_32_8_numel(int64_t rows, int64_t k_unpacked) {
-  if (is_gfx1250_mx_swizzle()) {
-    return blockwise_1x32_numel_gfx1250(rows, k_unpacked);
-  }
-  return blockwise_1x32_numel_32_8(rows, k_unpacked);
-}
-
 // gfx950 accepts NO_SWIZZLE or SWIZZLE_32_8. gfx1250 only accepts
-// SWIZZLE_32_8, so NO_SWIZZLE is rejected there. SWIZZLE_32_4_4 has no ROCm
-// equivalent and is rejected. The pair check comes first so a mismatch is
-// not reported as a size error.
+// SWIZZLE_128. SWIZZLE_32_4_4 has no ROCm equivalent and is rejected.
+// The pair check comes first so a mismatch is not reported as a size error.
 static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, SwizzleType swizzle_b) {
   TORCH_CHECK_VALUE(swizzle_a == swizzle_b,
-      "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8, got swizzle_a=",
+      "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128, got swizzle_a=",
       static_cast<int>(swizzle_a), " and swizzle_b=", static_cast<int>(swizzle_b));
-  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE || swizzle_a == SwizzleType::SWIZZLE_32_8,
-      "For ROCM MX gemm, block scales must use NO_SWIZZLE or SWIZZLE_32_8, got ", static_cast<int>(swizzle_a));
+  TORCH_CHECK_VALUE(
+      swizzle_a == SwizzleType::NO_SWIZZLE || swizzle_a == SwizzleType::SWIZZLE_32_8 ||
+          swizzle_a == SwizzleType::SWIZZLE_128,
+      "For ROCM MX gemm, block scales must use NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128, got ",
+      static_cast<int>(swizzle_a));
   if (is_gfx1250_mx_swizzle()) {
     TORCH_CHECK_NOT_IMPLEMENTED(
-        swizzle_a == SwizzleType::SWIZZLE_32_8,
-        "gfx1250 MX block scaling requires SWIZZLE_32_8 scales. "
+        swizzle_a == SwizzleType::SWIZZLE_128,
+        "gfx1250 MX block scaling requires SWIZZLE_128 scales. "
         "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
     return;
   }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      swizzle_a != SwizzleType::SWIZZLE_128,
+      "SWIZZLE_128 block scales require gfx1250");
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
       "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
 }
 
 #if ROCM_VERSION >= 70000
-// gfx1250 MX FP4 requires even M and N and K % 32. gfx1250 MX FP8 and
-// gfx950 SWIZZLE_32_8 require K % 32. NO_SWIZZLE, including v1, keeps
-// M and N multiples of 16 and K a multiple of 128.
+// gfx1250 MX FP4 SWIZZLE_128 requires even M and N and K % 32. gfx1250 MX
+// FP8 SWIZZLE_128 and gfx950 SWIZZLE_32_8 require K % 32. NO_SWIZZLE,
+// including v1, keeps M and N multiples of 16 and K a multiple of 128.
 static void check_mx_problem_size(
     int64_t m, int64_t n, int64_t k_unpacked, SwizzleType swizzle, ScalarType dtype) {
-  if (swizzle == SwizzleType::SWIZZLE_32_8) {
+  if (swizzle == SwizzleType::SWIZZLE_128) {
     if (dtype == ScalarType::Float4_e2m1fn_x2 && is_gfx1250_mx_swizzle()) {
       TORCH_CHECK_VALUE(
           m % 2 == 0 && n % 2 == 0 && k_unpacked % 32 == 0,
-          "M and N must be even and K must be a multiple of 32 for gfx1250 MX FP4 SWIZZLE_32_8 block-wise scaling, got M=",
+          "M and N must be even and K must be a multiple of 32 for gfx1250 MX FP4 SWIZZLE_128 block-wise scaling, got M=",
           m, ", N=", n, ", K=", k_unpacked);
       return;
     }
+    TORCH_CHECK_VALUE(
+        k_unpacked % 32 == 0,
+        "K must be a multiple of 32 for SWIZZLE_128 block-wise scaling, got K=",
+        k_unpacked);
+    return;
+  }
+  if (swizzle == SwizzleType::SWIZZLE_32_8) {
     TORCH_CHECK_VALUE(
         k_unpacked % 32 == 0,
         "K must be a multiple of 32 for SWIZZLE_32_8 block-wise scaling, got K=",
@@ -881,7 +886,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // order, which v1 cannot name.
     TORCH_CHECK_NOT_IMPLEMENTED(
         !is_gfx1250_mx_swizzle(),
-        "gfx1250 MX block scaling requires SWIZZLE_32_8 scales. "
+        "gfx1250 MX block scaling requires SWIZZLE_128 scales. "
         "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
 
     int packed_factor = 1;
@@ -913,7 +918,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       scaling_choice_b == ScalingType::BlockWise1x16) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
-        "NVFP4 block scaling on ROCm requires SWIZZLE_32_8 scales. "
+        "NVFP4 block scaling on ROCm requires SWIZZLE_128 scales. "
         "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
   }
 #endif
@@ -1334,9 +1339,13 @@ _scaled_mxfp8_mxfp8(
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
   [[maybe_unused]] const char* scale_layout;
-  if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    scale_a_elems = mx_swizzle_32_8_numel(mat_a.size(0), mat_a.size(1));
-    scale_b_elems = mx_swizzle_32_8_numel(mat_b.size(1), mat_b.size(0));
+  if (swizzle_a == SwizzleType::SWIZZLE_128) {
+    scale_a_elems = blockwise_1x32_numel_gfx1250(mat_a.size(0), mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_gfx1250(mat_b.size(1), mat_b.size(0));
+    scale_layout = "SWIZZLE_128";
+  } else if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
+    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), mat_b.size(0));
     scale_layout = "SWIZZLE_32_8";
   } else {
     scale_a_elems = ceil_div<int64_t>(mat_a.size(0), 32) * mat_a.size(1);
@@ -1422,9 +1431,13 @@ _scaled_mxfp4_mxfp4(
   check_mx_swizzle(mat_a, swizzle_a, swizzle_b);
   int64_t scale_a_elems, scale_b_elems;
   [[maybe_unused]] const char* scale_layout;
-  if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
-    scale_a_elems = mx_swizzle_32_8_numel(mat_a.size(0), K_multiplier * mat_a.size(1));
-    scale_b_elems = mx_swizzle_32_8_numel(mat_b.size(1), K_multiplier * mat_b.size(0));
+  if (swizzle_a == SwizzleType::SWIZZLE_128) {
+    scale_a_elems = blockwise_1x32_numel_gfx1250(mat_a.size(0), K_multiplier * mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_gfx1250(mat_b.size(1), K_multiplier * mat_b.size(0));
+    scale_layout = "SWIZZLE_128";
+  } else if (swizzle_a == SwizzleType::SWIZZLE_32_8) {
+    scale_a_elems = blockwise_1x32_numel_32_8(mat_a.size(0), K_multiplier * mat_a.size(1));
+    scale_b_elems = blockwise_1x32_numel_32_8(mat_b.size(1), K_multiplier * mat_b.size(0));
     scale_layout = "SWIZZLE_32_8";
   } else {
     scale_a_elems = ceil_div<int64_t>(K_multiplier * mat_a.size(0), 32) * mat_a.size(1);
@@ -1525,8 +1538,8 @@ _scaled_nvfp4_nvfp4(
       out_dtype == at::kBFloat16 || out_dtype == at::kHalf,
       "NVFP4 scaled_mm only supports bf16 or fp16 output, got ", out_dtype);
   TORCH_CHECK_NOT_IMPLEMENTED(
-      swizzle_a == SwizzleType::SWIZZLE_32_8 && swizzle_b == SwizzleType::SWIZZLE_32_8,
-      "gfx1250 NVFP4 block scaling requires SWIZZLE_32_8 scales. "
+      swizzle_a == SwizzleType::SWIZZLE_128 && swizzle_b == SwizzleType::SWIZZLE_128,
+      "gfx1250 NVFP4 block scaling requires SWIZZLE_128 scales. "
       "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
   const int64_t k_unpacked_a = mat_a.size(1) * 2;
   const int64_t k_unpacked_b = mat_b.size(0) * 2;
@@ -1589,9 +1602,9 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
       // Arch support is checked by _scaled_nvfp4_nvfp4. NO_SWIZZLE reaches
       // that check so the rejection names gfx1250.
       TORCH_CHECK_VALUE(
-          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
               swizzle_a[0] == swizzle_b[0],
-          "For ROCM NVFP4 gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8");
+          "For ROCM NVFP4 gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_128");
       if (two_level) {
         TORCH_CHECK_VALUE(
             swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,
@@ -1612,9 +1625,10 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
         swizzle_b.size());
     // Arch support for SWIZZLE_32_8 is checked by the per-impl functions.
     TORCH_CHECK_VALUE(
-        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8) &&
+        (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_32_8 ||
+            swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
             swizzle_a[0] == swizzle_b[0],
-        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_32_8");
+        "For ROCM MX gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128");
 #else
     TORCH_CHECK_VALUE(
         swizzle_a.size() == num_args,

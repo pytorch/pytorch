@@ -635,8 +635,8 @@ def _get_torch_rocm_version():
 def rocm_mx_swizzle(mat_dtype):
     """Whether this device takes MX block scales for `mat_dtype` pre-swizzled.
 
-    Both archs request SwizzleType.SWIZZLE_32_8. gfx950 uses a 32x8 tile.
-    gfx1250 uses a different order. `mx_scale_swizzle` builds the matching bytes.
+    gfx950 requests SWIZZLE_32_8, a 32x8 tile. gfx1250 requests SWIZZLE_128.
+    `mx_scale_swizzle` builds the matching bytes.
     """
     if not torch.version.hip:
         return False

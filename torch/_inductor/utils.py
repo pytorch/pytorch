@@ -5946,8 +5946,8 @@ def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> b
 def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     """
     gfx950 takes SWIZZLE_32_8 as the 32x8 tile: MX FP4 from ROCm 7.13 and MX
-    FP8 from 7.14. gfx1250 also requests SWIZZLE_32_8, but its scale count is
-    different and is handled by `_gfx1250_scale_swizzle`.
+    FP8 from 7.14. gfx1250 requests SWIZZLE_128; its count is handled by
+    `_gfx1250_scale_swizzle`.
     """
     # is_available() is not stable across a process lifetime, so it must stay
     # outside the cache -- a False from before device init would otherwise be
@@ -5975,7 +5975,7 @@ def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
 
 
 def _gfx1250_scale_swizzle() -> tuple[bool, bool]:
-    """Whether gfx1250 accepts SWIZZLE_32_8 for MX and for NVFP4.
+    """Whether gfx1250 accepts SWIZZLE_128 for MX and for NVFP4.
 
     The MX count is rows * round_up(K/32, 4). The NVFP4 count is
     rows * round_up(K/16, 8). Both equal the unswizzled count on some
@@ -6053,7 +6053,7 @@ def _infer_scale_swizzle_impl(
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
                 scale_numel, expected_numel_b
             ):
-                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_8
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128
         else:
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
@@ -6095,7 +6095,7 @@ def _infer_scale_swizzle_impl(
                 if eq_fn(scale_numel, expected_numel_a) or eq_fn(
                     scale_numel, expected_numel_b
                 ):
-                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128
             # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
             # because the two counts are equal whenever the paddings coincide
             # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the

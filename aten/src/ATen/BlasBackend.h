@@ -44,9 +44,11 @@ enum class ScalingType : std::uint8_t {
 enum class SwizzleType : std::uint8_t {
   NO_SWIZZLE = 0,
   SWIZZLE_32_4_4 = 1, // cuBLAS 128x4-tiled block scales
-  // Caller pre-swizzled block scales. gfx950 uses a 32x8 tile. gfx1250 uses
-  // a different order for MX and for NVFP4. Both are requested as SWIZZLE_32_8.
+  // gfx950 32x8 tile.
   SWIZZLE_32_8 = 2,
+  // gfx1250 order. Scales are grouped by 128 along K: 4 scales for MX
+  // (block 32) and 8 scales for NVFP4 (block 16).
+  SWIZZLE_128 = 3,
 };
 
 } // namespace blas

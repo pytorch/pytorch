@@ -198,7 +198,7 @@ inline int cublasLtMatmulScaleMode(
 #endif
       }
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
-      // gfx1250 SWIZZLE_32_8 and gfx950 NO_SWIZZLE enter here.
+      // gfx1250 SWIZZLE_128 and gfx950 NO_SWIZZLE enter here.
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #else
       TORCH_CHECK(

@@ -2058,7 +2058,15 @@ class TestScaleSwizzleInference(TestCase):
     `to_blocked` hands back the 32x8 buffer flattened.
     """
 
-    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8, gfx1250=(False, False), scale_dtype=None):
+    def _infer(
+        self,
+        mat_size,
+        scale_size,
+        mat_dtype,
+        prefers_32_8,
+        gfx1250=(False, False),
+        scale_dtype=None,
+    ):
         if scale_dtype is None:
             scale_dtype = torch.float8_e8m0fnu
         with (
@@ -2116,13 +2124,15 @@ class TestScaleSwizzleInference(TestCase):
         # M=128, K=128: gfx1250 holds 512 scales, the same as NO_SWIZZLE.
         mat_size = (128, 64 if packed else 128)
         self.assertEqual(
-            self._infer(mat_size, (512,), mat_dtype, prefers_32_8=False, gfx1250=(True, False)),
-            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+            self._infer(
+                mat_size, (512,), mat_dtype, prefers_32_8=False, gfx1250=(True, False)
+            ),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128),
         )
 
     def test_gfx1250_nvfp4_wins_the_padded_tie(self):
         # M=128, unpacked K=128: gfx1250 holds 1024 scales, the same as the
-        # 128-padded NVFP4 layout, but the swizzle is SWIZZLE_32_8.
+        # 128-padded NVFP4 layout, but the swizzle is SWIZZLE_128.
         self.assertEqual(
             self._infer(
                 (128, 64),
@@ -2132,7 +2142,7 @@ class TestScaleSwizzleInference(TestCase):
                 gfx1250=(False, True),
                 scale_dtype=torch.float8_e4m3fn,
             ),
-            (ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_8),
+            (ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128),
         )
 
     @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])

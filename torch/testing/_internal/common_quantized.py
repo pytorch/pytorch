@@ -513,7 +513,7 @@ def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     return x_f32.to(torch.bfloat16)
 
 def to_mx_swizzled_gfx1250(input_matrix, block_size: int = 32) -> torch.Tensor:
-    """Reorder (rows, K/block_size) scales into the gfx1250 SWIZZLE_32_8 order.
+    """Reorder (rows, K/block_size) scales into the gfx1250 SWIZZLE_128 order.
 
     Groups of ``128 // block_size`` K-scales are stored together. block_size
     is 32 for MX and 16 for NVFP4. This is not the gfx950 32x8 tile.
