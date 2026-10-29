@@ -1878,8 +1878,8 @@ def triton_kernel_wrapper_mutation_functionalize(
         lambda unwrapped_kwargs: get_mutated_tensors(
             kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
         ),
-        kwargs,
-        hop_kwargs,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
     )
     return None
 
@@ -1906,10 +1906,10 @@ def triton_kernel_wrapper_functional_dense(
         hop_kwargs["launch_kwargs"] = launch_kwargs
     return functional_hop_dense(
         triton_kernel_wrapper_mutation,
-        hop_kwargs,
-        kwargs,
-        tensors_to_clone,
-        tensor_bases,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
     )
 
 
@@ -1925,7 +1925,9 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    return functional_hop_fake(kwargs, tensors_to_clone, tensor_bases)
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -1987,10 +1989,10 @@ def triton_kernel_wrapper_functional_functionalize(
     return functionalize_functional_hop(
         ctx,
         triton_kernel_wrapper_functional,
-        hop_kwargs,
-        kwargs,
-        tensors_to_clone,
-        tensor_bases,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
     )
 
 
