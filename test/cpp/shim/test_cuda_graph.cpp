@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Sleep.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
@@ -14,6 +15,8 @@
 
 namespace {
 
+constexpr int32_t kThreadLocal = cudaStreamCaptureModeThreadLocal;
+
 class AOTICudaGraphTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -21,7 +24,7 @@ class AOTICudaGraphTest : public ::testing::Test {
       GTEST_SKIP() << "CUDA is not available";
     }
     ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool_), AOTI_TORCH_SUCCESS);
-    ASSERT_EQ(aoti_torch_create_cuda_graph(&graph_), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_create_cuda_graph(0, 8, &graph_), AOTI_TORCH_SUCCESS);
     capture_stream_ = at::cuda::getStreamFromPool();
   }
 
@@ -37,11 +40,15 @@ class AOTICudaGraphTest : public ::testing::Test {
   // Captures fn's work into graph (default graph_) on the capture stream and
   // returns its result.
   template <typename Fn>
-  at::Tensor capture(Fn fn, CUDAGraphHandle graph = nullptr) {
+  at::Tensor capture(
+      Fn fn,
+      CUDAGraphHandle graph = nullptr,
+      int32_t mode = kThreadLocal) {
     graph = graph != nullptr ? graph : graph_;
     at::cuda::CUDAStreamGuard guard(*capture_stream_);
     EXPECT_EQ(
-        aoti_torch_cuda_graph_capture_begin(graph, pool_), AOTI_TORCH_SUCCESS);
+        aoti_torch_cuda_graph_capture_begin(graph, pool_, mode),
+        AOTI_TORCH_SUCCESS);
     auto out = fn();
     EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph), AOTI_TORCH_SUCCESS);
     return out;
@@ -73,6 +80,25 @@ TEST_F(AOTICudaGraphTest, CapturesAndReplays) {
   EXPECT_TRUE(y.equal(x * 2 + 1));
 }
 
+TEST_F(AOTICudaGraphTest, CapturesInEachMode) {
+  for (int32_t mode :
+       {cudaStreamCaptureModeGlobal,
+        cudaStreamCaptureModeThreadLocal,
+        cudaStreamCaptureModeRelaxed}) {
+    // A deleted graph's pool can't take new captures, so each mode starts
+    // over.
+    ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_delete_cuda_mem_pool(pool_), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool_), AOTI_TORCH_SUCCESS);
+    ASSERT_EQ(aoti_torch_create_cuda_graph(0, 8, &graph_), AOTI_TORCH_SUCCESS);
+    auto x = at::zeros({8}, at::kCUDA);
+    auto y = capture([&] { return x + 1; }, graph_, mode);
+    x.fill_(3);
+    ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
+    EXPECT_TRUE(y.equal(at::full({8}, 4.0, at::kCUDA)));
+  }
+}
+
 TEST_F(AOTICudaGraphTest, ReplaysAdvanceRng) {
   auto y = capture([] { return at::rand({1024}, at::kCUDA); });
   ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
@@ -93,7 +119,7 @@ TEST_F(AOTICudaGraphTest, GraphKeepsDeletedPoolsMemory) {
 
 TEST_F(AOTICudaGraphTest, GraphsShareAPool) {
   CUDAGraphHandle second = nullptr;
-  ASSERT_EQ(aoti_torch_create_cuda_graph(&second), AOTI_TORCH_SUCCESS);
+  ASSERT_EQ(aoti_torch_create_cuda_graph(0, 8, &second), AOTI_TORCH_SUCCESS);
   auto x = at::zeros({8}, at::kCUDA);
   auto y1 = capture([&] { return x + 1; });
   auto y2 = capture([&] { return x * 2; }, second);
@@ -103,6 +129,19 @@ TEST_F(AOTICudaGraphTest, GraphsShareAPool) {
   ASSERT_EQ(replay(second), AOTI_TORCH_SUCCESS);
   EXPECT_TRUE(y2.equal(at::full({8}, 6.0, at::kCUDA)));
   EXPECT_EQ(aoti_torch_delete_cuda_graph(second), AOTI_TORCH_SUCCESS);
+}
+
+TEST_F(AOTICudaGraphTest, KeepsTheGraph) {
+  CUDAGraphHandle kept = nullptr;
+  ASSERT_EQ(aoti_torch_create_cuda_graph(1, 8, &kept), AOTI_TORCH_SUCCESS);
+  auto x = at::zeros({8}, at::kCUDA);
+  auto y = capture([&] { return x + 1; }, kept);
+  for (double v : {3.0, 5.0}) {
+    x.fill_(v);
+    ASSERT_EQ(replay(kept), AOTI_TORCH_SUCCESS);
+    EXPECT_TRUE(y.equal(at::full({8}, v + 1, at::kCUDA)));
+  }
+  EXPECT_EQ(aoti_torch_delete_cuda_graph(kept), AOTI_TORCH_SUCCESS);
 }
 
 TEST_F(AOTICudaGraphTest, ReplaysOnTheCurrentStream) {
@@ -124,7 +163,8 @@ TEST_F(AOTICudaGraphTest, OtherThreadsRunDuringCapture) {
   {
     at::cuda::CUDAStreamGuard guard(*capture_stream_);
     ASSERT_EQ(
-        aoti_torch_cuda_graph_capture_begin(graph_, pool_), AOTI_TORCH_SUCCESS);
+        aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
+        AOTI_TORCH_SUCCESS);
     y = x + 1;
   }
   // Another thread allocates, launches and syncs on its own stream and on the
@@ -168,7 +208,8 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
     // The capture uses device 1's default generator, which nothing created.
     at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromPool(false, 1));
     ASSERT_EQ(
-        aoti_torch_cuda_graph_capture_begin(graph_, pool), AOTI_TORCH_SUCCESS);
+        aoti_torch_cuda_graph_capture_begin(graph_, pool, kThreadLocal),
+        AOTI_TORCH_SUCCESS);
     y = at::rand({1024}, at::Device(at::kCUDA, 1));
     ASSERT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_SUCCESS);
   }
@@ -217,11 +258,23 @@ TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
 
 TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
   EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_begin(graph_, nullptr), AOTI_TORCH_FAILURE);
+      aoti_torch_cuda_graph_capture_begin(graph_, nullptr, kThreadLocal),
+      AOTI_TORCH_FAILURE);
   EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_begin(nullptr, pool_), AOTI_TORCH_FAILURE);
+      aoti_torch_cuda_graph_capture_begin(nullptr, pool_, kThreadLocal),
+      AOTI_TORCH_FAILURE);
   EXPECT_EQ(aoti_torch_cuda_graph_capture_end(nullptr), AOTI_TORCH_FAILURE);
   EXPECT_EQ(aoti_torch_cuda_graph_replay(nullptr), AOTI_TORCH_FAILURE);
+  {
+    at::cuda::CUDAStreamGuard guard(*capture_stream_);
+    EXPECT_EQ(
+        aoti_torch_cuda_graph_capture_begin(graph_, pool_, 3),
+        AOTI_TORCH_FAILURE);
+    EXPECT_FALSE(stream_is_capturing());
+  }
+  CUDAGraphHandle graph = nullptr;
+  EXPECT_EQ(aoti_torch_create_cuda_graph(0, -1, &graph), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(graph, nullptr);
   if (c10::cuda::device_count() < 2) {
     return;
   }
@@ -230,9 +283,25 @@ TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
   ASSERT_EQ(aoti_torch_create_cuda_mem_pool(1, &pool), AOTI_TORCH_SUCCESS);
   at::cuda::CUDAStreamGuard guard(*capture_stream_);
   EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_begin(graph_, pool), AOTI_TORCH_FAILURE);
+      aoti_torch_cuda_graph_capture_begin(graph_, pool, kThreadLocal),
+      AOTI_TORCH_FAILURE);
   EXPECT_FALSE(stream_is_capturing());
   EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
+}
+
+// Run with PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync.
+TEST_F(AOTICudaGraphTest, RejectsTheCudaMallocAsyncBackend) {
+  // Split so hipify keeps the name, which ROCm's allocator reports too.
+  if (c10::cuda::CUDACachingAllocator::name() !=
+      "c"
+      "udaMallocAsync") {
+    GTEST_SKIP() << "Needs the cudaMallocAsync allocator backend";
+  }
+  at::cuda::CUDAStreamGuard guard(*capture_stream_);
+  EXPECT_EQ(
+      aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
+      AOTI_TORCH_FAILURE);
+  EXPECT_FALSE(stream_is_capturing());
 }
 
 TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
@@ -242,7 +311,8 @@ TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
 #endif
   at::cuda::CUDAStreamGuard guard(*capture_stream_);
   ASSERT_EQ(
-      aoti_torch_cuda_graph_capture_begin(graph_, pool_), AOTI_TORCH_SUCCESS);
+      aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
+      AOTI_TORCH_SUCCESS);
   // Synchronizing a capturing stream is illegal and invalidates the capture.
   EXPECT_NE(cudaStreamSynchronize(capture_stream_->stream()), cudaSuccess);
   (void)cudaGetLastError();
@@ -253,7 +323,7 @@ TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
   ASSERT_EQ(aoti_torch_delete_cuda_graph(graph_), AOTI_TORCH_SUCCESS);
   ASSERT_EQ(aoti_torch_delete_cuda_mem_pool(pool_), AOTI_TORCH_SUCCESS);
   ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool_), AOTI_TORCH_SUCCESS);
-  ASSERT_EQ(aoti_torch_create_cuda_graph(&graph_), AOTI_TORCH_SUCCESS);
+  ASSERT_EQ(aoti_torch_create_cuda_graph(0, 8, &graph_), AOTI_TORCH_SUCCESS);
   auto x = at::zeros({8}, at::kCUDA);
   auto y = capture([&] { return x + 1; });
   ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
