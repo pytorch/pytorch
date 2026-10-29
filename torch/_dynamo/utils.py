@@ -4221,16 +4221,20 @@ def _tensor_device_types(tree: Any) -> frozenset[str]:
     ) - {"meta"}
 
 
+def _records_graph_break_ops(tx: InstructionTranslatorBase) -> bool:
+    package = tx.output.package
+    return package is not None and package.records_graph_break_ops
+
+
 def _record_graph_break_op(
     tx: InstructionTranslatorBase, record: Callable[[Any], object]
 ) -> None:
     """Calls ``record`` with the capture package, if it records graph-break ops. A
     failure only drops the record, so the graph break or error being handled stands."""
-    package = tx.output.package
-    if package is None or not package.records_graph_break_ops:
+    if not _records_graph_break_ops(tx):
         return
     try:
-        record(package)
+        record(tx.output.package)
     except Exception:
         log.debug("precompile: dropped a graph-break op record", exc_info=True)
 
