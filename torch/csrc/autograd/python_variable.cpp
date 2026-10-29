@@ -1186,24 +1186,31 @@ struct hash<NativeOpSchema> {
 // We cache the logger and debug-enabled check to avoid repeated Python calls.
 // Pattern follows torch/csrc/jit/passes/onnx/onnx_log.cpp
 namespace {
-thread_local py::object dtensor_dispatch_logger;
-thread_local py::object logging_DEBUG;
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_logging_module,
+    py::module_::import("logging"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_logging_debug,
+    get_logging_module().attr("DEBUG"))
+
 thread_local bool dtensor_dispatch_logger_initialized = false;
 thread_local bool dtensor_debug_logging_enabled = false;
+
+py::object get_dtensor_dispatch_logger() {
+  return get_logging_module().attr("getLogger")(
+      "torch.distributed.tensor._dispatch");
+}
 
 void init_dtensor_dispatch_logger() {
   if (!dtensor_dispatch_logger_initialized) {
     dtensor_dispatch_logger_initialized = true;
     try {
-      auto logging = py::module_::import("logging");
-      logging_DEBUG = logging.attr("DEBUG");
-      dtensor_dispatch_logger =
-          logging.attr("getLogger")("torch.distributed.tensor._dispatch");
       dtensor_debug_logging_enabled =
-          dtensor_dispatch_logger.attr("isEnabledFor")(logging_DEBUG)
+          get_dtensor_dispatch_logger()
+              .attr("isEnabledFor")(get_logging_debug())
               .cast<bool>();
     } catch (...) {
-      dtensor_dispatch_logger = py::none();
       dtensor_debug_logging_enabled = false;
     }
   }
@@ -1223,7 +1230,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  dtensor_dispatch_logger.attr("debug")(std::move(ss).str());
+  get_dtensor_dispatch_logger().attr("debug")(std::move(ss).str());
 }
 } // namespace
 

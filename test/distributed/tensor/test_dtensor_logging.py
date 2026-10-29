@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
+import threading
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -126,6 +128,39 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
 
+    def test_sharding_prop_cache_hit_in_worker_thread(self):
+        """A worker thread hitting the C++ sharding prop cache must exit cleanly."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dispatch_logger = logging.getLogger("torch.distributed.tensor._dispatch")
+
+        log_records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_records.append(record)
+        dispatch_logger.addHandler(handler)
+        self.addCleanup(dispatch_logger.removeHandler, handler)
+
+        x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
+
+        for level, expected_records in ((logging.WARNING, 0), (logging.DEBUG, 2)):
+            log_records.clear()
+            dispatch_logger.setLevel(level)
+
+            def worker():
+                x_dt + x_dt  # miss (populates thread-local C++ cache)
+                x_dt + x_dt  # hit (invokes log_sharding_prop_cache_hit on worker thread)
+
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join()
+            self.assertEqual(len(log_records), expected_records)
+
+        # Also test when the logger returned to C++ has no other Python references,
+        # so any dangling thread_local py::object deallocates it during thread exit
+        # after PyThreadState_DeleteCurrent() has released the GIL (even under -DNDEBUG).
+        with patch.object(logging, "getLogger", side_effect=logging.Logger):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join()
 
 if __name__ == "__main__":
     run_tests()
