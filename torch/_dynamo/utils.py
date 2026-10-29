@@ -4327,11 +4327,12 @@ def _get_fake_value_impl(
             torch._subclasses.fake_tensor.DynamicOutputShapeException,
             torch._subclasses.fake_tensor.UnsupportedOperatorException,
         )
-        if tx.output.package is not None:
-            # Most branches below graph-break, and the op then runs eagerly.
-            tx.output.package.add_graph_break_op(node.target)
-            if isinstance(cause, graph_break_causes):
-                tx.output.package.add_graph_break_op(cause.func)
+        package = tx.output.package
+        if package is not None and isinstance(cause, graph_break_causes):
+            # These graph-break below, and the op then runs eagerly; so do the
+            # TypeError and pending fake impl branches.
+            package.add_graph_break_op(node.target)
+            package.add_graph_break_op(cause.func)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -4434,6 +4435,8 @@ def _get_fake_value_impl(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
+            if package is not None:
+                package.add_graph_break_op(node.target)
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
@@ -4458,6 +4461,8 @@ def _get_fake_value_impl(
             # so do NOT wrap it as a hard TorchRuntimeError.
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
+            if package is not None:
+                package.add_graph_break_op(node.target)
             unimplemented(
                 gb_type="Custom op missing fake impl during tracing",
                 context=f"{node.target}",
