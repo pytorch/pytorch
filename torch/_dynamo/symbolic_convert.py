@@ -5066,10 +5066,14 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
-        if self.output.count_calls() > 1:
-            # perf optimization only
-            self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
-            return True
+        calls = 0
+        for node in self.output.graph.nodes:
+            if "call" in node.op:
+                calls += 1
+                if calls > 1:
+                    # perf optimization only
+                    self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
+                    return True
         return False
 
     def format_frame_summary(

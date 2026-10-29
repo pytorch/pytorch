@@ -4120,6 +4120,11 @@ def is_torch_inline_allowed(filename: str) -> bool:
 
 
 @functools.cache
+def _is_builtin_inline_when_called(filename: str, prefixes: tuple[str, ...]) -> bool:
+    return filename.startswith(prefixes)
+
+
+@functools.cache
 def get_ngb_suppress_inlinelist() -> set[str]:
     torch_dir = _module_dir(torch)
     if torch_dir is None:
@@ -4326,5 +4331,6 @@ def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
+    torch._dynamo.trace_rules._is_builtin_inline_when_called.cache_clear()
     torch._dynamo.trace_rules.get_ngb_suppress_inlinelist.cache_clear()
     torch._dynamo.trace_rules.dynamo_dir.cache_clear()
