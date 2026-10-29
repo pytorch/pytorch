@@ -6,7 +6,7 @@ import torch
 """Microbenchmarks for grouped_mm on MoE expert GEMMs.
 
 Shapes follow the Primus-Turbo grouped GEMM benchmark
-(benchmark/ops/training/bench_grouped_gemm_torch.py): for each model, the GateUP
+(benchmark/ops/training/bench_grouped_gemm_torch.py): for each MoE config, the GateUP
 (N = 2 * moe_intermediate_size, K = hidden_size) and Down (N = hidden_size,
 K = moe_intermediate_size) projections with B = n_routed_experts / EP local experts
 for EP in (32, 16, 8), and M tokens routed to every expert.
@@ -16,43 +16,42 @@ times backward through both inputs (dX and dW). Each test first checks the outpu
 and dW against per-group matmuls with Primus-Turbo's tolerances.
 """
 
-# model: (n_routed_experts, moe_intermediate_size, hidden_size)
-MOE_MODELS = {
-    "DeepSeek-V3": (256, 2048, 7168),
-    "DeepSeek-V4-Pro": (384, 3072, 7168),
-    "MiniMax-M3": (128, 3072, 6144),
-    "DeepSeek-V2": (160, 1536, 5120),
-    "DeepSeek-V2-Lite": (64, 1408, 2048),
-    "Grok-2": (8, 16384, 8192),
-    "GPT-OSS-20B": (32, 2880, 2880),
-    "Qwen3-30B-A3B": (128, 2048, 2048),
-    "Qwen3-235B-A22B": (128, 4096, 4096),
-    "Mixtral-8x7B": (8, 14336, 4096),
-    "Mixtral-8x22B": (8, 16384, 6144),
-    "Kimi-K2": (384, 2048, 7168),
-    "MoE-1T": (224, 1920, 8192),
-}
+# (n_routed_experts, moe_intermediate_size, hidden_size), in Primus-Turbo's order
+MOE_CONFIGS = [
+    (256, 2048, 7168),
+    (384, 3072, 7168),
+    (128, 3072, 6144),
+    (160, 1536, 5120),
+    (64, 1408, 2048),
+    (8, 16384, 8192),
+    (32, 2880, 2880),
+    (128, 2048, 2048),
+    (128, 4096, 4096),
+    (8, 14336, 4096),
+    (8, 16384, 6144),
+    (384, 2048, 7168),
+    (224, 1920, 8192),
+]
 EP_SIZES = (32, 16, 8)
 TOKENS_PER_EXPERT = (512, 1024, 2048, 4096, 8192, 16384)
 
 
-def moe_shapes(models=MOE_MODELS, tokens_per_expert=TOKENS_PER_EXPERT):
+def moe_shapes(configs=MOE_CONFIGS, tokens_per_expert=TOKENS_PER_EXPERT):
     shapes = []
-    for model, (experts, intermediate, hidden) in models.items():
+    for experts, intermediate, hidden in configs:
         projs = {"GateUP": (2 * intermediate, hidden), "Down": (hidden, intermediate)}
         for ep in EP_SIZES:
             if experts % ep != 0:
                 continue
             for M in tokens_per_expert:
                 for proj, (N, K) in projs.items():
-                    shapes.append([f"{model}-{proj}", experts // ep, M, N, K])
+                    shapes.append([proj, experts // ep, M, N, K])
     return shapes
 
 
-deepseek_v3 = {"DeepSeek-V3": MOE_MODELS["DeepSeek-V3"]}
 grouped_mm_configs_short = op_bench.config_list(
     attr_names=["case", "B", "M", "N", "K"],
-    attrs=[s for s in moe_shapes(deepseek_v3, (512, 4096)) if s[1] == 8],
+    attrs=[s for s in moe_shapes(MOE_CONFIGS[:1], (512, 4096)) if s[1] == 8],
     cross_product_configs={
         "device": ["cuda"],
         "dtype": [torch.bfloat16],
