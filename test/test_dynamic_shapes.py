@@ -831,6 +831,34 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         self.assertFalse(any(i.has(sympy.Gt, sympy.Ge) for i in implications))
         self.assertTrue(all(i == canonicalize_bool_expr(i) for i in implications))
 
+    def test_canonicalize_bool_expr_constant_difference(self):
+        # sympy leaves relations between bitwise expressions unevaluated, so
+        # canonicalize_bool_expr moves everything to one side and leaves a
+        # constant there. It must keep the sign and the zero of that constant.
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5)
+        x = (s0 & 3).node.expr
+        cases = [
+            sympy.Lt(x, x, evaluate=False),
+            sympy.Gt(x, x, evaluate=False),
+            sympy.Le(x, x - 1),
+            sympy.Lt(x + 3, x),
+            sympy.Ge(x, x + 2),
+            sympy.Le(x, x, evaluate=False),
+            sympy.Lt(x, x + 1),
+            sympy.Eq(x, x, evaluate=False),
+            sympy.Ne(x, x, evaluate=False),
+        ]
+        for rel in cases:
+            canon = canonicalize_bool_expr(rel)
+            self.assertEqual(canon.free_symbols, set())
+            expected = rel.xreplace({s0.node.expr: sympy.Integer(5)})
+            self.assertEqual(canon.func(*canon.args), expected, msg=str(rel))
+
+        self.assertFalse(guard_bool((s0 & 3) < (s0 & 3)))
+        self.assertFalse(guard_bool((s0 | 1) + 2 <= (s0 | 1)))
+        self.assertTrue(guard_bool((s0 & 3) <= (s0 & 3)))
+
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
@@ -4860,8 +4888,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_6 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_17: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_17,)""",
+        mul_15: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_15,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
