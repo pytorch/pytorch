@@ -5,7 +5,53 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
+#include <vector>
+
 namespace at::native::mkldnn {
+
+// Ported from ideep::convolution_forward::compute_v2 (with bias).
+// DEPRECATED
+// 2-in-1 compute (prepare & compute) with bias
+// Bias is not used if it is empty.
+// Zero points are passed explicitly as arguments for quantization
+void convolution_forward_compute_v2(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales = std::vector<float>(),
+    const std::vector<float>& weights_scales = std::vector<float>(),
+    const std::vector<float>& dst_scales = std::vector<float>(),
+    const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(),
+    const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(),
+    const ideep::attr_t& attr = ideep::attr_t());
+
+// Ported from ideep::convolution_forward::compute_v2 (without bias).
+// DEPRECATED
+// 2-in-1 compute (prepare & compute) without bias
+// Zero points are passed explicitly as arguments for quantization
+void convolution_forward_compute_v2(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales = std::vector<float>(),
+    const std::vector<float>& weights_scales = std::vector<float>(),
+    const std::vector<float>& dst_scales = std::vector<float>(),
+    const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(),
+    const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(),
+    const ideep::attr_t& attr = ideep::attr_t());
 
 // Ported from ideep::convolution_forward::compute_v3 (with bias).
 // 2-in-1 Conv computation with bias for fp32
