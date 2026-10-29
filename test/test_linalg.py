@@ -12047,21 +12047,19 @@ class TestLinalgCudaOnly(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float)
-    def test_borrow_verdict_cached_without_record_tunableop(self, device, dtype):
-        # Nearest match without record-borrowed must still cache the verdict in
-        # memory: the second call of the same shape is an exact hit, not a
-        # second FindFastestAmong. Count "finding fastest for" lines in a
-        # subprocess (VERBOSE is sticky per-process) -- exactly one validation
-        # for two identical calls.
+    def test_borrow_verdict_not_revalidated_tunableop(self, device, dtype):
+        # The verdict stands: the second call of the same shape is an exact hit,
+        # not a second FindFastestAmong. Holds whether RecordBorrowed persisted
+        # the verdict or Add only cached it in memory. LookupNearest itself
+        # never checks for an exact entry, so what protects this is the caller's
+        # Lookup guard. Count "finding fastest for" lines in a subprocess
+        # (VERBOSE is sticky per-process).
         import os
         import shutil
         import subprocess
         import sys
         import tempfile
         import textwrap
-
-        results_dir = tempfile.mkdtemp(prefix="tunableop_borrow_cache_")
-        results_filename = os.path.join(results_dir, "results.csv")
 
         script = textwrap.dedent(
             """
@@ -12088,7 +12086,7 @@ class TestLinalgCudaOnly(TestCase):
 
                 torch.cuda.tunable.tuning_enable(False)
                 torch.cuda.tunable._nearest_match_enable(True)
-                torch.cuda.tunable._record_borrowed_enable(False)
+                torch.cuda.tunable._record_borrowed_enable({record_borrowed})
 
                 # Same borrow shape twice: only the first may validate.
                 A2 = torch.randn(32, K, device=device, dtype=dtype)
@@ -12097,28 +12095,45 @@ class TestLinalgCudaOnly(TestCase):
             finally:
                 torch.cuda.tunable.enable(False)
             """
-        ).format(results_filename=results_filename, device=device, dtype=dtype)
+        )
 
-        env = os.environ.copy()
-        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
-        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
-        try:
-            result = subprocess.run(
-                [sys.executable, "-c", script],
-                capture_output=True,
-                text=True,
-                env=env,
-                cwd=os.path.dirname(__file__),
-                check=True,
-            )
-        finally:
-            shutil.rmtree(results_dir, ignore_errors=True)
+        for record_borrowed in (True, False):
+            with self.subTest(record_borrowed=record_borrowed):
+                # A fresh results file per run: reading back the previous run's
+                # entries would skip tuning and change the count.
+                results_dir = tempfile.mkdtemp(prefix="tunableop_borrow_cache_")
+                env = os.environ.copy()
+                env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+                env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+                try:
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-c",
+                            script.format(
+                                results_filename=os.path.join(
+                                    results_dir, "results.csv"
+                                ),
+                                device=device,
+                                dtype=dtype,
+                                record_borrowed=record_borrowed,
+                            ),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        cwd=os.path.dirname(__file__),
+                        check=True,
+                    )
+                finally:
+                    shutil.rmtree(results_dir, ignore_errors=True)
 
-        # The initial tuning run logs one "finding fastest for" via FindFastest;
-        # the single borrow validation logs one more via FindFastestAmong. The
-        # second identical call must be an in-memory hit and log nothing.
-        validations = result.stdout.count("finding fastest for")
-        self.assertEqual(validations, 2, result.stdout)
+                # The tuning run logs one "finding fastest for" via FindFastest
+                # and the single borrow validation one more via
+                # FindFastestAmong. The second identical call must hit the
+                # verdict and log nothing.
+                validations = result.stdout.count("finding fastest for")
+                self.assertEqual(validations, 2, result.stdout)
 
     @onlyCUDA
     @dtypes(torch.float)
