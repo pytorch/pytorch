@@ -5301,6 +5301,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             and inspect.getattr_static(obj, "__reduce_ex__")
             is collections.OrderedDict.__reduce_ex__
         ):
+            if type(obj).__qualname__ != type(obj).__name__:
+                raise_local_type_error(type(obj))
             # Native pickle normalizes storage to linked order, invalidating
             # storage-position sources and ORDERED_DICT_ORDER_MATCH on load.
             # Custom constructors/items/setitem must retain native callback order.
