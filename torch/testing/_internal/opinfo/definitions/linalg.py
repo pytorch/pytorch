@@ -656,9 +656,13 @@ def sample_inputs_linalg_ldl_factor(
     )  # zero batch of matrices
 
     # Hermitian inputs
-    # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+    # On ROCm, hermitian=True is tested only for complex inputs with MAGMA 2.5.4+
     magma_254_available = device.type == "cuda" and _get_magma_version() >= (2, 5, 4)
-    if dtype.is_complex and (device.type == "cpu" or magma_254_available):
+    if (
+        device.type == "cpu"
+        or (device.type == "cuda" and not TEST_WITH_ROCM)
+        or (dtype.is_complex and magma_254_available)
+    ):
         yield SampleInput(
             random_hermitian_pd_matrix(S, dtype=dtype, device=device),
             kwargs=dict(hermitian=True),
