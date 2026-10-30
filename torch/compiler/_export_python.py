@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
+import torch
 from torch._precompile import (
     _DynamoCapture,
     capture,
@@ -66,6 +67,8 @@ def export_python(
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
     """
+
+    torch._C._log_api_usage_once("torch.compiler.export_python")
 
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         exported = _ExportedPython(fn, path, backend, dynamic)
