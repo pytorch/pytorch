@@ -1018,6 +1018,9 @@ delay_realize_cheap_outputs: bool = Config(
 fallback_random = False
 
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+# TODO: Currently only aligned, contiguous fp32/fp16/bf16 dropout approximately matches
+# eager. Not yet handled: fp64 or misaligned/non-dense dropout, torch.rand values (and
+# fp64 offsets), randn/randint/bernoulli/uniform_, and multi-round Halide kernels.
 align_random_eager = False
 
 # Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
