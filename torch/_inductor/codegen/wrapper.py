@@ -5206,6 +5206,11 @@ class PythonWrapperCodegen(CodeGen):
         args = ", ".join(arg_str(arg) for arg in runtime_args.values())
         self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
 
+    def cutedsl_link_args(self) -> list[str]:
+        """Link arguments for the user CuTeDSL kernels the C++ wrapper exported (see
+        CppWrapperGpu); the Python wrapper launches them from Python."""
+        return []
+
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
