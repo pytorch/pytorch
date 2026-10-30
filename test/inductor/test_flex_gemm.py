@@ -1263,13 +1263,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
 
+MISSING_CUTEDSL = SM100OrLater and not lowering.has_flex_gemm_quack()
+
+
+@unittest.skipIf(MISSING_CUTEDSL, "requires CuTeDSL")
 class FlexGemmTestCase(TestCase):
     K, N = 32, 16
-
-    def setUp(self):
-        if SM100OrLater and not lowering.has_flex_gemm_quack():
-            self.skipTest("requires CuTeDSL")
-        super().setUp()
 
     @contextlib.contextmanager
     def limitEpiModAutotune(self):
