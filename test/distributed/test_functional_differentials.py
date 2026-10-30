@@ -26,10 +26,8 @@ if not dist.is_available():
 
 
 # Determine available devices
-DEVICE = "cuda"
 devices = ["cpu"]
 if acc := torch.accelerator.current_accelerator(True):
-    DEVICE = acc.type
     devices += [acc.type]
 
 
@@ -74,8 +72,8 @@ def with_comms(func=None):
         ):
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
-        self.pg = self.create_pg(device=DEVICE)
-        self.device = DEVICE
+        self.pg = self.create_pg(device=self.device_type)
+        self.device = self.device_type
         try:
             return func(self, *args, **kwargs)
         finally:
@@ -1394,9 +1392,12 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         self.assertEqual(input_tensor.grad, expected_grad)
 
 
-instantiate_device_type_tests(
-    TestFunctionalDifferentialsWithCompile, globals(), only_for=DEVICE
-)
+if acc:
+    instantiate_device_type_tests(
+        TestFunctionalDifferentialsWithCompile, globals(), only_for=acc.type
+    )
+else:
+    del TestFunctionalDifferentialsWithCompile
 
 if __name__ == "__main__":
     run_tests()

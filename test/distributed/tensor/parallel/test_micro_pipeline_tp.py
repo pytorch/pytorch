@@ -45,7 +45,9 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
+    TEST_XPU,
     TestCase,
+    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -134,6 +136,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @fresh_cache()
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5966
     @parametrize("with_reshape", (False, True))
     def test_scaled_mm_output_scale_preserves_all_gather_fusion(self, with_reshape):
         group = dist.group.WORLD
@@ -171,6 +174,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
     @fresh_cache()
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5966
     def test_scaled_mm_output_scale_folds_before_unmatched_reduce_scatter(self):
         group = dist.group.WORLD
 

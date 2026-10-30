@@ -226,7 +226,7 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = GPU_TYPE
+        self.device_type = torch.accelerator.current_accelerator().type
 
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -1171,13 +1171,12 @@ class TestDTensorDebugMode(TestCase):
             [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
         )
 
-    @unittest.skipIf(
-        not torch.accelerator.is_available()
-        or torch.get_device_module(GPU_TYPE).get_device_properties(0).total_memory
-        < 2**26,
-        "Being conservative, test peak memory is 25MB?",
-    )
     def test_tensor_hash_redistribute(self):
+        device_props = torch.get_device_module(self.device_type).get_device_properties(
+            0
+        )
+        if device_props.total_memory < 2**26:
+            self.skipTest("Being conservative, test peak memory is 25MB?")
         # test that hashing collectives gives correct results
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 

@@ -36,12 +36,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         return self.rank + 1
 
     def _requires_accelerator(self):
-        """Return True when the test variant has no accelerator, i.e. is cpu.
-
-        MultiProcContinuousTest workers wrap unittest.SkipTest as RuntimeError,
-        so @onlyCUDA / self.skipTest() poison the entire class.  Tests that
-        need an accelerator should call this and ``return`` early instead.
-        """
+        """Return True for the cpu variant; accelerator-only tests return early on it."""
         return self.device_type == "cpu"
 
     def _skip_if_product_overflows(self, op):
@@ -261,7 +256,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     def test_new_group_bare_default_backend_is_auto_qualified(self):
-        if self.device_type == "cpu":
+        if self._requires_accelerator():
             return
         ranks = list(range(self.world_size))
         backend = dist.get_default_backend_for_device(self.device_type)
@@ -271,7 +266,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     @skipIfXpu(
-        msg="second new_group() on the TorchComms xccl path hangs: "
+        msg="new_group(backend='xpu:xccl') hangs after a subgroup new_group(): "
         "https://github.com/intel/torch-xpu-ops/issues/5385"
     )
     def test_new_group_qualified_backend_passes_through(self):
