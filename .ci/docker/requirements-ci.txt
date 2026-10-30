@@ -15,6 +15,11 @@ build==1.5.0
 #Pinned versions: 1.5.0
 #test that import:
 
+certifi==2026.10.23
+#Description: Mozilla CA bundle; pinned past the eMudhra CA key compromise
+#Pinned versions: 2026.10.23
+#test that import:
+
 click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
@@ -79,6 +84,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x" and p
 # dynamic libraries that are not discoverable by our build scripts.
 mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+# Cap mkl-static's OpenMP dependency to avoid pulling in incompatible UR (#201218).
+intel-openmp<2026.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
@@ -119,7 +126,6 @@ ninja==1.13.0
 #Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x" and platform_machine != "riscv64"
 numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and platform_machine != "riscv64"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
@@ -141,7 +147,6 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.23.2; python_version == "3.10"
 numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version == "3.14"
@@ -175,7 +180,7 @@ optree==0.17.0 ; python_version >= "3.14"
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==12.3.0
+pillow==13.0.0
 #Description:  Python Imaging Library fork
 #Pinned versions: 11.0.0
 #test that import:
@@ -283,8 +288,7 @@ scipy==1.18.1 ; python_version >= "3.15"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.13.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -359,7 +363,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0
+onnx==1.23.2
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
@@ -389,7 +393,7 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
-pip==26.1.2
+pip==26.2.2
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
@@ -430,7 +434,7 @@ setuptools-git-versioning==2.1.0
 # below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
 # pinned independently.
 scikit-build==0.18.1
-scikit-build-core==1.0.0
+scikit-build-core==1.1.1
 pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
@@ -439,7 +443,7 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.14.3
+aiohttp==3.14.4
 #Description: required for torch.distributed.debug
 
 spin==0.17
