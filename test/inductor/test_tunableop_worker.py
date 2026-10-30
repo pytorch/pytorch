@@ -783,9 +783,9 @@ class TunableOpRealWorkerTest(TestCase):
     def test_job_with_settings_and_mask_survives_the_pipe(self):
         """A fully populated BenchmarkJob pickles and runs in the child.
 
-        The fake-process tests stop at what submit() stamps; without this,
-        nothing off ROCm checks that the stamped dict and the mask tuple
-        actually reach the child and that the job runs there.
+        The fake-process tests stop at what submit() stamps; this is the only
+        one recording what the child did with it -- the stamped setter calls and
+        a populated dyn_dims_mask, which nothing else sends through a worker.
         """
         with tempfile.TemporaryDirectory(prefix="tunableop_pipe_") as d:
             record = os.path.join(d, "calls.json")
@@ -851,7 +851,7 @@ class TunableOpSettingsRoundTripTest(TestCase):
 class TunableOpRealGpuWorkerTest(TestCase):
     """Real BenchmarkJob through a real worker on a GPU.
 
-    Covers what the stubbed tests cannot: the pickle round trip, and the worker
+    Covers what no stubbed test can: real tuning on a device, and the worker
     appending to the file the parent's runtime reads. Not ROCm-gated -- the
     TunableOp GEMM dispatch and its signature are the same on cuBLASLt.
     """
