@@ -1828,7 +1828,7 @@ def _available_cpu_memory():
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
-    if device_type in ["cuda", "xpu", "mtia"]:
+    if device_type in ["cuda", "xpu", "mtia", "npu"]:
         acc = torch.accelerator.current_accelerator()
         # Case 1: no accelerator found
         if not acc:
@@ -1854,6 +1854,9 @@ def _has_sufficient_memory(device, size):
 
         if device_type == "xpu":
             return torch.xpu.memory.mem_get_info(device_)[0] >= size
+
+        if device_type == "npu":
+            return torch.npu.mem_get_info()[0] >= size
 
         if device_type == "mtia":
             # MTIA has no mem_get_info; the dram stats dict exposes free_bytes
