@@ -21,6 +21,9 @@ class ShardedTensorTestBase(MultiProcessTestCase):
     def world_size(self):
         return TEST_GPU_NUM
 
+    def backend(self, device) -> str:
+        return dist.get_default_backend_for_device(device)
+
     def init_pg(self, backend="nccl"):
         # Ask the distributed framework rather than matching a fixed list, so a
         # backend registered by an out-of-tree device is accepted the same way
@@ -64,11 +67,14 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.init_pg(backend=backend)
 
     def destroy_comms(self, destroy_rpc=True):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-
+        # Shut down RPC before the barrier: graceful shutdown waits for in-flight
+        # RPCs on all workers, while a pending NCCL barrier kernel can block
+        # TensorPipe's CUDA channel (cudaDeviceSynchronize) from serving them.
         if destroy_rpc:
             rpc.shutdown()
+
+        # Wait for all ranks to reach here before destroying the process group.
+        dist.barrier()
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -100,15 +106,16 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
-        acc = torch.accelerator.current_accelerator()
-        if backend != dist.Backend.GLOO:
+        device_type = getattr(self, "device_type", None)
+        # Avoid shadowing the outer backend parameter used by legacy callers.
+        backend_name = self.backend(device_type) if device_type is not None else backend
+        if backend_name != dist.Backend.GLOO:
             if (
-                acc is None
-                or backend != dist.get_default_backend_for_device(acc)
+                not torch.accelerator.is_available()
                 or torch.accelerator.device_count() < self.world_size
             ):
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc=init_rpc, backend=backend)
+        self.init_comms(init_rpc=init_rpc, backend=backend_name)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
 
