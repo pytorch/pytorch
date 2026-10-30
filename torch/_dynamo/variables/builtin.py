@@ -57,11 +57,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
     LocalSource,
     Source,
+    TypeDictSource,
     TypeSource,
 )
 from ..utils import (
@@ -75,6 +77,7 @@ from ..utils import (
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
+    is_torch_class,
     istype,
     no_keywords,
     numpy_operator_wrapper,
@@ -101,7 +104,6 @@ from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
     DictKeysVariable,
-    DictViewVariable,
     pydict_checkexact,
 )
 from .lists import (
@@ -156,12 +158,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import (
-    FrozensetVariable,
-    OrderedSetVariable,
-    pyanyset_checkexact,
-    SetVariable,
-)
+from .sets import FrozensetVariable, pyanyset_checkexact, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -254,6 +251,8 @@ bin_int_ops = (
     operator.ior,
 )
 
+_RICH_CMP_DUNDERS = ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+
 un_int_ops = (operator.invert,)
 
 tensor_and_int_ops = (
@@ -293,15 +292,28 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-# Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
+# Raising ops need a reject check in ComputedLazyConstantVariable.create, like division
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
-    # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
-    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
+    1: frozenset(
+        [
+            operator.neg,
+            operator.pos,
+            operator.abs,
+            operator.not_,
+            operator.invert,
+            len,
+            str,
+            bool,
+        ]
+    ),
     2: frozenset(
         [
             operator.add,
             operator.sub,
             operator.mul,
+            operator.truediv,
+            operator.floordiv,
+            operator.mod,
             operator.and_,
             operator.or_,
             operator.xor,
@@ -505,6 +517,29 @@ class BaseBuiltinVariable(VariableTracker):
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if name == "__dict__":
+            # Each access allocates a fresh mappingproxy. Keep sources on its
+            # immutable builtin-type entries, not on the allocation itself.
+            dict_source = self.source and TypeDictSource(self.source)
+            items: dict[VariableTracker, VariableTracker] = {}
+            for key, value in attr.items():
+                value_source = dict_source and DictGetItemSource(dict_source, key)
+                value_vt = (
+                    variables.LazyVariableTracker.create(value, value_source, tx=tx)
+                    if value_source
+                    else VariableTracker.build(tx, value)
+                )
+                items[ConstantVariable.create(key)] = value_vt
+            return variables.MappingProxyVariable(variables.ConstDictVariable(items))
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+            # Unbound C method read off a builtin type, e.g. list.count. Torch
+            # types keep their trace-rule path through GetAttrVariable.
+            from .descriptors import MethodDescriptorVariable
+
+            owner: VariableTracker = self
+            if attr.__objclass__ is not fn:
+                owner = VariableTracker.build(tx, attr.__objclass__)
+            return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
@@ -1882,6 +1917,16 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.fn is type and len(args) == 3:
+            unimplemented(
+                gb_type="Dynamic class creation with type",
+                context="type(name, bases, namespace)",
+                explanation="Dynamo does not support tracing class creation with type().",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
         if self.fn is object and not args and not kwargs:
             # object() -> a fresh opaque instance, wrapped as ObjectVariable to
             # match how SourcelessBuilder wraps bare `object` instances. Falling
@@ -1985,12 +2030,23 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
-                return args[0].call_base_method(tx, name, args[1:], kwargs)
+                # int.__eq__(IntEnum.A, x): constant int/float/str subclass
+                # instances fall through to the rich-comparison fold below,
+                # which calls the base slot and ignores subclass overrides.
+                if not (
+                    self.fn in (int, float, str)
+                    and name in _RICH_CMP_DUNDERS
+                    and len(args) == 2
+                    and not kwargs
+                    and all(a.is_python_constant() for a in args)
+                    and isinstance(args[0].as_python_constant(), self.fn)
+                ):
+                    return args[0].call_base_method(tx, name, args[1:], kwargs)
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
         if (
-            name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
+            name in _RICH_CMP_DUNDERS
             and len(args) == 2
             and not kwargs
             and isinstance(self.fn, type)
@@ -2180,13 +2236,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
+            const_args = [a.as_python_constant() for a in args[1:]]
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
-                    *[a.as_python_constant() for a in args[1:]],
+                    *const_args,
                 )
-            except (TypeError, ValueError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+            except Exception as exc:
+                # A class body that fails CPython's own validation (e.g. an
+                # invalid enum member name) must surface as a traceable
+                # exception so a surrounding except can catch it, instead of
+                # escaping the compiled region.
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
@@ -3050,6 +3111,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # (__doc__, __module__, __qualname__, __type_params__) to real guarded
         # values so they are usable during tracing, and defer everything else
         # (callables, complex objects) to a GetAttrVariable.
+        if name == "__dict__":
+            return super().tp_getattro_impl(tx, name)
         source = self.source and AttrSource(self.source, name)
         try:
             value = getattr(self.fn, name)
@@ -3457,29 +3520,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                 sym_num=None,
             )
 
-        # Unwrap the underlying ConstDictVariable
-        if isinstance(a, DictViewVariable):
-            a = a.dv_dict
-        # Must precede the container fast path below: a user subclass now also
-        # satisfies those isinstance checks, but its __bool__/__len__ override
-        # has to win.
-        if isinstance(a, UserDefinedObjectVariable):
-            bool_result = self.call_bool(tx, a)
-            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
-        if isinstance(
-            a,
-            (
-                ListVariable,
-                ConstDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                variables.DictKeySetVariable,
-                OrderedSetVariable,
-            ),
-        ):
-            return VariableTracker.build(tx, len(a.items) == 0)
-
-        return None
+        # Mirrors PyObject_Not.
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L1921-L1929
+        result = generic_is_true(tx, a)
+        if isinstance(result, SymNodeVariable):
+            return self.call_not_(tx, result)
+        return VariableTracker.build(tx, not result.as_python_constant())
 
     def call_contains(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
@@ -3932,10 +3978,15 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     input_node = obj.as_proxy().node
                     if input_node.op == "placeholder":
                         ev = input_node.meta.get("example_value")
-                        if ev is not None and hasattr(ev, "fake_mode"):
+                        from torch._subclasses.fake_tensor import (
+                            is_fake_tensor,
+                            maybe_get_fake_mode,
+                        )
+
+                        if is_fake_tensor(ev):
                             from torch._subclasses.fake_impls import fast_detach
 
-                            snapshot = fast_detach(ev.fake_mode, ev)
+                            snapshot = fast_detach(maybe_get_fake_mode(ev), ev)
                             tx.output._shallow_copy_placeholder_snapshots.setdefault(
                                 input_node, snapshot
                             )
@@ -4063,7 +4114,12 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
                     )
-                elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                elif not isinstance(obj, variables.UnspecializedNNModuleVariable) and (
+                    obj.tp_as_sequence.sq_length is not None
+                    or obj.tp_as_mapping.mp_length is not None
+                ):
+                    # Iterables need not be Sized. Unsized user-defined objects
+                    # are guarded through the state read while tracing iteration.
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())

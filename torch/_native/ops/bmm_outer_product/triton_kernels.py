@@ -24,7 +24,7 @@ def _bmm_log_key(a, b, out, B, M, N, *strides, BLOCK_M, BLOCK_N, num_warps) -> s
 
 
 @instrumented_triton_cache("aten::bmm", key_fn=_bmm_log_key)
-def _bmm_outer_product_kernel(
+def _bmm_outer_product_aot_kernel(
     A_ptr,
     B_ptr,
     OUT_ptr,
@@ -49,6 +49,9 @@ def _bmm_outer_product_kernel(
     # of the output gigabytes before its buffer.
     pid = tl.program_id(0).to(tl.int64)
 
+    # Widen before cdiv adds BLOCK_* - 1, including when a dimension is INT32_MAX.
+    M = tl.cast(M, tl.int64)
+    N = tl.cast(N, tl.int64)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     tiles_per_batch = grid_m * grid_n
@@ -75,6 +78,9 @@ def _bmm_outer_product_kernel(
         out,
         mask=mask,
     )
+
+
+_bmm_outer_product_kernel = _bmm_outer_product_aot_kernel
 
 
 def _pick_block_sizes(m: int, n: int) -> tuple[int, int]:
@@ -133,3 +139,51 @@ def bmm_outer_product(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         num_warps=_TRITON_DEFAULT_NUM_WARPS,
     )
     return out
+
+
+# fp16 is absent on purpose: the declaration's _DTYPES leaves it to the JIT override,
+# so a key here would be a point no grid can reach.
+_TL_DTYPES = {"float32": "fp32", "bfloat16": "bf16"}
+_DTYPE_SHORT = {"float32": "f32", "bfloat16": "bf16"}
+
+
+def build(spec: dict) -> dict:
+    """One spec point -> a Triton AOT compile request + sidecar. Innermost strides are
+    baked to constexpr 1, so only inner-contiguous layouts are served."""
+    dtype = spec["dtype"]
+    tl_ty = _TL_DTYPES[dtype]
+    bm, bn = int(spec["BLOCK_M"]), int(spec["BLOCK_N"])
+    prefix = f"bmm_outer_{_DTYPE_SHORT[dtype]}_bm{bm}_bn{bn}"
+    # Parity with the JIT specializer's baked strides and 16B hints: without them the
+    # SASS is generically addressed, measured ~7x slower. The ":16" suffix is the
+    # toolchain's spelling for a tt.divisibility attr, which the prelude's 16B
+    # alignment tests are what make true.
+    ptr = f"*{tl_ty}:16"
+    signature = ", ".join(
+        [ptr, ptr, ptr, "i32", "i32", "i32"]
+        + ["i32", "1", "i32", "1", "i32", "i32", "1"]  # am/bn/on baked to 1
+        + [str(bm), str(bn)]
+    )
+    grid_x = f"B_dim*(((M+{bm - 1}LL)/{bm})*((N+{bn - 1}LL)/{bn}))"
+    return {
+        "kind": "triton",
+        "prefix": prefix,
+        "fn": _bmm_outer_product_aot_kernel,
+        "signature": signature,
+        # Evaluated in the generated launcher, over the named scalar args.
+        "launch": {"grid_x": grid_x},
+        "num_warps": 4,
+        # Signature order, constexprs excluded; passed positionally.
+        "args": [
+            {"name": "a", "kind": "tensor", "read_only": True},
+            {"name": "b", "kind": "tensor", "read_only": True},
+            {"name": "out", "kind": "tensor"},
+            {"name": "B_dim", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "M", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "N", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "stride_ab", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "stride_bb", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "stride_ob", "kind": "scalar", "ctype": "int32_t"},
+            {"name": "stride_om", "kind": "scalar", "ctype": "int32_t"},
+        ],
+    }
