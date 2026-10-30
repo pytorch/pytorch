@@ -38,6 +38,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 def remove_file_comment(gm_str: str) -> str:
     return remove_trailing_space(re.sub(r"File.*\n", "\n", gm_str))
 

@@ -7777,6 +7777,7 @@ else:
 if TEST_XPU:
     device_types += ("xpu", )
 
+device_types += ("privateuse1", )
 
 instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)

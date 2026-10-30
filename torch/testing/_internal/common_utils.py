@@ -5999,6 +5999,39 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
+# Default gradcheck parameters — these match the values already used by
+# torch.autograd.gradcheck (see torch/autograd/gradcheck.py).
+# Extracting them as constants lets privateuse1 backends override them
+# with dtype-appropriate values (e.g. wider tolerances for float32-only
+# hardware) in their test overlay.
+GRADCHECK_DEFAULT_EPS = 1e-6
+GRADCHECK_DEFAULT_ATOL = 1e-5
+GRADCHECK_DEFAULT_RTOL = 1e-3
+
+# Default tolerances for comparing gradients produced by a split backward
+# against a monolithic .backward() reference. The two reduce in a different
+# order, so non-associative summation makes them diverge by more than the dtype
+# default on hardware whose matmul accumulates below full float32 width. None
+# means use the torch.testing.assert_close default for the dtype. Backends that
+# need wider bounds override these in their test overlay.
+SPLIT_BACKWARD_GRAD_ATOL: float | None = None
+SPLIT_BACKWARD_GRAD_RTOL: float | None = None
+
+
+def split_backward_grad_tolerances() -> dict:
+    """Keyword args for assert_close when comparing a split backward to a reference.
+
+    Reads the constants above at call time rather than import time, so a backend
+    overlay can set them after the test module has been imported. Both are passed
+    together because assert_close rejects one without the other. When both are
+    None, falls back to the per-dtype default.
+    """
+    return {
+        "atol": SPLIT_BACKWARD_GRAD_ATOL,
+        "rtol": SPLIT_BACKWARD_GRAD_RTOL,
+    }
+
+
 TEST_WITH_SLOW_GRADCHECK: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW_GRADCHECK",
     env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK",
@@ -6020,6 +6053,9 @@ def gradcheck(fn, inputs, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "eps": GRADCHECK_DEFAULT_EPS,
+        "atol": GRADCHECK_DEFAULT_ATOL,
+        "rtol": GRADCHECK_DEFAULT_RTOL,
     }
 
     if TEST_WITH_SLOW_GRADCHECK:
@@ -6040,6 +6076,9 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     default_values = {
         "check_batched_grad": True,
         "fast_mode": True,
+        "eps": GRADCHECK_DEFAULT_EPS,
+        "atol": GRADCHECK_DEFAULT_ATOL,
+        "rtol": GRADCHECK_DEFAULT_RTOL,
     }
 
     if TEST_WITH_SLOW_GRADCHECK:
@@ -6657,7 +6696,12 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     limit specifies how many tensors to dump debug graphs for (default=1)
     """
     def match_obj(obj):
-        return isinstance(obj, matched_type)
+        if not isinstance(obj, matched_type):
+            return False
+        # Meta tensors are excluded: they own no storage, so cannot leak memory.
+        # Counting them makes this report count reference-cycle hygiene rather
+        # than leaked memory, and produces failures that depend on when the collector happens to run.
+        return not (isinstance(obj, torch.Tensor) and obj.device.type == "meta")
 
     try:
         gc.collect()
@@ -6687,6 +6731,9 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
 
     finally:
         gc.set_debug(0)
+        # gc.garbage is module-global and gc.set_debug(0) does not empty it, so
+        # entries saved here would otherwise outlive this block.
+        del gc.garbage[:]
 
 
 def _win_rmtree_onerror(func, path, exc_info):

@@ -14,6 +14,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     """Tests for enable_dynamo_decompositions config flag.
 

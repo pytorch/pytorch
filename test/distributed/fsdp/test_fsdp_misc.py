@@ -35,6 +35,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
+    DEVICE_TYPE,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,

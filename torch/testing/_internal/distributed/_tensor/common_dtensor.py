@@ -5,6 +5,7 @@
 import contextlib
 import copy
 import functools
+import os
 import itertools
 import sys
 import threading
@@ -73,6 +74,9 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 
 DEVICE_COUNT: int
+
+ENABLE_FOR_PRIVATEUSE1: bool = True
+
 
 if TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1:
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
@@ -814,7 +818,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
-        if backend not in [
+        _known = [
             "nccl",
             "nccl-legacy",
             "gloo",
@@ -826,7 +830,15 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "xccl",
             "fake",
             "cpu:gloo,xpu:xccl",
-        ]:
+        ]
+
+        # Dynamically accept the current device's registered backend,
+        # but only if the plugin hasn't opted out.
+        if curr_backend and ENABLE_FOR_PRIVATEUSE1:
+            _known.append(curr_backend)
+            _known.append(f"cpu:gloo,{self.device_type}:{curr_backend}")
+
+        if backend not in _known:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
@@ -1612,3 +1624,25 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
         _clear_sharding_prop_cache()
+
+
+if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
+    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
+        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
+    )
+
+    class DTensorOpTestBase(DTensorTestBase):  # type: ignore[no-redef]
+        @property
+        def world_size(self):
+            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, NUM_DEVICES)
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if "world_size" in cls.__dict__:
+                orig = cls.__dict__["world_size"]
+                if isinstance(orig, property):
+                    cls.world_size = property(
+                        lambda self, f=orig.fget: min(
+                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
+                        )
+                    )

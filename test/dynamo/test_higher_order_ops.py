@@ -16,7 +16,9 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     check_dynamic_shape_capture,
     CompileCounter,
     CompileCounterWithBackend,
@@ -3961,7 +3963,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         def fn(x):
             return torch.vmap(lambda x: x.sin())(x)
 
-        x = torch.randn(3, 3, 4, 5)
+        x = torch.randn(3, 3, 4, 5, device=device_type)
         y = fn(x)
         # sanity check
         self.assertEqual(len(records), 0)
@@ -6519,7 +6521,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):
@@ -6537,7 +6539,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):
@@ -6555,7 +6557,7 @@ class GraphModule(torch.nn.Module):
         def f(x):
             return x**2
 
-        x = torch.randn(2, requires_grad=True)
+        x = torch.randn(2, requires_grad=True, device=device_type)
         y = f(x)
 
         def get_vjp(v):

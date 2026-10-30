@@ -83,6 +83,11 @@ if torch.accelerator.is_available():
         DEVICE_COUNT = torch.accelerator.device_count()
     del acc  # avoid exposing a module-level temporary
 
+# Device types supported by FSDP device-type-parameterized tests.
+FSDP_DEVICES = ("cuda", "hpu", "xpu")
+if TEST_PRIVATEUSE1:
+    FSDP_DEVICES = FSDP_DEVICES + (DEVICE_TYPE,)
+
 
 class FSDPInitMode(Enum):
     # No FSDP wrapping
@@ -663,6 +668,8 @@ class ModuleWithDelay(FSDPTestModel):
                 )
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
+            else:
+                time.sleep(self.delay_after_loss_ms / 1000)
 
         return loss
 
@@ -1268,12 +1275,13 @@ class FSDPTestMixin:
 
         torch._dynamo.reset()
         set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
+        try:
+            self.run_test(test_name, pipe)
+        finally:
+            torch._dynamo.reset()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
     def _train_for_several_steps(
         self,
@@ -1571,6 +1579,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1617,12 +1626,13 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         torch._dynamo.reset()
         set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
+        try:
+            self.run_test(test_name, pipe)
+        finally:
+            torch._dynamo.reset()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
 
 class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
@@ -1765,3 +1775,36 @@ class SkipModel(nn.Module):
         x = self.linear_skip(x)
         x = self.nested_linear(x)
         return x
+
+
+if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
+    # Some backends may not support multi-threaded test execution.
+    # Setting PYTORCH_TESTING_PREFER_MULTIPROCESS=1 falls back to
+    # multi-process which tests the same FSDP logic with process isolation.
+    # Subclass world_size properties are capped to avoid spawning too many
+    # processes (threads are cheap, processes are not).
+    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
+        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
+    )
+
+    class FSDPTestMultiThread(FSDPTest):  # type: ignore[no-redef]
+        @property
+        def world_size(self):
+            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, DEVICE_COUNT)
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if "world_size" in cls.__dict__:
+                orig = cls.__dict__["world_size"]
+                if isinstance(orig, property):
+                    cls.world_size = property(
+                        lambda self, f=orig.fget: min(
+                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
+                        )
+                    )
+
+        def perThreadSetUp(self):
+            pass
+
+        def perThreadTearDown(self):
+            pass

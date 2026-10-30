@@ -137,10 +137,10 @@ def _loss_fn(output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 def _requires_multi_gpu(func):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
         torch.accelerator.device_count() < 4,
-        f"{backend} test requires 4+ GPUs",
+        f"{backend} test requires 4+ devices",
     )
     @functools.wraps(func)
     def wrapper(*args, **kwargs):

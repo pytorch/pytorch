@@ -31,7 +31,9 @@ import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     expectedFailureDynamic,
@@ -599,7 +601,7 @@ partial_fn = functools.partial(fn, scale=2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         i1, i2, a = fn(torch.ones(3, 3))
-        it1, it2, b = opt_fn(torch.ones(3, 3))
+        it1, it2, b = opt_fn(torch.ones(3, 3, device=device_type))
         self.assertEqual(next(i1), next(it1))
         self.assertEqual(next(i2), next(it2))
         self.assertEqual(a, b)
@@ -4358,7 +4360,7 @@ partial_fn = functools.partial(fn, scale=2)
                 list(zip(range(10, 12), filter(lambda y: y > 10, itertools.count()))),
             )
 
-        inputs = torch.ones(1)
+        inputs = torch.ones(1, device=device_type)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertTupleEqual(opt_fn(inputs), fn(inputs))
 
@@ -4959,8 +4961,8 @@ class GraphModule(torch.nn.Module):
             res += inner()
             return res
 
-        input1 = torch.randn(1)
-        input2 = torch.randn(1)
+        input1 = torch.randn(1, device=device_type)
+        input2 = torch.randn(1, device=device_type)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
 
@@ -5927,7 +5929,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3)))
+        self.assertEqual(fn(torch.ones(3, 3)), opt_fn(torch.ones(3, 3, device=device_type)))
 
     @unittest.skip("https://github.com/pytorch/pytorch/pull/146527 exposed a bug")
     def test_enumerate_reconstruct(self):

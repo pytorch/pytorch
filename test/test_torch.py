@@ -4095,6 +4095,10 @@ class TestTorchDeviceType(TestCase):
             src = torch.zeros(num_copy - 1, dtype=dt, device=device)
             with self.assertRaises(RuntimeError):
                 dest.masked_scatter_(mask, src)
+                # A device that checks the size in a kernel (Neuron) raises at the
+                # next sync, so sync inside the block.
+                if self.device_type != 'cpu':
+                    torch.accelerator.synchronize()
 
         # empty tensor
         dest = torch.empty((5, 0, 5), dtype=dt, device=device)

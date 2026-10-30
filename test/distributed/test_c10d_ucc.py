@@ -20,7 +20,7 @@ if not c10d.is_available() or not c10d.is_ucc_available():
 
 import test_c10d_common
 from test_c10d_common import (
-    gpus_for_rank,
+    devices_for_rank,
     ModuleForDdpCommHook,
     SparseGradientModule,
     Task,
@@ -397,14 +397,14 @@ class DistributedDataParallelTest(
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_ucc_backend_1gpu_module_device_ids_integer_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        int_devices = devices_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, int_devices)
 
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_ucc_backend_1gpu_module_device_ids_torch_device_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        int_devices = devices_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, devices)
 
@@ -416,7 +416,7 @@ class DistributedDataParallelTest(
     @requires_ucc()
     @skip_if_lt_x_gpu(4)
     def test_ucc_backend_2gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        int_devices = devices_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
@@ -426,7 +426,7 @@ class DistributedDataParallelTest(
     @requires_ucc()
     @skip_if_lt_x_gpu(8)
     def test_ucc_backend_4gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
+        int_devices = devices_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
@@ -484,7 +484,7 @@ class DistributedDataParallelTest(
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             GlobalLocalUnusedParamModule().to(device_id),
             device_ids=[device_id],
@@ -565,7 +565,7 @@ class DistributedDataParallelTest(
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             FindUnusedParamModule().to(device_id),
             device_ids=[device_id],
@@ -711,7 +711,7 @@ class DistributedDataParallelTest(
                 loss.backward()
                 optimizer.step()
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
 
         model_withload = TestModel().float().to(device_id)
         model_withoutload = TestModel().float().to(device_id)
@@ -844,7 +844,7 @@ class DistributedDataParallelTest(
     def _gpu_model_with_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],

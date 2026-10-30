@@ -7,6 +7,12 @@ from torch.distributed._shard.sharded_tensor import _sharded_op_impl, ShardedTen
 
 def _communicate_result(result, pg):
     # Gather results from all ranks.
+    device = None
+    if torch.accelerator.is_available():
+        device = torch.device(
+            torch.accelerator.current_accelerator().type,
+            torch.accelerator.current_device_index()
+        )
     if result:
         result_tensor = torch.ones(
             1, device=torch.device(torch.accelerator.current_device_index())

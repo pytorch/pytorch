@@ -18,6 +18,9 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 aten = torch.ops.aten
 
 
@@ -86,8 +89,8 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
             with patch_exp_decomp():
-                vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(4, 400, 256, device=GPU_TYPE)
+                vq_compiled = torch.compile(vq)
+                x = torch.randn(4, 400, 256).to(device_type)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -161,7 +164,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device=GPU_TYPE)
+            inp = torch.rand([10], device=device_type)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
@@ -177,7 +180,7 @@ class TestCompilerBisector(TestCase):
 
     def test_rng(self):
         def foo():
-            return torch.rand([10], device=GPU_TYPE) + 1
+            return torch.rand([10], device=device_type) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -251,7 +254,7 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=device_type)
             eager_scale = calculate_scale(inp)
             compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
 
@@ -313,7 +316,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device=GPU_TYPE)
+            x = torch.randn(1024, device=device_type)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
@@ -354,7 +357,7 @@ class TestCompilerBisector(TestCase):
             try:
                 foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device=GPU_TYPE)
+                x = torch.randn(10, device=device_type)
                 foo_c(x)
                 bar_c(x)
 

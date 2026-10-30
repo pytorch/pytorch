@@ -10,7 +10,8 @@ from typing import Any
 from unittest import mock
 
 import torch
-import torch.cuda.nccl as nccl
+if torch.cuda.is_available():
+    import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist

@@ -12,6 +12,9 @@ from torch.testing._internal.common_utils import (
 from torch.utils._ordered_set import OrderedSet
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class TestNbAnd(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -271,8 +274,8 @@ class TestNbAnd(torch._dynamo.test_case.TestCase):
             x &= y
             return x
 
-        x = torch.tensor([0b1110, 0b1100], dtype=torch.int64)
-        y = torch.tensor([0b1100, 0b1010], dtype=torch.int64)
+        x = torch.tensor([0b1110, 0b1100], dtype=torch.int64, device=device_type)
+        y = torch.tensor([0b1100, 0b1010], dtype=torch.int64, device=device_type)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x.clone(), y), fn(x.clone(), y))
 

@@ -33,6 +33,9 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_distributed = functools.partial(

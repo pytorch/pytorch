@@ -73,6 +73,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TemporaryFileName,
+    TEST_CUDA,
+    TEST_PRIVATEUSE1,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -119,6 +121,13 @@ try:
 except ModuleNotFoundError:
     HAS_PSUTIL = False
     psutil = None
+
+
+device_type = (
+    torch.accelerator.current_accelerator().type
+    if torch.accelerator.is_available()
+    else "cpu"
+)
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")

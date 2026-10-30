@@ -15,6 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    DEVICE_TYPE,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,

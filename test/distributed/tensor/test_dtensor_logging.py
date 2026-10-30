@@ -62,6 +62,7 @@ class TestDTensorLogging(TestCase):
         x_dt2 = DTensor.from_local(torch.randn(4, 4), mesh, [Shard(0)], run_check=False)
         x_dt2 + x_dt2
 
+        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
         self.assertExpectedInline(
             log_string(),
             f"""\
@@ -90,6 +91,7 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
         )
         propagator.propagate_op_sharding(op_schema)  # Python cache miss
         propagator.propagate_op_sharding(op_schema)  # Python cache hit
+        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
         self.assertExpectedInline(
             log_string(),
             f"""\
