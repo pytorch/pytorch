@@ -1,5 +1,9 @@
 # Owner(s): ["module: inductor"]
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +16,7 @@ import sympy
 import torch
 import torch.nn.functional as F
 from torch._inductor import config as inductor_config
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.codegen.flydsl import flydsl_utils
 from torch._inductor.codegen.flydsl.flydsl_kernel import FlyDSLTemplateKernel
 from torch._inductor.codegen.flydsl.flydsl_scheduling import (
@@ -21,6 +26,7 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
+from torch._inductor.package import load_package
 from torch._inductor.runtime.flydsl_cache import (
     LazyFlyDSLLauncher,
     precompile_flydsl_template,
@@ -1041,6 +1047,83 @@ class TestFlyDSLTemplate(TestCase):
                 self.assertIn("_inductor_tensor_arg(arg) for arg in tensor_args", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    @parametrize("package_cpp_only", (False, True))
+    def test_flydsl_gemm_aoti_package(self, package_cpp_only):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("FlyDSL AOT currently supports gfx950 only")
+
+        class Model(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return torch.relu(torch.mm(lhs, rhs.t()))
+
+        lhs = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+        rhs = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        expected = Model()(lhs, rhs)
+        exported = torch.export.export(Model(), (lhs, rhs), strict=False)
+
+        with (
+            WritableTempFile(suffix=".pt2") as package_file,
+            tempfile.TemporaryDirectory() as relocated_dir,
+        ):
+            package_path = torch._inductor.aoti_compile_and_package(
+                exported,
+                package_path=package_file.name,
+                inductor_configs={
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "FLYDSL",
+                    "flydsl_enable_autotuning": False,
+                    "aot_inductor.package_cpp_only": package_cpp_only,
+                },
+            )
+            relocated_path = os.path.join(relocated_dir, "model.pt2")
+            shutil.copy2(package_path, relocated_path)
+            actual = load_package(relocated_path)(lhs, rhs)
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    """
+import importlib.abc
+import sys
+
+import torch
+from torch._inductor.package import load_package
+
+class BlockFlyDSL(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "flydsl" or fullname.startswith("flydsl."):
+            raise ImportError("FlyDSL must not be imported by an AOTI package")
+        return None
+
+sys.meta_path.insert(0, BlockFlyDSL())
+assert "flydsl" not in sys.modules
+torch.manual_seed(1234)
+lhs = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+rhs = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+expected = torch.relu(torch.mm(lhs, rhs.t()))
+compiled = load_package(sys.argv[1])
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream):
+    actual = compiled(lhs, rhs)
+stream.synchronize()
+torch.testing.assert_close(actual, expected, atol=3e-2, rtol=3e-2)
+""",
+                    relocated_path,
+                ],
+                check=True,
+            )
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")

@@ -7,6 +7,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
 from torch._inductor.runtime.flydsl_cache import (
     configure_flydsl_cache_dir,
     flydsl_tensor_arg,
+    is_capturing_flydsl_compiles,
     precompile_flydsl,
 )
 
@@ -68,8 +69,17 @@ def _flydsl_mxfp8_grouped_mm(
 {{def_kernel("mat1", "mat2", "scale_a", "scale_b", "offs")}}
     output = {{get_output()}}
     return _flydsl_mxfp8_grouped_mm(
-        output, mat1, mat2, scale_a, scale_b, offs, stream
+        output, mat1, mat2, scale_a, scale_b, offs, stream,
+        compile_only=is_capturing_flydsl_compiles(),
     )
+
+
+{{kernel_name}}_aot_arg_names = (
+    "A", "B", "OUT", "A_scale", "B_scale", "OFFS",
+)
+{{kernel_name}}_aot_arg_sources = (
+    "mat1", "mat2", "output", "scale_a", "scale_b", "offs",
+)
 
 
 def {{kernel_name}}_precompile(

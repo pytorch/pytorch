@@ -15,7 +15,6 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
 
-
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
@@ -68,13 +67,11 @@ class FlyDSLTemplateKernel(Kernel):
 
     def gen_imports(self) -> str:
         imports = IndentedBuffer()
-        imports.splice(
-            """
+        imports.splice("""
             import torch
             import flydsl.compiler as flyc
             import flydsl.expr as fx
-            """
-        )
+            """)
         return imports.getvalue()
 
     def gen_defines(self, **kwargs) -> str:
@@ -151,6 +148,55 @@ class FlyDSLTemplateKernel(Kernel):
 
     def call_kernel(self, name: str, node=None):
         wrapper = V.graph.wrapper_code
+        if getattr(V.graph, "aot_mode", False):
+            from torch._inductor.codegen.external_aot import (
+                get_external_aot_backend,
+            )
+
+            template_inputs = {}
+            for arg_name, input_node in self._template_input_args:
+                reinterpret_view = self._get_reinterpret_view(input_node)
+                template_inputs[arg_name.removeprefix("arg_")] = (
+                    reinterpret_view if reinterpret_view is not None else input_node
+                )
+            artifact = wrapper.external_aot_artifacts[name]
+            if node is None:
+                raise AssertionError("FlyDSL AOT template buffer is required")
+            binding = {
+                "output": self.output_node,
+                **template_inputs,
+            }
+            if node.template.name == "grouped_gemm_flydsl":
+                mat2 = template_inputs["mat2"]
+                binding.update(
+                    {
+                        "group_count": mat2.get_size()[0],
+                        "k": mat2.get_size()[1],
+                        "n": mat2.get_size()[2],
+                        # Correctness-safe persistent grid. The specialized
+                        # adapter can replace this with a device-property plan.
+                        "grid_size": 1,
+                    }
+                )
+            elif node.template.name == "mxfp8_grouped_gemm_flydsl":
+                block_c = node.template_kwargs["BLOCK_C"]
+                output_size = self.output_node.get_size()
+                binding.update(
+                    {
+                        "n_blocks": 1,
+                        "n_c_tiles": (output_size[1] + block_c - 1) // block_c,
+                        "out_m": output_size[0],
+                        "out_n": output_size[1],
+                    }
+                )
+            get_external_aot_backend("flydsl").emit_call(
+                wrapper,
+                artifact,
+                binding,
+                device=self.output_node.get_device(),
+            )
+            return
+
         call_args = []
         arg_types = []
 
