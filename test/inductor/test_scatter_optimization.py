@@ -1442,11 +1442,11 @@ class TestPartitionedScatterOpt(TestCase):
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with
         moderate contention (8 slots). ROCm MI300X delivers about 1.8x, so the
         1.5x floor there catches regressions. NVIDIA GPUs in CI deliver about
-        1.35x, so CUDA uses a 1.2x floor.
+        1.35x, so CUDA uses a 1.2x floor. Other GPUs keep the 1.5x floor.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
-        MIN_SPEEDUP = 1.5 if torch.version.hip else 1.2
+        MIN_SPEEDUP = 1.2 if GPU_TYPE == "cuda" and not torch.version.hip else 1.5
 
         def scatter_fn(out0, out1, out2, idx, vals):
             out0 = out0.index_put([idx], vals, accumulate=True)
