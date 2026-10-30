@@ -333,7 +333,7 @@ void Pickler::pushBytes(const std::string& string) {
   }
 }
 
-void Pickler::pushGlobal(
+size_t Pickler::pushGlobal(
     std::string_view module_name,
     std::string_view class_name) {
   std::string key;
@@ -350,8 +350,10 @@ void Pickler::pushGlobal(
     // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
     memoized_globals_map_.insert({key, memo_id});
+    return memo_id;
   } else {
     pushBinGet(memo_entry->second);
+    return memo_entry->second;
   }
 }
 
@@ -577,7 +579,12 @@ void Pickler::pushLong(const std::string& data) {
 }
 
 void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushGlobal("torch.jit._pickle", "build_tensor_from_id");
+  if (memoized_tensor_ref_global_id_ >= 0) {
+    pushBinGet(static_cast<uint32_t>(memoized_tensor_ref_global_id_));
+  } else {
+    memoized_tensor_ref_global_id_ = static_cast<int64_t>(
+        pushGlobal("torch.jit._pickle", "build_tensor_from_id"));
+  }
   tensor_table_->push_back(ivalue.toTensor());
   auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
