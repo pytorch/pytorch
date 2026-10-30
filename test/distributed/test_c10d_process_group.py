@@ -3,6 +3,7 @@
 import json
 import math
 import sys
+import time
 from datetime import timedelta
 
 import torch
@@ -194,14 +195,30 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         dist.all_reduce(torch.ones(1, device=self.device))
         torch.cuda.synchronize()
         name = "pytorch.wait_counter.ProcessGroupNCCL__checkTimeout"
+        store = dist.distributed_c10d._get_default_store()
+        key = f"{self.backend_name}_check_timeout_wait_counter"
+
+        if self.rank != 0:
+            # Hold back until rank 0 has seen its pending work checked.
+            store.wait([key], timedelta(seconds=120))
+            dist.all_reduce(torch.ones(1, device=self.device))
+            return
+
         before = _wait_counter_values().get(name, {}).get("total_calls", 0)
-
-        # Keep the work pending so wait(timeout) has to check the timeout.
-        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
-        work.wait(timedelta(seconds=60))
-
-        self.assertGreater(_wait_counter_values()[name]["total_calls"], before)
+        # The work stays pending until the store key is set, so every poll (and
+        # the watchdog) runs the timeout check.
+        # Below the PG timeout, so a missing count fails here.
+        deadline = time.monotonic() + 30
+        try:
+            while _wait_counter_values().get(name, {}).get("total_calls", 0) <= before:
+                self.assertFalse(work.is_completed())
+                if time.monotonic() > deadline:
+                    self.fail(f"{name} did not fire for pending work")
+        finally:
+            # Release rank 1 even on failure so the pending work completes.
+            store.set(key, "1")
+            work.wait(timedelta(seconds=120))
 
 
 instantiate_backend_tests(

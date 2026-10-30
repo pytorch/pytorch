@@ -9,7 +9,9 @@ import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
     xfailIfPy313AndEarlier,
 )
 
@@ -121,6 +123,7 @@ class NotReversibleNone:
         return idx
 
 
+@instantiate_parametrized_tests
 class TestIterators(torch._dynamo.test_case.TestCase):
     """Test iterator support in Dynamo"""
 
@@ -588,6 +591,68 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         x = torch.tensor(5)
         it = reversed([10, 20, 30])
         self.assertEqual(opt_fn(it, x), torch.tensor(65))
+
+    @parametrize("protocol", ["iter", "getitem"])
+    @parametrize("constructor", [list, tuple])
+    def test_unsized_iterable_arg_guards(self, protocol, constructor):
+        class GetItemIterable:
+            def __init__(self, data):
+                self.data = data
+
+            def __getitem__(self, index):
+                return self.data[index]
+
+        iterable_type = CustomIterable if protocol == "iter" else GetItemIterable
+
+        def fn(x, obj):
+            values = constructor(obj)
+            return x + sum(values), len(values)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        obj = iterable_type([torch.tensor(1), torch.tensor(2)])
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Contents are runtime tensor inputs, not constants from the first trace.
+        obj = iterable_type([torch.tensor(3), torch.tensor(4)])
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+
+        # The backing list guards, not len(obj), invalidate a changed length.
+        obj.data.append(torch.tensor(5))
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+        obj.data[0] = torch.tensor(7)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+        obj.data.clear()
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_unsized_iterable_scalar_state_guards(self):
+        class ScalarIterable:
+            def __init__(self, count):
+                self.count = count
+
+            def __iter__(self):
+                return iter(range(self.count))
+
+        def fn(x, obj):
+            return x + sum(list(obj))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(10)
+        obj = ScalarIterable(2)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+        obj.count = 3
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_list_reverseiterator_arg_guards(self):
         """Guard validation and recompilation for list_reverseiterator arguments."""

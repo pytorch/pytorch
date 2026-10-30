@@ -23,25 +23,20 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
       // Use the checkStatus function to determine the work status
       WorkNCCL::WorkStatus status = work.state->checkStatus();
       const auto& state = *work.state;
-      const auto seq = static_cast<int64_t>(state.seq);
+      const StatusEntry entry{
+          work.statusSeq, state.statusName, state.numelIn, state.numelOut};
 
       // A work is checked until it completes, so only record its start once.
       if ((status == WorkNCCL::WorkStatus::INPROGRESS ||
            status == WorkNCCL::WorkStatus::COMPLETED) &&
-          status_.lastStartedSeq < seq) {
-        status_.lastStartedSeq = seq;
-        status_.lastStartedWorkName = state.opType;
-        status_.lastStartedNumelIn = static_cast<size_t>(state.numelIn);
-        status_.lastStartedNumelOut = static_cast<size_t>(state.numelOut);
+          status_.started.seq < entry.seq) {
+        status_.started = entry;
       }
 
-      // Queues are walked in stream order, not seq order.
+      // Queues are walked in stream order, not enqueue order.
       if (status == WorkNCCL::WorkStatus::COMPLETED &&
-          status_.lastCompletedSeq < seq) {
-        status_.lastCompletedSeq = seq;
-        status_.lastCompletedWorkName = state.opType;
-        status_.lastCompletedNumelIn = static_cast<size_t>(state.numelIn);
-        status_.lastCompletedNumelOut = static_cast<size_t>(state.numelOut);
+          status_.completed.seq < entry.seq) {
+        status_.completed = entry;
       }
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
@@ -141,12 +136,11 @@ void WorkNCCLQueue::enqueueWork(
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
     completedInputTensors.swap(completedInputTensors_);
-    stream_work_queues_[stream].push({work->state_, work->inputTensors_});
     const auto& state = *work->state_;
-    status_.lastEnqueuedSeq = static_cast<int64_t>(state.seq);
-    status_.lastEnqueuedWorkName = state.opType;
-    status_.lastEnqueuedNumelIn = static_cast<size_t>(state.numelIn);
-    status_.lastEnqueuedNumelOut = static_cast<size_t>(state.numelOut);
+    status_.enqueued = {
+        ++numEnqueued_, state.statusName, state.numelIn, state.numelOut};
+    stream_work_queues_[stream].push(
+        {work->state_, work->inputTensors_, numEnqueued_});
   }
   while (!completedInputTensors.empty()) {
     completedInputTensors.front()->clear();
@@ -154,7 +148,7 @@ void WorkNCCLQueue::enqueueWork(
   }
 }
 
-::c10d::ProcessGroupStatus WorkNCCLQueue::status() {
+WorkNCCLQueue::Status WorkNCCLQueue::status() {
   std::lock_guard<std::mutex> lock(work_queues_mutex_);
   return status_;
 }

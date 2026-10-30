@@ -47,7 +47,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, device);
   }
 
-  c10::Stream exchangeStream(c10::Stream _unused) const noexcept override {
+  c10::Stream exchangeStream(c10::Stream /*_unused*/) const noexcept override {
     return c10::Stream(c10::Stream::DEFAULT, g_device);
   }
 
@@ -199,7 +199,7 @@ c10::SymBool LTCTensorImpl::sym_is_non_overlapping_and_dense_custom() const {
 }
 
 c10::SymBool LTCTensorImpl::sym_is_contiguous_custom(
-    c10::MemoryFormat _unused) const {
+    c10::MemoryFormat /*_unused*/) const {
   // TODO(ezyang): I don't think this branch is actually necessary
   // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
   // the memory format?

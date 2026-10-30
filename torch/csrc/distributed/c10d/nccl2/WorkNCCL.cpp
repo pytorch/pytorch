@@ -24,15 +24,26 @@ namespace c10d::nccl2 {
 namespace {
 std::atomic<uint64_t> nextCompletionKey{1};
 
-// Same record legacy WorkNCCL::handleException emits.
-void logWorkException(const std::string& message) {
+// Same key and API usage name as legacy WorkNCCL::handleException, which also
+// logs the work's exception message behind the work's log prefix. The message
+// format differs.
+void logWorkException(ProcessGroupNCCL& comm, const std::string& message) {
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
   auto logger = ::c10d::C10dLogger::getLogger();
   if (!logger) {
     return;
   }
+  const auto& desc = comm.getGroupDesc();
+  const bool has_desc = !desc.empty() && desc != "undefined";
   ::c10d::C10dLoggingData data;
-  data.strings["work_nccl_exception"] = message;
+  data.strings["work_nccl_exception"] = c10::str(
+      "[PG GUID ",
+      comm.getGroupUid(),
+      has_desc ? "(" + desc + ")" : "",
+      " Rank ",
+      comm.getRank(),
+      "] ",
+      message);
   logger->log(data);
 }
 } // namespace
@@ -122,6 +133,11 @@ void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
   other.tensors.clear();
 }
 
+void WorkNCCL::InputTensorShelf::appendCopy(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(tensors.end(), other.tensors.begin(), other.tensors.end());
+}
+
 void WorkNCCL::InputTensorShelf::clear() {
   std::lock_guard<std::mutex> lock(mutex);
   tensors.clear();
@@ -186,10 +202,12 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
 }
 
 void WorkNCCL::recordStart(
-    std::string_view coll_name,
+    const char* coll_name,
+    const char* status_name,
     int64_t numel_in,
     int64_t numel_out) {
   state_->opType = coll_name;
+  state_->statusName = status_name;
   state_->numelIn = numel_in;
   state_->numelOut = numel_out;
   recordFunctionStart(coll_name);
@@ -248,7 +266,7 @@ bool WorkNCCL::State::setTerminalStatus(
     return true;
   }
   try {
-    logWorkException(message);
+    logWorkException(*comm, message);
   } catch (const std::exception& e) {
     TC_LOG(WARNING, comm) << "Failed to log work exception: " << e.what();
   }
@@ -311,13 +329,33 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
   return state_->timeout;
 }
 
+void WorkNCCL::setDurationStart(const WorkNCCL& first) {
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
+}
+
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
   if (!children.empty()) {
-    std::lock_guard<std::mutex> lock(state_->durationMutex);
-    state_->durationStartEvents = children.front()->state_->events;
+    setDurationStart(*children.front());
   }
   for (const auto& child : children) {
     inputTensors_->append(*child->inputTensors_);
+  }
+}
+
+void WorkNCCL::retainInputs(
+    const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    inputTensors_->appendCopy(*work->inputTensors_);
+  }
+}
+
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
   }
 }
 
@@ -346,8 +384,34 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
     return current;
   }
 
+  // Returns the elapsed time if this work exceeded its timeout. Unlike legacy,
+  // isCompleted() polls also reach this check.
+  auto timed_out_after = [&]() -> std::optional<std::chrono::milliseconds> {
+    STATIC_SCOPED_WAIT_COUNTER(
+        pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - workStartTime);
+    if (elapsed < timeout.value_or(this->timeout)) {
+      return std::nullopt;
+    }
+    return elapsed;
+  };
+  auto set_timed_out = [&](std::chrono::milliseconds elapsed) {
+    TC_LOG(ERROR, comm) << "Operation timed out after " << elapsed.count()
+                        << " ms";
+    setTerminalStatus(
+        WorkStatus::TIMEDOUT,
+        c10::str(
+            "ran for ", elapsed.count(), " milliseconds before timing out"));
+    return status();
+  };
+
   auto comm_error = comm->getError();
   if (comm_error == ErrorType::TIMEOUT) {
+    // Report this work's own timeout if it has one.
+    if (auto elapsed = timed_out_after()) {
+      return set_timed_out(*elapsed);
+    }
     setTerminalStatus(
         WorkStatus::TIMEDOUT,
         "another operation on the communicator timed out");
@@ -396,20 +460,9 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
     }
   }
 
-  // Only the timeout check is timed, like legacy WorkNCCL::checkTimeout().
-  STATIC_SCOPED_WAIT_COUNTER(
-      pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
-  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - workStartTime);
-  auto work_timeout = timeout.value_or(this->timeout);
-  if (elapsed < work_timeout) {
-    return status();
+  if (auto elapsed = timed_out_after()) {
+    return set_timed_out(*elapsed);
   }
-  TC_LOG(ERROR, comm) << "Operation timed out after " << elapsed.count()
-                      << " ms";
-  setTerminalStatus(
-      WorkStatus::TIMEDOUT,
-      c10::str("ran for ", elapsed.count(), " milliseconds before timing out"));
   return status();
 }
 

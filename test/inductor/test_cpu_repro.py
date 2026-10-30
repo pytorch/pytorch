@@ -7,6 +7,7 @@ import itertools
 import math
 import os
 import platform
+import re
 import sys
 import unittest
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
     CppOverrides,
+    CppScheduling,
     CppVecKernel,
     CppVecOverrides,
     KernelGroup,
@@ -4523,6 +4525,23 @@ class CPUReproTests(TestCase):
                 1,
             )
 
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    def test_local_buffer_with_mutation_output(self):
+        # https://github.com/pytorch/pytorch/issues/196570
+        # m depends on x so that dropping the index_put changes the output.
+        def fn(x):
+            m = x.clone()
+            m[torch.arange(8).unsqueeze(0), torch.arange(8).unsqueeze(1)] = 0
+            return torch.softmax(x + m, dim=-1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (torch.randn(8, 8),))
+        counts = metrics.cpp_outer_loop_fused_inner_counts
+        self.assertEqual(len(counts), 1)
+        self.assertEqual(counts[0].inner_kernel_number, 3)
+        self.assertEqual(counts[0].local_buffer_number, 1)
+
     @requires_vectorization
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_local_buffer_with_tiled_outer_dim(self):
@@ -4913,6 +4932,20 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
+    def test_compatible_ranges_fusion_into_fused_node(self):
+        def fn(x):
+            v1 = F.layer_norm(x.float(), (x.shape[-1],))
+            v2 = F.max_pool2d(v1, kernel_size=1, stride=1, padding=0)
+            v3 = torch.transpose(v2, 2, 3)
+            return v2, torch.clamp(v3, min=-0.66, max=0.53)
+
+        metrics.reset()
+        torch._dynamo.reset()
+        x = torch.rand(3, 1, 2, 2)
+        opt_fn = torch.compile(fn, backend="inductor")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
@@ -4999,6 +5032,39 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
+
+    def test_kernel_group_skips_exact_arg_count_below_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        with (
+            fresh_cache(),
+            patch.object(
+                KernelGroup,
+                "get_num_args",
+                autospec=True,
+                side_effect=KernelGroup.get_num_args,
+            ) as get_num_args,
+        ):
+            opt_fn = torch.compile(fn, backend="inductor")
+            self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Twenty arguments is far below the limit, so the exact count, which
+        # formats every argument, is never needed.
+        get_num_args.assert_not_called()
+
+    @patch.object(CppScheduling, "MAX_FUSED_KERNEL_ARGS_NUM", 6)
+    def test_kernel_group_flushes_when_args_exceed_limit(self):
+        def fn(*xs):
+            return [x + 1 for x in xs]
+
+        xs = [torch.randn(8) for _ in range(10)]
+        opt_fn = torch.compile(fn, backend="inductor")
+        _, code = run_and_get_cpp_code(opt_fn, *xs)
+        self.assertEqual(opt_fn(*xs), fn(*xs))
+        # Each add has two arguments, so a limit of six splits them across kernels.
+        kernels = set(re.findall(r"cpp_fused_\w+?_\d+\b", code))
+        self.assertGreater(len(kernels), 1)
 
     @requires_vectorization
     def test_vertical_reduction_tail_store_uses_tail_width(self):

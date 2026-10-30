@@ -22,7 +22,6 @@
 #include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
 
 namespace c10d::nccl2 {
 
@@ -106,6 +105,14 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
@@ -113,10 +120,13 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
+  // status_name and the numels feed the periodic work status record and
+  // follow legacy ProcessGroupNCCL's values; both names must be literals.
   void recordStart(
-      std::string_view coll_name,
-      int64_t numel_in = 0,
-      int64_t numel_out = 0);
+      const char* coll_name,
+      const char* status_name,
+      int64_t numel_in,
+      int64_t numel_out);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -128,6 +138,7 @@ class WorkNCCL : public c10d::Work {
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -142,7 +153,8 @@ class WorkNCCL : public c10d::Work {
     WorkStatus status() const;
     std::exception_ptr exception() const;
     // reason says why a TIMEDOUT or ERROR work failed; it ends up in the
-    // work's exception.
+    // work's exception. The first TIMEDOUT or ERROR transition also logs the
+    // work_nccl_exception C10dLogger record, unless the comm was aborted.
     bool setTerminalStatus(WorkStatus status, std::string_view reason = {});
     std::string describe() const;
     WorkStatus checkStatus(
@@ -161,8 +173,10 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
-    // Set by recordStart(), whose callers pass string literals.
-    std::string_view opType;
+    // Set by recordStart(); must point to static storage.
+    const char* opType{""};
+    // Legacy opTypeToString() name, e.g. "ALLREDUCE".
+    const char* statusName{""};
     int64_t numelIn{0};
     int64_t numelOut{0};
     std::shared_ptr<Events> events;
@@ -177,6 +191,8 @@ class WorkNCCL : public c10d::Work {
   struct TrackedWork {
     std::shared_ptr<State> state;
     std::shared_ptr<InputTensorShelf> inputTensors;
+    // Position in WorkNCCLQueue's enqueue order; see WorkNCCLQueue::Status.
+    int64_t statusSeq{-1};
   };
 
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
@@ -205,8 +221,24 @@ class WorkNCCLQueue {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
-  // Snapshot of the last enqueued, started and completed work.
-  ::c10d::ProcessGroupStatus status();
+  struct StatusEntry {
+    int64_t seq{-1};
+    const char* name{""};
+    int64_t numelIn{0};
+    int64_t numelOut{0};
+  };
+  // Last enqueued, started and completed work. seq counts the works enqueued
+  // on this queue (from 1), not the collective sequence number: p2p works share
+  // the previous collective's number and coalesced ops give every child the
+  // same one, which would hide a hung send or a pending child. Unlike legacy's
+  // collective seq, it differs across ranks that issue different p2p, window
+  // or coalesced ops.
+  struct Status {
+    StatusEntry enqueued;
+    StatusEntry started;
+    StatusEntry completed;
+  };
+  Status status();
 
  private:
   // completed collects the states retired as COMPLETED, so the caller can push
@@ -218,7 +250,8 @@ class WorkNCCLQueue {
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completedInputTensors_;
   // Guarded by work_queues_mutex_.
-  ::c10d::ProcessGroupStatus status_{};
+  int64_t numEnqueued_{0};
+  Status status_;
   std::mutex work_queues_mutex_;
 };
 
