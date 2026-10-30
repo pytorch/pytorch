@@ -149,6 +149,14 @@ def get_gpu_type() -> str:
     avail_gpus = [gpu for gpu in GPU_TYPES if _device_is_available(gpu)]
 
     if not avail_gpus:
+        # Nothing registered itself as a GPU-type device. Fall back to the
+        # runtime's current accelerator (private-use backends that do not
+        # advertise through DeviceInterface.is_gpu() land here) and only then
+        # to "cuda", which keeps the historical error message when no
+        # accelerator is present at all.
+        acc = torch.accelerator.current_accelerator(check_available=True)
+        if acc is not None:
+            return acc.type
         return "cuda"
     if len(avail_gpus) == 1:
         return avail_gpus[0]
@@ -2187,7 +2195,10 @@ def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
 
     min_sms = min_sms_override
     if min_sms is None:
-        min_sms = 16 if device.type == "xpu" else 68  # 3080
+        # 68 is the CUDA-flavoured default (3080-class SM count). Accelerators
+        # that count something other than CUDA SMs (xpu sub-slices, npu AI
+        # cores) use the lower bar so datacenter parts stay eligible.
+        min_sms = 68 if device.type == "cuda" else 16
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2202,7 +2213,9 @@ def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
 def get_max_num_sms() -> int:
     if torch.xpu.is_available():
         return torch.xpu.get_device_properties().gpu_subslice_count
-    return torch.cuda.get_device_properties("cuda").multi_processor_count
+    # Device-agnostic: resolves the same value as before on CUDA and stops
+    # assuming a CUDA device exists on npu / other triton backends.
+    return DeviceProperties.create(torch.device(get_gpu_type())).multi_processor_count
 
 
 @functools.lru_cache
