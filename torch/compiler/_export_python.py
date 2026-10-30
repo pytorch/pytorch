@@ -8,6 +8,8 @@ from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
+import torch
+import torch.utils._pytree as pytree
 from torch._precompile import (
     _cache_matches_artifact,
     _DynamoCapture,
@@ -30,6 +32,7 @@ def export_python(
     *,
     backend: str = "inductor",
     dynamic: bool | None = None,
+    check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
 
@@ -77,10 +80,19 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
+        check: Also run ``fn`` eagerly on every served call, on copies of the tensor
+            arguments, and raise :class:`~torch.compiler.PrecompileError` if the
+            outputs differ beyond ``torch.testing.assert_close``'s tolerances: a net
+            for edits to ``path``. Defaults to the ``TORCH_EXPORT_PYTHON_CHECK``
+            environment variable (``1`` enables it). Not meaningful for a function
+            that draws random numbers, whose compiled and eager draws differ.
     """
 
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-        exported = _ExportedPython(fn, path, backend, dynamic)
+        enabled = os.environ.get("TORCH_EXPORT_PYTHON_CHECK") == "1"
+        exported = _ExportedPython(
+            fn, path, backend, dynamic, enabled if check is None else check
+        )
 
         @functools.wraps(fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -98,6 +110,7 @@ class _ExportedPython:
         path: str | os.PathLike[str],
         backend: str,
         dynamic: bool | None,
+        check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
             raise PrecompileError(
@@ -110,6 +123,7 @@ class _ExportedPython:
         self._cache_path = self._path + ".cache"
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic)
+        self._check = check
         self._runnable: PrecompiledRunnable | None = None
 
     def __call__(self, *args: object, **kwargs: object) -> object:
@@ -117,7 +131,23 @@ class _ExportedPython:
             if not os.path.exists(self._path):
                 return self._capture(*args, **kwargs)
             self._runnable = self._load()
-        return self._runnable(*args, **kwargs)
+        if not self._check:
+            return self._runnable(*args, **kwargs)
+        # Copied before the artifact runs, so an in-place write cannot reach eager.
+        eager_args, eager_kwargs = pytree.tree_map_only(
+            torch.Tensor, lambda t: t.detach().clone(), (args, kwargs)
+        )
+        result = self._runnable(*args, **kwargs)
+        with torch.random.fork_rng():
+            expected = self._fn(*eager_args, **eager_kwargs)
+        try:
+            torch.testing.assert_close(result, expected)
+        except AssertionError as e:
+            raise PrecompileError(
+                f"export_python: {self._path} does not match eager {self._fn.__name__} "
+                f"(check is on): {e}"
+            ) from e
+        return result
 
     def _load(self) -> PrecompiledRunnable:
         cache: str | None = self._cache_path

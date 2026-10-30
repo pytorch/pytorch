@@ -214,6 +214,50 @@ class TestExportPython(_ExportPythonTestCase):
         os.remove(path + ".cache")
         self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
 
+    def test_check_catches_an_edit_that_changes_the_numerics(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path, check=True)(x)
+        self.assertEqual(self._export("shifted", path, check=True)(x), x * 7.25 + 1)
+        _edit_graph_code(path, "7.25", "7.5")
+        _in_a_fresh_process(
+            self,
+            f"""
+            x = torch.ones(8)
+            run = torch.compiler.export_python(path={path!r})(m.shifted)
+            torch.testing.assert_close(run(x), x * 7.5 + 1)
+            checked = torch.compiler.export_python(path={path!r}, check=True)(m.shifted)
+            try:
+                checked(x)
+            except torch.compiler.PrecompileError as e:
+                if "does not match eager shifted" not in str(e):
+                    raise
+            else:
+                raise AssertionError("the check did not catch the edit")
+            """,
+        )
+
+    def test_check_defaults_to_the_environment_variable(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        _edit_graph_code(path, "7.25", "7.5")
+        _in_a_fresh_process(
+            self,
+            f"""
+            import os
+            os.environ["TORCH_EXPORT_PYTHON_CHECK"] = "1"
+            run = torch.compiler.export_python(path={path!r})(m.shifted)
+            try:
+                run(torch.ones(8))
+            except torch.compiler.PrecompileError as e:
+                if "does not match eager" not in str(e):
+                    raise
+            else:
+                raise AssertionError("TORCH_EXPORT_PYTHON_CHECK=1 did not check")
+            """,
+        )
+
     def test_a_main_module_function_is_refused(self):
         def fn(x):
             return x + 1
