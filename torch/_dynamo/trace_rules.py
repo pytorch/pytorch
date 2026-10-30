@@ -3564,6 +3564,7 @@ MOD_INLINELIST = [
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
+    "torch.cuda.localized_tensor",
     "torch.distributions",
     "torch.export._patches",
     "torch.export._tree_utils",
