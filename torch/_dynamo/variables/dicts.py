@@ -310,7 +310,7 @@ class ConstDictVariable(VariableTracker):
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -362,7 +362,7 @@ class ConstDictVariable(VariableTracker):
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -454,7 +454,7 @@ class ConstDictVariable(VariableTracker):
                         and key_var.source.base == self.source
                     )
                 ):
-                    self.install_dict_order_guard(codegen.tx, guard_keys=True)
+                    self.install_dict_order_guard(codegen.tx)
                 codegen(key_var)
                 codegen(value)
                 num_args += 1
@@ -536,11 +536,10 @@ class ConstDictVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         *,
-        ordered: bool = True,
-        guard_keys: bool = False,
+        view: "DictViewVariable | None" = None,
     ) -> None:
-        # Subclasses use `ordered` for linked order and `guard_keys` for hook IDs;
-        # ordinary dictionaries always guard their keys in storage order.
+        # Without a view, the operation consumes the mapping's keys directly.
+        # A view identifies its native order and which parts of each item escape.
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -650,7 +649,7 @@ class ConstDictVariable(VariableTracker):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         return DictIterator(self.items)
 
     def tp_init_impl(
@@ -720,7 +719,7 @@ class ConstDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         return self._new_dict(self.items.copy())
 
     def dict_get(
@@ -924,7 +923,7 @@ class ConstDictVariable(VariableTracker):
             if mro_lookup(
                 other.python_type(), "__iter__"
             ) is dict.__iter__ or self._can_fast_merge(other):
-                other.install_dict_order_guard(tx, guard_keys=True)
+                other.install_dict_order_guard(tx)
                 self.items.update(other.items)
                 return
         keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
@@ -997,7 +996,7 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         return [x.vt for x in self.items]
 
     def nb_or_impl(
@@ -1144,14 +1143,14 @@ class OrderedDictVariable(ConstDictVariable):
         self,
         tx: "InstructionTranslatorBase",
         *,
-        ordered: bool = True,
-        guard_keys: bool = False,
+        view: "DictViewVariable | None" = None,
     ) -> None:
-        super().install_dict_order_guard(tx, ordered=ordered, guard_keys=guard_keys)
+        super().install_dict_order_guard(tx, view=view)
         if (
             self.source
             and not is_constant_source(self.source)
-            and ordered
+            and issubclass(self.python_type(), collections.OrderedDict)
+            and (view is None or view.is_ordered)
             and len(self.original_items) > 1
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
@@ -1230,7 +1229,7 @@ class OrderedDictVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         if not self.items:
             raise_observed_exception(
                 KeyError, tx, args=["popitem(): dictionary is empty"]
@@ -1319,7 +1318,7 @@ class OrderedDictVariable(ConstDictVariable):
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
-        self.install_dict_order_guard(tx, guard_keys=True)
+        self.install_dict_order_guard(tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
@@ -1531,14 +1530,11 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         self,
         tx: "InstructionTranslatorBase",
         *,
-        ordered: bool = True,
-        guard_keys: bool = False,
+        view: "DictViewVariable | None" = None,
     ) -> None:
-        if guard_keys:
+        if view is None or view.kv == "keys":
             ConstDictVariable.install_dict_keys_match_guard(self)
-        super().install_dict_order_guard(
-            tx, ordered=ordered and self._cpython_type is collections.OrderedDict
-        )
+        super().install_dict_order_guard(tx, view=view)
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
@@ -1609,9 +1605,7 @@ class DictViewVariable(VariableTracker):
         return getattr(self.dv_dict.items, self.kv)()
 
     def install_order_guard(self, tx: "InstructionTranslatorBase") -> None:
-        self.dv_dict.install_dict_order_guard(
-            tx, ordered=self.is_ordered, guard_keys=self.kv == "keys"
-        )
+        self.dv_dict.install_dict_order_guard(tx, view=self)
 
     def is_hashable(self) -> bool:
         return False
