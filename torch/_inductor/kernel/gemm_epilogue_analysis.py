@@ -799,29 +799,23 @@ class GemmLocalReduceAnalysis:
         )
 
     def grouped_operand(self, node: torch.fx.Node) -> torch.fx.Node | None:
-        """Return the one grouped view a pointwise operand applies elementwise math to.
+        """Return the grouped view a feed-main operand is computed from elementwise.
 
         The grouped view of ``x`` may be combined with captures and constants (e.g.
-        ``x * w``) before meeting the reduced value; any reduction inside the operand
-        disqualifies it, since it would be a second physical value.
+        ``x * w``) before meeting the reduced value. Every GEMM-dependent input must
+        resolve to the same view; a reduction or other non-pointwise input would be
+        a second physical value and disqualifies the operand.
         """
-        normalized = self.graph.normalized_nodes.get(node)
-        if isinstance(normalized, NormalizedView):
+        if isinstance(self.graph.normalized_nodes.get(node), NormalizedView):
             return node if node in self.grouped_tensors else None
-        if isinstance(
-            normalized, NormalizedReduction
-        ) or not is_shape_preserving_pointwise_node(node):
-            return None
         gemm = self.gemm
-        if gemm is None:
+        if gemm is None or not is_shape_preserving_pointwise_node(node):
             return None
         leaves = OrderedSet(
             self.grouped_operand(arg)
             for arg in iter_fx_node_inputs((node.args, node.kwargs))
-            if isinstance(arg, torch.fx.Node) and self.graph.depends_on(arg, gemm)
+            if self.graph.depends_on(arg, gemm)
         )
-        # Every GEMM-dependent input must resolve to the same grouped view; a None
-        # leaf (a reduction or non-pointwise input) disqualifies the operand.
         return next(iter(leaves)) if len(leaves) == 1 else None
 
     def match_feed_main_candidate(

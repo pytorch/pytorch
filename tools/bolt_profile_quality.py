@@ -280,7 +280,6 @@ def main() -> None:
         "--profile",
         nargs=2,
         action="append",
-        required=True,
         type=Path,
         metavar=("YAML", "LOG"),
         help="Profile and corresponding optimization log; repeat for additional profiles",

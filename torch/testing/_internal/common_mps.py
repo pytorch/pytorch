@@ -27,8 +27,6 @@ if torch.backends.mps.is_available():
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "linalg.eig",
-            "linalg.eigvals",
             "linalg.inv",
             "linalg.inv_ex",
             "linalg.ldl_factor",
@@ -51,8 +49,6 @@ if torch.backends.mps.is_available():
             # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
             # TODO: drop this when MPS has 5-D bicubic.
             "nn.functional.grid_sample": [torch.float32],
-            "linalg.eig": None,
-            "linalg.eigvals": None,
             "hash_tensor": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
@@ -112,7 +108,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.adaptive_avg_pool3d": None,
             "nn.functional.adaptive_max_pool1d": [
                 torch.int16,
                 torch.int32,
@@ -130,7 +125,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.adaptive_max_pool3d": None,
-            "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.local_response_norm": [
                 torch.int8,
@@ -244,7 +238,6 @@ if torch.backends.mps.is_available():
             "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
-            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
@@ -266,9 +259,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
             ],
             "float_power": None,
-            # MPS: input sizes must be divisible by output sizes
-            "nn.functional.adaptive_avg_pool1d": None,
-            "nn.functional.adaptive_avg_pool2d": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],
