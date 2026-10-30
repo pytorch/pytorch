@@ -128,7 +128,9 @@ class RmsNormBwdConfig:
         if arch_major is None:
             arch_major = _detect_arch_major()
         if arch_major >= 10:
-            return _for_blackwell_bwd(N, dtype_width, dout_width, T_hint, num_acc)
+            return _for_blackwell_bwd(
+                N, dtype_width, dout_width, arch_major, T_hint, num_acc
+            )
         return _for_hopper_bwd(N, dtype_width, arch_major)
 
 
@@ -166,7 +168,12 @@ def _for_hopper_bwd(N: int, dtype_width: int, arch_major: int) -> RmsNormBwdConf
 
 
 def _for_blackwell_bwd(
-    N: int, dtype_width: int, dout_width: int, T_hint: int = 0, num_acc: int = 1
+    N: int,
+    dtype_width: int,
+    dout_width: int,
+    arch_major: int,
+    T_hint: int = 0,
+    num_acc: int = 1,
 ) -> RmsNormBwdConfig:
     """Pick a launch config for RMSNorm bwd on Blackwell.
 
@@ -207,14 +214,6 @@ def _for_blackwell_bwd(
         # CTA's tile small enough to fit comfortably in registers.
         cluster_n = 4 if 0 < T_hint <= 1024 and row_bytes <= 64 * 1024 else 8
         num_threads, threads_per_row = 128, 128
-        # Override if this cluster_n would overflow the device's smem budget.
-        cluster_n = _bump_cluster_n_for_smem(
-            cluster_n,
-            N,
-            smem_stages=2,
-            sum_bytes=(dtype_width + dout_width) // 8,
-            max_cluster=_max_cluster_for(10),  # Blackwell
-        )
     elif row_bytes > 16 * 1024:
         # Wider than 128 threads can comfortably handle at cluster_n=1; bump
         # threads/row to keep per-thread fragments small.
@@ -223,6 +222,15 @@ def _for_blackwell_bwd(
     else:
         cluster_n = 1
         num_threads, threads_per_row = 128, 128
+
+    # SM12x has less shared memory, including for rows below 48KiB.
+    cluster_n = _bump_cluster_n_for_smem(
+        cluster_n,
+        N,
+        smem_stages=2,
+        sum_bytes=(dtype_width + dout_width) // 8,
+        max_cluster=_max_cluster_for(arch_major),
+    )
 
     bytes_per_thread_frag = (N // cluster_n) // threads_per_row * max_bytes
 
