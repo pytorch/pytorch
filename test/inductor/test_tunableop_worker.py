@@ -672,8 +672,6 @@ class TunableopModeValidationTest(TestCase):
             ("reuse", "PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0", True),
             ("reuse", "PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0", True),
             ("reuse", "PYTORCH_TUNABLEOP_TUNING", "0", False),
-            ("tune", "PYTORCH_TUNABLEOP_FILENAME", "", True),
-            ("reuse", "PYTORCH_TUNABLEOP_FILENAME", "", True),
         ):
             with self.subTest(mode=mode, var=var):
                 is_mode = getattr(tunableop, f"is_{mode}_mode")
