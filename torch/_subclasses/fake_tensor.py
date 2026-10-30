@@ -399,12 +399,11 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
 
 
 # The SymInt memos of a fake (nonzero_memo, unique_memo,
-# unique_consecutive_memo). A C++ fake has no SymNumberMemoDescriptor, so this
-# keeps the descriptor's state in the tensor's __dict__ under the same names,
-# and like the descriptor drops the memo once the tensor is mutated or
-# fake_mode's epoch changes. Unlike the item memo, which goes through the fake
-# mode's own store (maybe_get_item_memo), these memos are only used by the
-# Python fake impls, so they need no C++ store.
+# unique_consecutive_memo). A Python FakeTensor keeps them in its
+# SymNumberMemoDescriptors. A C++ fake keeps them on the C++ tensor, outside
+# its __dict__ (which torch.save would pickle as tensor state), and like the
+# descriptor drops a memo once the tensor is mutated or fake_mode's epoch
+# changes; a shallow copy such as set_data drops it too.
 def _check_sym_memo_name(name: str) -> None:
     # A Python FakeTensor raises on an unknown memo name through getattr, so do
     # the same for a C++ fake instead of silently missing the memo. item_memo
@@ -427,14 +426,7 @@ def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
     fake_mode = maybe_get_fake_mode(x)
     if fake_mode is None:
         return None
-    memo = getattr(x, f"_{name}", None)
-    if memo is None:
-        return None
-    mutated = not x.is_inference() and getattr(x, f"_{name}_vc", None) != x._version
-    if mutated or getattr(x, f"_{name}_epoch", None) != fake_mode.epoch:
-        setattr(x, f"_{name}", None)
-        return None
-    return memo
+    return torch._C._get_fake_sym_memo(x, name, fake_mode.epoch)
 
 
 def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
@@ -445,10 +437,7 @@ def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
         fake_mode = maybe_get_fake_mode(x)
         if fake_mode is None:
             return
-        setattr(x, f"_{name}", value)
-        if not x.is_inference():
-            setattr(x, f"_{name}_vc", x._version)
-        setattr(x, f"_{name}_epoch", fake_mode.epoch)
+        torch._C._set_fake_sym_memo(x, name, value, fake_mode.epoch)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
