@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -23,6 +24,8 @@ from torch.testing._internal.inductor_pointwise_coverage import (
 
 
 class TestPointwiseCoverage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "outcome",
         (
