@@ -102,3 +102,22 @@ TEST(OptionalArrayRefTest, DanglingPointerFix) {
   ASSERT_TRUE(get_first_element(300) == 300);
   ASSERT_TRUE(get_first_element({400}) == 400);
 }
+
+TEST(OptionalArrayRefTest, ArrayRefEquality) {
+  c10::ArrayRef<int64_t> a({1, 2, 3});
+  c10::ArrayRef<int64_t> b({1, 2, 3});
+  c10::ArrayRef<int64_t> c({1, 2, 4});
+
+  // A plain ArrayRef == ArrayRef comparison must not become ambiguous.
+  ASSERT_TRUE(a == b);
+  ASSERT_FALSE(a == c);
+
+  // Preserve OptionalArrayRef == ArrayRef semantics.
+  c10::OptionalIntArrayRef optional = a;
+  ASSERT_TRUE(optional == b);
+  ASSERT_FALSE(optional == c);
+
+  // An empty OptionalArrayRef is not equal to an ArrayRef.
+  c10::OptionalIntArrayRef empty = std::nullopt;
+  ASSERT_FALSE(empty == b);
+}
