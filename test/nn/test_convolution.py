@@ -3829,6 +3829,32 @@ class TestConvolutionNNDevice(NNTestCase):
             torch.ops.aten.slow_conv_dilated3d, input, weight, bias, kwargs
         )
 
+    @onlyAccelerator
+    def test_conv_inputs_device_mismatch(self, device):
+        device_mismatches = (
+            ("cpu", device, "cpu"),
+            ("cpu", "cpu", device),
+            ("cpu", device, device),
+            ("cpu", device, None),
+            (device, "cpu", device),
+            (device, device, "cpu"),
+            (device, "cpu", "cpu"),
+            (device, "cpu", None),
+        )
+        for input_device, weight_device, bias_device in device_mismatches:
+            input = torch.randn(1, 2, 5, device=input_device)
+            weight = torch.randn(3, 2, 3, device=weight_device)
+            bias = (
+                torch.randn(3, device=bias_device) if bias_device is not None else None
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "Expected all tensors to be on the same device"
+            ):
+                if bias is None:
+                    F.conv1d(input, weight)
+                else:
+                    F.conv1d(input, weight, bias)
+
 
 class TestConvolutionNNCPU(NNTestCase):
     """CPU-specific convolution tests."""
