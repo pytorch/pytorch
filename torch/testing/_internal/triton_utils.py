@@ -2,24 +2,33 @@
 
 import unittest
 
+import torch
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_MTIA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    TRITON_HAS_XPU,
 )
 from torch.utils._triton import has_triton
 
+_XPU_TRITON_MISSING = torch.xpu.is_available() and not TRITON_HAS_XPU
+_XPU_TRITON_HINT = (
+    "; XPU device found but Triton XPU backend is missing, "
+    "install pytorch-triton-xpu to enable"
+    if _XPU_TRITON_MISSING
+    else ""
+)
 
 requires_cuda_and_triton = unittest.skipUnless(
     HAS_CUDA_AND_TRITON, "requires cuda and triton"
 )
 requires_xpu_and_triton = unittest.skipUnless(
-    HAS_XPU_AND_TRITON, "requires xpu and triton"
+    HAS_XPU_AND_TRITON, "requires xpu and triton" + _XPU_TRITON_HINT
 )
 requires_gpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON or HAS_MTIA_AND_TRITON,
-    "requires gpu and triton",
+    "requires gpu and triton" + _XPU_TRITON_HINT,
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
