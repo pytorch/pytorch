@@ -26,6 +26,13 @@ Before submitting, simplify where possible and make sure the core change is easy
 for maintainers to review. If your PR is not ready for review, please use the
 GitHub draft PR feature.
 
+*Please keep stacks of pull requests under 10 PRs.* Large stacks can use up
+shared CI resources and block other contributors. Land the bottom of a stack
+before adding more on top, and use `[no-ci]` on PRs that don't need CI yet
+(see the [ghstack-ci skill](.agents/skills/ghstack-ci/SKILL.md)). To protect
+our CI infrastructure, we reserve the right to stop running CI on large
+stacks, as in [#185290](https://github.com/pytorch/pytorch/pull/185290).
+
 All contributions should involve a human who understands and can take
 responsibility for the work produced with AI assistance. *We do not accept
 contributions created by fully autonomous agents*, and we may close pull requests
