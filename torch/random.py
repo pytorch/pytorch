@@ -59,7 +59,7 @@ def manual_seed(seed) -> torch._C.Generator:
 
     .. note:: This function seeds both the CPU and the current :ref:`accelerator<accelerators>`.
         For CPU only, use ``torch.default_generator.manual_seed(seed)``.
-        For the accelerator only, use :func:`torch.accelerator.random.manual_seed_all`.            
+        For the accelerator only, use :func:`torch.accelerator.random.manual_seed_all`.
     .. seealso::
         For a stateless, JAX-style PRNG API (explicit ``key``, ``split``,
         ``fold_in``) that does not touch global generator state, see the
