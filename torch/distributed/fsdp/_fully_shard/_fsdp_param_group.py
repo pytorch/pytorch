@@ -1311,23 +1311,12 @@ class FSDPParamGroup:
             if fsdp_param.sharded_param.device.type == "meta"
         ]
         if param_names_on_meta:
-            msg = (
+            raise RuntimeError(
                 "FSDP parameters should be materialized from meta device before training, "
                 f"but the following were still on meta device: {param_names_on_meta}\n"
+                "For example, call module.to_empty(device) to materialize to device and "
+                "call module.reset_parameters() on each module to initialize values."
             )
-            if isinstance(self.offload_policy, CPUOffloadPolicy):
-                msg += (
-                    "With CPUOffloadPolicy, DTensor random ops (e.g. reset_parameters()) "
-                    "raise on CPU-offloaded parameters, so either initialize the parameters "
-                    "before calling fully_shard, or initialize each parameter's to_local() "
-                    "after seeding each rank's CPU generator."
-                )
-            else:
-                msg += (
-                    "For example, call module.to_empty(device) to materialize to device and "
-                    "call module.reset_parameters() on each module to initialize values."
-                )
-            raise RuntimeError(msg)
 
     def _validate_cpu_offload_params(self):
         if not isinstance(self.offload_policy, CPUOffloadPolicy):
@@ -1341,9 +1330,6 @@ class FSDPParamGroup:
             raise RuntimeError(
                 "FSDP parameters should be materialized on CPU when enabling CPU offloading. "
                 'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
-                "DTensor random ops (e.g. reset_parameters()) raise on CPU-offloaded parameters, "
-                "so either initialize the parameters before calling fully_shard, or "
-                "initialize each parameter's to_local() after seeding each rank's CPU generator. "
                 "Found following parameters on non-CPU device: "
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
             )

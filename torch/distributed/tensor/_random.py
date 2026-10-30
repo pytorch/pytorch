@@ -25,20 +25,6 @@ __all__ = [
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
 
-def _tracker_for_mesh(device_mesh: DeviceMesh) -> Optional["_RNGStateTracker"]:
-    """Returns ``_rng_tracker`` if it coordinates random ops on ``device_mesh``.
-
-    The tracker is a process-wide singleton, so it can exist for an accelerator
-    while a DTensor lives on a mesh of another device type (e.g. a CPU side mesh).
-    """
-    if (
-        _rng_tracker is not None
-        and device_mesh.device_type == _rng_tracker._device.type
-    ):
-        return _rng_tracker
-    return None
-
-
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
     Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest

@@ -157,27 +157,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_user_generator_used_when_distribute_region_disabled(self):
-        device_mesh = self.build_device_mesh()
-        dtensor = torch.distributed.tensor.empty(
-            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
-        )
-        dtensor.uniform_()  # lazily constructs the RNG tracker
-        random._rng_tracker.distribute_region_enabled = False
-
-        rng = torch.Generator(device=self.device_type).manual_seed(42)
-        state_before = rng.get_state()
-        dtensor.uniform_(generator=rng)
-
-        # No per-shard offsets with the distribute region disabled: every rank
-        # draws from seed 42.
-        ref_rng = torch.Generator(device=self.device_type).manual_seed(42)
-        expected = torch.empty_like(dtensor.to_local()).uniform_(generator=ref_rng)
-        self.assertEqual(dtensor.to_local(), expected)
-        self.assertNotEqual(rng.get_state(), state_before)
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value.
         # The DTensor random ops will use the same generator as the default one on the device.
@@ -1129,41 +1108,30 @@ DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
+class DTensorDeviceMismatchRandomOpsTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 1
 
+    def _cpu_offloaded_linear(self):
+        # fully_shard with CPUOffloadPolicy keeps the mesh on the accelerator,
+        # so to_empty(device="cpu") yields CPU local tensors on that mesh.
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(
+            lin, mesh=self.build_device_mesh(), offload_policy=CPUOffloadPolicy()
+        )
+        lin.to_empty(device="cpu")
+        return lin
+
     @with_comms
     @skip_if_lt_x_gpu(1)
     def test_random_op_on_cpu_offloaded_param_raises(self):
-        # fully_shard with CPUOffloadPolicy keeps the mesh on the accelerator,
-        # so to_empty(device="cpu") yields CPU local tensors whose RNG the
-        # accelerator tracker cannot coordinate.
-        dp_mesh = self.build_device_mesh()
-        lin = torch.nn.Linear(4, 4, bias=False)
-        fully_shard(lin, mesh=dp_mesh, offload_policy=CPUOffloadPolicy())
-        lin.to_empty(device="cpu")
-        self.assertEqual(lin.weight.device_mesh.device_type, self.device_type)
-        self.assertEqual(lin.weight.to_local().device.type, "cpu")
-
-        with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "local tensors on cpu"):
-                lin.weight.normal_()
-
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_random_op_on_cpu_offloaded_param_with_distribute_region_disabled(self):
-        dp_mesh = self.build_device_mesh()
-        torch.distributed.tensor.randn(4, device_mesh=dp_mesh)  # constructs the tracker
-        random._rng_tracker.distribute_region_enabled = False
-
-        lin = torch.nn.Linear(4, 4, bias=False)
-        fully_shard(lin, mesh=dp_mesh, offload_policy=CPUOffloadPolicy())
-        lin.to_empty(device="cpu")
-        with torch.no_grad():
-            samples = [lin.weight.normal_().to_local().clone() for _ in range(2)]
-        self.assertNotEqual(samples[0], samples[1])
+        lin = self._cpu_offloaded_linear()
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(RuntimeError, "local tensors on cpu"),
+        ):
+            lin.weight.normal_()
 
     @with_comms
     @skip_if_lt_x_gpu(1)
@@ -1179,22 +1147,12 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(1)
-    def test_random_op_on_cpu_mesh_with_accelerator_tracker(self):
-        # A CPU-mesh DTensor was never offloaded, so an existing accelerator
-        # tracker must neither raise nor reset the CPU generator for it.
-        mesh = self.build_device_mesh()
-        t = torch.empty(4, device=self.device_type)
-        distribute_tensor(t, mesh, [Replicate()]).uniform_()
-        self.assertIsNotNone(random._rng_tracker)
-
-        cpu_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-        local = torch.empty(4, 4)
-        dtensor = DTensor.from_local(local, cpu_mesh, [Replicate()], run_check=False)
-        samples = [dtensor.normal_().to_local().clone() for _ in range(2)]
-        self.assertNotEqual(samples[0], samples[1])
-
-        randn = torch.distributed.tensor.randn
-        samples = [randn(4, device_mesh=cpu_mesh).to_local() for _ in range(2)]
+    def test_random_op_on_cpu_offloaded_param_with_distribute_region_disabled(self):
+        lin = self._cpu_offloaded_linear()
+        torch.distributed.tensor.randn(4, device_mesh=self.build_device_mesh())
+        random._rng_tracker.distribute_region_enabled = False
+        with torch.no_grad():
+            samples = [lin.weight.normal_().to_local().clone() for _ in range(2)]
         self.assertNotEqual(samples[0], samples[1])
 
 

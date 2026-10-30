@@ -430,18 +430,14 @@ class OpDispatcher:
                     raise RuntimeError(
                         f"DTensor random op {op_call} does not support local tensors on "
                         f"{local_device_type} when the DeviceMesh is on {mesh_device_type}, "
-                        "since RNG cannot be coordinated across ranks. Either run the op before "
-                        "moving the local tensors (e.g. before fully_shard with CPUOffloadPolicy), "
-                        "or run it on DTensor.to_local() after seeding each rank's "
-                        f"{local_device_type} generator so that shards get different values and "
-                        "replicas get the same values."
+                        "since RNG cannot be coordinated across ranks. Run the op before "
+                        "moving the local tensors (e.g. before fully_shard with CPUOffloadPolicy)."
                     )
 
-                rng_tracker = random._tracker_for_mesh(first_spec.mesh)
                 if (
-                    rng_tracker
+                    random._rng_tracker
                     and not first_local_arg.is_meta
-                    and rng_tracker.distribute_region_enabled
+                    and random._rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
                     if (
@@ -453,7 +449,7 @@ class OpDispatcher:
                             and type(first_local_arg) is not torch.Tensor
                         )
                     ):
-                        with rng_tracker._distribute_region(
+                        with random._rng_tracker._distribute_region(
                             first_spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
@@ -464,10 +460,12 @@ class OpDispatcher:
                                 )
                     else:
                         # Accelerator device without user generator, use HOP for traceability
-                        if not isinstance(rng_tracker, random.OffsetBasedRNGTracker):
+                        if not isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        ):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            rng_tracker._compute_rng_offsets(first_spec)
+                            random._rng_tracker._compute_rng_offsets(first_spec)
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec
@@ -480,11 +478,7 @@ class OpDispatcher:
                                 **op_info.local_kwargs,
                             )
                 else:
-                    # No rng_tracker, meta tensor, distribute_region disabled, or a
-                    # mesh on a different device type than the tracker.
-                    # Nothing else will pass the generator along, so restore it.
-                    if maybe_user_generator is not None:
-                        op_info.local_kwargs["generator"] = maybe_user_generator
+                    # No rng_tracker, meta tensor, or distribute_region disabled
                     with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                         output_sharding.output_spec
                     ):
