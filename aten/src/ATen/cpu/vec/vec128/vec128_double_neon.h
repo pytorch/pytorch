@@ -177,7 +177,10 @@ class Vectorized<double> {
   Vectorized<double> angle() const {
     auto zero = Vectorized<double>(0.0);
     auto pi = Vectorized<double>(c10::pi<double>);
-    auto tmp = blendv(zero, pi, vreinterpretq_f64_u64(vcltzq_f64(values)));
+    auto tmp = blendv(
+        zero,
+        pi,
+        vreinterpretq_f64_u64(vcltzq_s64(vreinterpretq_s64_f64(values))));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
