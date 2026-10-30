@@ -10,6 +10,7 @@ from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+import torch.utils._pytree as pytree
 from torch._precompile import (
     _DynamoCapture,
     _matching_cache,
@@ -35,6 +36,7 @@ def export_python(
     *,
     backend: str = "inductor",
     dynamic: bool | None = None,
+    check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
 
@@ -94,12 +96,31 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
+        check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
+            too, as during compiler-internal tracing) on every served call, on copies
+            of the tensor arguments, and raise
+            :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
+            arguments after any in-place writes, differ beyond
+            ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
+            ``fn``'s outputs must be values ``assert_close`` compares. Tensor
+            arguments are copied one by one, so arguments that alias each other (one
+            tensor passed twice, or views of one tensor) do not alias in the eager
+            run. Module arguments are not copied, so state a module updates in place
+            (BatchNorm's running statistics in training, say) is updated twice per
+            checked call.
+            Not meaningful for a function that draws random numbers, whose compiled
+            and eager draws differ. Defaults to the ``TORCH_EXPORT_PYTHON_CHECK``
+            environment variable (``1`` enables it), read when the decorator is
+            applied.
     """
 
     torch._C._log_api_usage_once("torch.compiler.export_python")
 
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-        exported = _ExportedPython(fn, path, backend, dynamic)
+        enabled = os.environ.get("TORCH_EXPORT_PYTHON_CHECK") == "1"
+        exported = _ExportedPython(
+            fn, path, backend, dynamic, enabled if check is None else check
+        )
 
         @functools.wraps(fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -117,6 +138,7 @@ class _ExportedPython:
         path: str | os.PathLike[str],
         backend: str,
         dynamic: bool | None,
+        check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
             raise PrecompileError(
@@ -129,6 +151,7 @@ class _ExportedPython:
         self._cache_path = self._path + ".cache"
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic)
+        self._check = check
         self._runnable: PrecompiledRunnable | None = None
         # Reentrant, so a call fn makes to itself while it is captured gets the clear
         # error below rather than waiting on its own first call.
@@ -149,7 +172,39 @@ class _ExportedPython:
                     if not os.path.exists(self._path):
                         return self._capture(*args, **kwargs)
                     self._runnable = self._load()
-        return self._runnable(*args, **kwargs)
+        if not self._check:
+            return self._runnable(*args, **kwargs)
+
+        def copy(t: torch.Tensor) -> torch.Tensor:
+            c = t.detach().clone().requires_grad_(t.requires_grad)
+            # A non-leaf stays one, so eager may write to it in place as fn did.
+            return c if t.is_leaf else c.clone()
+
+        # Copied before the artifact runs, so an in-place write cannot reach eager.
+        eager_args, eager_kwargs = pytree.tree_map_only(
+            torch.Tensor, copy, (args, kwargs)
+        )
+        result = self._runnable(*args, **kwargs)
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        # A torch.compile'd function fn calls runs eagerly too, on this thread only
+        # (set_stance would switch every thread's compiles to eager).
+        with _use_eager_on_nested_compile():
+            expected = self._fn(*eager_args, **eager_kwargs)
+        # The tensor arguments too, so an edit that breaks an in-place write is caught.
+        inputs, eager_inputs = (
+            [t for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)]
+            for tree in ((args, kwargs), (eager_args, eager_kwargs))
+        )
+        try:
+            torch.testing.assert_close((result, inputs), (expected, eager_inputs))
+        except AssertionError as e:
+            name = getattr(self._fn, "__qualname__", self._fn)
+            raise PrecompileError(
+                f"export_python: {self._path} does not match eager {name} (check is "
+                f"on): {e}"
+            ) from e
+        return result
 
     def _load(self) -> PrecompiledRunnable:
         python_code, _ = _read_artifact(self._path, None)
