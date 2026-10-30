@@ -1599,6 +1599,17 @@ class FxGraphHashDetails:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
         self.cache_key_tag = cconfig.cache_key_tag
+        if (
+            config.strict_pointwise
+            and config.cuda_backend == "triton"
+            and torch.version.hip is None
+        ):
+            from torch._native.registry import native_decomp_table
+
+            self.native_inner_tree_sum = (
+                torch.ops.aten.sum.dim_IntList
+                in native_decomp_table(overrides_only=True)
+            )
         self.nested_inductor_config_patches = (
             _collect_nested_region_inductor_config_patches_for_hash(gm)
             if gm is not None
