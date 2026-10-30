@@ -1005,6 +1005,30 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestBenchmarkChoiceFailures(TestCase):
+    def test_pool_compile_failure_drops_choice(self):
+        # A kernel that fails to compile in an async-compile pool worker comes back
+        # as a SubprocException; that choice is dropped, not the whole compile.
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        good, bad = unittest.mock.Mock(), unittest.mock.Mock()
+
+        def benchmark_choice(choice, autotune_args):
+            if choice is bad:
+                raise SubprocException("RuntimeError: PassManager::run failed", "k")
+            return 1.0
+
+        with patch.object(
+            select_algorithm.AlgorithmSelectorCache,
+            "benchmark_choice",
+            side_effect=benchmark_choice,
+        ):
+            timings = select_algorithm.AlgorithmSelectorCache.benchmark_choices(
+                [bad, good], None
+            )
+        self.assertEqual(timings, {bad: float("inf"), good: 1.0})
+
+
 class TestSelectAlgorithmCleanup(TestCase):
     def test_benchmark_only_clears_matching_precompile_cache_entry(self):
         """
