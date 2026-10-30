@@ -483,6 +483,30 @@ partial_fn = functools.partial(fn, scale=2)
         )
         return a
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_itertools_product_zero_repeat_preserves_inputs(self, backend):
+        def fn(x):
+            first = iter([7, 8])
+            second = iter([9, 10])
+            product = list(itertools.product(first, second, repeat=0))
+            return x + next(first, -1) + next(second, -1), product
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(fn(x), (x + 16, [()]))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_itertools_product_zero_repeat_does_not_call_iter(self):
+        class Iterable:
+            def __iter__(self):
+                raise AssertionError("repeat=0 must not call iter")
+
+        def fn(x):
+            return x + len(list(itertools.product(Iterable(), repeat=0)))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_itertools_permutations_basic(self):
         def fn():
             return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
@@ -2583,6 +2607,25 @@ partial_fn = functools.partial(fn, scale=2)
 
         x = torch.ones(1)
         self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    def test_functools_wraps_name(self):
+        # https://github.com/pytorch/pytorch/issues/201123
+        def deco(func):
+            @functools.wraps(func)
+            def new_func(x):
+                return func(x)
+
+            return new_func
+
+        @deco
+        def add_(x):
+            return x + 1
+
+        def fn(x, method=add_):
+            return x + len(method.__name__) + len(method.__qualname__)
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -8878,6 +8921,63 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
+
+    def test_full_with_tensor_fill_value_infers_dtype(self):
+        cases = (
+            (torch.bool, True),
+            (torch.int32, 5),
+            (torch.int64, 5),
+            (torch.float16, 2.5),
+            (torch.float64, 2.5),
+        )
+
+        for fill_dtype, value in cases:
+            with self.subTest(fill_dtype=fill_dtype):
+
+                def func(fill_value):
+                    return torch.full((2,), fill_value)
+
+                fill_value = torch.tensor(value, dtype=fill_dtype)
+                expected = func(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_explicit_dtype(self):
+        def func(fill_value, dtype):
+            return torch.full((2,), fill_value, dtype=dtype)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for dtype in (None, torch.float64):
+            with self.subTest(dtype=dtype):
+                expected = func(fill_value, dtype)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, dtype
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
+    def test_full_with_tensor_fill_value_out_dtype(self):
+        def func(fill_value, out):
+            return torch.full((2,), fill_value, out=out)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for out_dtype in (None, torch.float64):
+            with self.subTest(out_dtype=out_dtype):
+                expected_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                result_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                expected = func(fill_value, expected_out)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, result_out
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
 
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
