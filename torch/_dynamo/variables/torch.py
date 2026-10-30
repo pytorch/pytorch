@@ -2141,10 +2141,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            # Eager only accepts a tensor fill_value that does not require grad,
-            # and fill_ would make the result differentiable w.r.t. it.
+            # Eager only accepts a 0-d tensor fill_value that does not require
+            # grad, and fill_ would make the result differentiable w.r.t. it.
             if (
                 isinstance(fill_value, variables.TensorVariable)
+                and fill_value.ndim == 0
                 and not fill_value.requires_grad
             ):
                 dtype = kwargs.get("dtype")
