@@ -1,5 +1,6 @@
 """``torch.compiler.export_python``: a decorator whose compile cache is a file you own."""
 
+import contextlib
 import functools
 import logging
 import os
@@ -76,6 +77,13 @@ def export_python(
     refuses that. The stale cache stays until a recapture replaces it. A process
     serves one version of a capture: run a new process to pick up an edit, since
     loading the edited file where an earlier version of it is loaded raises.
+
+    With the inductor backend the capture tunes its Triton kernels at compile time (it
+    compiles as inductor does under ``triton.autotune_at_compile_time``), so a graph's
+    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
+    generated launches with: editing a row changes that kernel's launch config. A
+    template (flex attention, say) or a user-defined kernel keeps its config in its
+    own decorator instead, editable the same way.
 
     The artifact is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
@@ -179,7 +187,16 @@ class _ExportedPython:
         )
         self._capturing = True
         try:
-            with cap:
+            with contextlib.ExitStack() as stack:
+                if self._backend == "inductor":
+                    from torch._inductor import config as inductor_config
+
+                    # Tuning at compile time writes each graph's KERNEL_CONFIGS table:
+                    # the config each inductor-generated kernel tuned to and launches with.
+                    stack.enter_context(
+                        inductor_config.patch({"triton.autotune_at_compile_time": True})
+                    )
+                stack.enter_context(cap)
                 result = cap(*args, **kwargs)
         finally:
             self._capturing = False
