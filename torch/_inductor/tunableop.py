@@ -580,12 +580,11 @@ _TUNABLEOP_MIN_DYN_DIM = 8
 _TUNABLEOP_MAX_LADDER_BYTES = 8 * 1024**3
 
 # Ceiling on the SYMBOL, not the dim. A declared range reports what a symbol MAY
-# take, not what it does: every symbol here reports [2, 2**31-1], so the ladder ran
-# to the old dim ceiling of 65536 for every GEMM -- 64x the traced hint on one model
-# and 4096x on another. Capping in symbol space also leaves an expression dim like
-# 200*s free to reach the size it is actually served at, which a dim-space ceiling
-# truncated: one GEMM served a dim of 294912 while its ladder stopped at 49152.
-# Expression dims are bounded instead by the served-dim ceiling below.
+# take, not what it does -- every symbol here reports [2, 2**31-1] -- so without a
+# cap the ladder runs orders of magnitude past the traced hint. Capping in symbol
+# space also leaves an expression dim like 200*s free to reach the size it is
+# actually served at, which a dim-space ceiling would truncate. Expression dims
+# are bounded instead by the served-dim ceiling below.
 _TUNABLEOP_MAX_DYN_SYM = 16384
 
 
@@ -606,7 +605,7 @@ def maybe_range_pretune(winner) -> None:
 
     if not is_tune_mode():
         return
-    if not config.cuda.aten_tunableop_ladder:
+    if not config.cuda.autotune_tunableop_ladder:
         # Traced shape only; the normal autotune path still tunes each aten
         # candidate at the shape it was traced at.
         return
@@ -621,9 +620,8 @@ def maybe_range_pretune(winner) -> None:
     # Match on the underlying ExternKernelChoice name. ExternKernelCaller
     # always sets self.choice (and its own name from it). Compared by string
     # so a double import of the kernel modules cannot break the match. Covers
-    # the _dtype out-variants and _scaled_mm_v2, which the old
-    # op-name allowlist missed; _int_mm / sparse variants are not
-    # hipBLASLt-tunable.
+    # the _dtype out-variants and _scaled_mm_v2; _int_mm and the sparse
+    # variants are not hipBLASLt-tunable.
     choice_name = winner.choice.name
     if choice_name not in _TUNABLEOP_GEMM_CHOICES:
         return
@@ -818,10 +816,14 @@ def maybe_range_pretune(winner) -> None:
             continue
         buckets.append(sym_val)
         dim_vals.append(dim_val)
-    # Largest first: the budget below is shared across the ladder and spent in
-    # order, so ascending order dropped the sizes nearest the shape actually
-    # served while keeping 8, 16, 32.
-    order = sorted(range(len(buckets)), key=lambda i: -dim_vals[i])
+    # The traced hint first, then largest first. The budget below is shared and
+    # spent in order: ascending order dropped the sizes nearest the shape
+    # actually served, and pure largest-first can spend it all on the biggest
+    # sizes -- the likeliest to fault -- before reaching the one size runtime is
+    # known to ask for.
+    order = sorted(
+        range(len(buckets)), key=lambda i: (buckets[i] != sym_hint, -dim_vals[i])
+    )
     buckets = [buckets[i] for i in order]
     dim_vals = [dim_vals[i] for i in order]
     log.info(
@@ -935,32 +937,34 @@ def maybe_range_pretune(winner) -> None:
 
     # Drop buckets no GPU could materialize. The dim ceiling bounds the dynamic
     # dim, not the problem size: a bmm with dynamic batch at dim 16384 and
-    # K = N = 4096 fp16 is 512 GiB per operand, and largest-first order submits
-    # those first -- each fault can cost a cold worker restart.
-    def _meta_bytes(m: Any) -> int:
+    # K = N = 4096 fp16 is 512 GiB per operand, and the biggest sizes run early
+    # -- each fault can cost a cold worker restart.
+    def _meta_bytes(m: Any) -> float:
+        # inf, not 0: a size we cannot compute must fail the cap, not pass it.
         try:
             numel = 1
             for d in m.sizes:
                 numel *= int(d)
             return numel * m.dtype.itemsize
         except Exception:
-            return 0
+            return float("inf")
 
     kept: list[Any] = []
     kept_dims: list[int] = []
     for bmreq, dim_val in zip(bmreqs, dim_vals):
         try:
             metas = [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]
-            biggest = max(_meta_bytes(m) for m in metas)
+            # Summed: the worker allocates every operand and the output at once.
+            footprint = sum(_meta_bytes(m) for m in metas)
         except Exception:
-            biggest = 0
-        if biggest > _TUNABLEOP_MAX_LADDER_BYTES:
+            footprint = float("inf")
+        if footprint > _TUNABLEOP_MAX_LADDER_BYTES:
             log.warning(
-                "TunableOp range pre-tune for %s skipping dim %d: largest "
-                "operand is %.1f GiB, over the %.1f GiB cap.",
+                "TunableOp range pre-tune for %s skipping dim %d: operands "
+                "and output total %.1f GiB, over the %.1f GiB cap.",
                 winner.name,
                 dim_val,
-                biggest / 1024**3,
+                footprint / 1024**3,
                 _TUNABLEOP_MAX_LADDER_BYTES / 1024**3,
             )
             continue
@@ -987,30 +991,24 @@ def maybe_range_pretune(winner) -> None:
             )
             break
         bucket_start = time.monotonic()
-        # The whole remaining budget, deliberately. A per-bucket slot was tried
-        # and is worse: TuningProcess.get() kills the worker on timeout, and a
-        # slot below the cold-start cost of 15-40s makes the restart cold, time
-        # out, and be killed again -- a flat 5s produced 334 timeouts and 334
-        # kills where the shared budget produced 7. Letting the first bucket
-        # have the budget absorbs the cold start instead of fighting it.
+        # The whole remaining budget, deliberately. TuningProcess.get() kills
+        # the worker on timeout, so a per-bucket slot below the 15-40s
+        # cold-start cost makes the restart cold, time out and be killed again.
+        # Letting the first bucket have the budget absorbs the cold start
+        # instead of fighting it.
         outcome = submit(BenchmarkJob(bmreq, tuning=True), timeout=remaining)
-        if config.cuda.aten_tunableop_pretune_debug:
-            # Per-bucket cost, which nothing else records: only failures are
-            # logged today, so the cost of the buckets that SUCCEED -- and
-            # whether it falls as the worker warms up -- is invisible. That
-            # curve is what a per-bucket budget has to be sized against. Info,
-            # not debug: the flag alone must suffice, without also raising the
-            # logger level.
-            log.info(
-                "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d "
-                "wall=%.2fs status=%s",
-                winner.name,
-                dim_vals[i],
-                i + 1,
-                len(bmreqs),
-                time.monotonic() - bucket_start,
-                outcome.status,
-            )
+        # The only record of what a bucket costs when it SUCCEEDS: the other
+        # logs here report failures only, and that curve is what a per-bucket
+        # budget would have to be sized against.
+        log.debug(
+            "TunableOp pre-tune bucket: op=%s dim=%s size=%d/%d wall=%.2fs status=%s",
+            winner.name,
+            dim_vals[i],
+            i + 1,
+            len(bmreqs),
+            time.monotonic() - bucket_start,
+            outcome.status,
+        )
         if outcome.status == "ok":
             recorded = True
         else:

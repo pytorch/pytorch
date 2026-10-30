@@ -3011,7 +3011,7 @@ class cuda(cutlass):
 
     # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
     # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
-    # autotuning and records the solutions; with aten_tunableop_ladder it also
+    # autotuning and records the solutions; with autotune_tunableop_ladder it also
     # tunes a range of sizes of each GEMM's dynamic dim, otherwise only the
     # traced shape. "reuse" instead borrows the nearest recorded shape, benchmarks
     # it against the default kernel, and records the winner. Run as separate
@@ -3031,17 +3031,9 @@ class cuda(cutlass):
     # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim,
     # or only the traced shape. The ladder is what gives runtime a chance of an
     # exact hit on a size the compile never saw, and is also nearly all of the
-    # tuning cost -- on the heavier merge nets, the difference between minutes
-    # and hours.
-    aten_tunableop_ladder: bool = (
-        os.environ.get("INDUCTOR_ATEN_TUNABLEOP_LADDER", "1") == "1"
-    )
-
-    # Per-bucket pre-tune timing for the ladder above. One line per bucket is
-    # noise in a normal compile but is the only record of what a bucket costs
-    # when it SUCCEEDS; the ladder's other logs report failures only.
-    aten_tunableop_pretune_debug: bool = (
-        os.environ.get("INDUCTOR_ATEN_TUNABLEOP_PRETUNE_DEBUG", "0") == "1"
+    # tuning cost.
+    autotune_tunableop_ladder: bool = (
+        os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_LADDER", "1") == "1"
     )
 
 

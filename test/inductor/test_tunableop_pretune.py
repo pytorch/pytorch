@@ -13,6 +13,9 @@ signatures match the ones runtime produces -- both need real hardware.
 """
 
 import contextlib
+import os
+import tempfile
+import unittest
 from unittest import mock
 
 import sympy
@@ -23,6 +26,7 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    skipIfWindows,
     TestCase,
 )
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -115,7 +119,13 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
             mock.patch("torch._inductor.tunableop.submit", side_effect=_record)
         )
         stack.enter_context(mock.patch("torch._inductor.tunableop.BenchmarkJob", _Job))
-        stack.enter_context(config.patch({"cuda.aten_tunableop_ladder": ladder}))
+        # The winners below carry a cuda layout so they reach the ladder, but
+        # torch._C._cuda_tunableop_get_filename only exists in a CUDA build.
+        # Patched so these stay runnable on CPU-only inductor shards.
+        stack.enter_context(
+            mock.patch("torch.cuda.tunable.get_filename", return_value="pretune.csv")
+        )
+        stack.enter_context(config.patch({"cuda.autotune_tunableop_ladder": ladder}))
         yield submitted
 
 
@@ -147,13 +157,23 @@ class TestTunableOpPretune(TestCase):
         super().tearDown()
 
     def _mm_winner(self, name, s):
-        """A GEMM whose M is the dynamic dim. Bias-first ops get a third operand."""
+        """A GEMM whose M is the dynamic dim.
+
+        Operand lists match what each op is really lowered with: bias-first for
+        addmm/baddbmm, and [mat_a, mat_b, scale_a, scale_b] for _scaled_mm --
+        where scale_a carries the symbol too, so it goes through the meta
+        rebuild and the density check like the matrices do.
+        """
         m, k, n = s, 256, 512
         mat1 = _buffer("mat1", [m, k], [k, 1])
         mat2 = _buffer("mat2", [k, n], [n, 1])
         if name in ("addmm", "baddbmm"):
             bias = _buffer("bias", [m, n], [n, 1])
             return _FakeWinner(name, [bias, mat1, mat2], [m, n])
+        if name.startswith("_scaled_mm"):
+            scale_a = _buffer("scale_a", [m, 1], [1, 1])
+            scale_b = _buffer("scale_b", [1, n], [n, 1])
+            return _FakeWinner(name, [mat1, mat2, scale_a, scale_b], [m, n])
         return _FakeWinner(name, [mat1, mat2], [m, n])
 
     def test_supported_ops_produce_buckets(self):
@@ -161,6 +181,11 @@ class TestTunableOpPretune(TestCase):
             s = sympy.Symbol(f"s_{name}", positive=True, integer=True)
             submitted = _run(self._mm_winner(name, s), sym=s)
             self.assertTrue(submitted, f"{name} produced no buckets")
+            if name == "_scaled_mm":
+                metas = submitted[0].input_tensor_meta
+                self.assertEqual(len(metas), 4, "scales must reach the worker")
+                # scale_a carries the symbol, so it is rebuilt with the matrices
+                self.assertEqual(metas[2].sizes[0], metas[0].sizes[0])
 
     def test_unsupported_op_is_skipped(self):
         s = sympy.Symbol("s_other", positive=True, integer=True)
@@ -298,8 +323,8 @@ class TestTunableOpPretune(TestCase):
         self.assertEqual(_run(padded, sym=s), [])
 
     def test_choice_variants_produce_buckets(self):
-        # The old op-name allowlist missed the _dtype out-variants and
-        # _scaled_mm_v2. Matching runs on winner.choice.name.
+        # Matching runs on winner.choice.name, which covers the _dtype
+        # out-variants and _scaled_mm_v2.
         from types import SimpleNamespace
 
         for choice_name in (
@@ -342,16 +367,19 @@ class TestTunableOpPretune(TestCase):
             dims.add(bmreq.input_tensor_meta[0].sizes[0])
         self.assertIn(3000, dims, f"traced hint missing from {sorted(dims)}")
 
-    def test_largest_first_order(self):
+    def test_traced_hint_first_then_largest_first(self):
+        # The budget is shared and spent in order, so the one size runtime is
+        # known to ask for goes first; the rest descend, since a fault on a big
+        # size can cost a cold worker restart.
         s = sympy.Symbol("s_order", positive=True, integer=True)
-        submitted = _run(self._mm_winner("mm", s), sym=s)
+        submitted = _run(self._mm_winner("mm", s), sym=s, hint=512)
         dims = [bmreq.input_tensor_meta[0].sizes[0] for bmreq in submitted]
-        self.assertEqual(dims, sorted(dims, reverse=True))
+        self.assertEqual(dims[0], 512, f"traced hint must run first: {dims}")
+        self.assertEqual(dims[1:], sorted(dims[1:], reverse=True))
 
     def test_deadline_skips_remaining_buckets(self):
-        # Patch time.monotonic so the first bucket sees a healthy budget and
-        # every later check sees an expired one; assert the surviving submit
-        # got the remaining budget as its timeout.
+        # The clock advances on submission, not per monotonic() call, so this
+        # does not depend on how many times the loop reads the time.
         import time as _time
 
         s = sympy.Symbol("s_budget", positive=True, integer=True)
@@ -359,22 +387,18 @@ class TestTunableOpPretune(TestCase):
         timeouts = []
         submit_calls = {"n": 0}
 
+        t0 = _time.monotonic()
+
         def _fake_submit(job, timeout=None):
             timeouts.append(timeout)
             submit_calls["n"] += 1
             return mock.Mock(status="ok", time=1.0)
 
-        real_monotonic = _time.monotonic
-        t0 = real_monotonic()
-        mono_calls = {"n": 0}
-
         def _fake_monotonic():
-            # Call 1 computes the deadline; call 2 (first budget check) is
-            # healthy; everything after is expired.
-            mono_calls["n"] += 1
-            if mono_calls["n"] <= 2:
-                return t0
-            return t0 + 10**6
+            # Still t0 until something has been submitted, far past the
+            # deadline afterwards: exactly one bucket can run, whatever the
+            # loop's call pattern.
+            return t0 if submit_calls["n"] == 0 else t0 + 10**6
 
         with _ladder(s):
             with (
@@ -533,13 +557,14 @@ class TestTunableOpPretune(TestCase):
         submitted = _run(winner, sym=s, hint=16384, declared=(2, 16384))
         self.assertTrue(submitted, "smaller rungs must still submit")
         for bmreq in submitted:
+            # Summed, as the cap is: the worker allocates them all at once.
+            total = 0
             for meta in [*bmreq.input_tensor_meta, bmreq.output_tensor_meta]:
                 numel = 1
                 for d in meta.sizes:
                     numel *= int(d)
-                self.assertLessEqual(
-                    numel * meta.dtype.itemsize, tunableop._TUNABLEOP_MAX_LADDER_BYTES
-                )
+                total += numel * meta.dtype.itemsize
+            self.assertLessEqual(total, tunableop._TUNABLEOP_MAX_LADDER_BYTES)
         # And the 16384 rung itself is absent.
         batches = set()
         for bmreq in submitted:
@@ -580,17 +605,89 @@ class TestTunableOpPretune(TestCase):
         sched.nodes = [sched_node]
         sched._has_layout_conflict_for_template.return_value = True
 
-        # The finalizer calls output_node() after the ladder hook and then
-        # replaces the node -- deep IR machinery this test does not cover.
-        # Raise a sentinel there: reaching it proves the hook already fired.
+        # The finalizer replaces the node after the hook -- deep IR machinery
+        # this test does not cover -- so raise a sentinel from the hook itself.
+        # Reaching it proves output_node() already ran, which is the order the
+        # select_algorithm call sites use.
         class _Stop(Exception):
             pass
 
-        winner.output_node = mock.Mock(side_effect=_Stop)
-        with mock.patch("torch._inductor.tunableop.maybe_range_pretune") as pretune:
+        winner.output_node = mock.Mock(return_value=mock.Mock())
+        with mock.patch(
+            "torch._inductor.select_algorithm._maybe_pretune_tunableop",
+            side_effect=_Stop,
+        ) as pretune:
             with self.assertRaises(_Stop):
                 Scheduler.finalize_multi_template_buffers(sched)
-            pretune.assert_called_once_with(winner)
+        pretune.assert_called_once_with(winner)
+        winner.output_node.assert_called_once()
+
+
+class TunableOpPretuneRealGpuTest(TestCase):
+    """The ladder against a real compile, a real worker and a real results file.
+
+    The tests above stop at what the ladder decides. This is the only one that
+    sends a real ExternKernelGPUBenchmarkRequest through the pipe, so it is what
+    proves the rebuilt metas describe shapes hipBLASLt accepts and that each one
+    reaches the file runtime reads.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "needs a device")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_dynamic_mm_records_every_bucket(self):
+        def fn(a, b):
+            return a @ b
+
+        was_enabled = torch.cuda.tunable.is_enabled()
+        previous = torch.cuda.tunable.get_filename()
+        with tempfile.TemporaryDirectory(prefix="tunableop_pretune_gpu_") as d:
+            results = os.path.join(d, "results.csv")
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.set_filename(results, False)
+                # Tuning cost is per candidate solution, so the caps -- not the
+                # operand size -- are what keep this to a few seconds a bucket.
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                with config.patch(
+                    {
+                        "cuda.autotune_tunableop_mode": "tune",
+                        "cuda.autotune_tunableop_ladder": True,
+                        # The ladder only runs while lowering, and a warm
+                        # FxGraphCache hit skips lowering entirely, so without
+                        # this the test records nothing whenever an earlier run
+                        # left a cache entry behind.
+                        "force_disable_caches": True,
+                    }
+                ):
+                    a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                    b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+                    # One dynamic dim only: dynamic=True would mark every dim
+                    # and the ladder requires exactly one free symbol.
+                    torch._dynamo.mark_dynamic(a, 0)
+                    torch.compile(fn)(a, b)
+            finally:
+                torch.cuda.tunable.enable(was_enabled)
+                torch.cuda.tunable.set_filename(previous, False)
+            with open(results) as f:
+                content = f.read()
+
+        # Rows are op_signature,params_signature,solution,time, and the params
+        # signature is ab_M_N_K_ld_... in the BLAS frame, which transposes the
+        # operands -- a dynamic dim on A's rows lands in N, not M. Compare the
+        # whole M_N_K triple rather than depending on which one varies.
+        shapes = set()
+        for line in content.splitlines():
+            parts = line.split(",")
+            if len(parts) < 2 or parts[0] == "Validator":
+                continue
+            tokens = parts[1].split("_")
+            if len(tokens) > 3:
+                shapes.add(tuple(tokens[1:4]))
+        self.assertGreater(len(shapes), 1, f"one shape tuned, not a ladder: {shapes}")
 
 
 if __name__ == "__main__":
