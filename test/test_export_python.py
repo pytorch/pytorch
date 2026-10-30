@@ -57,6 +57,14 @@ def shifted(x):
 def reduce(x):
     return (x.sin() * 2).sum(dim=-1)
 
+from torch.nn.attention.flex_attention import flex_attention
+
+def causal(score, b, h, q_idx, kv_idx):
+    return torch.where(q_idx >= kv_idx, score, -float("inf"))
+
+def attention(q, k, v):
+    return flex_attention(q, k, v, score_mod=causal)
+
 """
 
 
@@ -300,6 +308,39 @@ class TestExportPythonCUDA(_ExportPythonTestCase):
             )
             (launcher,) = getattr(module, {name!r}).launchers
             if launcher.config.num_warps != {warps}:
+                raise AssertionError(launcher.config)
+            """,
+        )
+
+    def test_flex_attention_hill_climb_step(self):
+        # One step of an agent tuning an exported flex attention kernel: export,
+        # change the template's num_warps in the file, rerun with the eager check.
+        path = os.path.join(self.dir, "attention.py")
+        q, k, v = (torch.randn(1, 2, 256, 64, device="cuda") for _ in range(3))
+        expected = self.module.attention(q, k, v)
+        out = self._export("attention", path)(q, k, v)
+        self.assertEqual(out, expected, atol=2e-3, rtol=2e-3)
+        with open(path) as f:
+            src = f.read()
+        (name,) = re.findall(r"^def (triton_tem_\w+)\(", src, re.MULTILINE)
+        self.assertEqual(src.count("num_warps=4,"), 1)
+        _edit_graph_code(path, "num_warps=4,", "num_warps=8,")
+        torch.save((q, k, v, expected), os.path.join(self.dir, "io.pt"))
+        _in_a_fresh_process(
+            self,
+            f"""
+            import inspect
+            from torch._inductor.codecache import PyCodeCache
+            q, k, v, expected = torch.load({os.path.join(self.dir, "io.pt")!r})
+            run = torch.compiler.export_python(path={path!r}, check=True)(m.attention)
+            torch.testing.assert_close(run(q, k, v), expected, atol=2e-3, rtol=2e-3)
+            (module,) = (
+                mod
+                for mod in PyCodeCache.modules
+                if hasattr(mod, {name!r}) and "num_warps=8," in inspect.getsource(mod)
+            )
+            (launcher,) = getattr(module, {name!r}).launchers
+            if launcher.config.num_warps != 8:
                 raise AssertionError(launcher.config)
             """,
         )
