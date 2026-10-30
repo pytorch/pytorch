@@ -7,20 +7,12 @@
 #else
 #include <ATen/ops/_weight_norm_interface_backward_native.h>
 #include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/norm_except_dim.h>
 #endif
 
 namespace at::native {
 
 using namespace at::native::mps;
-
-// Derive from MPSCachedGraph
-struct WeightNormCachedGraph : public MPSCachedGraph {
-  WeightNormCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor* g_ = nil;
-  MPSGraphTensor* v_ = nil;
-  MPSGraphTensor* norms_ = nil;
-  MPSGraphTensor* w_ = nil;
-};
 
 struct WeightNormBackwardCachedGraph : public MPSCachedGraph {
   WeightNormBackwardCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -34,54 +26,8 @@ struct WeightNormBackwardCachedGraph : public MPSCachedGraph {
 
 std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int64_t dim) {
   TORCH_CHECK(dim == 0 || dim == v.dim() - 1, "fused kernels can only be applied for first or last dim")
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-
-  auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto norms = at::empty_like(g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  std::string key = "weight_norm_mps_" + std::to_string(dim) + getTensorsStringKey({v, g});
-
-  NSMutableArray* reduction_dims = [NSMutableArray array];
-  for (int i = 0; i < v.dim(); ++i) {
-    if (i != dim) {
-      [reduction_dims addObject:@(i)];
-    }
-  }
-
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<WeightNormCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      // Placeholders
-      newCachedGraph->v_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(v.scalar_type()), getMPSShape(v));
-      newCachedGraph->g_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(g.scalar_type()), getMPSShape(g));
-
-      // Compute the L2 norm for each column of v
-      MPSGraphTensor* squared = [mpsGraph squareWithTensor:newCachedGraph->v_ name:nil];
-      MPSGraphTensor* sum_squared = [mpsGraph reductionSumWithTensor:squared axes:reduction_dims name:nil];
-      newCachedGraph->norms_ = [mpsGraph squareRootWithTensor:sum_squared name:nil];
-
-      // Divide each column of v by its L2 norm
-      MPSGraphTensor* unit_v = [mpsGraph divisionWithPrimaryTensor:newCachedGraph->v_
-                                                   secondaryTensor:newCachedGraph->norms_
-                                                              name:nil];
-
-      // Multiply each columb of vNormalized by the corresponding element of g
-      newCachedGraph->w_ = [mpsGraph multiplicationWithPrimaryTensor:unit_v
-                                                     secondaryTensor:newCachedGraph->g_
-                                                                name:nil];
-    });
-
-    Placeholder v_placeholder = Placeholder(cachedGraph->v_, v, nil, true);
-    Placeholder g_placeholder = Placeholder(cachedGraph->g_, g, nil, true);
-    Placeholder norms_placeholder = Placeholder(cachedGraph->norms_, norms);
-    Placeholder w_placeholder = Placeholder(cachedGraph->w_, w);
-
-    auto feeds = dictionaryFromPlaceholders(v_placeholder, g_placeholder);
-    auto results = dictionaryFromPlaceholders(norms_placeholder, w_placeholder);
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
-  }
-
-  return std::tuple<Tensor, Tensor>{w, norms};
+  auto norms = at::norm_except_dim(v, 2, dim);
+  return {v.mul(g.div(norms)), norms};
 }
 
 std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
