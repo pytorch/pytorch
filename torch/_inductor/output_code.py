@@ -539,6 +539,9 @@ class CompiledFxGraph(OutputCode):
     frozen_param_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     opaque_value_type_classes: dict[str, type]
+    # User CuTeDSL kernels that keep this graph from being serialized (see
+    # prepare_for_serialization).
+    process_local_kernels: list[str]
     output_strides: list[tuple[_StrideExprStr, ...] | None] | None
     disabled_cudagraphs_reason: str | None
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -639,6 +642,9 @@ class CompiledFxGraph(OutputCode):
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes
+        self.process_local_kernels = sorted(
+            graph.wrapper_code.user_defined_cutedsl_launchers
+        )
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.kernel_free_cudagraph = graph.kernel_free_cudagraph
@@ -1002,6 +1008,13 @@ class CompiledFxGraph(OutputCode):
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
+        if self.process_local_kernels:
+            raise RuntimeError(
+                "This compiled graph launches user CuTeDSL kernels "
+                f"({', '.join(self.process_local_kernels)}) through objects bound in "
+                "this process, so it cannot be serialized (aot_compile, precompile). "
+                "Compile it in the process that runs it."
+            )
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
         # TODO: This could be better if we're ever able to serialize compiled

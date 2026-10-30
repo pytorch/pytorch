@@ -508,6 +508,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return f"static_cast<const {c_type}*>({array_expr}.data())"
 
+    def define_user_defined_cutedsl_kernel(
+        self,
+        kernel: Any,
+        constant_args: dict[str, Any],
+        runtime_args: dict[str, Any],
+    ) -> str:
+        raise NotImplementedError(
+            "User-defined CuTeDSL kernels are not supported by the C++ wrapper yet"
+        )
+
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
