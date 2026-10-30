@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantized import (
     to_mxfp as to_mxfp8_reference,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
@@ -313,6 +314,8 @@ def _assert_bitwise_eq(a: torch.Tensor, b: torch.Tensor) -> None:
 
 
 class TestMXFP8ReferenceNumerics(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_f32_to_e8m0_rceil(self, device):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L113
