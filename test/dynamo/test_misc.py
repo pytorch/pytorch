@@ -2341,6 +2341,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for n in (1, 0):
             self.assertEqual(opt(x, make(n)), fn(x, make(n)))
 
+    @parametrize(
+        "not_fn",
+        [
+            subtest(lambda d: not d, name="not"),
+            subtest(operator.not_, name="operator_not"),
+        ],
+    )
+    def test_not_on_user_defined_symbolic_len(self, not_fn):
+        class MyLen:
+            def __init__(self, n):
+                self.n = n
+
+            def __len__(self):
+                return self.n
+
+        def fn(x, d):
+            return x + int(not_fn(d)), 0 if not_fn(d) else 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        # The recompile makes `n` symbolic, so `bool(d)` is a SymBool.
+        for n in (0, 1, 0, 2):
+            self.assertEqual(opt(x, MyLen(n)), fn(x, MyLen(n)))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
