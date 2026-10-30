@@ -11679,13 +11679,6 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe
             # cast from a result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
-            DecorateInfo(
-                unittest.skip("failed on xpu"),
-                "TestForeachDevice",
-                "test_foreach_norm_empty_tensor_inf_error",
-                device_type="xpu",
-                dtypes=floating_types_and(torch.bfloat16, torch.half),
-            ),
         ),
     ),
 ]
