@@ -6,6 +6,7 @@ from typing import Any
 import torch
 from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.fx_utils import rank_agnostic_device
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -18,9 +19,9 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-def _factory_args(fake_tensor: Tensor) -> dict[str, Any]:
+def _factory_args(graph: Graph, fake_tensor: Tensor) -> dict[str, Any]:
     return {
-        "device": fake_tensor.device,
+        "device": rank_agnostic_device(graph, fake_tensor.device),
         "dtype": fake_tensor.dtype,
     }
 
@@ -39,6 +40,10 @@ def fake_tensor_prop(gm: GraphModule) -> None:
 
 
 def is_chunking_subgraph_input(node: Node) -> bool:
+    # TODO: under compile-on-one-rank a factory node's device is a current_device()
+    # node, which has no chunking meta, so e.g. a full() in the chunked region is
+    # built at full size here and then chunked, instead of at chunk size in the
+    # subgraph.
     meta = get_chunking_meta(node)
     if meta is None or is_tangent_node(node):
         return False
@@ -146,7 +151,9 @@ class ChunkingApplier:
 
             fake_tensor = node.meta["val"]
             one = self.parent_graph.call_function(
-                aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
+                aten.full.default,
+                (fake_tensor.shape, 1),
+                _factory_args(self.parent_graph, fake_tensor),
             )
 
             name = "tangent_overriden_as_one_{idx}"
@@ -199,7 +206,7 @@ class ChunkingApplier:
             else:
                 override_dtype = fake_tensor.dtype
 
-            kwargs = _factory_args(fake_tensor)
+            kwargs = _factory_args(self.parent_graph, fake_tensor)
             kwargs["dtype"] = override_dtype
             accum = self.parent_graph.call_function(
                 aten.full.default, (fake_tensor.shape, 0), kwargs
