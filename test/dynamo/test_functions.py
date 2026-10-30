@@ -7186,6 +7186,54 @@ class GraphModule(torch.nn.Module):
             fn(x, Container()),
         )
 
+    @parametrize("binding", ["direct", "getattr", "super"])
+    def test_builtin_descriptor_arity_after_graph_break(self, binding):
+        class Container(dict):
+            pass
+
+        method_name = "popitem"
+
+        def fn(x, obj):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 1
+            torch._dynamo.graph_break()
+            try:
+                if binding == "direct":
+                    obj.popitem(1)
+                elif binding == "getattr":
+                    getattr(obj, method_name)(1)
+                else:
+                    super(Container, obj).popitem(1)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x, obj = torch.ones(1), Container()
+        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), fn(x, obj))
+
+    def test_builtin_descriptor_arity_argument_graph_break(self):
+        class Container(dict):
+            pass
+
+        def argument():
+            torch._dynamo.graph_break()
+            return 1
+
+        def fn(x, obj):
+            x = x + 1
+            obj.popitem(argument())
+            return x
+
+        x, obj = torch.ones(1), Container()
+        with self.assertRaises(TypeError) as eager:
+            fn(x, obj)
+        counter = torch._dynamo.testing.CompileCounter()
+        with self.assertRaises(TypeError) as compiled:
+            torch.compile(fn, backend=counter)(x, obj)
+        self.assertEqual(str(compiled.exception), str(eager.exception))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
             def count(self, value):
@@ -7325,17 +7373,18 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize("method", ["__dir__", "__sizeof__", "__format__", "__reduce__"])
-    def test_object_method_descriptor_error_owner(self, method):
+    def test_object_method_descriptor_binding(self):
         class C:
             pass
 
         def fn(x, obj):
-            args = ("",) if method == "__format__" else ()
-            return x + 1, getattr(obj, method)(*args)
+            method = obj.__dir__
+            return x + 1, method.__qualname__, method.__self__ is obj
 
-        with self.assertRaisesRegex(Unsupported, f"method `{method}` of class `C`"):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1), C())
+        x, obj = torch.ones(1), C()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
+        )
 
     @parametrize("bound", [False, True])
     def test_method_descriptor_preserves_polyfill_trace_rule(self, bound):

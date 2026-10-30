@@ -431,6 +431,10 @@ class SuperVariable(VariableTracker):
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
+            if isinstance(inner_fn, types.MethodDescriptorType):
+                return variables.BoundBuiltinMethodVariable(
+                    inner_fn, self.objvar
+                ).call_function(tx, args, kwargs)
             return self.objvar.call_base_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]

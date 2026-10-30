@@ -84,6 +84,7 @@ class Instruction:
     target: Optional["Instruction"] = None
     exn_tab_entry: InstructionExnTabEntry | None = None
     argrepr: str | None = None
+    # Retain LOAD_ATTR's method bit while tracing its normalized instruction pair.
     is_method_load: bool = False
 
     def __hash__(self) -> int:
@@ -1206,6 +1207,42 @@ def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+def restore_load_attr_method_variant(instructions: list[Instruction]) -> None:
+    """Undo intact method-load normalization before emitting executable bytecode.
+
+    Binding a method instead of using CPython's method-call fast path changes
+    TypeError qualnames. Resume functions must retain the original binding.
+    """
+    targets = {inst.target for inst in instructions}
+    for inst in instructions:
+        if entry := inst.exn_tab_entry:
+            targets.update((entry.start, entry.target))
+    removed: dict[Instruction, Instruction] = {}
+    count = 1 if sys.version_info >= (3, 13) else 2
+    for index, inst in enumerate(instructions):
+        if not inst.is_method_load or inst.opname != "LOAD_ATTR":
+            continue
+        tail = instructions[index + 1 : index + 1 + count]
+        if (
+            len(tail) != count
+            or tail[0].opname != "PUSH_NULL"
+            or (count == 2 and (tail[1].opname != "SWAP" or tail[1].arg != 2))
+            # A resume may start after LOAD_ATTR with an already-bound callable.
+            or any(helper in targets for helper in tail)
+        ):
+            continue
+        if inst.arg is None:
+            raise AssertionError("LOAD_ATTR method variant requires an argument")
+        inst.arg |= 1
+        inst.is_method_load = False
+        removed.update((helper, inst) for helper in tail)
+    if removed:
+        instructions[:] = [inst for inst in instructions if inst not in removed]
+        for inst in instructions:
+            if entry := inst.exn_tab_entry:
+                entry.end = removed.get(entry.end, entry.end)
+
+
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
     "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
@@ -1634,6 +1671,8 @@ def clean_and_assemble_instructions(
     instructions: list[Instruction], keys: list[str], code_options: dict[str, Any]
 ) -> tuple[list[Instruction], types.CodeType]:
     remove_graph_break_if_leaf_instructions(instructions)
+    if sys.version_info >= (3, 12):
+        restore_load_attr_method_variant(instructions)
     # also implicitly checks for no duplicate instructions
     check_inst_exn_tab_entries_valid(instructions)
 

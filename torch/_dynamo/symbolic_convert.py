@@ -62,6 +62,7 @@ from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
+from torch.utils._pytree import tree_leaves
 
 from . import (
     config,
@@ -147,6 +148,9 @@ from .source import (
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
+    _record_graph_break_op,
+    _records_graph_break_ops,
+    _tensor_device_types,
     counters,
     FrameState,
     get_fake_value,
@@ -962,11 +966,6 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            # ConstDictVariable is optimized to be very lazy about insertion of
-            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
-            # here.
-            if isinstance(value, ConstDictVariable) and value.source:
-                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
@@ -1021,7 +1020,11 @@ def generic_jump(
                 self.jump(inst)
         elif not value.is_tensor():
             result = generic_is_true(self, value)  # type: ignore[arg-type]
-            if truth_fn(result):
+            if isinstance(result, SymNodeVariable):
+                result_val = result.evaluate_expr()
+            else:
+                result_val = result.as_python_constant()
+            if truth_fn(result_val):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -1098,6 +1101,44 @@ def _make_warnings_warn_wrapper(filename: str, lineno: int) -> Callable[..., Any
     return wrapper
 
 
+def _record_graph_break_ops(package: Any, popped: list[VariableTracker]) -> None:
+    from .variables.torch import BaseTorchVariable
+
+    # The instruction runs eagerly, so the ops it calls or passes must be
+    # registered when served. Lazy items are read, never realized.
+    vts: list[VariableTracker] = []
+    VariableTracker.visit(vts.append, popped)
+    leaves: list[Any] = []
+    devices_known = True
+    for vt in vts:
+        if isinstance(vt, LazyVariableTracker):
+            try:
+                leaves += tree_leaves(vt.peek_value())
+            except Exception:
+                devices_known = False
+                log.debug("precompile: dropped a graph-break item", exc_info=True)
+        elif isinstance(vt, BaseTorchVariable):
+            leaves.append(vt.value)
+    # With no recorded device, the op is checked on the compiled frames' devices.
+    devices = frozenset[str]()
+    if devices_known:
+        try:
+            # isinstance(TensorVariable) would realize a lazy item.
+            vs = [v for v in vts if not isinstance(v, LazyVariableTracker)]
+            known = {
+                t.device.type for t in vs if isinstance(t, TensorVariable) and t.device
+            }
+            devices = _tensor_device_types(leaves) | (known - {"meta"})
+        except Exception:
+            log.debug("precompile: graph-break op devices unknown", exc_info=True)
+    for op in leaves:
+        if isinstance(op, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
+            try:
+                package.add_graph_break_op(op, device_types=devices)
+            except Exception:
+                log.debug("precompile: dropped a graph-break op", exc_info=True)
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -1123,9 +1164,17 @@ def break_graph_if_unsupported(
                         "expected speculation.reason is not None to be true"
                     )
                 return handle_graph_break(self, inst, speculation.reason)
+            records = _records_graph_break_ops(self)
+            stack: list[VariableTracker] = self.stack[:] if records else []
             try:
                 return inner_fn(self, inst)
             except (Unsupported, UserError) as excp:
+                # Before every fallback (try block, loop, skipped frame) and the
+                # restart that resumes after this instruction.
+                popped = stack[len(self.stack) :]
+                _record_graph_break_op(
+                    self, lambda p: _record_graph_break_ops(p, popped)
+                )
                 if self.active_generic_context_managers:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:

@@ -2696,24 +2696,31 @@ Tensor binary_cross_entropy_with_logits_backward(
     return at::_efficientzerotensor(input.sizes(), input.options());
   }
 
-  // -w * [ pos * y * (1 -sigmoid(x)) - (1 - y) sigmoid(x)] * grad
+  // [(1 - y) * sigmoid(x) - pos * y * sigmoid(-x)] * grad
+  // Using sigmoid(-x) instead of 1 - sigmoid(x) avoids cancellation
+  // when sigmoid(x) rounds to 1.
+  //
+  // for eg, when x = 37.42994775023705;
+  //              sigmoid(x) = 1 (approx)
+  //              sigmoid(x) - 1 = 0.0 (gradient loss)
+  //              sigmoid(-x) = 5.55112e-17 (approx)
 
   // If there are subclassed tensors use the out of place version
-  Tensor grad_input;
+  const bool out_of_place = at::areAnyTensorSubclassLike({input, target}) ||
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      (isDefined(pos_weight) && at::isTensorSubclassLike(*pos_weight)) ||
+      at::GradMode::is_enabled();
+  auto neg_part = out_of_place ? input.neg().sigmoid().mul(target)
+                               : input.neg().sigmoid_().mul_(target);
+
   if (isDefined(pos_weight)) {
-    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    auto t = pos_weight->mul(target);
-    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
-            at::GradMode::is_enabled()
-        ? t.add(1).sub(target).mul(input.sigmoid()).sub(t)
-        : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t);
-  } else {
-    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
-            at::GradMode::is_enabled()
-        ? input.sigmoid().sub(target)
-        : input.sigmoid().sub_(target);
+    neg_part = neg_part.mul(*pos_weight);
   }
+
+  auto grad_input = out_of_place
+      ? input.sigmoid().mul(at::rsub(target, 1)).sub(neg_part)
+      : input.sigmoid().mul_(at::rsub(target, 1)).sub_(neg_part);
 
   if (at::isTensorSubclassLike(grad) || at::GradMode::is_enabled()) {
     grad_input = grad_input.mul(grad);
