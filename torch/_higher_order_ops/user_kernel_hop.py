@@ -362,6 +362,15 @@ class UserKernelHOPInfo:
       ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
       may write in place.
     - Any other argument is the DSL's own; the passes only hand it on.
+
+    Despite its name, config.triton_kernel_default_layout_constraint sets the layout
+    constraint that Inductor applies to every registered DSL's mutation HOP.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and CuTeDSL's pass cacheable=False: the cache bypasses
+    every graph that contains them.
     """
 
     dsl: str
@@ -381,6 +390,8 @@ class UserKernelHOPInfo:
     functional_dense: Callable[..., dict[str, Any]]
     # Counts this DSL's reinplacing decisions.
     reinplace_trigger: "ReInplaceTrigger"
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
 
 
 _user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
