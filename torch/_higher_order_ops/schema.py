@@ -292,6 +292,30 @@ class HopSchema(torch._C.FunctionSchema):
             copy.deepcopy(self.tree_spec),
         )
 
+    def __reduce_ex__(self, protocol: int) -> tuple[Any, tuple[Any, ...]]:
+        return (
+            _rebuild_hop_schema,
+            (str(self), self.is_vararg, self.is_varret, self.tree_spec),
+        )
+
+
+def _rebuild_hop_schema(
+    schema_string: str,
+    is_vararg: bool,
+    is_varret: bool,
+    tree_spec: pytree.TreeSpec | None,
+) -> HopSchema:
+    schema = torch._C.parse_schema(schema_string)
+    return HopSchema(
+        schema.name,
+        schema.overload_name,
+        list(schema.arguments),
+        list(schema.returns),
+        is_vararg,
+        is_varret,
+        tree_spec,
+    )
+
 
 def find_hop_schema(
     gm: torch.fx.GraphModule, target: Target
