@@ -580,6 +580,32 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_object_collectives_use_bound_device(self) -> None:
+        # nccl2 binds groups without device_id; test_c10d_object_collectives.py
+        # covers all object collectives with device_id.
+        default_pg = dist.distributed_c10d._get_default_group()
+        self.assertEqual(default_pg.bound_device_id, self.device)
+        subgroup = dist.new_group()
+        try:
+            self.assertEqual(subgroup.bound_device_id, self.device)
+            # The current device differs from the device the group is bound to.
+            with torch.cuda.device((self.rank + 1) % self.world_size):
+                for group in (default_pg, subgroup):
+                    gathered = [None] * self.world_size
+                    dist.all_gather_object(gathered, self.rank, group=group)
+                    self.assertEqual(gathered, list(range(self.world_size)))
+
+                    objects = [self.rank]
+                    if self.rank == 0:
+                        dist.send_object_list(objects, dst=1, group=group)
+                    elif self.rank == 1:
+                        dist.recv_object_list(objects, src=0, group=group)
+                        self.assertEqual(objects, [0])
+        finally:
+            dist.destroy_process_group(subgroup)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_ephemeral_timeout(self) -> None:
         self.addCleanup(dist.set_timeout, self.timeout)
         dist.set_timeout(timedelta(seconds=3))

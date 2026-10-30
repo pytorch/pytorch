@@ -358,6 +358,27 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_object_collectives_use_device_id(self):
+        # Object collectives stage on the device_id device, not the current
+        # device, which ProcessGroupNCCL would reject.
+        self._init_process_group(backend=NCCL_BACKEND, device_id=self.device)
+        subgroup = c10d.new_group()
+        with torch.cuda.device((self.rank + 1) % self.world_size):
+            for group in (None, subgroup):
+                output = [None] * self.world_size
+                c10d.all_gather_object(output, self.rank, group=group)
+                self.assertEqual(output, list(range(self.world_size)))
+
+                object_list = [self.rank]
+                if self.rank == 0:
+                    c10d.send_object_list(object_list, dst=1, group=group)
+                elif self.rank == 1:
+                    c10d.recv_object_list(object_list, src=0, group=group)
+                    self.assertEqual(object_list, [0])
+        c10d.destroy_process_group()
+
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     hw_classification = HardwareClassification.CUDA
