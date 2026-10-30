@@ -5,6 +5,7 @@ import contextlib
 import ctypes
 import functools
 import gc
+import importlib.util
 import json
 import os
 import pickle
@@ -187,6 +188,14 @@ def skip_background_threads_on_windows(f):
     return wrapped
 
 
+def skip_unless_blas_library_selectable(backend):
+    # Windows ignores the setter; archs without hipBLASLt fall back to hipBLAS.
+    with blas_library_context(backend):
+        effective = torch.backends.cuda.preferred_blas_library()
+    if effective != torch.backends.cuda._BlasBackends[backend]:
+        raise unittest.SkipTest(f"cannot select {backend}, BLAS runs on {effective}")
+
+
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
@@ -310,7 +319,12 @@ class TestAmdSmiImport(TestCase):
                 )
                 env_updates["ROCM_HOME"] = ""
                 env_updates["ROCM_PATH"] = ""
-            if provide_sdk_library:
+            # A real _rocm_sdk_core (TheRock wheels) already provides the SDK
+            # fallback, and a stub would shadow it during torch's SDK preload.
+            if (
+                provide_sdk_library
+                and importlib.util.find_spec("_rocm_sdk_core") is None
+            ):
                 sdk_lib_dir = os.path.join(tmpdir, "_rocm_sdk_core", "lib")
                 os.makedirs(sdk_lib_dir)
                 with open(
@@ -1080,13 +1094,16 @@ print("RECOVERED")
             stop = threading.Event()
 
             def heartbeat():
-                while not stop.wait(0.001):
+                while not stop.is_set():
                     beats.append(time.perf_counter())
+                    time.sleep(0.001)
 
             thread = threading.Thread(target=heartbeat)
             thread.start()
             try:
-                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                # Long enough for 12+ heartbeats even where time.sleep rounds
+                # up to the 15.6 ms Windows timer tick (Python < 3.11).
+                torch.cuda._sleep(int(200 * get_cycles_per_ms()))
                 start = time.perf_counter()
                 copy_fn()
                 end = time.perf_counter()
@@ -1099,9 +1116,9 @@ print("RECOVERED")
             lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
         )
         self.assertEqual(dst, src.cpu())
-        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
-        # with the GIL released, Tensor.copy_ saw ~18. Require several
-        # heartbeats so a regression to holding the GIL fails the test.
+        # With the GIL held, ~1 heartbeat lands during the wait; with the GIL
+        # released, Tensor.copy_ gets 40 or more. Require several heartbeats
+        # so a regression to holding the GIL fails the test.
         self.assertGreaterEqual(storage_beats, 5)
 
     def test_copy_non_blocking_type_conversion(self):
@@ -1186,6 +1203,8 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                if ROCM_VERSION >= (10, 3):
+                    archs.extend(["gfx1170", "gfx1171"])
                 archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
@@ -1389,6 +1408,7 @@ print(public_active, active, allocated)
     @serialTest()
     @blas_library_context("cublaslt")
     def test_cublaslt_workspace_eager_resize_and_zero(self):
+        skip_unless_blas_library_selectable("cublaslt")
         a = torch.randn(128, 128, device="cuda")
         out = torch.empty_like(a)
 
@@ -1588,6 +1608,7 @@ print(mem_after_first, torch.cuda.memory_allocated())
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cached_lazy_reallocation(self, backend):
+        skip_unless_blas_library_selectable(backend)
         test_script = f"""
 import torch
 torch.backends.cuda.preferred_blas_library("{backend}")
@@ -2970,7 +2991,10 @@ raise RuntimeError("device assert did not fire")
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"value cannot be safely converted without overflow: output\.numel\(\)",
+        ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -2980,6 +3004,33 @@ raise RuntimeError("device assert did not fire")
         y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
+
+    def test_vectorized_elementwise_remainder_sizes(self):
+        # Sizes around the 256 / 1024 / 4096 boundaries of the vectorized kernel's
+        # remainder block, alone and after full blocks.
+        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
+        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
+        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
+            for n in sizes:
+                a, b, c = (
+                    torch.randint(0, 100, (n,), device="cuda").to(dtype)
+                    for _ in range(3)
+                )
+                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
+                out = torch.full((n + 64,), 7, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], a_cpu + b_cpu)
+                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
+                self.assertEqual(
+                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
+                )
+                self.assertEqual(torch.square(a), torch.square(a_cpu))
+                self.assertEqual(a.float(), a_cpu.float())
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x, y = torch.randn(2, n, device="cuda")
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
 
     # this might create a reference cycle on self...
     def _make_multiply_in_stream(self):
@@ -7756,6 +7807,7 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(not torch.profiler.kineto_available(), "Kineto is required")
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True

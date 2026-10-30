@@ -61,7 +61,6 @@ jobs:
           pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13-vllm,
           pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13-inductor-benchmarks,
-          pytorch-linux-jammy-py3.10-clang21,
           pytorch-linux-jammy-py3.11-clang21,
           pytorch-linux-jammy-py3.12-clang21,
           pytorch-linux-jammy-py3.13-clang21,
@@ -83,7 +82,7 @@ jobs:
           pytorch-linux-noble-xpu-n-py3-client,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
           pytorch-linux-jammy-linter,
-          pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-linter,
+          pytorch-linux-jammy-cuda13.2-cudnn9-py3.11-linter,
           # TODO: Re-enable me when docker pin update happens
           # pytorch-linux-jammy-py3-clang21-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
@@ -127,7 +126,7 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: pytorch
@@ -137,7 +136,7 @@ jobs:
       # runs can't use, so they push with GITHUB_TOKEN instead
       - name: Login to GHCR (ciflow/docker)
         if: startsWith(github.ref, 'refs/tags/ciflow/docker/')
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -203,7 +202,7 @@ jobs:
           echo "${docker_image_name}=${docker_image_tag}" >> "docker-builds-output-${docker_image_name}.txt"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: contains(matrix.docker-image-name, 'rocm')
         with:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}

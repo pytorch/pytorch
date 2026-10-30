@@ -30,6 +30,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
 )
+from .cpp_wrapper_gpu import cpp_string_literal
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
@@ -333,8 +334,23 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def log1p(x: CSEVariable) -> str:
+        return f"c10::metal::log1p({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x: CSEVariable) -> str:
         return f"metal::precise::exp({x})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def expm1(x: CSEVariable) -> str:
+        # same form as expm1_functor in UnaryKernel.metal
+        V.kernel.headers.add("special_math")
+        return (
+            f"(metal::fabs({x}) < 0.1f ? c10::metal::expm1f({x})"
+            f" : metal::precise::exp({x}) - 1.0f)"
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -564,6 +580,7 @@ class MetalOverrides(OpOverrides):
 
         # Unary special ops with forward in method name
         for name in [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
             "bessel_y0",
@@ -599,6 +616,7 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
             "laguerre_polynomial_l",
+            "legendre_polynomial_p",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -634,7 +652,7 @@ class MetalKernel(SIMDKernel):
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["utils"])
+    headers: OrderedSet[str]
     multistage_reduction_entry: list[IterationRangesEntry] = []
 
     def __init__(
@@ -643,6 +661,7 @@ class MetalKernel(SIMDKernel):
         **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
+        self.headers = OrderedSet(["utils"])
         self.acc_var_ids = itertools.count()
         # Reductions shorter than a simdgroup run serially, in one thread per output
         rnumel = self.features.reduction_numel
@@ -680,6 +699,10 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
+                reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+                line = f"if ({reduction_dim.name} == 0) {line}"
         else:
             raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
@@ -1272,7 +1295,7 @@ class MetalKernel(SIMDKernel):
             self.compute.writelines(
                 [
                     f"if (!{cond}) {{",
-                    f"    TORCH_REPORT_ERROR(error_buf, {repr(msg)});",
+                    f"    TORCH_REPORT_ERROR(error_buf, {cpp_string_literal(msg)});",
                     "    return;",
                     "}",
                 ]
@@ -1363,7 +1386,7 @@ class MetalScheduling(SIMDScheduling):
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")
         for line in body_lines:
-            wrapper.header.writeline(line)
+            wrapper.header.writeline(line.replace("\\", "\\\\").replace("'", "\\'"))
         wrapper.header.writeline(f"''', {headers_repr})")
 
         return fn_name

@@ -207,13 +207,26 @@ it.
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. The
+# python_code you JIT -- same results either way. One caveat: an artifact whose graph
+# calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a failed
+# import only warns, unless the module is in CUSTOM_OP_OVERRIDE_MODULES: its kernel
+# the graph ran at capture overrode another for the same key), then refuses to load
+# unless every op in CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is
+# registered, and every overriding kernel is still the active one, registered from
+# the same module's file. The caller must
+# import, before load, what the artifact cannot record: C++ extension ops, ops from
+# torch.library.define or __main__, and kernels registered through
+# @torch.library.impl, register_kernel or another module's Library. The
 # eager backend has no kernels to accelerate, so the eager cache carries no compiled
 # artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
 # (python_code, cache) pair that did not come from the same precompile capture.
+# A Dynamo artifact runs those imports after its version checks, and fails the load
+# when a SERVED_MODULES module (one serving its frames) does not import. If an op or
+# kernel has no recorded module or one outside torch, it also imports its served
+# frames' modules, so the caller need import only what is registered outside them.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -245,13 +258,16 @@ it.
 # installed (see load()); either way it is locked to the producing Python version and
 # torch build, since it inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
 # are the make_fx contract; under Dynamo a call outside the captured variants is
-# REFUSED by the guards rather than silently served, and the guards that could not be
-# serialized are reported (PrecompileSummary.dropped_guards) rather than checked.
+# REFUSED by the guards rather than silently served, except in a frame Dynamo gave up
+# on during the capture (PrecompileSummary.eager_fallbacks), which runs that call
+# eagerly as the capture did; and the guards that could not be serialized are
+# reported (PrecompileSummary.dropped_guards) rather than checked.
 
 from __future__ import annotations
 
+import ast
 import base64
-import contextlib  # noqa: TC003
+import contextlib
 import dataclasses
 import errno
 import functools
@@ -262,6 +278,7 @@ import logging
 import operator
 import os
 import pickle
+import re
 import stat
 import sys
 import threading
@@ -269,6 +286,7 @@ import types
 import uuid
 from collections.abc import (
     Callable,  # noqa: TC003
+    Iterable,  # noqa: TC003
     Sequence,  # noqa: TC003
 )
 from types import MappingProxyType
@@ -297,7 +315,6 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from contextlib import AbstractContextManager
     from typing_extensions import Self
 
     from torch._dynamo.precompile_package import PrecompileSession
@@ -716,7 +733,7 @@ class _DynamoCapture(Capture[_P, _R]):
             "require_no_risky_drops": require_no_risky_drops,
         }
         self._call: Callable[..., object] | None = None
-        self._fresh_cache: AbstractContextManager[None] | None = None
+        self._block = contextlib.ExitStack()
         self._in_call = False
         self._calls = 0
         # The call count the last save() wrote. -1, not 0, so a block that never
@@ -734,19 +751,22 @@ class _DynamoCapture(Capture[_P, _R]):
 
     def _start(self) -> None:
         from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._runtime_cache import capture_scope
 
         # The capture's compiles record into the process-global cache-artifact
         # list, which the cache half of the artifact bundles to prime the
         # kernel caches on load. A fresh one so the bundle holds only this
         # capture's compiles; left in _finish. The swap spans the whole
-        # block, so anything else compiled inside the block records here too.
-        self._fresh_cache = CacheArtifactManager.with_fresh_cache()
-        self._fresh_cache.__enter__()
+        # block, so anything else compiled inside the block records here too,
+        # as it does into the runtime scope whose dependencies _write freezes.
+        # Captures open at once share that scope, so each also freezes the
+        # kernels the others compiled.
         try:
+            self._block.enter_context(capture_scope())
+            self._block.enter_context(CacheArtifactManager.with_fresh_cache())
             self._call = self._map(self._session.__enter__)
         except BaseException:
-            self._fresh_cache.__exit__(None, None, None)
-            self._fresh_cache = None
+            self._block.close()
             raise
 
     def _run(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -768,14 +788,47 @@ class _DynamoCapture(Capture[_P, _R]):
             self._in_call = False
 
     def _write(self) -> None:
-        rendered = self._map(self._session.snapshot_artifact, **self._gates)
+        from torch.compiler._runtime_cache import freeze_runtime_cache
+
+        python_code = ""
+        blob: dict[str, Any] = {}
+
+        # Called by freeze_runtime_cache under its freeze lock.
+        def snapshot() -> bytes | None:
+            nonlocal python_code, blob
+            python_code, cache = self._map(
+                self._session.snapshot_artifact, **self._gates
+            )
+            blob = torch.load(io.BytesIO(cache), weights_only=True)
+            if blob["backend"] != "eager" and blob["artifact"] is None:
+                raise RuntimeError(
+                    "precompile.capture requires the cache artifact of a compiled "
+                    "capture, and this capture saved none"
+                )
+            return blob["artifact"]
+
+        def write(artifact: bytes | None) -> None:
+            buf = io.BytesIO()
+            torch.save({**blob, "artifact": artifact}, buf)
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, buf.getvalue()
+                )
+            except OSError as e:
+                # Only the on-disk rewrite failed; _write_artifact leaves
+                # whatever pair was already at these paths in place.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
+
         try:
-            _write_artifact(self._artifact_path, self._cache_path, *rendered)
-        except OSError as e:
-            # Only the on-disk rewrite failed; _write_artifact leaves whatever
-            # pair was already at these paths in place.
+            freeze_runtime_cache(snapshot, write)
+        except PrecompileError:
+            raise
+        except Exception as e:
             raise PrecompileError(
-                f"precompile could not write the artifact: {e}"
+                "precompile could not freeze the runtime dependencies of "
+                f"cache_path={os.fspath(self._cache_path)!r}: {e}"
             ) from e
         self._saved_calls = self._calls
 
@@ -817,9 +870,7 @@ class _DynamoCapture(Capture[_P, _R]):
                     raise
                 raise e from error
         finally:
-            if self._fresh_cache is not None:
-                self._fresh_cache.__exit__(None, None, None)
-                self._fresh_cache = None
+            self._block.close()
         if exc[0] is None and error is not None:
             raise error
 
@@ -1649,8 +1700,8 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be STRUCTURALLY IDENTICAL to the one precompile traced
@@ -1662,6 +1713,8 @@ _GENERATED_HEADER = """\
 # example). See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
+#   0. Imports of the modules registering the custom ops the graph calls, and a check
+#      that those ops are registered (only when the graph calls custom ops).
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
 #      Inductor kernels (JIT-compiled from the embedded source on first use -- no
 #      external cache required) plus AOTAutograd's own codegen'd prelude/epilogue
@@ -1773,8 +1826,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     lock them, _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION
     for the pickled guard state.
     """
-    import ast
-
     try:
         tree = ast.parse(python_code)
     except SyntaxError as e:
@@ -1848,8 +1899,15 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     optional = {
         "TRACER",
         "SERVING_MODE",
+        "_ALLOW_SERVE_TIME_COMPILES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
+        "CUSTOM_OP_MODULES",
+        "CUSTOM_OPS",
+        "CUSTOM_OP_KERNELS",
+        "CUSTOM_OP_OVERRIDE_MODULES",
+        "SERVED_MODULES",
+        "ENTRY_MODULE",
     }
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
@@ -1879,6 +1937,317 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     return found
 
 
+def _overload_names(op: object) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of ``op`` if it is an operator: its own,
+    or every overload's for an ``OpOverloadPacket`` but its TorchScript-only ones."""
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        ops = [getattr(op, name) for name in op.overloads()]
+        ops = [o for o in ops if torch._C._dispatch_has_kernel(o._name)]
+    else:
+        ops = [op]
+    return {
+        (o._schema.name, o._schema.overload_name)
+        for o in ops
+        if isinstance(o, torch._ops.OpOverload)
+    }
+
+
+def _op_names(gm: torch.fx.GraphModule) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the operators ``gm`` and its subgraphs
+    call, directly or passed to a higher-order op."""
+    names: set[tuple[str, str]] = set()
+    for module in gm.modules():
+        graph = getattr(module, "graph", None)
+        if not isinstance(graph, torch.fx.Graph):
+            continue
+        for node in graph.nodes:
+            if node.op != "call_function":
+                continue
+            for op in (node.target, *pytree.tree_leaves((node.args, node.kwargs))):
+                names |= _overload_names(op)
+    return names
+
+
+def _called_op_names(python_code: str) -> set[tuple[str, str]]:
+    """The ``(ns::op, overload)`` names of the ``torch.ops.<ns>.<op>.<overload>``
+    calls in Inductor's generated code. Unlike the captured graph, this omits ops
+    Inductor decomposed or lowered and includes ops a post-grad pass inserted."""
+    names: set[tuple[str, str]] = set()
+    for node in ast.walk(ast.parse(python_code)):
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name) and node.id == "torch" and len(parts) == 4:
+            overload, op, ns, ops = parts
+            if ops == "ops":
+                names.add((f"{ns}::{op}", "" if overload == "default" else overload))
+    return names
+
+
+def _custom_op_module(op_name: str, overload: str) -> str | None:
+    """The importable module that registers ``op_name``, if one is known: the one
+    defining the function ``torch.library.custom_op`` wrapped, or the one a C++ op
+    names with ``m.set_python_module``."""
+    from torch._library.custom_ops import OPDEFS
+
+    if (opdef := OPDEFS.get(op_name)) is not None:
+        name = getattr(opdef._init_fn, "__module__", None)
+    else:
+        pystub = torch._C._dispatch_pystub(op_name, overload)
+        name = pystub[0] if pystub is not None else None
+    if name is None or name == "__main__":
+        return None
+    module = sys.modules.get(name)
+    return name if getattr(module, "__spec__", None) is not None else None
+
+
+def _registration_path(op_name: str, overload: str) -> str:
+    """The file that defined ``op_name``, as recorded at build time ("" if none)."""
+    try:
+        debug = torch._C._dispatch_find_schema_or_throw(op_name, overload).debug()
+    except RuntimeError:
+        return ""
+    return debug.removeprefix("registered at ").rpartition(":")[0]
+
+
+@functools.cache
+def _torch_source_root() -> str | None:
+    """The source root torch's C++ op registrations recorded at build time (the CI
+    checkout in a wheel), from a generated and a hand-written aten schema."""
+    paths = [
+        _registration_path("aten::add", "Tensor"),
+        _registration_path("aten::quantized_lstm", "input"),
+    ]
+    try:
+        root = os.path.commonpath(paths) if all(paths) else None
+    except ValueError:
+        return None
+    # Paths sharing only a filesystem root (an out-of-tree build) match any path.
+    return root if root and root != os.path.dirname(root) else None
+
+
+def _torch_cpp_op(op_name: str, overload: str) -> bool:
+    """Whether ``import torch`` registers ``op_name`` from C++: its namespace is one
+    of torch's, and it is not an extension's that adds ops to that namespace from a
+    C++ source outside torch's root. Paths alone cannot decide: an extension built in
+    a checkout, or under a directory the root shares, lies inside the root. One that
+    is built in torch's checkout and adds ops to a torch namespace is taken for
+    torch's."""
+    if op_name.split("::")[0] not in _TORCH_OP_NAMESPACES:
+        return False
+    root = _torch_source_root()
+    path = _registration_path(op_name, overload)
+    if path.endswith(".py"):
+        # A torch helper's Library records itself for any caller.
+        torch_file = path.startswith(os.path.join(_TORCH_DIR, ""))
+        return torch_file and not path.startswith(_TORCH_OP_HELPERS)
+    if root is None or not path:
+        return True
+    path = os.path.normcase(os.path.normpath(path))
+    return path.startswith(os.path.normcase(os.path.join(root, "")))
+
+
+# Torch's namespaces defined from C++.
+_TORCH_OP_NAMESPACES = frozenset(
+    "aten prim inductor inductor_prims profiler quantized _quantized quantization"  # noqa: SIM905
+    " sparse c10d _c10d_functional _c10d_functional_autograd _dtensor symm_mem fsdp"
+    " mkl mkldnn mkldnn_prepacked onednn static_runtime xnnpack prepacked vulkan"
+    " vulkan_prepack metal metal_prepack vulkan_quantized _nnapi _native_aot".split()
+)
+_TORCH_DIR = os.path.dirname(torch.__file__)
+# torch's helpers that build a Library for the caller's namespace record themselves.
+_TORCH_OP_HELPERS = tuple(
+    os.path.join(_TORCH_DIR, name) for name in ("library.py", "_library", "_custom_op")
+)
+
+
+def _file_modules() -> dict[str, str]:
+    """The importable modules in ``sys.modules`` by the real path of their file."""
+    modules: dict[str, str] = {}
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if name == "__main__" or getattr(module, "__spec__", None) is None:
+            continue
+        if isinstance(path, str):
+            modules.setdefault(os.path.realpath(path), name)
+    return modules
+
+
+def _library_op_module(
+    op_name: str, overload: str, file_modules: Callable[[], dict[str, str]]
+) -> str | None:
+    """The module whose import registers ``op_name``, if a ``torch.library.Library``
+    created in a loaded module defines it. ``file_modules`` is ``_file_modules``."""
+    path = _registration_path(op_name, overload)
+    if not path.endswith(".py") or path.startswith(_TORCH_OP_HELPERS):
+        return None
+    return file_modules().get(os.path.realpath(path))
+
+
+def _kernel_modules(
+    op_name: str,
+    overload: str,
+    keys: tuple[str, ...],
+    file_modules: Callable[[], dict[str, str]],
+    shadowing: bool = False,
+) -> dict[str, str]:
+    """The modules outside torch that constructed a ``torch.library.Library``
+    registering the active kernel of ``op_name`` for each of ``keys``, by key, often
+    not the module defining the op, and only for the keys where that kernel replaced
+    another if ``shadowing``. A kernel registered through another module's Library
+    records that module, not the one calling ``impl``."""
+    qualname = f"{op_name}.{overload}" if overload else op_name
+    dump = torch._C._dispatch_dump(qualname)
+    if shadowing:
+        # A replaced kernel's line reads "CPU (inactive): registered at ...".
+        inactive = r"^(\w+)(?:\[alias\])? \(inactive\):"
+        replaced = re.findall(inactive, dump, re.MULTILINE)
+        keys = tuple(k for k in keys if k in replaced)
+    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+\.py):\d+ ::"
+    found = re.findall(pattern, dump, re.MULTILINE)
+    modules = {
+        k: file_modules().get(os.path.realpath(p)) for k, p in found if k in keys
+    }
+    return {k: m for k, m in modules.items() if m and m.partition(".")[0] != "torch"}
+
+
+def _custom_op_modules(
+    op_keys: Mapping[tuple[str, str], tuple[str, ...]],
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """The modules registering the ops in ``op_keys`` and their active kernels for
+    the op's keys, in the order their imports finished, which load replays with the
+    modules of overriding kernels last; and the custom ops among them that no
+    known module registers, or with a kernel for ``keys`` no known module registers
+    (a torch helper's, a C++ extension's or ``__main__``'s)."""
+    file_modules = functools.cache(_file_modules)
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    modules: set[str] = set()
+    unmapped: set[tuple[str, str]] = set()
+    for (op_name, overload), keys in op_keys.items():
+        module = _custom_op_module(op_name, overload)
+        if module is None:
+            module = _library_op_module(op_name, overload, file_modules)
+        kernels = _kernel_modules(op_name, overload, keys, file_modules)
+        modules.update(kernels.values())
+        # torch registers the kernels of its own ops.
+        if module is not None:
+            modules.add(module)
+            if module.partition(".")[0] == "torch":
+                continue
+        elif _torch_cpp_op(op_name, overload):
+            continue
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        if module is None or any(
+            k not in kernels and has_kernel(qualname, k) for k in keys
+        ):
+            unmapped.add((op_name, overload))
+    return tuple(m for m in sys.modules if m in modules), tuple(sorted(unmapped))
+
+
+def _custom_ops(op_names: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+    """The ops among ``op_names`` outside aten and prims, which the artifact checks
+    are registered once its imports ran."""
+    return tuple(
+        sorted(n for n in op_names if n[0].split("::")[0] not in ("aten", "prims"))
+    )
+
+
+_COMPOSITE_KERNEL_KEYS = (
+    "CompositeImplicitAutograd",
+    "CompositeExplicitAutograd",
+    "CompositeExplicitAutogradNonFunctional",
+)
+# The dispatch keys whose kernels an artifact checks are still registered at load,
+# when its graph's tensors are unknown.
+_KERNEL_KEYS = ("CPU", "CUDA", "XPU", "MPS", "PrivateUse1", *_COMPOSITE_KERNEL_KEYS)
+
+
+def _graph_kernel_keys(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[object]
+) -> tuple[str, ...]:
+    """The dispatch keys an artifact of ``gm`` runs kernels under: the composite
+    keys and the backend keys of its tensors and ``example_inputs`` (``SparseCPU``
+    for a sparse CPU one). A real-mode trace leaves no ``meta["val"]`` for a sparse
+    tensor, so one the graph creates adds no key."""
+    # A tensor's backend key is its highest key below BackendSelect.
+    below = torch._C._dispatch_keyset_full_after(torch._C.DispatchKey.BackendSelect)
+    vals = [
+        node.meta.get("val")
+        for module in gm.modules()
+        if isinstance(graph := getattr(module, "graph", None), torch.fx.Graph)
+        for node in graph.nodes
+    ]
+    backends = {
+        (torch._C._dispatch_keys(leaf) & below).highestPriorityTypeId().name
+        for leaf in pytree.tree_leaves((vals, list(example_inputs)))
+        if isinstance(leaf, torch.Tensor)
+    }
+    # Many per-backend keys, e.g. QuantizedMeta, have names the dispatcher cannot
+    # parse back, so no kernel can be checked under them.
+    parseable = {k for k in backends if torch._C._parse_dispatch_key(k) is not None}
+    return (*sorted(parseable - {"Undefined"}), *_COMPOSITE_KERNEL_KEYS)
+
+
+def _device_kernel_keys(device_types: Iterable[str]) -> tuple[str, ...]:
+    """The composite keys and the backend keys of ``device_types``."""
+    backends = {torch._C._dispatch_key_for_device(t) for t in device_types}
+    return (*sorted(backends), *_COMPOSITE_KERNEL_KEYS)
+
+
+def _write_custom_op_imports(
+    buf: PySourceBuilder,
+    modules: tuple[str, ...],
+    ops: tuple[tuple[str, str], ...],
+    keys: Mapping[tuple[str, str], tuple[str, ...]],
+    call: bool = True,
+) -> None:
+    # A compiled graph calls torch.ops.<ns>.<op> directly, so nothing on the serving
+    # path imports the module that registers the op. The recorded modules are the
+    # ones that constructed each Library used for the op's define and impls, which
+    # misses a module calling impl on another module's Library (and an op defined
+    # with torch.library.define or from __main__ has none), so the imports are best
+    # effort and the ops and their kernels are checked.
+    if not ops:
+        return
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 0. The modules registering the custom ops the graphs call")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"CUSTOM_OP_MODULES = {modules!r}")
+    buf.writeline(f"CUSTOM_OPS = {ops!r}")
+    # A kernel is often registered by a module other than the op's own, so the
+    # schema alone does not show the op can run.
+    has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+    kernels = {}
+    file_modules = functools.cache(_file_modules)
+    overrides = {}
+    for name, overload in ops:
+        qualname = f"{name}.{overload}" if overload else name
+        # Despite its name, _dispatch_has_kernel only tests that the op exists,
+        # which _dispatch_has_kernel_for_dispatch_key requires (it raises otherwise).
+        op_exists = torch._C._dispatch_has_kernel(qualname)
+        op_keys = keys[name, overload]
+        if op_exists and (
+            found := tuple(k for k in op_keys if has_kernel(qualname, k))
+        ):
+            kernels[qualname] = found
+            if owners := _kernel_modules(name, overload, op_keys, file_modules, True):
+                overrides[qualname] = owners
+    buf.writeline(f"CUSTOM_OP_KERNELS = {kernels!r}")
+    # By op and key, the module registering a kernel the graph ran over another one
+    # for the same key. The replaced kernel passes the check above, and would run in
+    # its place if the module failed to import, registered it only when called, or
+    # was imported before the replaced kernel's module.
+    buf.writeline(f"CUSTOM_OP_OVERRIDE_MODULES = {overrides!r}")
+    from torch import _precompile_driver as driver
+
+    buf.writeline(inspect.getsource(driver._import_custom_op_modules).rstrip())
+    if call:
+        buf.writeline("_import_custom_op_modules()")
+        buf.writeline("del _import_custom_op_modules")
+    buf.writeline("")
+
+
 def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
@@ -1888,6 +2257,10 @@ def _build_python_source(
     buf = PySourceBuilder()
     buf.writeline(_GENERATED_HEADER)
     buf.writeline("")
+    op_names = _called_op_names(graph_python)
+    if ops := _custom_ops(op_names):
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        _write_custom_op_imports(buf, _custom_op_modules(keys)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
     buf.writeline("# " + "=" * 70)
@@ -1913,8 +2286,8 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
 # The runtime model must be structurally identical to the traced one (only weight
@@ -1941,6 +2314,10 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     buf = PySourceBuilder()
     buf.writeline(_EAGER_GENERATED_HEADER)
     buf.writeline("")
+    op_names = _op_names(gm)
+    if ops := _custom_ops(op_names):
+        keys = dict.fromkeys(ops, compiled._kernel_keys)
+        _write_custom_op_imports(buf, _custom_op_modules(keys)[0], ops, keys)
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
     buf.writeline("# " + "=" * 70)
@@ -2012,8 +2389,8 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant (how it serves them is said below):
 #
-#     ns = {}
-#     exec(open("this_file.py").read(), ns)
+#     import runpy
+#     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state,
@@ -2032,7 +2409,8 @@ _SERVING_NOTES = {
 # minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
 # under their backend ids) are re-seeded and stay. The flip side is that there is no
 # compiler behind it: a call no captured variant covers RAISES rather than compiling a
-# new one.
+# new one, except in a frame Dynamo gave up on during capture (marked "eager
+# fallback" in FRAMES below), which runs it eagerly.
 """,
     "installed": """\
 # This artifact SERVES BY INSTALLING the Dynamo package in _PACKAGE onto the live code
@@ -2042,7 +2420,9 @@ _SERVING_NOTES = {
 # as under the fail_on_recompile stance (but without setting that process-wide
 # stance), so a call no captured variant covers raises rather than compiling a new
 # graph, under every process-wide stance that would compile it (force_backend,
-# "eager_then_compile", ...) too. Two stances you set yourself do change serving:
+# "eager_then_compile", ...) too; a frame Dynamo gave up on during capture (marked
+# "eager fallback" in FRAMES below) runs such a call eagerly instead. Two stances you set
+# yourself do change serving:
 # "force_eager" runs every call eagerly, bypassing the installed entries, and
 # "eager_on_recompile" serves the captured variants and runs any other call eagerly.
 """,
@@ -2081,6 +2461,9 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
             # trailing .backward(). Either way it ran eager during capture, so
             # the driver runs it eager too.
             "trivial": not code.guarded_codes and not code.bypassed,
+            # Dynamo gave up on the frame during capture and skipped it from
+            # then on; a load still serves its variants and runs a miss eager.
+            "eager_fallback": code.eager_fallback and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
@@ -2095,6 +2478,20 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         }
         for i, code in enumerate(entry.codes)
     ]
+
+
+def _opens_scope(frame: dict[str, Any]) -> bool:
+    """Whether ``_build_multigraph_forward`` opens ``frame``'s module for its globals.
+    That driver inlines this test, as it imports nothing from torch._precompile."""
+    return bool(frame["variants"] or (frame["trivial"] and frame["resume_names"]))
+
+
+def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
+    """The modules of the entry frame and of the frames ``_build_multigraph_forward``
+    opens a scope for, which that driver imports. Never a dead record's. The
+    installed driver's ``CompilePackage.install`` also binds the modules of the
+    codes this leaves out, which its pre-check does not cover."""
+    return {f["python_module"] for f in frames if f["is_entry"] or _opens_scope(f)}
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
@@ -2162,9 +2559,12 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     capture-time fact and is refused here rather than at load on the serving
     machine. (Defaults, which the code object does not carry either, are
     recorded into the artifact rather than refused.) An entry with no
-    dispatchable variant is refused too, naming which of its two causes applies.
+    dispatchable variant is refused too, naming which of its causes applies:
+    Dynamo bypassed it, Dynamo gave up on it at its first call, or it produced
+    no guarded code (a thin wrapper).
     """
     from torch._dynamo.package import SerializedCode
+    from torch._dynamo.precompile_package import _variantless_entry_fallback_message
 
     entry_frame = next((f for f in frames if f["is_entry"]), None)
     if entry_frame is None:
@@ -2182,6 +2582,9 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
             f"restructuring the captured callable."
         )
+    if entry_frame["eager_fallback"] and not entry_frame["variants"]:
+        name = entry_frame["code"].co_name
+        raise PrecompileError(_variantless_entry_fallback_message(name))
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -2237,6 +2640,9 @@ def _build_multigraph_python_source(
     entry_binding: dict[str, Any] | None,
     mode: str,
     unreachable: list[str],
+    custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
 
@@ -2254,23 +2660,36 @@ def _build_multigraph_python_source(
     buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
     buf.writeline(_SERVING_NOTES[mode])
     buf.writeline("")
+    # The driver imports them after its version checks.
+    _write_custom_op_imports(
+        buf, custom_op_modules, custom_ops, custom_op_keys, call=False
+    )
     buf.writeline("# " + "=" * 70)
     buf.writeline("# 1. What was captured (readable)")
     buf.writeline("# " + "=" * 70)
     buf.writeline(f"BACKEND = {backend!r}")
     buf.writeline('TRACER = "dynamo"')
     buf.writeline(f'SERVING_MODE = "{mode}"')
+    if mode == "installed":
+        # load(allow_serve_time_compiles=True) flips this to True before exec.
+        buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    buf.writeline(f"ENTRY_MODULE = {entry.codes[0].python_module!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
+    buf.writeline("# Frame modules: section 0 imports those CUSTOM_OP_MODULES lists,")
+    buf.writeline("# probes the rest; the driver (installed: install()) imports them.")
+    buf.writeline(f"SERVED_MODULES = {tuple(sorted(_served_modules(frames)))!r}")
     buf.writeline("")
     buf.writeline(
         "# frame name -> number of captured variants. A frame with one variant"
     )
-    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("# serves one specialization; the artifact covers no other, except")
+    buf.writeline("# that an eager fallback runs a call its variants miss eagerly.")
     buf.writeline("FRAMES = [")
     for frame in frames:
-        buf.writeline(f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),")
+        row = f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),"
+        buf.writeline(row + ("  # eager fallback" if frame["eager_fallback"] else ""))
     buf.writeline("]")
     buf.writeline("")
     buf.writeline(
@@ -2380,6 +2799,10 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
+    *,
+    custom_op_modules: tuple[str, ...],
+    custom_ops: tuple[tuple[str, str], ...],
+    custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
 ) -> tuple[str, bytes]:
     """``(python_code, cache)`` for a multi-graph capture.
 
@@ -2398,8 +2821,9 @@ def _build_multigraph_artifact(
     unreachable = _unreachable_frames(frames)
     mode = "installed" if unreachable else "standalone"
     binding = _entry_binding(entry_fn) if mode == "standalone" else None
+    imports = (custom_op_modules, custom_ops, custom_op_keys)
     python_code = _build_multigraph_python_source(
-        entry, frames, backends, summary, backend, binding, mode, unreachable
+        entry, frames, backends, summary, backend, binding, mode, unreachable, *imports
     )
     inductor_bundle = None
     if backend != "eager":
@@ -2513,6 +2937,8 @@ class PrecompiledModule(PrecompiledRunnable):
         self._in_spec: pytree.TreeSpec | None = None
         self._out_spec: pytree.TreeSpec | None = None
         self._gm: torch.fx.GraphModule | None = None
+        # The dispatch keys the graph runs custom op kernels under.
+        self._kernel_keys: tuple[str, ...] = _KERNEL_KEYS
         # Inductor backend: the composed self-contained graph module (from
         # aot_autograd.compile_to_python, exposing ``call(flat_inputs)``) and the
         # opaque artifact-cache bytes (None if uncacheable), populated by _compile().
@@ -2593,6 +3019,7 @@ class PrecompiledModule(PrecompiledRunnable):
         self._out_spec = capture.out_spec
         self._grad_param_indices = capture.grad_param_indices
         self._gm = capture.gm
+        self._kernel_keys = _graph_kernel_keys(capture.gm, capture.flat_args)
 
         if self._backend == "eager":
             # No Inductor lowering: the captured ATen graph IS the artifact. It is
@@ -2739,7 +3166,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, *, warn: bool = True
+    python_code: str, *, warn: bool = True, allow_serve_time_compiles: bool = False
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2759,8 +3186,20 @@ def _make_inlined_forward(
             "exec python_code you produced or otherwise trust (Note [precompile "
             "programming model], invariant 7)."
         )
-    module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
-    exec(compile(python_code, "<precompile>", "exec"), module_ns)
+    if allow_serve_time_compiles:
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        if default not in python_code:
+            raise PrecompileError(
+                "allow_serve_time_compiles=True: the artifact's "
+                "_ALLOW_SERVE_TIME_COMPILES line is not in the form capture() writes, "
+                "so the flag cannot be applied. Recapture it under this torch."
+            )
+        python_code = python_code.replace(
+            default, "\n_ALLOW_SERVE_TIME_COMPILES = True\n", 1
+        )
+    from torch._inductor.codecache import exec_from_cache_file
+
+    module_ns = exec_from_cache_file(python_code, "_precompiled_artifact")
     return cast("Callable[..., object]", module_ns["forward"])
 
 
@@ -3033,6 +3472,78 @@ def _read_artifact(
     return python_code, cache
 
 
+def _verified_cache_envelope(
+    cache: bytes,
+    *,
+    backend: str,
+    tracer: str,
+    code_hash: str,
+    strict: bool,
+) -> dict[str, Any] | None:
+    # weights_only=True is safe (plain str/int/bytes dict). Outside strict mode the
+    # cache is acceleration only, so an unreadable envelope or a FORMAT / VERSION
+    # mismatch degrades to JIT'ing from python_code. Under no_compilation() that JIT
+    # is forbidden, so the same conditions raise instead. A BACKEND, TRACER or
+    # CODE_HASH mismatch signals a wrong (python_code, cache) pairing and always
+    # raises; see Note [precompile programming model], invariant 7.
+    try:
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        if blob.get("format") != _CACHE_FORMAT or blob.get("version") != _CACHE_VERSION:
+            if strict:
+                raise PrecompileError(
+                    "strict precompile.load requires a compatible cache envelope; "
+                    f"got format={blob.get('format')!r}, "
+                    f"version={blob.get('version')!r}, "
+                    f"expected {_CACHE_FORMAT!r}, {_CACHE_VERSION!r}."
+                )
+            log.warning(
+                "torch.compiler.precompile got a cache with format=%r "
+                "version=%r, expected %r / %r; it is likely from a different torch "
+                "build. Falling back to JIT from python_code.",
+                blob.get("format"),
+                blob.get("version"),
+                _CACHE_FORMAT,
+                _CACHE_VERSION,
+            )
+            return None
+        if blob.get("backend") != backend:
+            raise PrecompileError(
+                f"cache backend {blob.get('backend')!r} does not match the "
+                f"python_code backend {backend!r}; the cache and python_code "
+                "came from different precompile captures."
+            )
+        if blob.get("tracer", "make_fx") != tracer:
+            raise PrecompileError(
+                f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                f"the python_code tracer {tracer!r}; the cache and python_code "
+                "came from different precompile captures."
+            )
+        if blob.get("code_hash") != code_hash:
+            raise PrecompileError(
+                "cache does not match python_code (its code_hash "
+                f"{blob.get('code_hash')!r} != sha256(python_code) "
+                f"{code_hash!r}); the cache and python_code came from "
+                "different precompile captures. Pair each cache with the "
+                "python_code from the same capture."
+            )
+        return blob
+    except PrecompileError:
+        raise
+    except Exception as e:
+        if strict:
+            raise PrecompileError(
+                "strict precompile.load could not read the cache envelope"
+            ) from e
+        log.warning(
+            "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
+            "cache is likely corrupt or from a different torch build. Falling back "
+            "to JIT from python_code.",
+            type(e).__name__,
+            e,
+        )
+        return None
+
+
 def no_compilation() -> contextlib.AbstractContextManager[None]:
     """
     Forbid graph/kernel compilation and autotuning on every thread of this process.
@@ -3062,7 +3573,11 @@ def no_compilation() -> contextlib.AbstractContextManager[None]:
 
 
 def _runnable_from_pair(
-    python_code: str, cache: bytes, *, _trusted: bool = False
+    python_code: str,
+    cache: bytes,
+    *,
+    allow_serve_time_compiles: bool = False,
+    _trusted: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
 
@@ -3086,76 +3601,62 @@ def _runnable_from_pair(
     # TRACER is absent on make_fx artifacts predating the tag; the cache envelope
     # defaults the same way, so an older pair still matches.
     tracer = cast(str, meta.get("TRACER", "make_fx"))
+    installed = meta["SERVING_MODE"] == "installed"
+    if allow_serve_time_compiles and not installed:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True applies only to an installed artifact "
+            '(SERVING_MODE = "installed"), which serves through Dynamo; this '
+            "artifact is standalone and has no compiler behind it. Load it without "
+            "the flag, or recapture to cover the calls it misses."
+        )
+    if allow_serve_time_compiles and "_ALLOW_SERVE_TIME_COMPILES" not in meta:
+        raise PrecompileError(
+            "allow_serve_time_compiles=True: this installed artifact predates the "
+            "flag and would still refuse every uncovered call. Recapture it under "
+            "this torch."
+        )
+    if meta.get("_ALLOW_SERVE_TIME_COMPILES", False) is not False:
+        raise PrecompileError(
+            "this artifact sets _ALLOW_SERVE_TIME_COMPILES to something other than "
+            "False; capture() always writes False, and serve-time compiles are "
+            "enabled only by load(..., allow_serve_time_compiles=True)."
+        )
 
-    # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
-    # are the inductor save_cache_artifacts bundle, used below to prime the kernel
-    # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
-    # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
-    # BACKEND, TRACER or CODE_HASH mismatch is different -- it signals a wrong
-    # (python_code, cache) pairing -- so it hard-fails rather than running under
-    # foreign metadata.
-    artifact = None
-    try:
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
-            _CACHE_VERSION
-        ):
-            log.warning(
-                "torch.compiler.precompile got a cache with format=%r "
-                "version=%r, expected %r / %r; it is likely from a different torch "
-                "build. Falling back to JIT from python_code.",
-                blob.get("format"),
-                blob.get("version"),
-                _CACHE_FORMAT,
-                _CACHE_VERSION,
-            )
-            blob = None
-        if blob is not None:
-            if blob.get("backend") != backend:
-                raise PrecompileError(
-                    f"cache backend {blob.get('backend')!r} does not match the "
-                    f"python_code backend {backend!r}; the cache and python_code "
-                    "came from different precompile captures."
-                )
-            if blob.get("tracer", "make_fx") != tracer:
-                raise PrecompileError(
-                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
-                    f"the python_code tracer {tracer!r}; the cache and python_code "
-                    "came from different precompile captures."
-                )
-            # Reject a cache whose code_hash does not match this python_code (a
-            # mismatched pairing); see Note [precompile programming model], invariant 7.
-            expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
-            if blob.get("code_hash") != expected_code_hash:
-                raise PrecompileError(
-                    "cache does not match python_code (its code_hash "
-                    f"{blob.get('code_hash')!r} != sha256(python_code) "
-                    f"{expected_code_hash!r}); the cache and python_code came from "
-                    "different precompile captures. Pair each cache with the "
-                    "python_code from the same capture."
-                )
-            artifact = blob.get("artifact")
-    except PrecompileError:
-        raise
-    except Exception as e:
-        log.warning(
-            "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
-            "cache is likely corrupt or from a different torch build. Falling back "
-            "to JIT from python_code.",
-            type(e).__name__,
-            e,
+    from torch.compiler._no_compile import is_compilation_forbidden
+
+    strict = is_compilation_forbidden()
+    blob = _verified_cache_envelope(
+        cache,
+        backend=backend,
+        tracer=tracer,
+        code_hash=hashlib.sha256(python_code.encode()).hexdigest(),
+        strict=strict,
+    )
+    artifact = blob.get("artifact") if blob is not None else None
+    # Only inductor's python_code JITs kernels at load, so other backends run without
+    # the artifact. An inductor capture of an uncacheable graph saves no artifact and
+    # cannot be served strictly.
+    if strict and backend == "inductor" and not artifact:
+        raise PrecompileError(
+            "strict precompile.load requires the compiled cache artifact"
         )
     if artifact is not None:
         # Prime the inductor kernel caches from the bundle so the exec of python_code
         # below loads the precompiled kernels (Triton binaries / autotune results)
         # instead of recompiling them. The composed python_code runs its inlined
         # kernels directly (no compile_fx re-entry, so no FxGraphCache lookup); the
-        # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
-        # cross-torch-version / corrupt bundle that fails to load just leaves the caches
-        # cold, and python_code JITs -- same result, no crash.
+        # acceleration is the warm kernel cache. Outside strict mode this is a pure
+        # acceleration: a stale / cross-torch-version / corrupt bundle that fails to
+        # load just leaves the caches cold, and python_code JITs -- same result, no
+        # crash. Under no_compilation() that JIT is forbidden, so hydration must
+        # succeed.
         try:
-            torch.compiler.load_cache_artifacts(artifact)
+            cache_info = torch.compiler.load_cache_artifacts(artifact)
         except Exception as e:
+            if strict:
+                raise PrecompileError(
+                    "strict precompile.load could not hydrate the compiled cache"
+                ) from e
             log.warning(
                 "torch.compiler.precompile could not prime the cache from the "
                 "artifact bundle (%s: %s); it is likely stale or from a different "
@@ -3163,14 +3664,21 @@ def _runnable_from_pair(
                 type(e).__name__,
                 e,
             )
+        else:
+            if strict and (cache_info is None or cache_info.empty()):
+                raise PrecompileError(
+                    "strict precompile.load could not hydrate the compiled cache"
+                )
     # Run the driver inlined in python_code. It carries the full calling convention and
     # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
     # input/model validation) and JITs the kernels -- which hit the primed cache when
     # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
     # a separate runtime.
-    forward = _make_inlined_forward(python_code, warn=not _trusted)
-
-    installed = meta["SERVING_MODE"] == "installed"
+    forward = _make_inlined_forward(
+        python_code,
+        warn=not _trusted,
+        allow_serve_time_compiles=allow_serve_time_compiles,
+    )
     return PrecompiledModule._from_loaded(forward, backend=backend, installed=installed)
 
 
@@ -3210,25 +3718,50 @@ def capture(
     that made no call raises ``PrecompileError`` on exit. A capture is single-use:
     to capture again, call ``capture()`` again. A :class:`DynamoTracer` capture
     records the kernel-cache artifacts of everything compiled inside the block,
-    so compile nothing else there, and do not overlap two such captures.
+    so compile nothing else there, and do not overlap two such captures. Only
+    what runs inside the block is carried: run every kernel the serving process
+    needs there, since one compiled or launched only before the block is not in
+    the cache. Each write also freezes the compiled kernels the serving process
+    needs, and raises :class:`~torch.compiler.PrecompileError` for one it cannot
+    freeze. That includes kernels launched directly through ``@triton.jit`` and
+    ``@triton.autotune`` inside the block: Triton compiles into a fresh cache
+    directory there, with its autotuning cache on, so a ``TRITON_CACHE_DIR``
+    you set is not used inside the block, and a JIT kernel or autotuner already
+    used before the block compiles and tunes again on its first launch inside
+    it. That retune benchmarks on the block's real inputs, and the config it
+    picks, which is what ships and what the process keeps using afterwards, may
+    differ from the one picked before the block. Compiled JIT kernel
+    specializations and autotuning decisions the block does not produce again
+    are kept afterwards.
+    Triton does not cache the decision of an autotuner with ``pre_hook``
+    configs, so one that does not prune its configs keeps its earlier decision
+    in the block and is benchmarked again on first use in the serving process.
+    No other thread should launch Triton kernels while the block opens or
+    closes: the in-memory caches are dropped and restored then without
+    synchronizing with launches, so a concurrent autotuner launch can fail.
+    Triton kernels another thread compiles or tunes while the block is open
+    go into the block's cache directory and ship with it.
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
     configuration. :class:`DynamoTracer` (the default) is an execution-driven
     multi-graph capture: it analyzes the Python rather than tracing one path,
     records every graph-break continuation and guarded recompilation the calls
     exercise, takes as many calls as you make (keyword arguments included), and
-    the artifact dispatches among the captured variants by their guards -- a call
-    no variant covers RAISES rather than silently serving, since there is no
-    compiler behind a source artifact. :class:`MakeFxTracer` is one non-strict
-    ATen trace: the capture takes exactly ONE positional call, refuses a second,
-    and specializes control flow and shapes to that call, with the contract of
-    Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. a module-level ``def step(model, x): return
-    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
-    ``nn.Module`` arguments have their params/buffers lifted to graph inputs (no
-    weights are baked in) and the rest are the runtime inputs; the reloaded
-    callable is invoked with the same argument structure, and the runtime model
-    must match the captured model's parameter/buffer structure.
+    the artifact dispatches among the captured variants by their guards -- a
+    call no variant covers RAISES rather than silently serving, since there is
+    no compiler behind a source artifact, unless Dynamo gave up on that frame
+    during the capture (``PrecompileSummary.eager_fallbacks``): the capture ran
+    that frame eagerly, so the call runs eagerly too. :class:`MakeFxTracer` is
+    one non-strict ATen trace: the capture takes exactly ONE positional call,
+    refuses a second, and specializes control flow and shapes to that call, with
+    the contract of Note [precompile programming model] in
+    ``torch/_precompile.py``. ``fn`` is the whole computation, e.g. a
+    module-level ``def step(model, x): return model(x)`` (only a
+    :class:`MakeFxTracer` capture also takes a lambda): the ``nn.Module``
+    arguments have their params/buffers lifted to graph inputs (no weights are
+    baked in) and the rest are the runtime inputs; the reloaded callable is
+    invoked with the same argument structure, and the runtime model must match
+    the captured model's parameter/buffer structure.
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
@@ -3313,7 +3846,10 @@ def capture(
 
 
 def load(
-    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    *,
+    allow_serve_time_compiles: bool = False,
 ) -> PrecompiledRunnable:
     """Reconstruct a runnable from the two files a precompile capture wrote.
 
@@ -3365,14 +3901,71 @@ def load(
     frames after load adds live entries that serve the calls the installed
     ones miss.
 
+    Either kind of artifact runs a call eagerly instead of refusing it when the
+    missed frame is one Dynamo gave up on during the capture (listed in
+    ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in the
+    artifact's ``FRAMES``), since the capture ran that frame eagerly too. A
+    frame that kept variants logs a warning the first time a call misses them;
+    one that compiled none is served as plain Python from the start, as a
+    trivial frame is, with no warning, since there is no compiled code to lose.
+    Under an installed artifact only that frame runs eagerly: the frames it
+    calls still dispatch to their own variants. A standalone artifact installs
+    nothing, so the rest of the call from that frame on, its callees included,
+    runs as plain Python; whatever ran before it, such as the entry's variant
+    up to a graph break whose continuation fell back, still ran compiled.
+
+    Frozen C++ kernels are keyed by their build command with the PyTorch install
+    taken out, so they serve a host that installed the same PyTorch build
+    elsewhere. The Python, compiler, CUDA and other SDK paths must still match the
+    producer's. The key also covers each kernel's source, so a kernel whose source
+    or command names a path in the Inductor cache dir (a linked Halide runtime,
+    CUTLASS or CK library, or a GPU ``cpp_wrapper`` wrapper's cubin path) keeps
+    that path: a host whose cache dir is at the producer's path restores the frozen
+    binary, which needs those files at the same path, and any other host rebuilds
+    it. Rebuilding needs a C++ compiler on the serving host: :func:`no_compilation`
+    does not gate C++ builds.
+
+    ``allow_serve_time_compiles=True`` opts an installed artifact out of the
+    refusal: a call no captured variant covers compiles with the artifact's
+    backend, as ``torch.compile`` would, under the process-wide stance like any
+    other compile. The captured variants are still served first and do not
+    count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
+    that many serve-time compiles on top of them; a missed call past the limit
+    runs eagerly instead of compiling.
+    Serve-time compiles are recorded nowhere, but they are built under the
+    process's Dynamo config: with ``torch._dynamo.config.caching_precompile`` on
+    they drop identity guards (``ID_MATCH``, ``CLOSURE_MATCH``, ...) exactly as
+    any other compile in that process does.
+    The flag does not lift the ``compiled_autograd`` refusal above. A standalone
+    artifact has no compiler behind it, and an installed artifact captured
+    before the flag existed cannot honor it, so passing the flag for either
+    raises ``PrecompileError``.
+
+    Before its graphs load, the artifact imports the modules in its
+    ``CUSTOM_OP_MODULES`` (the ones registering the custom ops its graphs call)
+    and then checks that every op in ``CUSTOM_OPS`` is registered, with a kernel
+    for each dispatch key ``CUSTOM_OP_KERNELS`` lists for it (the composite keys,
+    and the backend keys of the graph's tensors, that it had a kernel for at
+    capture). A module in ``CUSTOM_OP_OVERRIDE_MODULES``, one whose kernel the
+    graph ran at capture overrode another kernel for the same dispatch key, must
+    import, and that kernel must still be the active one, registered from the same
+    module's file: otherwise the replaced kernel would run in its place. Any other
+    module not in ``SERVED_MODULES`` only warns when it fails to import and the ops
+    and kernels are registered anyway, e.g. by a module the server imported under
+    another name.
+
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,
     ``tracer`` or ``code_hash`` does not match ``python_code`` -- the pair came from different
     captures -- or if an installed artifact cannot install onto the serving process (for
-    example, a captured source changed since capture). A cache whose ``format``/``version`` does not match (a foreign or
+    example, a captured source changed since capture), or if a custom op the
+    artifact calls, or one of its captured kernels, is not registered once its
+    imports ran, or if a captured overriding kernel is no longer the active one. A cache whose ``format``/``version`` does not match (a foreign or
     different-build envelope) is NOT fatal: the cache is acceleration only, so
     ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache)
+    return _runnable_from_pair(
+        python_code, cache, allow_serve_time_compiles=allow_serve_time_compiles
+    )
