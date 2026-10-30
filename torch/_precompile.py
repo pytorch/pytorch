@@ -2702,11 +2702,15 @@ def _split_graph_sources(
 
 
 def _source_literal(source: str) -> str:
-    """A raw triple-quoted literal of ``source``, so it reads and edits as code."""
+    """A triple-quoted literal of ``source`` that keeps its lines, so it reads and
+    edits as code: raw when a quote style allows it, else with backslashes and double
+    quotes escaped (code holding both quote styles, a user Triton kernel's docstring
+    inside Inductor's '''-quoted kernels, say)."""
     for quote in ('"""', "'''"):
         if quote not in source and not source.endswith((quote[0], "\\")):
             return f"r{quote}{source}{quote}"
-    return repr(source)
+    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"""{escaped}"""'
 
 
 def _build_multigraph_python_source(

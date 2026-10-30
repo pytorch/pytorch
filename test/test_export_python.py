@@ -23,6 +23,7 @@ _MODULE = """
 import os
 
 import torch
+import torch._dynamo.testing
 
 def scaled(x, *, scale=2.0):
     return (x * scale).relu()
@@ -35,7 +36,9 @@ def inner(x):
 def outer(x):
     return inner(x * 2) + 1
 
-@torch.compile(backend="eager")
+live_counter = torch._dynamo.testing.CompileCounter()
+
+@torch.compile(backend=live_counter)
 def live(x):
     y = x.sin()
     print("graph break")
@@ -137,9 +140,33 @@ class TestExportPython(TestCase):
     def test_a_live_compile_of_another_function_survives_the_capture(self):
         x = torch.randn(4)
         self.assertEqual(self.module.live(x), x.sin().cos())
+        compiles = self.module.live_counter.frame_count
         run = self._export("calls_live", os.path.join(self.dir, "calls_live.py"))
         self.assertEqual(run(x), x.sin().cos() + 1)
         self.assertEqual(self.module.live(x), x.sin().cos())
+        # Its frames ran under its own compile, so the capture released none of them.
+        self.assertEqual(self.module.live_counter.frame_count, compiles)
+
+    def test_a_capture_beside_a_loaded_artifact_on_a_shared_frame(self):
+        # outer and decorated_outer both graph-break in inner, where the installed
+        # artifact loaded first keeps its entries while the second is captured.
+        x = torch.randn(4)
+        expected = (x * 2).sin().cos() + 1
+        run = self._export("outer", os.path.join(self.dir, "outer.py"))
+        self.assertEqual(run(x), expected)
+        self.assertEqual(self.module.decorated_outer(x), expected)
+        with no_compilation():
+            self.assertEqual(run(x), expected)
+            self.assertEqual(self.module.decorated_outer(x), expected)
+        _in_a_fresh_process(
+            self,
+            """
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            with no_compilation():
+                torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
+            """,
+        )
 
     def test_a_new_process_serves_the_file_without_compiling(self):
         path = os.path.join(self.dir, "breaks.py")
