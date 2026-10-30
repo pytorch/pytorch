@@ -3290,8 +3290,7 @@ instantiate_parametrized_tests(TestCollectivesInductorCUDA)
 instantiate_parametrized_tests(TestCollectivesInductorAccelerator)
 
 
-@requires_accelerator_dist_backend(["nccl", "xccl"])
-class TestSyncDecisionCrossRanks(MultiProcessTestCase):
+class _SyncDecisionCrossRanksBase(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -3328,6 +3327,11 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         torch._C._distributed_c10d._register_process_group(
             "default", torch.distributed.group.WORLD
         )
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksAccelerator(_SyncDecisionCrossRanksBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_if_lt_x_gpu(2)
     def test_sync_decision_cross_ranks(self):
@@ -3628,6 +3632,66 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
         self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
         self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_triton()
+    def test_benchmark_collective_with_symint_args(self):
+        """
+        Test that collective benchmarking handles SymInt non-tensor arguments.
+
+        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
+        in the FX graph. The benchmark path must convert these to concrete ints
+        before calling the collective.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        HIDDEN = 64
+
+        def func(x, w, group_size, group_name):
+            seq = x.shape[0]
+            pad = (-seq) % group_size
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
+            chunk = x_padded.shape[0] // group_size
+            split_sizes = [chunk] * group_size
+            gathered = torch.ops._c10d_functional.all_to_all_single(
+                x_padded, split_sizes, split_sizes, group_name
+            )
+            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
+            return (gathered @ w).sum()
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(gm):
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                collective_estimator="benchmark",
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
+        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
+
+        for n in (7, 11):
+            x = torch.randn(n, HIDDEN, device=self.device)
+            compiled(x, w, group_size, group_name)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+class TestSyncDecisionCrossRanksCUDA(_SyncDecisionCrossRanksBase):
+    hw_classification = HardwareClassification.CUDA
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
@@ -4127,52 +4191,6 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 # assert est_ms_nccl > 0
 
     @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_regression_use_nccl_estimate_with_gloo(self):
-        # Test checks that using nccl estimator option does not hard fail
-        # with backends that does not support runtime estimations, e.g. gloo
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
-        )
-        group = c10d.distributed_c10d._get_default_group()
-        group_name = "default"
-        torch._C._distributed_c10d._register_process_group(
-            group_name, torch.distributed.group.WORLD
-        )
-        group_size = group.size()
-
-        def func(inp, group_size, group_name):
-            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
-                inp, group_size, group_name
-            )
-            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
-            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
-                ag_0_wait, group_size, group_name
-            )
-            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
-            return ag_1_wait
-
-        gm = make_fx(func)(torch.ones(4, 4), group_size, group_name)
-        g = gm.graph
-        for n in g.nodes:
-            if is_all_gather_into_tensor(n):
-                from torch._inductor.comm_analysis import (
-                    estimate_nccl_collective_runtime_from_fx_node,
-                )
-
-                est_ms = estimate_nccl_collective_runtime_from_fx_node(
-                    n, use_nccl_estimator=False
-                )
-                if not (est_ms > 0):
-                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
-                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
-                    n, use_nccl_estimator=True
-                )
-                if not (est_ms_nccl > 0):
-                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
-
-    @skip_if_lt_x_gpu(2)
     @requires_triton()
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_schedule_overlap_benchmark(self):
@@ -4447,59 +4465,50 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         )
 
     @skip_if_lt_x_gpu(2)
-    @requires_triton()
-    def test_benchmark_collective_with_symint_args(self):
-        """
-        Test that collective benchmarking handles SymInt non-tensor arguments.
-
-        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
-        in the FX graph. The benchmark path must convert these to concrete ints
-        before calling the collective.
-        """
+    @requires_gloo()
+    def test_regression_use_nccl_estimate_with_gloo(self):
+        # Test checks that using nccl estimator option does not hard fail
+        # with backends that does not support runtime estimations, e.g. gloo
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         group = c10d.distributed_c10d._get_default_group()
         group_name = "default"
-        torch._C._distributed_c10d._register_process_group(group_name, group)
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
         group_size = group.size()
 
-        HIDDEN = 64
-
-        def func(x, w, group_size, group_name):
-            seq = x.shape[0]
-            pad = (-seq) % group_size
-            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
-            chunk = x_padded.shape[0] // group_size
-            split_sizes = [chunk] * group_size
-            gathered = torch.ops._c10d_functional.all_to_all_single(
-                x_padded, split_sizes, split_sizes, group_name
+        def func(inp, group_size, group_name):
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
             )
-            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
-            return (gathered @ w).sum()
-
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            schedule_overlap_bucketing,
-        )
-
-        def _pass(gm):
-            return schedule_overlap_bucketing(
-                gm.owning_module,
-                collective_bucketing=True,
-                insert_overlap_deps=True,
-                collective_estimator="benchmark",
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
             )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            return ag_1_wait
 
-        torch._inductor.config.post_grad_custom_post_pass = _pass
+        gm = make_fx(func)(torch.ones(4, 4), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
 
-        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
-        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
-
-        for n in (7, 11):
-            x = torch.randn(n, HIDDEN, device=self.device)
-            compiled(x, w, group_size, group_name)
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                if not (est_ms > 0):
+                    raise AssertionError(f"Expected est_ms > 0, got {est_ms}")
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                if not (est_ms_nccl > 0):
+                    raise AssertionError(f"Expected est_ms_nccl > 0, got {est_ms_nccl}")
 
 
 class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
