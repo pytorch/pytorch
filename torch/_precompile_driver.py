@@ -49,6 +49,11 @@ if TYPE_CHECKING:
     # An installed artifact carries the pickled Dynamo package and its backend
     # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
     _PACKAGE: str = ""
+    # Each Inductor graph's output code, as editable text, keyed f"{backend_id}.fw" or
+    # ".bw", and the sha256 of the text as captured. Artifacts predating these keep the
+    # code inside _BACKENDS.
+    GRAPH_SOURCES: dict[str, str] = {}
+    _GRAPH_SOURCE_SHA256: dict[str, str] = {}
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     BACKEND: str = ""
@@ -627,14 +632,37 @@ def _build_multigraph_forward():
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
+    # The graph code runs from GRAPH_SOURCES, edits included. An edited graph gets
+    # its own PyCodeCache key and compiles the kernels its text defines, instead of
+    # binding the ones precompiled from the captured text.
+    _sha256 = globals().get("_GRAPH_SOURCE_SHA256", {})
+    graph_sources = globals().get("GRAPH_SOURCES", {})
+    for _key, _source in graph_sources.items():
+        _backend_id, _, _part = _key.rpartition(".")
+        _graph = getattr(backends[_backend_id].content, f"compiled_{_part}").result
+        _digest = hashlib.sha256(_source.encode()).hexdigest()
+        if _digest != _sha256.get(_key):
+            _graph.cache_key = f"e{_digest}"
+            _graph.kernel_sources = {}
+        _graph.source_code = _source
     compiled = {
         _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
         for _backend_id, _artifact in backends.items()
     }
     # Resume names come from a per-process counter (backend ids carry a uuid), so
     # another artifact or a live compile can hold one this artifact mints; the
-    # tag hashes both channels so two artifacts of one capture differ.
-    tag = hashlib.sha256((_FRAMES + _BACKENDS).encode()).hexdigest()[:16]
+    # tag hashes both channels so two artifacts of one capture differ, and the
+    # graph code, so an edited copy of an artifact is another version of it.
+    graph_code = "".join(f"{k}\0{v}\0" for k, v in sorted(graph_sources.items()))
+    tag = hashlib.sha256((_FRAMES + _BACKENDS + graph_code).encode()).hexdigest()[:16]
+    # Each compiled graph is marked with a digest of its own code, so the same
+    # graph from another artifact of the capture binds again, and an edited one
+    # cannot repoint the graph another runnable already serves.
+    for _backend_id, _fn in compiled.items():
+        _code = "".join(
+            graph_sources.get(f"{_backend_id}.{_p}", "") for _p in ("fw", "bw")
+        )
+        _fn.__precompile_graph__ = hashlib.sha256(_code.encode()).hexdigest()[:16]
 
     def _seed(scope, name, value):
         # A pre-reset compile's CleanupHook may still own the name; it must not
@@ -659,6 +687,17 @@ def _build_multigraph_forward():
         if scope is None:
             scope = scopes[module_name] = vars(_import(module_name))
             for _backend_id, _fn in compiled.items():
+                # Frames find a compiled graph by name in this module, so binding
+                # different code under the name would repoint every runnable that
+                # already serves it.
+                held = getattr(scope.get(_backend_id), "__precompile_graph__", None)
+                if held not in (None, _fn.__precompile_graph__):
+                    raise _PrecompileError(
+                        f"precompile: {_backend_id!r} in module {module_name!r} is "
+                        f"bound to other code for the same compiled graph (an edited "
+                        f"copy of this capture, say); a process serves one version of "
+                        f"a captured graph. Load this artifact in a fresh process."
+                    )
                 _seed(scope, _backend_id, _fn)
         for _alias, _module_name in frame["import_sources"].items():
             _seed(scope, _alias, _import(_module_name))
