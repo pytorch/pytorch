@@ -170,6 +170,7 @@ from .utils import (
     nn_module_proxy,
     same,
     set_example_value,
+    summarize_example_value,
     temporarily_clear_torch_function_mode_stack,
 )
 from .variables.builder import (
@@ -4376,14 +4377,14 @@ class SubgraphTracer(fx.Tracer):
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            example_value,
+            summarize_example_value(example_value),
             self.debug_level,
             before,
         )
         if source is None:
             if self.parent is None:
                 raise AssertionError(
-                    f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
+                    f"you are required to provide a source for inputs {name} example_val {summarize_example_value(example_value)} on the root tracer"
                 )
 
         # Note [Export inputs must be explicitly passed in]
