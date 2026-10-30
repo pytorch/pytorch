@@ -185,20 +185,22 @@ class CPUReproTests(TestCase):
             )
             prefix = "min" if op == "minimum" else "max"
             if simdlen == 1:
-                self.assertIn(f"{prefix}_preserve_signbit(", code)
+                self.assertIn(f"{prefix}_keep_first(", code)
             else:
                 check_metrics_vec_kernel_count(1)
                 if _can_check_vec_metrics():
-                    self.assertIn(f"{prefix}_preserve_signbit_vec(", code)
+                    self.assertIn(f"{prefix}_keep_first_vec(", code)
 
         self.assertEqual(actual, expected)
         self.assertEqual(torch.signbit(actual), torch.signbit(expected))
 
-    @parametrize("size", [1, 65])
+    @parametrize("size,simdlen", [(1, 1), (65, None)])
     @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
     @parametrize("nan_position", ["first", "second"])
     @parametrize("op", ["minimum", "maximum"])
-    def test_minimum_maximum_nan_propagation(self, dtype, op, nan_position, size):
+    def test_minimum_maximum_nan_propagation(
+        self, dtype, op, nan_position, size, simdlen
+    ):
         nan = float("nan")
 
         def fn(x, y):
@@ -206,9 +208,21 @@ class CPUReproTests(TestCase):
 
         x = torch.full((size,), nan if nan_position == "first" else 1.0, dtype=dtype)
         y = torch.full((size,), 1.0 if nan_position == "first" else nan, dtype=dtype)
-        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        with config.patch({"cpp.simdlen": simdlen}):
+            metrics.reset()
+            actual, code = run_and_get_cpp_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, y
+            )
+            prefix = "min" if op == "minimum" else "max"
+            if simdlen == 1:
+                self.assertIn(f"{prefix}_keep_first(", code)
+            else:
+                check_metrics_vec_kernel_count(1)
+                if _can_check_vec_metrics():
+                    self.assertIn(f"{prefix}_keep_first_vec(", code)
 
         self.assertTrue(torch.isnan(actual).all())
+        self.assertEqual(actual, fn(x, y))
 
     @parametrize("size,simdlen", [(3, 1), (65, None)])
     @parametrize("dtype", [torch.bool, torch.int32, torch.int64])

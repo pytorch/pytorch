@@ -1009,12 +1009,12 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
-        return f"min_preserve_signbit({a}, {b})"
+        return f"min_keep_first({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
-        return f"max_preserve_signbit({a}, {b})"
+        return f"max_keep_first({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1714,7 +1714,7 @@ class CppVecOverrides(CppOverrides):
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
             return f"{a_cast} & {b_cast}"
         else:
-            return f"min_preserve_signbit_vec({a}, {b})"
+            return f"min_keep_first_vec({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
@@ -1724,7 +1724,7 @@ class CppVecOverrides(CppOverrides):
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
             return f"{a_cast} | {b_cast}"
         else:
-            return f"max_preserve_signbit_vec({a}, {b})"
+            return f"max_keep_first_vec({a}, {b})"
 
     @staticmethod
     def fmaximum(a, b):

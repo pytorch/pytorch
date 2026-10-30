@@ -378,7 +378,7 @@ inline at::vec::VecMask<float, 1> min_masked_reduce(
 // compare unequal and retain the propagation from at::vec::minimum/maximum.
 // The ATen trait also covers at::Half and at::BFloat16.
 template <typename V>
-inline V min_preserve_signbit_vec(const V& a, const V& b) {
+inline V min_keep_first_vec(const V& a, const V& b) {
   auto result = at::vec::minimum(a, b);
   using T = typename V::value_type;
   if constexpr (at::vec::is_floating_point_v<T>) {
@@ -388,7 +388,7 @@ inline V min_preserve_signbit_vec(const V& a, const V& b) {
 }
 
 template <typename V>
-inline V max_preserve_signbit_vec(const V& a, const V& b) {
+inline V max_keep_first_vec(const V& a, const V& b) {
   auto result = at::vec::maximum(a, b);
   using T = typename V::value_type;
   if constexpr (at::vec::is_floating_point_v<T>) {
@@ -1020,8 +1020,11 @@ inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
   return a < b ? a : b;
 }
 
+// Pointwise minimum/maximum keep the first operand on ties to match eager CPU.
+// Reductions use *_propagate_nan above, which keep the second operand on ties
+// to match eager amin/amax.
 template <typename scalar_t>
-inline scalar_t max_preserve_signbit(scalar_t a, scalar_t b) {
+inline scalar_t max_keep_first(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
@@ -1029,7 +1032,7 @@ inline scalar_t max_preserve_signbit(scalar_t a, scalar_t b) {
 }
 
 template <typename scalar_t>
-inline scalar_t min_preserve_signbit(scalar_t a, scalar_t b) {
+inline scalar_t min_keep_first(scalar_t a, scalar_t b) {
   if (at::_isnan(a)) {
     return a;
   }
