@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import dataclasses
 import os
 import tempfile
 import unittest
+from concurrent.futures import Future
 from datetime import timedelta
+from unittest import mock
 
 import psutil
 
@@ -26,6 +29,7 @@ from torch.distributed.checkpoint.staging import (
 )
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     requires_accelerator_dist_backend,
@@ -775,10 +779,18 @@ class TestStateDictStager(TestCase):
 
         for pin_memory, share_memory in test_configs:
             with self.subTest(pin_memory=pin_memory, share_memory=share_memory):
-                # Create stager with specific configuration
-                stager = StateDictStager(
-                    pin_memory=pin_memory, share_memory=share_memory
-                )
+                # Pinning shared memory in place needs cudaHostRegister, so other
+                # accelerators warn and stage it unpinned.
+                pin_dropped = pin_memory and share_memory and device_type != "cuda"
+                with (
+                    self.assertWarnsRegex(UserWarning, "Ignoring pin_memory")
+                    if pin_dropped
+                    else contextlib.nullcontext()
+                ):
+                    stager = StateDictStager(
+                        pin_memory=pin_memory, share_memory=share_memory
+                    )
+                expected_pinned = pin_memory and not pin_dropped
                 cpu_state_dict = stager.stage(state_dict)
 
                 # Get the staged tensors
@@ -806,13 +818,13 @@ class TestStateDictStager(TestCase):
                 # Verify pinned memory status
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
-                    pin_memory,
-                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
+                    expected_pinned,
+                    lambda msg: f"{msg}\nTensor pinned status should be {expected_pinned}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
-                    pin_memory,
-                    lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
+                    expected_pinned,
+                    lambda msg: f"{msg}\nTensor pinned status should be {expected_pinned}",
                 )
 
                 # Verify shared memory status
@@ -850,6 +862,42 @@ class TestStateDictStager(TestCase):
                     )
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_pin_memory_under_default_device(self):
+        """
+        Test that staging under a non-CPU default device still produces pinned CPU tensors.
+        """
+        tensor = torch.randn(8, 8, device=device_type)
+        with torch.device(device_type):
+            stager = StateDictStager(pin_memory=True)
+            cpu_tensor = stager.stage({"tensor": tensor})["tensor"]
+        self.assertEqual(cpu_tensor.device.type, "cpu")
+        self.assertTrue(cpu_tensor.is_pinned())
+        self.assertEqual(cpu_tensor, tensor.cpu())
+
+    @unittest.skipIf(torch.cuda.is_available(), "CUDA pins in place without a probe")
+    def test_pin_memory_without_pinned_allocator(self):
+        """
+        Test that pin_memory falls back to unpinned staging when pinned allocation fails.
+        """
+        empty = torch.empty
+
+        # Like MPS without a Metal device: 0-byte pinned requests succeed, others fail.
+        def empty_failing_pinned(*args, pin_memory=False, **kwargs):
+            tensor = empty(*args, **kwargs)
+            if pin_memory and tensor.numel() > 0:
+                raise RuntimeError("no pinned memory")
+            return tensor
+
+        with mock.patch("torch.empty", empty_failing_pinned):
+            with self.assertWarnsRegex(UserWarning, "pinned memory allocation failed"):
+                stager = StateDictStager(pin_memory=True)
+        tensor = torch.randn(8, 8)
+        cpu_tensor = stager.stage({"tensor": tensor})["tensor"]
+        self.assertFalse(stager.pin_memory)
+        self.assertFalse(cpu_tensor.is_pinned())
+        self.assertEqual(cpu_tensor, tensor)
+
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_async_save_can_reuse_default_stager(self):
         state_dict = {
             "weight": torch.randn(4, 4, device=device_type),
@@ -875,6 +923,38 @@ class TestStateDictStager(TestCase):
                 self.assertIsNotNone(metadata)
 
         stager.close()
+
+
+class TestDefaultStager(TestCase):
+    def test_async_staging_with_pinned_memory(self, device):
+        tensor = torch.empty(1024 * 1024, device=device)
+        state_dict = {"tensor": tensor}
+        stager = DefaultStager(
+            StagingOptions(
+                use_pinned_memory=True,
+                use_shared_memory=False,
+                use_async_staging=True,
+                use_non_blocking_copy=True,
+            )
+        )
+        self.addCleanup(stager.close)
+
+        storage_ptr = None
+        for value in (1, 2):
+            tensor.fill_(value)
+            expected = torch.full_like(tensor, value, device="cpu")
+            # Make source writes ready for the stager's separate stream.
+            torch.accelerator.synchronize()
+            future = stager.stage(state_dict)
+            self.assertIsInstance(future, Future)
+            staged_tensor = future.result(timeout=30)["tensor"]
+            self.assertEqual(staged_tensor.device.type, "cpu")
+            self.assertTrue(staged_tensor.is_pinned())
+            self.assertFalse(staged_tensor.is_shared())
+            self.assertEqual(staged_tensor, expected)
+            if storage_ptr is not None:
+                self.assertEqual(staged_tensor.data_ptr(), storage_ptr)
+            storage_ptr = staged_tensor.data_ptr()
 
 
 class TestDTensorStateDictStager(DTensorTestBase):
@@ -1487,6 +1567,11 @@ class TestReplicationStager(DTensorContinuousTestBase):
 
             # Clean up
             stager.close()
+
+
+instantiate_device_type_tests(
+    TestDefaultStager, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":

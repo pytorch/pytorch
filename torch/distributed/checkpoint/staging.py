@@ -109,7 +109,8 @@ class StagingOptions:
 
     Attributes:
         use_pinned_memory (bool): Enable pinned memory allocation for faster
-            CPU-GPU transfers. Requires CUDA to be available. Default: True
+            CPU-GPU transfers. Requires an accelerator with pinned memory
+            support, and CUDA when combined with use_shared_memory. Default: True
         use_shared_memory (bool): Enable shared memory for multi-process
             scenarios. Useful when multiple processes need access to the
             same staged data. Default: True
