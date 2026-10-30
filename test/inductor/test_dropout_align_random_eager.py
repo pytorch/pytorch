@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import struct
 import time
 import unittest
 
@@ -9,12 +8,12 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU_AND_TRITON,
-    requires_gpu,
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
 )
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # ───────────────────────────────────────────────────────────────
@@ -76,8 +75,6 @@ def build_models(dropout: float, *, mode=None, dynamic: bool = False):
 # ───────────────────────────────────────────────────────────────
 def _set_seed(base: int = BASE_SEED):
     torch.manual_seed(base)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(base)
 
 
 def _sync(x: torch.Tensor):
@@ -94,35 +91,30 @@ def _timed_run(model, x, backward: bool = False):
     return (time.time() - t0) * 1e3, y
 
 
-def _cuda_rng_u64_seed_off():
-    """Return (seed, offset) extracted from torch.cuda.get_rng_state()."""
-    st = (
-        torch.xpu.get_rng_state()
-        if torch.xpu.is_available()
-        else torch.cuda.get_rng_state()
-    )
-    seed = struct.unpack("<Q", st[0:8].cpu().numpy().tobytes())[0]
-    off = struct.unpack("<Q", st[8:24].cpu().numpy().tobytes())[0]
+def _rng_seed_and_offset(device):
+    """Return (seed, offset) extracted from the RNG state of ``device``.
+
+    The CUDA RNG state is a 16-byte uint8 tensor laid out as
+    seed[0:8] + offset[8:16]. get_rng_state returns a CPU tensor, so the
+    uint64 fields are read with a direct view; the device argument is
+    forwarded so the state always matches the tensors under test.
+    """
+    st = torch.get_device_module(device).get_rng_state(device)
+    seed = st[:8].view(torch.int64).item()
+    off = st[8:16].view(torch.int64).item()
     return seed, off
 
 
-def set_seed(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-
-
-def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
+def dropout_parity(device, shape, p=0.3, dtype=torch.float32, seed=1234):
     """Returns (masks_equal, eager_out, compiled_out)."""
-    DEVICE = torch.device(GPU_TYPE)
     torch._dynamo.reset()
-    x = torch.ones(shape, device=DEVICE, dtype=dtype)
-    drop_e = torch.nn.Dropout(p).to(DEVICE).train()
-    drop_c = torch.compile(torch.nn.Dropout(p).to(DEVICE).train())
+    x = torch.ones(shape, device=device, dtype=dtype)
+    drop_e = torch.nn.Dropout(p).to(device).train()
+    drop_c = torch.compile(torch.nn.Dropout(p).to(device).train())
 
-    set_seed(seed)
+    _set_seed(seed)
     out_e = drop_e(x)
-    set_seed(seed)
+    _set_seed(seed)
     out_c = drop_c(x)
 
     masks_eq = torch.equal(out_e != 0, out_c != 0)
@@ -133,16 +125,26 @@ def dropout_parity(shape, p=0.3, dtype=torch.float32, seed=1234):
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
 @unittest.skipIf(
-    not (IS_LINUX and HAS_GPU_AND_TRITON),
-    "Inductor CUDA dropout alignment tests require Linux and CUDA",
+    not (IS_LINUX and HAS_TRITON),
+    "Inductor dropout alignment tests require Linux and Triton",
 )
-@config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = config.patch(align_random_eager=True)
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
     def assertSmallMismatchFraction(self, a, b, atol=1e-5, max_fraction=1e-3):
         """Assert that only a small fraction of elements differ significantly.
 
-        The Philox uint32→float32 conversion can produce values on opposite
-        sides of the dropout threshold for ~1 in 10⁶ elements (architecture-
+        The Philox uint32->float32 conversion can produce values on opposite
+        sides of the dropout threshold for ~1 in 10^6 elements (architecture-
         and seed-dependent).  One wrong mask bit is then amplified by the
         downstream linear layer, so we check the *fraction* of large
         mismatches rather than requiring every element to be close.
@@ -157,11 +159,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             f"Mismatch fraction {fraction:.6f} ({bad}/{total}) exceeds {max_fraction}",
         )
 
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_linear_block_compile_parity_forward(self):
-        device = torch.device(GPU_TYPE)
-
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_linear_block_compile_parity_forward(self, device):
         for training in (False, True):
             eager, compiled = build_models(DROPOUT_P)
             eager.to(device)
@@ -187,11 +186,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
             self.assertSmallMismatchFraction(y_eager, y_comp)
 
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_linear_block_compile_parity_backward(self):
-        device = torch.device(GPU_TYPE)
-
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_linear_block_compile_parity_backward(self, device):
         eager, compiled = build_models(DROPOUT_P)
         eager.to(device)
         compiled.to(device)
@@ -220,61 +216,55 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertIsNotNone(p_new.grad)
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_dropout_mask_parity_and_rng_offset_cuda(self):
-        device = torch.device(GPU_TYPE)
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_dropout_mask_parity_and_rng_offset(self, device):
         H, W = BATCH * SEQ_LEN, FFN_DIM
 
+        dev_mod = torch.get_device_module(device)
         dtypes = [torch.float32, torch.float16, torch.bfloat16]
         for dtype in dtypes:
-            if dtype is torch.bfloat16 and (
-                torch.cuda.is_available() and not torch.cuda.is_bf16_supported()
-            ):
+            if dtype is torch.bfloat16 and not dev_mod.is_bf16_supported():
                 continue
 
             x = torch.ones((H, W), device=device, dtype=dtype)
 
             # Eager
             _set_seed(BASE_SEED)
-            seed0_e, off0_e = _cuda_rng_u64_seed_off()
+            seed0_e, off0_e = _rng_seed_and_offset(device)
             drop_e = torch.nn.Dropout(DROPOUT_P).to(device=device, dtype=dtype).train()
             mask_e = drop_e(x) != 0
-            seed1_e, off1_e = _cuda_rng_u64_seed_off()
+            seed1_e, off1_e = _rng_seed_and_offset(device)
             delta_e = off1_e - off0_e
 
             # Compiled
             _set_seed(BASE_SEED)
-            seed0_c, off0_c = _cuda_rng_u64_seed_off()
+            seed0_c, off0_c = _rng_seed_and_offset(device)
             drop_c = torch.nn.Dropout(DROPOUT_P).to(device=device, dtype=dtype)
             drop_c = torch.compile(drop_c)
             drop_c.train()
             mask_c = drop_c(x) != 0
-            seed1_c, off1_c = _cuda_rng_u64_seed_off()
+            seed1_c, off1_c = _rng_seed_and_offset(device)
             delta_c = off1_c - off0_c
 
             mismatch_ratio = (mask_e != mask_c).float().mean().item()
             self.assertLessEqual(
                 mismatch_ratio,
                 1e-4,
-                msg=lambda msg: f"{msg}\nDropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
+                msg=f"Dropout mask mismatch ratio too high: {mismatch_ratio:.8f}",
             )
             self.assertEqual(seed0_e, BASE_SEED)
             self.assertEqual(seed0_c, BASE_SEED)
             self.assertEqual(
                 delta_e,
                 delta_c,
-                msg=lambda msg: f"{msg}\nRNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
+                msg=f"RNG offset delta mismatch: eager={delta_e}, compiled={delta_c}",
             )
 
     # ───────────────────────────────────────────────────────────
     # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_multi_dropout_multi_iterations_parity(self):
-        device = torch.device(GPU_TYPE)
-
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_multi_dropout_multi_iterations_parity(self, device):
         eager = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = MultiDropoutBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -300,11 +290,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_dropout_parity_dynamic_shapes(self):
-        device = torch.device(GPU_TYPE)
-
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_dropout_parity_dynamic_shapes(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -332,11 +319,8 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_dropout_parity_cudagraphs_reduce_overhead(self):
-        device = torch.device(GPU_TYPE)
-
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_dropout_parity_cudagraphs_reduce_overhead(self, device):
         eager = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
         compiled.load_state_dict(eager.state_dict())
@@ -358,9 +342,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # Codegen sanity: run_and_get_code + FileCheck
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    def test_inductor_generated_code_contains_dropout(self):
-        device = torch.device(GPU_TYPE)
+    def test_inductor_generated_code_contains_dropout(self, device):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         model = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
@@ -379,9 +361,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # ───────────────────────────────────────────────────────────
     # Optional: perf smoke (GPU only)
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    def test_perf_smoke_cuda(self):
-        device = torch.device(GPU_TYPE)
+    def test_perf_smoke(self, device):
         x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
 
         eager, compiled = build_models(DROPOUT_P)
@@ -440,33 +420,25 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Primitive random fns: rand / randn / randint -> mark as XFAIL
     # ───────────────────────────────────────────────────────────
     @unittest.expectedFailure
-    @requires_gpu()
-    def test_primitive_rand_parity(self):
-        device = torch.device(GPU_TYPE)
+    def test_primitive_rand_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("rand", device, shape)
 
     @unittest.expectedFailure
-    @requires_gpu()
-    def test_primitive_randn_parity(self):
-        device = torch.device(GPU_TYPE)
+    def test_primitive_randn_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randn", device, shape)
 
     @unittest.expectedFailure
-    @requires_gpu()
-    def test_primitive_randint_parity(self):
-        device = torch.device(GPU_TYPE)
+    def test_primitive_randint_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
         self._run_primitive_random_parity("randint", device, shape)
 
     # ───────────────────────────────────────────────────────────
     # nn.Dropout as primitive RNG consumer (should PASS)
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_primitive_nn_dropout_parity(self):
-        device = torch.device(GPU_TYPE)
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_primitive_nn_dropout_parity(self, device):
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
 
         x = torch.ones(shape, device=device)
@@ -489,17 +461,22 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Seed and base are packed into int64 as (seed << 32) | base.
     # Seeds > 2^32 overflow.
     # ───────────────────────────────────────────────────────────
-    @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
-    def test_large_seed(self):
+    @skipXPUIf(True, "intel/torch-xpu-ops/issue/4851")
+    def test_large_seed(self, device):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):
-                masks_eq, _, _ = dropout_parity((1024,), seed=seed)
-                self.assertTrue(
-                    masks_eq, lambda msg: f"{msg}\nseed={seed}: mask mismatch"
-                )
+                masks_eq, _, _ = dropout_parity(device, (1024,), seed=seed)
+                self.assertTrue(masks_eq, msg=f"seed={seed}: mask mismatch")
+
+
+instantiate_device_type_tests(
+    TestDropoutAlignRandomEager,
+    globals(),
+    only_for=["cuda", "xpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU_AND_TRITON:
+    if IS_LINUX and HAS_TRITON:
         run_tests(needs="filelock")
