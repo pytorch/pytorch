@@ -623,41 +623,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-  // If beta != 0, spgemm is correct only when
-  // the sparsity pattern of A @ B is that of C, i.e. sp(A @ B) = sp(C).
-  // Since sp(A @ B) is not known in advance, we need to materialize it
-  // in an external memory, and then deal with accumulation into C.
-  if (beta.toComplexDouble() != .0) {
-    const auto is_eq_idx = [](const Tensor& idx1, const Tensor& idx2) -> bool {
-      return idx1.eq(idx2).all().item<bool>();
-    };
-    // NOTE: beta == 0 implies that the result is overwritten, not accumulated into.
-    auto AB = at::zeros(C.sizes(), C.options());
-    spgemm(A, B, static_cast<Scalar>(0), alpha, AB);
-
-    // Handling accumulation into C.
-    // No add for reduced dtypes, so we try to deploy add on values.
-    // Of course, that only works when the sparsity patterns do match,
-    // which we check under the assumption that it is unlikely that
-    // sp(A @ B) == sp(C). This path introduces a host-device sync,
-    // but spgemm syncs anyway, since the result's shape is data-dependent.
-    // When sp(A @ B) != sp(C), then, alas, (A @ B) and C will need
-    // an upcast with reduced dtypes.
-    if (
-      (AB._nnz() == C._nnz())
-      && is_eq_idx(AB.crow_indices(), C.crow_indices())
-      && is_eq_idx(AB.col_indices(), C.col_indices())
-    ) {
-      AB.values().add_(C.values(), beta);
-      C.values().copy_(AB.values());
-    } else {
-      const auto add_dtype = at::isReducedFloatingType(C.scalar_type()) ? kFloat : C.scalar_type();
-      const auto res = at::add(AB.to(add_dtype), C.to(add_dtype), beta);
-      C.resize_as_sparse_(res).copy_(res);
-    }
-    return;
-  }
-
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
@@ -840,6 +805,45 @@ void addmm_out_sparse_csr(
     result.copy_(input);
   }
 
+  // If beta != 0, spgemm is correct only when the sparsity pattern
+  // of mat1 @ mat2 is that of result, i.e. sp(mat1 @ mat2) = sp(result).
+  // Since sp(mat1 @ mat2) is not known in advance, we need to materialize it
+  // in an external memory, and then deal with accumulation into result.
+  const auto is_csr_or_csc = [](const Tensor& t) {
+    return t.layout() == kSparseCsr || t.layout() == kSparseCsc;
+  };
+  if (beta.toComplexDouble() != 0. && is_csr_or_csc(mat1) && is_csr_or_csc(mat2) && is_csr_or_csc(result)) {
+    // NOTE: beta == 0 implies that the result is overwritten, not accumulated into.
+    auto AB = at::zeros(result.sizes(), result.options());
+    addmm_out_sparse_csr(AB, mat1, mat2, static_cast<Scalar>(0), alpha, AB);
+
+    // Handling accumulation into result.
+    // No add for reduced dtypes, so we try to deploy add on values.
+    // Of course, that only works when the sparsity patterns do match,
+    // which we check under the assumption that it is unlikely that
+    // sp(mat1 @ mat2) == sp(result). This path introduces a host-device sync,
+    // but spgemm syncs anyway, since the result's shape is data-dependent.
+    // When sp(mat1 @ mat2) != sp(result), then, alas, (mat1 @ mat2) and result
+    // will need an upcast with reduced dtypes.
+    const auto [AB_compressed, AB_plain] = at::sparse_csr::getCompressedPlainIndices(AB);
+    const auto [C_compressed, C_plain] = at::sparse_csr::getCompressedPlainIndices(result);
+    if (
+      (AB._nnz() == result._nnz())
+      && AB_compressed.eq(C_compressed).all().logical_and(AB_plain.eq(C_plain).all()).item<bool>()
+    ) {
+      result.values().mul_(beta).add_(AB.values());
+    } else {
+      const auto add_dtype = at::isReducedFloatingType(result.scalar_type()) ? kFloat : result.scalar_type();
+      // CUDA sparse add supports CSR only, and the transpose of a CSC tensor is CSR.
+      const auto t = [&](const Tensor& x) {
+        return result.layout() == kSparseCsc ? x.transpose(-2, -1) : x;
+      };
+      const auto res = t(at::add(t(AB).to(add_dtype), t(result).to(add_dtype), beta));
+      result.resize_as_sparse_(res).copy_(res);
+    }
+    return;
+  }
+
   // mm functions that assume that result contains input:
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
@@ -903,12 +907,22 @@ void addmm_out_sparse_csr(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
+        // spgemm may change nnz by resizing or replacing the member tensors of
+        // the transposed view, which share storage with those of result, but
+        // not sizes. Hence result adopts the view's member tensors.
+        auto result_t = result.transpose(-2, -1);
         spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1)); return;
+            result_t);
+        static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl())->set_member_tensors(
+            result_t.crow_indices(),
+            result_t.col_indices(),
+            result_t.values(),
+            result.sizes());
+        return;
       }
     }
   }
