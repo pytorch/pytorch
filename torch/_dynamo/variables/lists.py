@@ -1196,6 +1196,26 @@ class ListVariable(BaseListVariable):
             items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"[{items}]")
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # list.__new__(cls); `self` is the ListBuiltinVariable __new__ was
+        # found on, `args[0]` is the actual (possibly subclassed) cls.
+        # list.__new__ (PyType_GenericNew) ignores extra args *and* kwargs --
+        # population happens later via __init__.
+        from .builtin import ListBuiltinVariable
+
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        if isinstance(args[0], ListBuiltinVariable):
+            return ListVariable([], mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], [], tx=tx
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Only a sourceless object needs the empty-then-fill placeholder. Once
         # it has a source -- including the TempLocalSource that
@@ -2045,6 +2065,31 @@ class TupleVariable(BaseListVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
         return TupleIteratorVariable(self.items, mutation_type=ValueMutationNew())
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tuple.__new__(cls, iterable=()); `self` is the BuiltinVariable(tuple)
+        # __new__ was found on (there's no TupleBuiltinVariable -- BuiltinVariable
+        # delegates here explicitly), `args[0]` is the actual (possibly
+        # subclassed) cls.
+        from .builtin import BuiltinVariable
+
+        if not 1 <= len(args) <= 2:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        # tuple_new rejects keywords only when tuple's own tp_init would run.
+        cls = args[0].as_python_constant()
+        if cls is tuple or cls.__init__ is tuple.__init__:
+            no_keywords(tx, "tuple", kwargs)
+        if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+            init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
+            return TupleVariable(init_args, mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_build_tuple(len(self.items)))
@@ -2276,6 +2321,39 @@ class ByteArrayVariable(VariableTracker):
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # bytearray_str warns under -b (BytesWarning), then returns the repr.
         return python_constant_repr_impl(self, tx, str)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # bytearray_init: https://github.com/python/cpython/blob/v3.13.3/Objects/bytearrayobject.c#L749-L924
+        if not all(a.is_python_constant() for a in [*args, *kwargs.values()]):
+            unimplemented(
+                gb_type="bytearray.__init__ with non-constant arguments",
+                context=f"bytearray.__init__ {self}",
+                explanation="Dynamo only models bytearray.__init__ with constant arguments.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not self.is_mutable():
+            raise AssertionError(
+                f"tp_init_impl reached an immutable {type(self).__name__}; "
+                "every construction site should set mutation_type."
+            )
+        # Run the real bytearray_init on a copy: on error it may already have
+        # cleared or partially filled the contents, and the copy captures that.
+        data = bytearray(self.data)
+        tx.output.side_effects.mutation(self)
+        self.data = data
+        try:
+            data.__init__(
+                *[a.as_python_constant() for a in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except (TypeError, ValueError, LookupError, OverflowError, MemoryError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(None)
 
     def nb_remainder_impl(
         self,

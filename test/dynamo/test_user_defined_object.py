@@ -868,6 +868,46 @@ class TestClassSetattr(TestCase):
         MyModule.x = 10
 
 
+class TestObjectNew(TestCase):
+    def test_object_new_on_plain_class(self):
+        def fn():
+            return object.__new__(Plain)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIsInstance(opt_fn(), Plain)
+
+    def test_object_new_rejects_kwargs(self):
+        def fn():
+            return object.__new__(Plain, extra=1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_new_on_class_with_unsupported_c_level_new(self):
+        # torch._C._DisableFuncTorch (a pybind11 extension type) inherits
+        # its __new__ from pybind11_object, a C-level __new__ that isn't
+        # one of the constructors Dynamo recognizes (unlike object.__new__,
+        # dict.__new__, etc). Explicitly calling __new__ should gracefully
+        # graph-break (fullgraph=True -> Unsupported) instead of hard
+        # crashing with an internal AssertionError in get_example_value.
+        def fn():
+            return torch._C._DisableFuncTorch.__new__(torch._C._DisableFuncTorch)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaises(Unsupported, opt_fn)
+
+    def test_construct_class_with_unsupported_c_level_new(self):
+        # Normal (non-fullgraph) construction/use of such a class must
+        # still work correctly by falling back gracefully.
+        def fn(x):
+            with torch._C._DisableFuncTorch():
+                return x + 1
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x), opt_fn(x))
+
+
 # ---------------------------------------------------------------------------
 # __setitem__ on user-defined classes / metaclasses
 # ---------------------------------------------------------------------------
@@ -2027,6 +2067,80 @@ class TestConstantSubclassHash(TestCase):
 
 
 instantiate_parametrized_tests(TestObjectConstruction)
+
+
+class _InitOnly:
+    def __init__(self, a):
+        self.a = a
+
+
+class _SuperInitExtraArg:
+    def __init__(self, a):
+        super().__init__(a)
+
+
+class _NewOnly:
+    def __new__(cls, *args):
+        return super().__new__(cls)
+
+
+# object_init: extra arguments are an error unless the type overrides __new__
+# but not __init__.
+_OBJECT_INIT_CASES = {
+    "explicit_on_new_override": lambda: object.__init__(_NewOnly(), 1),
+    "explicit_on_init_override": lambda: object.__init__(_InitOnly(1), 1),
+    "explicit_on_plain": lambda: object.__init__(Plain(), 1),
+    "explicit_kwargs_on_plain": lambda: object.__init__(Plain(), k=1),
+    "bound_on_plain": lambda: Plain().__init__(1),
+    "super_with_extra_arg": lambda: _SuperInitExtraArg(1),
+}
+
+
+class TestObjectInit(TestCase):
+    @parametrize("case", list(_OBJECT_INIT_CASES))
+    def test_object_init(self, case):
+        def fn(x):
+            try:
+                _OBJECT_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestObjectInit)
+
+
+# type_init (a class's tp_init) accepts 1 or 3 arguments and no keywords.
+_TYPE_INIT_CASES = {
+    "builtin_class_no_args": lambda: type.__init__(int),
+    "builtin_class_three_args": lambda: type.__init__(int, "n", (), {}),
+    "builtin_class_kwargs": lambda: type.__init__(int, x=1),
+    "user_class_no_args": lambda: type.__init__(Plain),
+    "user_class_three_args": lambda: type.__init__(Plain, "P", (), {}),
+    "non_class_receiver": lambda: type.__init__(1),
+}
+
+
+class TestTypeInit(TestCase):
+    @parametrize("case", list(_TYPE_INIT_CASES))
+    def test_type_init(self, case):
+        def fn(x):
+            try:
+                _TYPE_INIT_CASES[case]()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x + 1, "ok"
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+
+instantiate_parametrized_tests(TestTypeInit)
 
 
 if __name__ == "__main__":

@@ -65,7 +65,6 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
-    identity,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -266,7 +265,7 @@ class SuperVariable(VariableTracker):
         # relevant `tp_descr_get`, so we explicitly handle the cases we care
         # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
-            return LambdaVariable(identity)
+            return VariableTracker.tp_init_impl(self.objvar, tx, args, kwargs)
         elif (
             isinstance(inner_fn, types.WrapperDescriptorType)
             and inner_fn.__name__ == "__init__"
@@ -326,7 +325,12 @@ class SuperVariable(VariableTracker):
                 user_cls_vt = variables.UserDefinedClassVariable(
                     user_cls, source=user_cls_source
                 )
-            return user_cls_vt.call_method(tx, "__new__", args, kwargs)
+            # `args[0]` (== `cls` in `super().__new__(cls, ...)`) is not a
+            # receiver, so this must go through the tp_new slot, not
+            # call_method (whose generic unbound-method-forwarding blocks,
+            # e.g. for set/frozenset/list/tuple, assume args[0] is a receiver
+            # instance and would misdispatch cls as one).
+            return user_cls_vt.tp_new_impl(tx, args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):

@@ -883,6 +883,21 @@ def _wrap_init(
     return func(self, tx, args, kwargs)
 
 
+def _wrap_new(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., VariableTracker],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    # tp_new via __new__: variadic, forwards kwargs. Unlike every other
+    # tp_*_impl, `self` stays the type __new__ was found on (e.g.
+    # BuiltinVariable(set)), not an instance -- `args[0]` is the actual
+    # `cls` (possibly a subclass, e.g. via super().__new__(cls, ...)).
+    # See tp_new_impl's docstring for the full calling convention.
+    return func(self, tx, args, kwargs)
+
+
 def _wrap_setattr(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -1313,7 +1328,7 @@ _SLOTDEFS: list[SlotDef] = [
         _wrap_descr_delete,
     ),
     TPSLOT("__init__", "tp_init_impl", PyTypeSlots.TP_INIT, _wrap_init),
-    # SlotDef("__new__", ...), # missing
+    TPSLOT("__new__", "tp_new_impl", PyTypeSlots.TP_NEW, _wrap_new),
     # SlotDef("__del__", ...), # missing
     # SlotDef("__buffer__", ...), # missing
     # SlotDef("__release_buffer__", ...), # missing
@@ -2368,12 +2383,69 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        """tp_init slot (__init__). VTs override to initialize instances."""
-        unimplemented(
-            gb_type="missing tp_init",
-            context=f"tp_init_impl not implemented for {self.python_type_name()}",
-            explanation=f"Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+        """Default tp_init: object_init.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6109-L6127
+
+        Rejects extra arguments unless the type overrides __new__ but not
+        __init__. VT subclasses override this for types with their own tp_init.
+        """
+        if args or kwargs:
+            py_type = self.python_type()
+            if py_type.__init__ is not object.__init__:
+                raise_type_error(
+                    tx,
+                    "object.__init__() takes exactly one argument (the instance to initialize)",
+                )
+            if py_type.__new__ is object.__new__:
+                raise_type_error(
+                    tx,
+                    f"{py_type.__name__}.__init__() takes exactly one argument (the instance to initialize)",
+                )
+        return variables.ConstantVariable.create(None)
+
+    def tp_new_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """tp_new slot (__new__). Unlike every other tp_*_impl, `self` here is
+        the type being constructed *from* (e.g. BuiltinVariable(set)), not an
+        instance -- there is no instance yet. `args[0]` is `cls` (possibly a
+        subclass of `self`, e.g. via `super().__new__(cls, ...)`), not a
+        receiver, so callers must not forward it to `args[0].call_method`.
+        VTs representing a constructible type (BuiltinVariable,
+        DictBuiltinVariable, ListBuiltinVariable, UserDefinedClassVariable)
+        override this to implement `cls.__new__(cls, ...)`. The default here
+        implements `object.__new__(cls)`, the ultimate fallback every type's
+        `__new__` chain bottoms out at.
+        """
+        klass = self.as_python_constant()
+        if klass is not object:
+            unimplemented(
+                gb_type="missing tp_new",
+                context=f"tp_new_impl not implemented for {klass.__name__}",
+                explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not args:
+            raise_type_error(tx, "object.__new__(): not enough arguments")
+        # object_new: https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c
+        cls = args[0].as_python_constant()
+        if len(args) > 1 or kwargs:
+            if cls.__new__ is not object.__new__:
+                raise_type_error(
+                    tx,
+                    "object.__new__() takes exactly one argument (the type to instantiate)",
+                )
+            if cls.__init__ is object.__init__:
+                raise_type_error(tx, f"{cls.__name__}() takes no arguments")
+        if cls is object:
+            return self.call_function(tx, [], {})
+        # object_new ignores the excess args, so don't record them.
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], [], tx=tx
         )
 
     def call_function(

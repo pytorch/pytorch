@@ -157,6 +157,7 @@ from .object_protocol import (
     ternary_op,
     type_implements_mp_length,
     type_implements_sq_length,
+    type_init,
     vt_identity_compare,
 )
 from .sets import (
@@ -500,6 +501,17 @@ class BaseBuiltinVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self._fn
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # A builtin class is an instance of type, so its tp_init is type_init.
+        if not isinstance(self.as_python_constant(), type):
+            return super().tp_init_impl(tx, args, kwargs)
+        return type_init(tx, args, kwargs)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # A builtin type or function reprs to a fixed string, e.g. "<class 'int'>". type_repr / func_repr:
         return VariableTracker.build(tx, repr(self.as_python_constant()))
@@ -572,6 +584,30 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        cls = self.as_python_constant()
+        if name == "__init__" and args and isinstance(cls, type):
+            # `cls.__init__(obj, ...)` is an unbound slot wrapper call: obj is
+            # the receiver and cls's own __init__ applies to it.
+            obj, rest = args[0], args[1:]
+            if cls.__init__ is object.__init__:
+                return VariableTracker.tp_init_impl(obj, tx, rest, kwargs)
+            if not issubclass(obj.python_type(), cls):
+                raise_type_error(
+                    tx,
+                    f"descriptor '__init__' requires a '{cls.__name__}' object "
+                    f"but received a '{obj.python_type_name()}'",
+                )
+            if cls.__init__ is type.__init__:
+                return type_init(tx, rest, kwargs)
+            if obj.python_type() is cls:
+                return obj.tp_init_impl(tx, rest, kwargs)
+            unimplemented(
+                gb_type="__init__ called through a builtin class",
+                context=f"{cls.__name__}.__init__ on {obj}",
+                explanation=f"Dynamo does not support {cls.__name__}.__init__ on an "
+                f"instance of the subclass {obj.python_type_name()}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if name == "__str__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object:
@@ -1959,6 +1995,31 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
         return handler(tx, args, kwargs)  # type: ignore[return-value]
 
+    # object.__new__ is handled by the VariableTracker default (every type
+    # ultimately falls back to it). tuple/set/frozenset each have their own
+    # constructible VariableTracker (TupleVariable/SetVariable/
+    # FrozensetVariable) -- BuiltinVariable is only ever the receiver
+    # `__new__` was found on for them (there's no dedicated
+    # TupleBuiltinVariable/SetBuiltinVariable/FrozensetBuiltinVariable), so
+    # this is a pure lookup table, not construction logic.
+    _tp_new_delegates: dict[Callable[..., Any], type[VariableTracker]] = {
+        tuple: TupleVariable,
+        set: SetVariable,
+        frozenset: FrozensetVariable,
+    }
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        target = self._tp_new_delegates.get(self.fn)
+        if target is not None:
+            # pyrefly: ignore[bad-argument-type]
+            return target.tp_new_impl(self, tx, args, kwargs)
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -1984,34 +2045,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
 
-        if name == "__new__":
-            # Supported __new__ methods
-            if self.fn is object and len(args) == 1:
-                if len(kwargs) != 0:
-                    raise AssertionError(
-                        f"object.__new__ expects no kwargs, got {len(kwargs)}"
-                    )
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
-                )
-
-            if self.fn is tuple and len(args) == 2 and not kwargs:
-                if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = unpack_iterable(tx, args[1])
-                    return variables.TupleVariable(
-                        init_args, mutation_type=ValueMutationNew()
-                    )
-
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
-                )
-
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
             if all(a.is_python_constant() for a in args) and all(
                 v.is_python_constant() for v in kwargs.values()
@@ -2030,11 +2063,10 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
-        if self.fn is object and name == "__init__":
-            # object.__init__ is a no-op
-            return variables.ConstantVariable.create(None)
-
-        if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
+        if (
+            self.fn in (set, frozenset, list, tuple, int, str, float, complex)
+            and name != "__new__"
+        ):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
                 # int.__eq__(IntEnum.A, x): constant int/float/str subclass
                 # instances fall through to the rich-comparison fold below,
@@ -3598,6 +3630,25 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         "fromkeys": Method(fromkeys),
     }
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if args:
+            # dict.__new__ (tp_new) ignores extra args — only the first
+            # arg (the type) matters.  Pass init_args=[] so reconstruction
+            # emits base_cls.__new__(cls) without extras.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
+            dict_vt = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            if isinstance(args[0], DictBuiltinVariable):
+                return dict_vt
+            return tx.output.side_effects.track_new_user_defined_object(
+                self, args[0], [], tx=tx
+            )
+        return super().tp_new_impl(tx, args, kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3606,20 +3657,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__new__":
-            if args:
-                # dict.__new__ (tp_new) ignores extra args — only the first
-                # arg (the type) matters.  Pass init_args=[] so reconstruction
-                # emits base_cls.__new__(cls) without extras.
-                # https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4735-L4768
-                dict_vt = ConstDictVariable({}, mutation_type=ValueMutationNew())
-                if isinstance(args[0], DictBuiltinVariable):
-                    return dict_vt
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
-                )
+            return self.tp_new_impl(tx, args, kwargs)
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
@@ -4149,30 +4187,16 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         lst.call_method(tx, "extend", [args[0]], {})
         return lst
 
-    def call_method(
+    def tp_new_impl(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__new__":
-            if args and not kwargs:
-                # list.__new__ (PyType_GenericNew) ignores extra args -- only
-                # the first arg (the type) matters. Pass init_args=[] so
-                # reconstruction emits base_cls.__new__(cls) without extras.
-                # https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c
-                list_vt = ListVariable([], mutation_type=ValueMutationNew())
-                if isinstance(args[0], ListBuiltinVariable):
-                    return list_vt
-                return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
-                )
-
-        return super().call_method(tx, name, args, kwargs)
+        # ListBuiltinVariable is always the `__new__`-found-on receiver for
+        # list; construction itself lives on ListVariable.
+        # pyrefly: ignore[bad-argument-type]
+        return ListVariable.tp_new_impl(self, tx, args, kwargs)
 
 
 class ByteArrayBuiltinVariable(BaseBuiltinVariable):
