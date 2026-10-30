@@ -1,3 +1,5 @@
+// TODO: Move this file to a parent directory for shared usage between
+// nccl2 and xccl2 backends, after xccl2 is upstreamed.
 #ifdef USE_C10D_XCCL
 
 #include <torch/csrc/distributed/c10d/xccl2/TracingGuard.hpp>

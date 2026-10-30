@@ -1,3 +1,5 @@
+// TODO: Move this file to a parent directory for shared usage between
+// nccl2 and xccl2 backends, after xccl2 is upstreamed.
 #pragma once
 
 #ifdef USE_C10D_XCCL
