@@ -64,12 +64,14 @@ def export_python(
     served without its cache, which was built for the captured text and stays stale
     until a recapture replaces it, so its edited graphs compile the kernels their
     text defines, which :func:`~torch.compiler.precompile.no_compilation` forbids.
-    With the inductor backend the capture tunes every Triton kernel at compile time
-    (it compiles as inductor does under ``triton.autotune_at_compile_time``), so a
-    graph's code carries a ``KERNEL_CONFIGS`` table of the config each kernel launches
-    with: editing a row changes that kernel's launch config. A process serves one
-    version of a capture: rerun in a new process to pick up an edit, since loading the
-    edited file where an earlier version of it is loaded raises::
+    With the inductor backend the capture tunes its Triton kernels at compile time (it
+    compiles as inductor does under ``triton.autotune_at_compile_time``), so a graph's
+    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
+    generated launches with: editing a row changes that kernel's launch config. A
+    template (flex attention, say) or a user-defined kernel keeps its config in its own
+    decorator instead, editable the same way. A process serves one version of a
+    capture: rerun in a new process to pick up an edit, since loading the edited file
+    where an earlier version of it is loaded raises::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
@@ -95,14 +97,17 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
-        check: Also run ``fn`` eagerly (under the ``"force_eager"`` stance) on every
-            served call, on copies of the tensor arguments, and raise
+        check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
+            too) on every served call, on copies of the tensor arguments, and raise
             :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
             arguments after any in-place writes, differ beyond
             ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
-            ``fn``'s outputs must be values ``assert_close`` compares. Module
-            arguments are not copied, so state a module updates in place (BatchNorm's
-            running statistics in training, say) is updated twice per checked call.
+            ``fn``'s outputs must be values ``assert_close`` compares. Tensor
+            arguments are copied one by one, so arguments that alias each other (one
+            tensor passed twice, or views of one tensor) do not alias in the eager
+            run. Module arguments are not copied, so state a module updates in place
+            (BatchNorm's running statistics in training, say) is updated twice per
+            checked call.
             Not meaningful for a function that draws random numbers, whose compiled
             and eager draws differ. Defaults to the ``TORCH_EXPORT_PYTHON_CHECK``
             environment variable (``1`` enables it), read when the decorator is
@@ -161,11 +166,16 @@ class _ExportedPython:
             return self._runnable(*args, **kwargs)
         # Copied before the artifact runs, so an in-place write cannot reach eager.
         eager_args, eager_kwargs = pytree.tree_map_only(
-            torch.Tensor, lambda t: t.detach().clone(), (args, kwargs)
+            torch.Tensor,
+            lambda t: t.detach().clone().requires_grad_(t.requires_grad),
+            (args, kwargs),
         )
         result = self._runnable(*args, **kwargs)
-        # Eager all the way down: a torch.compile'd function fn calls must not compile.
-        with torch.compiler.set_stance("force_eager"):
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        # A torch.compile'd function fn calls runs eagerly too, on this thread only
+        # (set_stance would switch every thread's compiles to eager).
+        with _use_eager_on_nested_compile():
             expected = self._fn(*eager_args, **eager_kwargs)
         # The tensor arguments too, so an edit that breaks an in-place write is caught.
         inputs, eager_inputs = (
