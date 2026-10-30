@@ -12,11 +12,18 @@ it actually means your PR fixed the bug! Feel free to delete the test and close 
 import pytest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 
 
 class TestFuzzerCompileIssues(TestCase):
     """Test cases for fuzzer-discovered eager/compile divergence issues."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         """Configure common test settings."""
