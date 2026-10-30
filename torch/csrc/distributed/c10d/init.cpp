@@ -5542,7 +5542,7 @@ fabricating 0..size-1, which would collide the dump files of a subgroup.)")
           &::c10d::FlightRecorderHook::remove,
           "Detach the hook from its process group.")
       .def_static(
-          "rearm",
+          "_rearm",
           &::c10d::FlightRecorderHook::rearm,
           py::call_guard<py::gil_scoped_release>(),
           R"(

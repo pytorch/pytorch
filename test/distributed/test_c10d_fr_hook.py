@@ -1160,6 +1160,10 @@ class _SignalStore(dist.Store):
         self.polls = 0
         self.fail = False
         self.poll_threads = []
+        # Polls from this thread wait for `release` once they have started.
+        self.block_thread = None
+        self.blocked = threading.Event()
+        self.release = threading.Event()
 
     def set(self, key, value):
         self._store.set(key, value)
@@ -1178,6 +1182,10 @@ class _SignalStore(dist.Store):
                 raise RuntimeError("injected store failure")
             return self._store.add(key, value)
         try:
+            if threading.get_ident() == self.block_thread:
+                self.blocked.set()
+                if not self.release.wait(60):
+                    raise RuntimeError("poll was never released")
             if self.fail:
                 raise RuntimeError("injected store failure")
             return self._store.add(key, value)
@@ -1341,7 +1349,7 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
             self.assertTrue(self._dumped())
             file_store.set("fired", b"1")
         else:
-            file_store.wait(["fired"])
+            file_store.wait(["fired"], timedelta(seconds=60))
             store.settle()
             self.assertTrue(self._dumped())
         hook.remove()
@@ -1401,6 +1409,7 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
 
     def test_rearm(self):
         store = _SignalStore(dist.HashStore())
+        main = threading.get_ident()
         backend, hook = self._attach(store)
         store.add(_DUMP_SIGNAL_KEY, 1)
         store.settle()
@@ -1413,7 +1422,10 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
         self.assertFalse(self._dumped())
 
         # rearm() ignores signals sent before it, and dumps on the next one.
-        FlightRecorderHook.rearm()
+        # It reads the new baseline before returning.
+        before = store.poll_threads.count(main)
+        FlightRecorderHook._rearm()
+        self.assertEqual(store.poll_threads.count(main), before + 1)
         store.settle()
         self.assertFalse(self._dumped())
         store.add(_DUMP_SIGNAL_KEY, 1)
@@ -1421,10 +1433,33 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
         self.assertTrue(self._dumped())
 
         # The abort hook broadcasts again too.
-        FlightRecorderHook.rearm()
+        FlightRecorderHook._rearm()
         signals = self._signals(store)
         backend.fire_abort_hooks()
         self.assertEqual(self._signals(store), signals + 1)
+        hook.remove()
+
+    def test_older_rearm_baseline_does_not_replace_newer(self):
+        # Groups reconfigure concurrently. A rearm() whose baseline read
+        # finishes after a later rearm()'s must not replace the newer baseline:
+        # the poller would drop every dump as decided against an old arming.
+        store = _SignalStore(dist.HashStore())
+        _, hook = self._attach(store)
+
+        def older_rearm():
+            store.block_thread = threading.get_ident()
+            FlightRecorderHook._rearm()
+
+        older = threading.Thread(target=older_rearm)
+        older.start()
+        self.assertTrue(store.blocked.wait(60))
+        FlightRecorderHook._rearm()
+        store.release.set()
+        older.join()
+
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
         hook.remove()
 
     def test_dump_on_timeout_off(self):

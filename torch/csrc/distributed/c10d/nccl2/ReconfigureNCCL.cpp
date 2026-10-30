@@ -557,6 +557,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     nccl_comm_ = newComm;
   }
 
+  // The failure that led here has been dealt with; dump on the next one.
+  // Before initNcclResources() starts the watchdog that would detect it.
+  ::c10d::FlightRecorderHook::rearm();
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
   TORCH_CHECK(
@@ -570,8 +573,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
       " of ",
       newSize);
   reconfigure_uuid_ = opts.uuid;
-  // The failure that led here has been dealt with; dump on the next one.
-  ::c10d::FlightRecorderHook::rearm();
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL reconfigure completed for rank: "
                      << rank_;

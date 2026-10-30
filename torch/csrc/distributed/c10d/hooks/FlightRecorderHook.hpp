@@ -62,6 +62,10 @@
 // also broadcasts a dump signal through the group's global store, and one
 // thread per process polls that store every TORCH_FR_COORD_CHECK_MILSEC and
 // dumps when any rank signaled since the first attach() or the last rearm().
+// The thread is started by the first hook attached while none runs; it polls
+// that hook's global store, through the same client as other store users, and
+// dumps that hook's default backend. So every group is assumed to share one
+// root store, as groups created by init_process_group and new_group do.
 // The signal is a counter of the hook's own; stock's exception_dump key is left
 // alone (see kDumpSignalKey). Giving peers time to dump before the process
 // exits is up to the backend: nccl2's abortProcess, which runs only when error

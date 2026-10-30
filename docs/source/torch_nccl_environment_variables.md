@@ -49,15 +49,15 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN``
   - **nccl-legacy only.** Whether to log C++ stack traces on unclean shutdown. Default: ``1``.
 * - ``TORCH_NCCL_COORD_CHECK_MILSEC``
-  - **All NCCL backends.** Control the interval inside the monitoring thread to check the coordinated signal from other ranks, e.g. to dump the debugging information. ``nccl-legacy`` reads only this name; for ``nccl`` it is the alias of ``TORCH_FR_COORD_CHECK_MILSEC``. Default value is 1000 ms.
+  - **All NCCL backends.** Control the interval to check the coordinated signal from other ranks, e.g. to dump the debugging information. ``nccl-legacy`` reads only this name; for ``nccl`` it is the alias of ``TORCH_FR_COORD_CHECK_MILSEC``. Default value is 1000 ms.
 * - ``TORCH_FR_COORD_CHECK_MILSEC``
-  - **`nccl`, `nccl-lazy` and other hooked backends.** Interval in milliseconds at which each process polls the store for a flight recorder dump signal from another rank. Falls back to ``TORCH_NCCL_COORD_CHECK_MILSEC``. Default: ``1000``.
+  - **`nccl`, `nccl-lazy` and other hooked backends.** Interval in milliseconds at which each process polls the store for a flight recorder dump signal from another rank. No polling when ``TORCH_FR_DUMP_ON_TIMEOUT=0``. Falls back to ``TORCH_NCCL_COORD_CHECK_MILSEC``. Default: ``1000``.
 * - ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``
   - **All NCCL backends.** Control how much extra time we will wait for dumping the debugging info before we exit and throws timeout exception. ``nccl`` waits this long before aborting the process; its flight recorder dump reads ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC`` first. Default: ``15000``.
 * - ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC``
   - **`nccl`, `nccl-lazy` and other hooked backends.** Time limit in milliseconds for a flight recorder dump on failure. Falls back to ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``. Default: ``15000``.
 * - ``TORCH_FR_DUMP_ON_TIMEOUT``
-  - **`nccl`, `nccl-lazy` and other hooked backends.** Whether to dump the flight recorder trace when a collective times out or fails. Falls back to ``TORCH_NCCL_DUMP_ON_TIMEOUT``. Default: ``1``.
+  - **`nccl`, `nccl-lazy` and other hooked backends.** Whether to dump the flight recorder trace when a collective times out or fails, broadcast a dump signal to the other ranks, and dump on theirs. Falls back to ``TORCH_NCCL_DUMP_ON_TIMEOUT``. Default: ``1``.
 * - ``TORCH_NCCL_DUMP_ON_TIMEOUT``
   - **All NCCL backends.** Control whether dumping debug info on watchdog timeout or exception is detected. ``nccl-legacy`` reads only this name; for ``nccl`` it is the alias of ``TORCH_FR_DUMP_ON_TIMEOUT``. Has no effect if the trace buffer size is 0. Default: ``1``.
 * - ``TORCH_FR_BUFFER_SIZE``, ``TORCH_NCCL_TRACE_BUFFER_SIZE``

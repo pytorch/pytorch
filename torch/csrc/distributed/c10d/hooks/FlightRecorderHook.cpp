@@ -215,6 +215,11 @@ bool dumped = false;
 std::atomic<uint64_t> arm_generation{0};
 std::atomic<bool> dump_signal_sent{false};
 
+bool dumpOnTimeout() {
+  static const bool enabled = getCvarBool(TORCH_FR_DUMP_ON_TIMEOUT, true);
+  return enabled;
+}
+
 void dumpTraceOnce(
     const std::string& backend,
     const std::string& reason,
@@ -305,9 +310,18 @@ void dumpTraceOnce(
   }
 }
 
-void broadcastDumpSignal(const c10::intrusive_ptr<Store>& store, int rank) {
-  if (!store || dump_signal_sent.exchange(true)) {
-    return;
+void broadcastDumpSignal(
+    const c10::intrusive_ptr<Store>& store,
+    int rank,
+    uint64_t generation) {
+  {
+    std::lock_guard<std::mutex> lock(dump_mutex);
+    // A rearm() since the failure was detected means it has been dealt with,
+    // and setting the flag would suppress the next arming's broadcast.
+    if (!store || dump_signal_sent || generation != arm_generation) {
+      return;
+    }
+    dump_signal_sent = true;
   }
   try {
     store->add(kDumpSignalKey, 1);
@@ -342,11 +356,13 @@ std::mutex poller_mutex;
 size_t poller_refs = 0;
 std::shared_ptr<DumpSignalPoller> poller;
 
-// Synchronous, so a signal sent once attach() or rearm() returned is never
-// taken for the baseline. Not under poller_mutex: with a Python store the read
-// needs the GIL, which a concurrent remove() may hold while waiting on it.
-void takeBaseline(DumpSignalPoller& state) {
-  const uint64_t generation = arm_generation;
+// Synchronous, so a signal sent once attach() or rearm() returned is not taken
+// for the baseline. Exceptions: a failed read, after which the poller takes its
+// first successful one, and an attach() that returns while another starts the
+// poller. `generation` is the arm_generation read before the store read. Not
+// under poller_mutex: with a Python store the read needs the GIL, which a
+// concurrent remove() may hold while waiting on it.
+void takeBaseline(DumpSignalPoller& state, uint64_t generation) {
   std::optional<int64_t> signals;
   try {
     signals = state.store->add(kDumpSignalKey, 0);
@@ -367,7 +383,7 @@ void takeBaseline(DumpSignalPoller& state) {
 void pollDumpSignal(std::shared_ptr<DumpSignalPoller> state) {
   c10::setThreadName("pt_fr_dump_sig");
   const std::chrono::milliseconds interval{
-      getCvarInt(TORCH_FR_COORD_CHECK_MILSEC, 1000)};
+      std::max(getCvarInt(TORCH_FR_COORD_CHECK_MILSEC, 1000), 1)};
   bool failing = false;
   while (true) {
     try {
@@ -386,8 +402,9 @@ void pollDumpSignal(std::shared_ptr<DumpSignalPoller> state) {
           state->seen = signals;
         }
       }
-      // Skip this process's own broadcast: onAbort dumps the failing backend.
-      if (signaled && !dump_signal_sent) {
+      // This process's own broadcast follows its dump, so dumpTraceOnce drops
+      // it: `dumped` is set, or a rearm() since changed the generation.
+      if (signaled) {
         dumpTraceOnce(
             state->backend, "dump signal from another rank", generation);
       }
@@ -413,15 +430,17 @@ void startDumpSignalPoller(
   std::shared_ptr<DumpSignalPoller> state;
   {
     std::lock_guard<std::mutex> lock(poller_mutex);
-    if (poller_refs++ > 0) {
+    if (poller_refs > 0) {
+      ++poller_refs;
       return;
     }
     poller = state = std::make_shared<DumpSignalPoller>(
         std::move(store), std::move(backend));
+    poller_refs = 1;
   }
   // Only this hook's remove() can drop the count to zero, so the poller
   // cannot be stopped before it starts.
-  takeBaseline(*state);
+  takeBaseline(*state, arm_generation);
   try {
     std::thread(pollDumpSignal, std::move(state)).detach();
   } catch (...) {
@@ -440,6 +459,10 @@ void stopDumpSignalPoller() {
       return;
     }
     state = std::exchange(poller, nullptr);
+  }
+  // Null if starting the thread failed while another hook was attaching.
+  if (!state) {
+    return;
   }
   {
     std::lock_guard<std::mutex> lock(state->mutex);
@@ -493,9 +516,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     });
     hook->abort_hook_registered_ = true;
   }
-  static const bool dump_on_timeout =
-      getCvarBool(TORCH_FR_DUMP_ON_TIMEOUT, true);
-  if (dump_on_timeout && hook->global_store_ &&
+  if (dumpOnTimeout() && hook->global_store_ &&
       hook->default_target_.recorder != nullptr) {
     startDumpSignalPoller(hook->global_store_, hook->default_target_.name);
     hook->polls_dump_signal_ = true;
@@ -828,9 +849,7 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
 }
 
 void FlightRecorderHook::onAbort() {
-  static const bool dump_on_timeout =
-      getCvarBool(TORCH_FR_DUMP_ON_TIMEOUT, true);
-  if (!dump_on_timeout) {
+  if (!dumpOnTimeout()) {
     return;
   }
   // Only the default backend's instance reaches disk: ProcessGroup routes
@@ -844,27 +863,43 @@ void FlightRecorderHook::onAbort() {
   // No mutex_ here. The abort hook fires from inside the backend, on a thread
   // that may hold backend locks, whereas onPre/onPost take mutex_ and then the
   // recorder's; keeping this path off mutex_ leaves that order intact.
-  broadcastDumpSignal(global_store_, default_target_.recorder->getRank());
+  //
+  // Dump before broadcasting: the store client serializes requests, so the
+  // broadcast can block behind a long get() or wait(), or until the store
+  // timeout if the server is gone, and the local dump must not wait on it.
+  // The dump is bounded, and nccl2 abortProcess gives peers
+  // TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC after the abort hooks return.
+  const uint64_t generation = arm_generation;
   dumpTraceOnce(default_target_.name, "collective failure");
+  broadcastDumpSignal(
+      global_store_, default_target_.recorder->getRank(), generation);
 }
 
 void FlightRecorderHook::rearm() {
+  // Bump the generation before the baseline: the poller drops any dump decided
+  // against an older baseline, so neither a signal from the failure just
+  // handled nor one read before the new baseline below can trigger a second
+  // dump. Also before reading `poller`: a poller published after that read
+  // takes its first baseline after the bump, so it gets the new generation.
+  // A signal sent after the baseline dumps again, overwriting the dump file
+  // and using up this arming's dump, even when it comes from a rank that
+  // detected the same failure late.
+  uint64_t generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(dump_mutex);
+    dumped = false;
+    generation = ++arm_generation;
+    dump_signal_sent = false;
+  }
   std::shared_ptr<DumpSignalPoller> state;
   {
     std::lock_guard<std::mutex> lock(poller_mutex);
     state = poller;
   }
-  // Bump the generation first: the poller drops any dump decided against an
-  // older baseline, so neither a signal from the failure just handled nor one
-  // read before the new baseline below can trigger a second dump.
-  {
-    std::lock_guard<std::mutex> lock(dump_mutex);
-    dumped = false;
-    ++arm_generation;
-    dump_signal_sent = false;
-  }
   if (state) {
-    takeBaseline(*state);
+    // This call's generation, not the current one: a concurrent rearm() that
+    // bumped after it must win even if its read finishes first.
+    takeBaseline(*state, generation);
   }
 }
 
