@@ -50,6 +50,7 @@ from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
+from ..masked_value_propagation import MaskedValuePropagationOpsHandler
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -655,6 +656,65 @@ class BlockDescriptorOptions:
 
     def has_rmask(self) -> bool:
         return self.has_rindex()
+
+    def is_reduction_mask_covered(self, tree: IterationRangesRoot) -> bool:
+        """Check whether physical bounds cover every logical R tail lane.
+
+        TMA fills accesses outside descriptor.shape with zero. The logical
+        r0_mask is separate, so repeating valid source values can leave the
+        logical tail nonzero. For a.repeat(1, 9) @ b with K=72, generated load
+        expressions (layout conversions omitted) are:
+
+            r0_mask = r0_index < r0_numel
+            tmp0 = tma_descriptor0.load([yoffset, (r0_offset % 8)])
+            tmp2 = tma_descriptor1.load([r0_offset, xoffset])
+
+        Descriptor shapes are [33, 8] and [72, 136]. Broadcast/reshape repeats
+        tmp0's eight columns across the R tile. At logical r=72, tmp0 reuses
+        valid source column 0 while tmp2 reads an OOB row and gets zero. We
+        return False for tmp0 and True for tmp2: tmp0 still needs an R-mask
+        where before dot, since an Inf source value would produce Inf * 0=NaN.
+
+        We check for a retained physical dimension with a positive integer S:
+
+            shape = K / S
+            block_shape = ceil(RBLOCK / S)
+            offset = floor(roffset / S)
+
+        Its leading quotient makes r >= K imply a physical coordinate outside
+        shape. S=1 covers direct R indexing; larger S covers aligned ND splits.
+        Broadcasting inner dimensions preserves this zero, but removing the
+        leading dimension for stride-0 repetition loses the boundary. Offsets
+        stay symbolic so a repeat cannot pass by matching only the first tile.
+        BlockPtr also requires this dimension in the actual boundary_check.
+        """
+        sizevars = V.graph.sizevars
+        numel = sizevars.remove_precomputed_replacements(tree.numel)
+        block = TritonSymbols.get_block_size(tree)
+        offset = TritonSymbols.get_block_offset(tree)
+        for dim, (shape, block_shape, block_offset) in enumerate(
+            zip(self.shape, self.block_shape, self.offsets, strict=True)
+        ):
+            if isinstance(self, BlockPtrOptions) and dim not in self.boundary_check():
+                continue
+            shape = sizevars.remove_precomputed_replacements(shape)
+            if not sizevars.statically_known_gt(shape, 0):
+                continue
+            if not sizevars.statically_known_multiple_of(numel, shape):
+                continue
+            divisor = sizevars.simplify(numel / shape)
+            if not sizevars.statically_known_gt(divisor, 0):
+                continue
+            # A retained leading quotient preserves the logical R boundary.
+            if sizevars.statically_known_equals(
+                sizevars.remove_precomputed_replacements(block_shape),
+                CeilDiv(block, divisor),
+            ) and sizevars.statically_known_equals(
+                sizevars.remove_precomputed_replacements(block_offset),
+                FloorDiv(offset, divisor),
+            ):
+                return True
+        return False
 
     def has_tmpmask(self) -> bool:
         return False  # block_ptr can't do indirect indexing
@@ -1730,11 +1790,8 @@ class TritonOverrides(OpOverrides):
                 return False
 
             # Skip if the variable is already zeroed outside the mask
-            # (e.g., from tl.load(..., other=0.0))
-            # TODO : track the value of outside of mask region with cse
-            for k, v in V.kernel.cse._cache.items():
-                if v == var and "tl.load" in k and "other=0.0" in k:
-                    return False
+            if var.masked_value is not None and var.masked_value.item() == 0:
+                return False
 
             return True
 
@@ -5391,6 +5448,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
+        reduction_trees = [
+            tree for tree in self.active_range_trees() if tree.is_reduction
+        ]
+        reduction_range = (
+            reduction_trees[0]
+            if len(reduction_trees) == 1
+            and not self.cooperative_reduction
+            and not self.mix_order_reduction
+            and not isinstance(reduction_trees[0], DerivedIterationRangesRoot)
+            else None
+        )
+        zero_is_proven = False
 
         # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
@@ -5476,8 +5545,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         else:
             if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+                zero_fill = bool(other) and not self._load_other
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
+                )
+                # Require physical bounds to cover the R tail with zero fill.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and (isinstance(indexing, TensorDescriptorOptions) or zero_fill)
+                    and indexing.is_reduction_mask_covered(reduction_range)
                 )
                 if isinstance(indexing, BlockPtrOptions):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
@@ -5502,6 +5578,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
+                # A pointer load needs the actual R predicate and other=0.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and reduction_range.mask_name() in indexing.mask_vars
+                    and bool(other)
+                    and not self._load_other
+                )
 
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
@@ -5575,6 +5658,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         result_var.shape, indexing.mask_vars
                     ),
                 )
+                # The broadcast's where must zero the R tail; bool defaults to True.
+                zero_is_proven = (
+                    reduction_range is not None
+                    and reduction_range.mask_name() in indexing.mask_vars
+                    and not self._load_other
+                    and dtype != torch.bool
+                )
+
+        result_var.masked_value = MaskedValuePropagationOpsHandler.load(
+            name, index, zero_is_proven=zero_is_proven, dtype=result_var.dtype
+        )
 
         # Only CSE values emitted outside the loop remain valid after it closes.
         if not self.inside_reduction or load_buffer is self.body:
