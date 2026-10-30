@@ -36,6 +36,7 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -7309,7 +7310,6 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
-
     def test_quantize_activation_duplicate_nodes(self):
         """Test both quantize_activation_fw and quantize_activation_bw handle duplicate nodes correctly"""
         import torch.fx as fx
@@ -7544,7 +7544,6 @@ def forward(self, primals_1, tangents_1):
         node = graph.placeholder("dev")
         node.meta["val"] = torch.device("cuda:0")
         self.assertEqual(_size_of(node), 0)
-
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
@@ -8277,7 +8276,6 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
-
     def test_functionalized_rng_no_codegen(self):
         with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -8307,7 +8305,6 @@ def forward(self, primals_1, tangents_1):
             sentinel, SimpleNamespace(), runtime_metadata=mock_meta
         )
         self.assertIs(result, sentinel)
-
 
     # --- Backward prologue codegen tests ---
 
@@ -8580,7 +8577,6 @@ def forward(self, primals_1, tangents_1):
         ):
             torch.autograd.grad(loss, x, create_graph=True)
 
-
     # --- CompiledFunction.forward codegen tests ---
 
     def test_compiled_forward_codegen_emitted(self):
@@ -8667,7 +8663,6 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(ctx, args)", source)
 
-
     def test_compiled_forward_correctness(self):
         @torch.compile(backend="aot_eager")
         def f(x, y):
@@ -8720,7 +8715,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertNotIn("_rng_add_(_ctx_", source)
-
 
     def test_compiled_backward_elides_vc_check(self):
         with capture_codegen_source("compiled_function_backward") as captured:
@@ -8802,7 +8796,6 @@ def forward(self, primals_1, tangents_1):
         a, b, c = f(x)
         (a + b + c).sum().backward()
         self.assertEqual(x.grad, 2 + 2 * x + 1)
-
 
     def test_compiled_backward_dynamic_shapes(self):
         @torch.compile(backend="aot_eager", dynamic=True)
@@ -9031,7 +9024,6 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
-
     def test_backward_epilogue_create_graph(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -9041,7 +9033,6 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
-
 
     def test_backward_epilogue_subclass_and_tokens_codegen(self):
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -10011,7 +10002,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[0].base_idx, 1)
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
-
 
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
@@ -11530,7 +11520,6 @@ Expected a .* tangent but got a plain Tensor.""",
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
             def __init__(self):
@@ -11765,7 +11754,6 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
-
     def _test_pack_hooks(
         self,
         fn,
@@ -11829,12 +11817,11 @@ Expected a .* tangent but got a plain Tensor.""",
             x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
             self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
 
-                # Disable testing of Subclasses for now
-                # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
-                # self._test_pack_hooks(
-                #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
-                # )
-
+            # Disable testing of Subclasses for now
+            # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+            # self._test_pack_hooks(
+            #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+            # )
 
     @torch._functorch.config.patch(donated_buffer=True)
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
@@ -12632,8 +12619,6 @@ class _PartitioningHardwareTestBase(AOTTestCase):
 
 
 class TestPartitioningHardware(_PartitioningHardwareTestBase):
-    hw_classification = HardwareClassification.CUDA
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self):
@@ -13094,7 +13079,6 @@ class TestPartitioningHardware(_PartitioningHardwareTestBase):
         with torch.compiler.config.patch(compile_on_one_rank=True):
             torch.compile(model, backend=backend, fullgraph=True)(x).backward()
         self.assertIsNotNone(x.grad)
-
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_min_cut_partitions_must_save_device_valued_node(self):
