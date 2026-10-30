@@ -2011,6 +2011,31 @@ class TestLinalg(TestCase):
             expected = torch.full((3,), expected, dtype=dtype, device=device)
             self.assertEqual(result, expected, atol=0, rtol=0, msg=f"{fn.__name__}, ord={ord}")
 
+    # A single-element output goes through the all-reduce branch of the cascade
+    # sum, which adds up each thread's chunk in float. In the sliced x, the dims
+    # can't be merged, so a chunk is summed row by row; doing that in half or
+    # bfloat16 would stall far below the expected values.
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_norm_reduced_precision_all_reduce(self, device, dtype):
+        x = torch.full((2**16, 3, 2), 2.0**-4, dtype=dtype, device=device)[:, :2]
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for t, (fn, ord) in product((x, x.contiguous()), (
+                    (torch.linalg._powsum, 1),
+                    (torch.linalg._powsum, 2),
+                    (torch.linalg.vector_norm, 0),
+                    (torch.linalg.vector_norm, 1),
+                    (torch.linalg.vector_norm, 2),
+                )):
+                    expected = fn(t.double(), ord).to(dtype)
+                    msg = f"threads={threads}, contiguous={t.is_contiguous()}, {fn.__name__}, ord={ord}"
+                    self.assertEqual(fn(t, ord), expected, atol=0, rtol=0, msg=msg)
+        finally:
+            torch.set_num_threads(num_threads)
+
     @onlyAccelerator
     def test_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation

@@ -599,10 +599,9 @@ struct IdentityMap {};
 
 // Custom floating point sum for better accuracy
 template <typename Map, typename scalar_t, typename out_t = scalar_t>
-void cascade_sum(TensorIterator &iter) {
+void cascade_sum(TensorIterator &iter, bool sqrt_result = false) {
   constexpr bool is_identity = std::is_same_v<Map, IdentityMap>;
   static_assert(!is_identity || std::is_same_v<scalar_t, out_t>);
-  iter.output_base().fill_(out_t(0));
   auto loop =
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -679,7 +678,8 @@ void cascade_sum(TensorIterator &iter) {
   if constexpr (!is_identity) {
     // TensorIterator::parallel_reduce would add up the per-thread results of a
     // reduction to one element with this same loop, applying Map to them again
-    // (and reading them as scalar_t).
+    // (and reading them as scalar_t). The output is written once here, so it
+    // can also be a reduced precision scalar_t.
     if (iter.output_base(0).numel() == 1) {
       using acc_t = at::acc_type<scalar_t, true>;
       const acc_t total = at::parallel_reduce(
@@ -695,11 +695,22 @@ void cascade_sum(TensorIterator &iter) {
             return acc_t(partial);
           },
           std::plus<acc_t>());
-      *static_cast<out_t*>(iter.data_ptr(0)) = out_t(total);
+      const acc_t result = sqrt_result ? std::sqrt(total) : total;
+      if (iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value) {
+        *static_cast<out_t*>(iter.data_ptr(0)) = out_t(result);
+      } else {
+        *static_cast<scalar_t*>(iter.data_ptr(0)) = scalar_t(result);
+      }
       return;
     }
   }
+  iter.output_base().fill_(out_t(0));
   iter.parallel_reduce(loop);
+  if (sqrt_result) {
+    const TensorBase& out = iter.output_base();
+    auto sqrt_iter = TensorIteratorConfig().add_output(out).add_const_input(out).build();
+    cpu_kernel(sqrt_iter, [](out_t a) -> out_t { return std::sqrt(a); });
+  }
 }
 
 void sum_kernel_impl(TensorIterator &iter) {
@@ -727,14 +738,14 @@ void nansum_kernel_impl(TensorIterator &iter) {
 }
 
 template <typename scalar_t, typename out_t>
-void cascade_powsum(TensorIterator &iter, double p) {
+void cascade_powsum(TensorIterator &iter, double p, bool is_norm) {
   if (p == 0) {
     cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
   } else if (p == 1) {
     cascade_sum<AbsMap, scalar_t, out_t>(iter);
   } else {
     TORCH_INTERNAL_ASSERT(p == 2, "cascade_powsum: unsupported p ", p);
-    cascade_sum<SquareMap, scalar_t, out_t>(iter);
+    cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
   }
 }
 
@@ -742,13 +753,14 @@ void cascade_powsum(TensorIterator &iter, double p) {
 
 inline namespace CPU_CAPABILITY {
 
-void cascade_powsum_kernel(TensorIterator &iter, double p) {
+void cascade_powsum_kernel(TensorIterator &iter, double p, bool is_norm) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half, iter.input_dtype(), "cascade_powsum_cpu", [&] {
     using out_t = std::conditional_t<is_reduced_floating_point_v<scalar_t>, float, scalar_t>;
-    TORCH_INTERNAL_ASSERT(iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value,
+    TORCH_INTERNAL_ASSERT(iter.dtype(0) == c10::CppTypeToScalarType<out_t>::value ||
+                          (iter.dtype(0) == iter.input_dtype() && iter.output_base(0).numel() == 1),
                           "cascade_powsum: unexpected output dtype ", iter.dtype(0));
-    cascade_powsum<scalar_t, out_t>(iter, p);
+    cascade_powsum<scalar_t, out_t>(iter, p, is_norm);
   });
 }
 

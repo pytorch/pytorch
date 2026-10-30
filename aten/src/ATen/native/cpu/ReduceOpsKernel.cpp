@@ -209,11 +209,8 @@ void norm_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/true)) {
-    cascade_powsum_kernel(iter, val);
-    if (val == 2.0) {
-      iter.output().sqrt_();
-    }
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/true, iter.output().numel() == 1)) {
+    cascade_powsum_kernel(iter, val, /*is_norm=*/true);
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
@@ -449,8 +446,8 @@ void powsum_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/false)) {
-    cascade_powsum_kernel(iter, val);
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/false, iter.output().numel() == 1)) {
+    cascade_powsum_kernel(iter, val, /*is_norm=*/false);
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       powsum_kernel_cpu_impl<at::Half, float>(iter, val); return;
