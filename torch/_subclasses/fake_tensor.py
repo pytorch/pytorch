@@ -2131,23 +2131,28 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
+        # Whether a non-builtin op can be cached doesn't depend on its arguments,
+        # so check that before building a key that would only be thrown away.
+        # The reason doesn't depend on them either, so it is worked out once per
+        # op; later calls bypass the cache without raising.
+        is_op_overload = isinstance(func, torch._ops.OpOverload)
+        if is_op_overload and not library_utils.is_builtin(func):
+            reason = _non_builtin_bypass_reasons.get(func)
+            if reason is None:
+                try:
+                    self._validate_cache_key(func, args, kwargs)
+                except _BypassDispatchCache as e:
+                    reason = _non_builtin_bypass_reasons[func] = e.reason
+                else:
+                    raise AssertionError(
+                        f"_validate_cache_key accepted non-builtin op {func}"
+                    )
+            FakeTensorMode.cache_bypasses[reason] += 1
+            return self._dispatch_impl(func, types, args, kwargs)
+
         state = None
         key = None
         try:
-            # Whether a non-builtin op can be cached doesn't depend on its
-            # arguments, so check that before building a key that would only
-            # be thrown away. The reason doesn't depend on them either, so it
-            # is worked out once per op.
-            is_op_overload = isinstance(func, torch._ops.OpOverload)
-            if is_op_overload and not library_utils.is_builtin(func):
-                reason = _non_builtin_bypass_reasons.get(func)
-                if reason is None:
-                    try:
-                        self._validate_cache_key(func, args, kwargs)
-                    except _BypassDispatchCache as e:
-                        reason = _non_builtin_bypass_reasons[func] = e.reason
-                if reason is not None:
-                    raise _BypassDispatchCache(reason)
             state = _CacheKeyState(self.shape_env)
             key = self._cache_key(state, func, args, kwargs)
         except _BypassDispatchCache as e:
