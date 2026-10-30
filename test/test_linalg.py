@@ -11111,6 +11111,7 @@ class TestLinalgCudaOnly(TestCase):
             self.assertTrue(ok)
 
     @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @dtypes(torch.float)
     def test_addmm_lt_follows_blas_backend_switch(self, device, dtype):
         # The first addmm in a process ran under rocBLAS; switching to hipBLASLt afterwards must still route
@@ -11130,8 +11131,7 @@ class TestLinalgCudaOnly(TestCase):
             torch.backends.cuda.preferred_blas_library("cublas")
             torch.nn.functional.linear(x, w, bias)
 
-            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
-                raise SystemExit("hipBLASLt unsupported")
+            assert torch.backends.cuda.preferred_blas_library("cublaslt") == torch._C._BlasBackend.Cublaslt
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_duration(1)
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -11143,12 +11143,13 @@ class TestLinalgCudaOnly(TestCase):
                 print(result[0])
             """
         )
+        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, so keep it out of the child.
+        env = os.environ.copy()
+        env.pop("DISABLE_ADDMM_CUDA_LT", None)
         # TunableOp writes its results file into the cwd at exit.
         cmd = [sys.executable, "-c", script]
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True)
-        if "hipBLASLt unsupported" in result.stderr:
-            self.skipTest("hipBLASLt is not supported on this device")
+            result = subprocess.run(cmd, cwd=tmpdir, capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         op_sigs = result.stdout.split()
         self.assertTrue(any(sig.startswith("GemmAndBiasTunableOp") for sig in op_sigs), op_sigs)
