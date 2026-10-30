@@ -312,6 +312,21 @@ TEST_F(TunableNearestTest, RecordBorrowedDoesNotWidenAddPersistence) {
   }
 }
 
+TEST_F(TunableNearestTest, LookupNearestIgnoresAnExistingExactEntry) {
+  // Unconditional by design: an exact entry, a recorded Default included, does
+  // not suppress the scan, because a candidate equal to the query differs in no
+  // dim and so never matches. Callers must miss Lookup first --
+  // ResolveWithoutExactHit is reached only on !concrete_hit, which is what
+  // keeps a recorded verdict from being validated twice.
+  FlagGuard g;
+  TempResultsFile results("tunableop-exact-skip-");
+  TuningResultsManager mgr;
+  SeedDonor(mgr);
+  mgr.RecordBorrowed(kOp, kQSig, ResultEntry::Default());
+  EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Default()));
+  EXPECT_EQ(Key(mgr.LookupNearest(kOp, kQSig)), Key(Donor("k64")));
+}
+
 TEST_F(TunableNearestTest, EnvKillSwitchVetoesLookupAndRecord) {
   // The env is read once into a function-local static, so one process only
   // ever sees one value and the rest of this binary needs it unset. run_tests.sh

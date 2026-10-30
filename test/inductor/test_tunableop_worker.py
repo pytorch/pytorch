@@ -562,7 +562,8 @@ class BenchmarkJobCallTest(TestCase):
             _CallFakeBmreq(calls, 1.5), tuning=True, nearest_match=True
         )
         self.assertEqual(self._run(job, calls, device=3, filename="w.csv"), 1.5)
-        # Device first, then filename, then flags; cudagraphs cleared.
+        # Device first, then filename, then flags; warm benchmark, tuning off,
+        # measured benchmark; cudagraphs cleared.
         self.assertEqual(
             [c[0] for c in calls],
             [
@@ -571,6 +572,9 @@ class BenchmarkJobCallTest(TestCase):
                 "enable",
                 "tuning_enable",
                 "_nearest_match_enable",
+                "_record_borrowed_enable",
+                "benchmark",
+                "tuning_enable",
                 "benchmark",
             ],
         )
@@ -898,6 +902,190 @@ class TunableOpRealGpuWorkerTest(TestCase):
             with open(results_file) as f:
                 content = f.read()
             self.assertIn("GemmTunableOp", content)
+
+
+def _extern_caller(choice_name="mm", cuda_out=True):
+    """An ExternKernelCaller stand-in for routing tests (no GPU, no bmreq build)."""
+    from types import SimpleNamespace
+
+    from torch._inductor import select_algorithm as sa
+
+    caller = mock.Mock(spec=sa.ExternKernelCaller)
+    caller.name = choice_name
+    caller.choice = SimpleNamespace(name=choice_name)
+    caller.bmreq = mock.Mock()
+    caller.bmreq.benchmark_with_cudagraphs = False
+    caller.bmreq.config_cudagraph_benchmarking = False
+    caller.bmreq.benchmark.return_value = 2.0
+    caller.tunable_dyn_dims_mask = None
+    caller._benchmark_with_cudagraphs = False
+    # spec autospecs the new _benchmark_inline helper as a Mock; make it run
+    # the real inline body so routing tests observe real return values.
+    caller._benchmark_inline = (
+        lambda args, out: sa.ExternKernelCaller._benchmark_inline(caller, args, out)
+    )
+    out = mock.Mock()
+    out.is_cuda = cuda_out
+    return caller, out
+
+
+class ExternRoutingTest(TestCase):
+    """ExternKernelCaller.benchmark routes only tunable GEMMs to the worker."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _benchmark(self, caller, out):
+        from torch._inductor import select_algorithm as sa
+
+        return sa.ExternKernelCaller.benchmark(caller, out=out)
+
+    def test_gemm_candidate_is_submitted_with_flags(self):
+        from torch._inductor import tunableop as _top
+
+        caller, out = _extern_caller("mm")
+        caller.tunable_dyn_dims_mask = (True, False, False, False)
+        seen = {}
+
+        def _fake_submit(job, timeout=None):
+            seen["job"] = job
+            return _top.Outcome(1.5, "ok")
+
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch("torch._inductor.tunableop.is_tune_mode", return_value=True),
+            mock.patch("torch._inductor.tunableop.is_reuse_mode", return_value=False),
+            mock.patch("torch._inductor.tunableop.submit", side_effect=_fake_submit),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 1.5)
+        job = seen["job"]
+        self.assertTrue(job.tuning)
+        self.assertFalse(job.nearest_match)
+        self.assertFalse(job.record_borrowed)
+        self.assertEqual(job.dyn_dims_mask, (True, False, False, False))
+
+    def test_non_gemm_candidate_stays_inline(self):
+        caller, out = _extern_caller("convolution")
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch(
+                "torch._inductor.tunableop.submit",
+                side_effect=AssertionError("must not submit"),
+            ),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 2.0)
+        caller.bmreq.benchmark.assert_called_once()
+
+    def test_cpu_out_never_submitted(self):
+        caller, out = _extern_caller("mm", cuda_out=False)
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch(
+                "torch._inductor.tunableop.submit",
+                side_effect=AssertionError("must not submit"),
+            ),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 2.0)
+
+    def test_non_ok_falls_through_with_tunableop_off(self):
+        from torch._inductor import tunableop as _top
+
+        caller, out = _extern_caller("mm")
+        tunable = mock.Mock()
+        tunable.is_enabled.return_value = True
+        tunable.tuning_is_enabled.return_value = True
+        with (
+            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch(
+                "torch._inductor.tunableop.submit",
+                return_value=_top.Outcome(None, "timeout"),
+            ),
+            mock.patch("torch.cuda.tunable", tunable),
+        ):
+            self.assertEqual(self._benchmark(caller, out), 2.0)
+        # TunableOp disabled around the inline fallback, restored after.
+        self.assertEqual(
+            [c.args for c in tunable.enable.call_args_list], [(False,), (True,)]
+        )
+        self.assertEqual(
+            [c.args for c in tunable.tuning_enable.call_args_list],
+            [(False,), (True,)],
+        )
+
+    def test_nonfinite_worker_time_is_error(self):
+        for bad in (float("inf"), float("nan"), 0.0, -1.0):
+            tunableop._worker = None
+            tunableop._worker_key = None
+            proc = _FakeProcess(device=None)
+            proc.result = bad
+            with (
+                mock.patch("torch.cuda.current_device", return_value=0),
+                mock.patch("torch.cuda.tunable.get_filename", return_value="t.csv"),
+                mock.patch(
+                    "torch._inductor.autotune_process.TuningProcess",
+                    return_value=proc,
+                ),
+            ):
+                outcome = tunableop.submit(tunableop.BenchmarkJob(None, tuning=False))
+            self.assertEqual(outcome.status, "error", f"value={bad!r}")
+            self.assertIsNone(outcome.time)
+        tunableop._worker = None
+        tunableop._worker_key = None
+
+
+class WarmMeasureTest(TestCase):
+    """_warm_then_measure pays tuning work outside the measured average."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _job(self, **kwargs):
+        bmreq = mock.Mock()
+        bmreq.benchmark_with_cudagraphs = True
+        bmreq.config_cudagraph_benchmarking = True
+        bmreq.benchmark.return_value = 3.0
+        return tunableop.BenchmarkJob(bmreq, tuning=True, **kwargs)
+
+    def test_measure_runs_warm_then_measured(self):
+        job = self._job()
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            self.assertEqual(job(0, "", {}), 3.0)
+        # Warm + measured: two full benchmarks.
+        self.assertEqual(job.bmreq.benchmark.call_count, 2)
+        self.assertFalse(job.bmreq.benchmark_with_cudagraphs)
+        self.assertFalse(job.bmreq.config_cudagraph_benchmarking)
+
+    def test_failed_warm_still_measures(self):
+        job = self._job()
+        job.bmreq.benchmark.side_effect = [RuntimeError("boom"), 4.0]
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            self.assertEqual(job(0, "", {}), 4.0)
+
+    def test_tune_only_skips_second_benchmark(self):
+        job = self._job(measure=False)
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            self.assertEqual(job(0, "", {}), 3.0)
+        self.assertEqual(job.bmreq.benchmark.call_count, 1)
+
+    def test_tune_only_failed_warm_reraises(self):
+        # A failed tune-only warm re-raises (rather than reporting inf) so the
+        # exception crosses the worker pipe and submit() restarts a possibly
+        # poisoned worker.
+        job = self._job(measure=False)
+        job.bmreq.benchmark.side_effect = RuntimeError("boom")
+        with (
+            mock.patch("torch.cuda.set_device"),
+            mock.patch("torch.cuda.tunable", mock.Mock()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "tune-only warm-up failed"):
+                job(0, "", {})
 
 
 if __name__ == "__main__":
