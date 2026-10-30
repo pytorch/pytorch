@@ -25,12 +25,14 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+import cmath
 import enum
 import functools
 import inspect
 import logging
 import math
 import re
+import sys
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -105,7 +107,13 @@ from ..utils import (
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    Method,
+    NO_SUCH_SUBOBJ,
+    typestr,
+    VariableTracker,
+)
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -1361,6 +1369,79 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             converted = [pyfloat_as_double(tx, arg) for arg in args]
             return self.call_function(tx, converted, {})
+
+        @register(math.isclose, cmath.isclose)
+        def handle_isclose(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            if not any(
+                isinstance(arg, UserDefinedObjectVariable)
+                and not issubclass(arg.python_type(), complex)
+                for arg in (*args, *kwargs.values())
+            ):
+                return None
+
+            # Validate argument binding without running user conversion hooks.
+            try:
+                self.value(*([0.0] * len(args)), **dict.fromkeys(kwargs, 0.0))
+            except TypeError as exc:
+                raise_type_error(tx, str(exc))
+
+            bound = dict(zip(("a", "b"), args))
+            bound.update(kwargs)
+            if self.value is cmath.isclose:
+                for name in ("a", "b"):
+                    arg = bound[name]
+                    arg_type = arg.python_type()
+                    if (
+                        not isinstance(arg, UserDefinedObjectVariable)
+                        and not issubclass(arg_type, complex)
+                        and mro_lookup(arg_type, "__complex__") is not NO_SUCH_SUBOBJ
+                    ):
+                        unimplemented(
+                            gb_type="cmath.isclose with unsupported __complex__ conversion",
+                            context=f"argument {name}",
+                            explanation="Dynamo cannot trace this argument's __complex__ conversion.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+            # Mirrors PyComplex_AsCComplex for cmath arguments; other values use PyFloat_AsDouble.
+            # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/complexobject.c#L340-L373
+            for name in ("a", "b", "rel_tol", "abs_tol"):
+                if name not in bound:
+                    continue
+                arg = bound[name]
+                if self.value is cmath.isclose and name in ("a", "b"):
+                    if issubclass(arg.python_type(), complex):
+                        continue
+                    result = (
+                        arg._maybe_call_special(tx, "__complex__", [])
+                        if isinstance(arg, UserDefinedObjectVariable)
+                        else None
+                    )
+                    if result is not None:
+                        if not issubclass(result.python_type(), complex):
+                            if sys.version_info >= (3, 15):
+                                msg = f"{arg.python_qualified_name()}.__complex__() must return a complex, not {result.python_qualified_name()}"
+                            else:
+                                msg = f"__complex__ returned non-complex (type {result.python_type_name()})"
+                            raise_type_error(tx, msg)
+                        if result.python_type() is not complex:
+                            unimplemented(
+                                gb_type="__complex__ returned a complex subclass",
+                                context=f"argument {name}",
+                                explanation="Dynamo cannot model the deprecation warning for a complex subclass return.",
+                                hints=[*graph_break_hints.SUPPORTABLE],
+                            )
+                        bound[name] = specialize_symnode(result)
+                        continue
+                bound[name] = specialize_symnode(pyfloat_as_double(tx, arg))
+
+            return self.call_function(tx, [], bound)
 
         @register(math.radians)
         def handle_radians(

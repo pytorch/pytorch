@@ -2167,6 +2167,24 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         return pynumber_float(tx, arg)
 
+    def call_complex(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if len(args) == 1 and not kwargs and isinstance(args[0], SymNodeVariable):
+            arg = specialize_symnode(args[0])
+            if args[0].python_type() is float and arg.as_python_constant() == 0.0:
+                unimplemented(
+                    gb_type="complex of symbolic zero",
+                    context=f"complex({args[0].python_type_name()})",
+                    explanation="Symbolic float specialization does not preserve the sign of zero.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            return self.call_function(tx, [arg], {})
+        return None
+
     def call_bin(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:

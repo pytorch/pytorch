@@ -1786,6 +1786,54 @@
       "Hints": []
     }
   ],
+  "GB7433": [
+    {
+      "Gb_type": "cmath.isclose with unsupported __complex__ conversion",
+      "Context": "argument {name}",
+      "Explanation": "Dynamo cannot trace this argument's __complex__ conversion.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "cmath.isclose with unsupported __complex__ conversion",
+      "Context": "",
+      "Explanation": "Dynamo cannot trace this __complex__ conversion.",
+      "Hints": []
+    }
+  ],
+  "GB6561": [
+    {
+      "Gb_type": "__complex__ returned a complex subclass",
+      "Context": "argument {name}",
+      "Explanation": "Dynamo cannot model the deprecation warning for a complex subclass return.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "__complex__ returned a complex subclass",
+      "Context": "",
+      "Explanation": "Dynamo cannot model the deprecation warning for a complex subclass return.",
+      "Hints": []
+    }
+  ],
+  "GB5497": [
+    {
+      "Gb_type": "complex of symbolic zero",
+      "Context": "complex({args[0].python_type_name()})",
+      "Explanation": "Symbolic float specialization does not preserve the sign of zero.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "complex of symbolic zero",
+      "Context": "",
+      "Explanation": "Symbolic float specialization does not preserve the sign of zero.",
+      "Hints": []
+    }
+  ],
   "GB0109": [
     {
       "Gb_type": "Tensor.tolist() with non-integer tensor",
