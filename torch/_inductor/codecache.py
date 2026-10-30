@@ -3642,6 +3642,7 @@ end
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
                 use_relative_path=use_relative_path,
+                extra_flags=graph.wrapper_code.cutedsl_link_args(),
             )
 
             if gpu_kernels_o and device_type == "xpu":
@@ -4198,23 +4199,40 @@ class CppCodeCache:
                 and not _IS_WINDOWS
                 and not (replaying and has_frozen_cpp_kernel(relocatable_key()))
             ):
+                # A header is precompiled without extra_flags, the link inputs (see
+                # _precompile_header), so it is keyed without them as well: else each
+                # new set of them (e.g. CuTeDSL objects) would precompile it again.
                 if header := cls._get_uncompiled_header(device_type):
+                    header_command = {**main_compile_command, "extra_flags": ()}
+                    header_option = CppTorchDeviceOptions(
+                        compile_only=bool(optimized_code),
+                        min_optimize=min_optimize,
+                        # pyrefly: ignore [bad-argument-type]
+                        **header_command,
+                    )
                     main_build_option.precompiled_header = _precompile_header(
                         header,
-                        main_cmd_line,
+                        get_hashable_command_line(header_option),
                         min_optimize=min_optimize,
-                        **main_compile_command,
+                        **header_command,
                     )
 
                 # Currently, the optimized_code field is only used for cpp kernel code,
                 # so go ahead and precompile the relevant header here.  Revisit this
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
+                    header_command = {**optimized_compile_command, "extra_flags": ()}
+                    header_option = CppTorchDeviceOptions(
+                        # pyrefly: ignore [bad-argument-type]
+                        compile_only=True,
+                        # pyrefly: ignore [bad-argument-type]
+                        **header_command,
+                    )
                     optimized_build_option.precompiled_header = _precompile_header(
                         # pyrefly: ignore [unbound-name]
                         header,
-                        optimized_cmd_line,
-                        **optimized_compile_command,
+                        get_hashable_command_line(header_option),
+                        **header_command,
                     )
 
             main_name, output_dir = get_name_and_dir_from_output_file_path(main_path)
