@@ -22,8 +22,7 @@ from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
-from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
-from quantization.core.test_workflow_ops import TestFusedObsFakeQuant  # noqa: F401
+from quantization.core.test_workflow_ops import TestFakeQuantizeOps, TestFakeQuantizeOpsDevice  # noqa: F401
 # 3. Quantized Tensor
 from quantization.core.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # 4. Modules
@@ -137,6 +136,26 @@ except ImportError as e:
     log.warning(e)
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
+    from quantization.core.test_workflow_ops import TestFusedObsFakeQuantDeviceCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
+    from quantization.core.test_workflow_ops import TestFusedObsFakeQuantDeviceCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
+    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
+    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableAcceleratorCUDA  # noqa: F401
 except ImportError as e:
     log.warning(e)
 
