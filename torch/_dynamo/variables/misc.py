@@ -639,10 +639,14 @@ class CellVariable(VariableTracker):
     # Set on both sides when a real cell had to be created for this cell before
     # it was populated (see SideEffects.track_cell_alias). Stores to one are
     # mirrored to the other.
-    linked_cell: VariableTracker | None = None
+    linked_cell: "CellVariable | None" = None
+
+    # Set only on the alias side: the real cell created by track_cell_alias.
+    alias_cell: types.CellType | None = None
 
     _nonvar_fields = {
         "linked_cell",
+        "alias_cell",
         *VariableTracker._nonvar_fields,
     }
 

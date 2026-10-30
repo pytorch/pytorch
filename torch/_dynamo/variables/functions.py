@@ -2351,14 +2351,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 # A class body can close over a name that is only bound after
                 # the class is created, e.g. a method referring to the class
                 # itself. Hand the real function an empty cell that stays
-                # linked to cell_var.
-                if (
-                    allow_sourced_cells
-                    and cell_var.linked_cell is None
-                    and cell_var._current_contents(tx) is None
-                ):
-                    cells.append(tx.output.side_effects.track_cell_alias(cell_var))
-                    continue
+                # linked to cell_var. A cell that existed before tracing gets
+                # no alias and graph breaks in load_cell below.
+                if allow_sourced_cells and cell_var._current_contents(tx) is None:
+                    alias_cell = tx.output.side_effects.track_cell_alias(cell_var)
+                    if alias_cell is not None:
+                        cells.append(alias_cell)
+                        continue
 
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects

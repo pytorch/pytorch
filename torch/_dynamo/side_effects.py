@@ -1009,9 +1009,9 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
-    def track_cell_alias(self, cellvar: VariableTracker) -> CellType:
-        """Create a real, empty cell to stand in for `cellvar`, which has not
-        been populated yet.
+    def track_cell_alias(self, cellvar: VariableTracker) -> CellType | None:
+        """Return a real, empty cell to stand in for `cellvar`, which has not
+        been populated yet, creating it on first use.
 
         Used when a function closing over `cellvar` must be materialized as a
         real function, e.g. a method of a class built by `__build_class__`
@@ -1019,12 +1019,28 @@ class SideEffects:
         pre-existing cell linked to `cellvar`: stores to either are mirrored
         to the other, so inlined calls of the real function see the current
         value, and the final value is written to the real cell after the graph
-        runs.
+        runs. Every function closing over `cellvar` gets the same real cell.
+
+        Returns None for a cell that existed before tracing (e.g. a free
+        variable of the compiled frame): it must not be replaced by a new
+        cell, since the enclosing function keeps writing to the original.
+
+        Known limitation: the real cell is a global of the compiled code, as
+        is the class built at trace time, so every call of the compiled code
+        shares it, unlike CPython which creates a fresh cell per call.
         """
         if not isinstance(cellvar, variables.CellVariable):
             raise AssertionError(
                 f"Expected CellVariable, got {type(cellvar)} in track_cell_alias"
             )
+        # `cellvar` is itself an alias, e.g. the closure of a method of a
+        # class built earlier in the trace.
+        if cellvar.alias_cell is not None:
+            return cellvar.alias_cell
+        if cellvar.linked_cell is not None:
+            return cellvar.linked_cell.alias_cell
+        if not isinstance(cellvar.mutation_type, AttributeMutationNew):
+            return None
         output_graph = self.output_graph_weakref()
         if output_graph is None:
             raise AssertionError("output_graph weakref is dead in track_cell_alias")
@@ -1034,8 +1050,13 @@ class SideEffects:
         alias = self.track_cell_existing(
             ConstantSource(name), cell, variables.DeletedVariable()
         )
+        if not isinstance(alias, variables.CellVariable):
+            raise AssertionError(
+                f"Expected CellVariable, got {type(alias)} in track_cell_alias"
+            )
+        alias.alias_cell = cell
         cellvar.linked_cell = alias
-        alias.linked_cell = cellvar  # type: ignore[attr-defined]
+        alias.linked_cell = cellvar
         return cell
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
