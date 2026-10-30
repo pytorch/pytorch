@@ -230,6 +230,13 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
 }
 
 TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
+  auto handles = [](std::vector<at::Tensor>& tensors) {
+    std::vector<AtenTensorHandle> result;
+    for (auto& t : tensors) {
+      result.push_back(reinterpret_cast<AtenTensorHandle>(&t));
+    }
+    return result;
+  };
   auto longs = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
   // Same dtype and layout, so the copies fuse, then mixed ones, which don't.
   for (bool fused : {true, false}) {
@@ -242,15 +249,12 @@ TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
       dst.push_back(at::empty({5}, longs));
       src.push_back(at::randint(100, {5}, longs));
     }
-    std::vector<AtenTensorHandle> dst_handles, src_handles;
-    for (size_t i = 0; i < dst.size(); ++i) {
-      dst_handles.push_back(reinterpret_cast<AtenTensorHandle>(&dst[i]));
-      src_handles.push_back(reinterpret_cast<AtenTensorHandle>(&src[i]));
-    }
+    auto dst_handles = handles(dst);
+    auto src_handles = handles(src);
     auto n = static_cast<int64_t>(dst.size());
     ASSERT_EQ(
         aoti_torch_foreach_copy_(
-            dst_handles.data(), n, src_handles.data(), n, fused),
+            dst_handles.data(), n, src_handles.data(), n, 0),
         AOTI_TORCH_SUCCESS);
     for (size_t i = 0; i < dst.size(); ++i) {
       EXPECT_TRUE(dst[i].equal(src[i]));
@@ -267,6 +271,22 @@ TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
   }
   EXPECT_EQ(
       aoti_torch_foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
+
+  // Asynchronous copies from pinned host memory.
+  std::vector<at::Tensor> host = {
+      at::randn({4}).pin_memory(), at::randn({3, 2}).pin_memory()};
+  std::vector<at::Tensor> device = {
+      at::empty({4}, at::kCUDA), at::empty({3, 2}, at::kCUDA)};
+  auto host_handles = handles(host);
+  auto device_handles = handles(device);
+  ASSERT_EQ(
+      aoti_torch_foreach_copy_(
+          device_handles.data(), 2, host_handles.data(), 2, 1),
+      AOTI_TORCH_SUCCESS);
+  at::cuda::getCurrentCUDAStream().synchronize();
+  for (size_t i = 0; i < host.size(); ++i) {
+    EXPECT_TRUE(device[i].cpu().equal(host[i]));
+  }
 }
 
 TEST_F(AOTICudaGraphTest, DeletingAPoolWhileCapturingFails) {

@@ -1124,11 +1124,28 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_xpu_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) noexcept {
+    auto err = aoti_torch_xpu_caching_allocator_raw_delete(ptr);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free GPU memory in AOTInductor model (caching allocator): error code "
+          << err << '\n';
+    }
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use sycl::malloc_device directly for allocating GPU memory
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
   void* data_ptr = sycl::malloc_device(num_bytes, *queue_ptr);
   auto deleter = [queue_ptr](void* ptr) { sycl::free(ptr, *queue_ptr); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_MPS)
