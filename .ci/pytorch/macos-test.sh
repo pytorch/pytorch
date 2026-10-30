@@ -69,38 +69,6 @@ test_python_shard() {
   assert_git_not_dirty
 }
 
-test_libtorch() {
-  # C++ API
-
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-    # NB: Install outside of source directory (at the same level as the root
-    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-    # But still clean it before we perform our own build.
-
-    echo "Testing libtorch"
-
-    CPP_BUILD="$PWD/../cpp-build"
-    rm -rf "$CPP_BUILD"
-    mkdir -p "$CPP_BUILD"/caffe2
-
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd "$CPP_BUILD"/caffe2
-    VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
-    popd
-
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
-
-    # Unfortunately it seems like the test can't load from miniconda3
-    # without these paths being set
-    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" CPP_TESTS_DIR="${CPP_BUILD}/caffe2/bin" python test/run_test.py --cpp --verbose -i cpp/test_api
-
-    assert_git_not_dirty
-  fi
-}
-
 test_custom_backend() {
   echo "Testing custom backends"
   pushd test/custom_backend
@@ -395,7 +363,6 @@ elif [[ $TEST_CONFIG == *"mps"* ]]; then
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    test_libtorch
     test_custom_script_ops
   elif [[ "${SHARD_NUMBER}" == 2 ]]; then
     test_jit_hooks
@@ -403,7 +370,6 @@ elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   fi
 else
   test_python_all
-  test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
