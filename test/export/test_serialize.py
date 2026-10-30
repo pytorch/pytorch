@@ -2054,6 +2054,48 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_save_load_region_without_outputs(self):
+        class UnusedAutocast(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    x @ x.T
+                return x * 2
+
+        class EmptyAutocastInNoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = x * 2
+                    with torch.autocast("cpu", dtype=torch.bfloat16):
+                        pass
+                return y
+
+        class UnusedNoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    x @ x.T
+                return x * 2
+
+        def has_region_without_outputs(ep):
+            return any(
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and node.meta.get("val") == ()
+                for gm in ep.graph_module.modules()
+                if isinstance(gm, torch.fx.GraphModule)
+                for node in gm.graph.nodes
+            )
+
+        x = torch.randn(4, 4)
+        for m in (UnusedAutocast(), EmptyAutocastInNoGrad(), UnusedNoGrad()):
+            ep = export(m, (x,))
+            self.assertTrue(has_region_without_outputs(ep))
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            self.assertTrue(has_region_without_outputs(loaded_ep))
+            self.assertEqual(loaded_ep.module()(x), m(x))
+            save(loaded_ep, io.BytesIO())
+
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
         buf = io.BytesIO()

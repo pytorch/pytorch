@@ -2857,6 +2857,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
+            if not serialized_node.outputs:
+                # serialize_hoo_outputs saves no outputs when the HOP returns ().
+                fx_node.meta["val"] = ()
             fx_node.meta.update(metadata)
 
         elif isinstance(
