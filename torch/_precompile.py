@@ -881,8 +881,10 @@ class _DynamoCapture(Capture[_P, _R]):
         each graph-break continuation is bound as a resume function in its module's
         globals. Loading the artifact here binds those same resume names, and an
         installed artifact refuses frames with live entries, so the capturing process
-        could not serve its own artifact. Only what this capture compiled is
-        released; a later torch.compile of these frames recompiles them.
+        could not serve its own artifact. Every cache entry of the frames the capture
+        compiled is dropped, including one an earlier torch.compile of the same frames
+        made (which recompiles on its next call), and so are the resume functions it
+        bound; frames the capture did not compile are untouched.
         """
         from torch._C._dynamo.eval_frame import reset_code
         from torch._dynamo.utils import CleanupHook

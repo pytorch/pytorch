@@ -884,6 +884,7 @@ def _build_installed_forward():
     """
     import base64
     import importlib
+    import inspect
     import operator
     import pickle
     import sys as _sys
@@ -944,6 +945,16 @@ def _build_installed_forward():
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
         ) from _e
+    # A decorator (torch.compiler.export_python's, say) can bind a functools.wraps
+    # wrapper under the captured name: install onto the captured function it wraps.
+    root = dynamo.codes[0].python_code
+    captured = (root.co_name, root.co_firstlineno)
+
+    def _is_captured(f):
+        code = getattr(f, "__code__", None)
+        return code is not None and (code.co_name, code.co_firstlineno) == captured
+
+    fn = inspect.unwrap(fn, stop=_is_captured)
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)
