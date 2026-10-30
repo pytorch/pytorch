@@ -15,7 +15,14 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
     skipMPS,
+)
+from torch.testing._internal.common_quantized import (
+    _float32_to_float6_e2m3fn_x4,
+    _float6_e2m3fn_x4_to_float32,
+    pack_uint6,
+    unpack_uint6,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -725,6 +732,226 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
 instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
+
+
+def _e2m3_decode_lut():
+    """float64 values of all 64 E2M3 codes, from OCP MX v1.0 Section 5.3."""
+    values = []
+    for code in range(64):
+        sign = -1.0 if code & 0b100000 else 1.0
+        exponent, mantissa = (code >> 3) & 0b11, code & 0b111
+        if exponent == 0:
+            values.append(sign * mantissa / 8)
+        else:
+            values.append(sign * math.ldexp(1 + mantissa / 8, exponent - 1))
+    return torch.tensor(values, dtype=torch.float64)
+
+
+def _as_bytes(x):
+    """Each 3-byte element as a trailing dim of 3 uint8 values (any strides)."""
+    return x.unsqueeze(-1).view(torch.uint8)
+
+
+class TestFloat6E2M3FNx4(TestCase):
+    dtype = torch.float6_e2m3fn_x4
+
+    def _random(self, *shape, device):
+        raw = torch.randint(0, 256, (*shape[:-1], 3 * shape[-1]), dtype=torch.uint8)
+        return raw.to(device).view(self.dtype)
+
+    def test_packing_is_little_endian_bitstream(self, device):
+        codes = torch.tensor([1, 2, 3, 4], dtype=torch.uint8, device=device)
+        self.assertEqual(pack_uint6(codes).tolist(), [0x81, 0x30, 0x10])
+        # one value per position, so every byte-boundary crossing is pinned
+        for i, expected in enumerate(
+            ([0x3F, 0, 0], [0xC0, 0x0F, 0], [0, 0xF0, 0x03], [0, 0, 0xFC])
+        ):
+            one_hot = torch.zeros(4, dtype=torch.uint8, device=device)
+            one_hot[i] = 0x3F
+            self.assertEqual(pack_uint6(one_hot).tolist(), expected)
+        # the whole buffer is one little-endian bitstream: value i is at bits
+        # [6i, 6i + 6), the DLPack sub-byte rule
+        codes = torch.randint(0, 64, (8, 64), dtype=torch.uint8, device=device)
+        packed = pack_uint6(codes)
+        for row, packed_row in zip(codes.tolist(), packed.tolist()):
+            stream = int.from_bytes(bytes(packed_row), "little")
+            self.assertEqual([(stream >> (6 * i)) & 0x3F for i in range(64)], row)
+        self.assertEqual(unpack_uint6(packed), codes)
+
+    def test_decode_all_codes(self, device):
+        codes = torch.arange(64, dtype=torch.uint8, device=device)
+        x = pack_uint6(codes).view(self.dtype)
+        self.assertEqual(x.shape, (16,))
+        decoded = _float6_e2m3fn_x4_to_float32(x)
+        self.assertEqual(decoded.double().cpu(), _e2m3_decode_lut(), atol=0, rtol=0)
+
+    def test_encode(self, device):
+        lut = _e2m3_decode_lut().float()
+        x = lut.to(device).reshape(2, 32)
+        x_fp6 = _float32_to_float6_e2m3fn_x4(x)
+        self.assertEqual(x_fp6.shape, (2, 8))
+        self.assertEqual(_float6_e2m3fn_x4_to_float32(x_fp6), x, atol=0, rtol=0)
+        # saturates to +-7.5 and rounds ties to even (0.0625 is between 0 and 0.125)
+        x = torch.tensor([100.0, -100.0, 0.0625, 0.1875], device=device)
+        self.assertEqual(
+            _float6_e2m3fn_x4_to_float32(_float32_to_float6_e2m3fn_x4(x)),
+            torch.tensor([7.5, -7.5, 0.0, 0.25], device=device),
+        )
+
+    def test_metadata(self, device):
+        x = torch.empty(4, 8, dtype=self.dtype, device=device)
+        self.assertEqual(self.dtype.itemsize, 3)
+        self.assertEqual(x.element_size(), 3)
+        self.assertEqual(x.nbytes, 4 * 8 * 3)
+        self.assertTrue(self.dtype.is_floating_point)
+        self.assertEqual(self.dtype.abbr, "f6e2m3fnx4")
+        self.assertIn("dtype=torch.float6_e2m3fn_x4", str(x))
+        self.assertIn(
+            "[129,  48,  16]",
+            str(pack_uint6(torch.tensor([1, 2, 3, 4])).view(self.dtype)),
+        )
+
+    def test_view_dtype(self, device):
+        x = self._random(4, 8, device=device)
+        x_u8 = x.view(torch.uint8)
+        self.assertEqual(x_u8.shape, (4, 24))
+        self.assertEqual(_as_bytes(x_u8.view(self.dtype)), _as_bytes(x))
+        self.assertEqual(x.view(torch.float4_e2m1fn_x2).shape, (4, 24))
+        self.assertEqual(x_u8[:, 3:].view(self.dtype).view(torch.uint8), x_u8[:, 3:])
+        with self.assertRaisesRegex(RuntimeError, "must be divisible by 3"):
+            x_u8[:, 1:].view(self.dtype)
+        with self.assertRaisesRegex(RuntimeError, "storage_offset"):
+            x_u8.flatten()[1:4].view(self.dtype)
+        for other in (torch.int16, torch.float32, torch.float64):
+            with self.assertRaisesRegex(
+                RuntimeError, "one element size must divide the other"
+            ):
+                x.view(other)
+            with self.assertRaisesRegex(
+                RuntimeError, "one element size must divide the other"
+            ):
+                torch.zeros(4, 24, dtype=other, device=device).view(self.dtype)
+
+    def test_byte_level_ops(self, device):
+        x = self._random(6, 16, device=device)
+        y = self._random(6, 16, device=device)
+        xb, yb = _as_bytes(x), _as_bytes(y)
+        # each op must also apply to the bytes view, which has a trailing dim of 3
+        ops = [
+            lambda t: t[:, 8:16],  # second MX block of each row
+            lambda t: t[1::2, 3:11],
+            lambda t: t.transpose(0, 1).contiguous(),
+            lambda t: t.transpose(0, 1).clone(),
+            lambda t: t.reshape(3, 32, *t.shape[2:]),
+            lambda t: t.unsqueeze(0).expand(2, *t.shape).contiguous(),
+        ]
+        for op in ops:
+            self.assertEqual(_as_bytes(op(x)), op(xb))
+        self.assertEqual(_as_bytes(copy.deepcopy(x)), xb)
+        for dim in (0, 1):
+            self.assertEqual(
+                _as_bytes(torch.cat([x, y], dim=dim)), torch.cat([xb, yb], dim=dim)
+            )
+            self.assertEqual(
+                _as_bytes(torch.cat([x, y.t().contiguous().t()], dim=dim)),
+                torch.cat([xb, yb], dim=dim),
+            )
+        self.assertEqual(_as_bytes(torch.stack([x, y])), torch.stack([xb, yb]))
+        # large enough for the parallel (non-serial) cat paths
+        big = self._random(512, 64, device=device)
+        self.assertEqual(
+            _as_bytes(torch.cat([big, big], dim=1)),
+            torch.cat([_as_bytes(big)] * 2, dim=1),
+        )
+        out = torch.empty(16, 6, dtype=self.dtype, device=device)
+        out.copy_(x.t())
+        self.assertEqual(_as_bytes(out), xb.transpose(0, 1))
+        # copy_ broadcasts like any other dtype, and errors report the real shapes
+        out = torch.empty(6, 16, dtype=self.dtype, device=device)
+        out.copy_(x[0])
+        self.assertEqual(_as_bytes(out), xb[0].expand(6, 16, 3))
+        with self.assertRaisesRegex(RuntimeError, r"output with shape \[16\]"):
+            torch.empty(16, dtype=self.dtype, device=device).copy_(x)
+        # 0-dim tensors
+        scalar = x[1, 2]
+        self.assertEqual(_as_bytes(scalar.clone()), xb[1, 2])
+        scalar.zero_()
+        self.assertEqual(_as_bytes(x[1, 2]).tolist(), [0, 0, 0])
+
+    def test_zeros(self, device):
+        # large enough to skip the CPU memset fast path
+        for shape in ((4, 8), (1024, 1024)):
+            x = torch.zeros(shape, dtype=self.dtype, device=device)
+            self.assertEqual(x.view(torch.uint8).count_nonzero().item(), 0)
+        x = self._random(64, 32, device=device)
+        x_ref = _as_bytes(x).clone()
+        x[:, 8:16].zero_()
+        x_ref[:, 8:16] = 0
+        self.assertEqual(_as_bytes(x), x_ref)
+
+    @onlyCUDA
+    def test_cross_device_copy(self, device):
+        x = self._random(8, 16, device="cpu")
+        for src in (x, x.t()):
+            on_device = src.to(device)
+            self.assertEqual(on_device.dtype, self.dtype)
+            self.assertEqual(_as_bytes(on_device).cpu(), _as_bytes(src))
+            self.assertEqual(_as_bytes(on_device.cpu()), _as_bytes(src))
+
+    def test_cast_raises(self, device):
+        msg = r"view\(torch.uint8\) and unpack each 3-byte group"
+        x = self._random(4, 8, device=device)
+        for dtype in (torch.float32, torch.bfloat16, torch.uint8, torch.float8_e4m3fn):
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x.to(dtype)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.zeros(4, 8, dtype=dtype, device=device).to(self.dtype)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.empty(0, dtype=self.dtype, device=device).float()
+        with FakeTensorMode():
+            x_fake = torch.empty(4, 8, dtype=self.dtype, device=device)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x_fake.to(torch.float32)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.ops.prims.convert_element_type(x_fake, torch.float32)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(
+                lambda t: t.to(torch.float32), backend="eager", fullgraph=True
+            )(x)
+        # the casts raise on the host, so the device is still usable
+        self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
+
+    def test_compile_views(self, device):
+        x = self._random(4, 16, device=device)
+        torch._dynamo.reset()
+        fn = torch.compile(
+            lambda t: t[:, 8:].contiguous().view(torch.uint8),
+            backend="aot_eager",
+            fullgraph=True,
+        )
+        self.assertEqual(fn(x), x[:, 8:].contiguous().view(torch.uint8))
+
+    def test_save_load(self, device):
+        x = self._random(4, 8, device=device)[:, 2:6]
+        with TemporaryFileName() as fname:
+            torch.save(x, fname)
+            loaded = torch.load(fname)
+        self.assertEqual(loaded.dtype, self.dtype)
+        self.assertEqual(loaded.shape, x.shape)
+        self.assertEqual(_as_bytes(loaded), _as_bytes(x))
+
+    def test_dlpack(self, device):
+        x = self._random(4, 8, device=device)
+        y = torch.from_dlpack(torch.utils.dlpack.to_dlpack(x))
+        self.assertEqual(y.dtype, self.dtype)
+        self.assertEqual(y.shape, x.shape)
+        self.assertEqual(y.data_ptr(), x.data_ptr())
+        z = torch.from_dlpack(x[:, 1:5])
+        self.assertEqual(_as_bytes(z), _as_bytes(x[:, 1:5]))
+
+
+instantiate_device_type_tests(TestFloat6E2M3FNx4, globals(), except_for="mps")
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
