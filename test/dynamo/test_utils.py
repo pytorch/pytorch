@@ -35,6 +35,32 @@ _IS_WINDOWS = sys.platform == "win32"
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_safe_repr(self):
+        class BadRepr:
+            def __repr__(self):
+                raise RuntimeError("repr failed")
+
+        t = torch.ones(1)
+        # Only the elements whose repr raises are replaced
+        self.assertEqual(
+            utils.safe_repr((1, BadRepr(), [t, BadRepr()])),
+            f"(1, <BadRepr>, [{t!r}, <BadRepr>])",
+        )
+        self.assertEqual(
+            utils.safe_repr({"x": BadRepr(), "y": 2}), "{'x': <BadRepr>, 'y': 2}"
+        )
+        self.assertEqual(utils.safe_repr((BadRepr(),)), "(<BadRepr>,)")
+        self.assertEqual(utils.safe_repr((t, {"k": 2})), repr((t, {"k": 2})))
+
+    def test_summarize_example_value(self):
+        self.assertEqual(
+            utils.summarize_example_value([torch.ones(2, 3), 4]),
+            "list[Tensor(..., size=(2, 3)), 4]",
+        )
+        self.assertEqual(
+            utils.summarize_example_value(torch.ones(2)), "Tensor(..., size=(2,))"
+        )
+
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
         # cleared before the weakref callback fires the hook. The hook must not
