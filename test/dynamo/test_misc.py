@@ -10143,9 +10143,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         class M(torch.nn.Module):
             def forward(self, x):
                 a_entered.set()
+                release_a.wait(60)
+                # B is parked inside export while A's compile session exits;
+                # A's exit must not restore or clear B's own session flags.
                 flags_from_export_thread["is_exporting"] = torch.compiler.is_exporting()
                 flags_from_export_thread["is_compiling"] = torch.compiler.is_compiling()
-                release_a.wait(60)
                 return x + 1
 
         def compile_side():
@@ -10168,10 +10170,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_exporting())
         release_b.set()
         self._join_flags_thread(compile_thread, errors)
-        self.assertTrue(flags_from_export_thread["is_exporting"])
-        self.assertTrue(flags_from_export_thread["is_compiling"])
         release_a.set()
         self._join_flags_thread(export_thread, errors)
+        self.assertEqual(flags_from_export_thread["is_exporting"], True)
+        self.assertEqual(flags_from_export_thread["is_compiling"], True)
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
 
@@ -10203,6 +10205,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch._C._remove_obj_from_tls(torch.compiler._IS_COMPILING)
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
+
+    def test_tracing_flags_scriptable(self):
+        # TorchScript static-ifs its is_scripting() checks, so the TLS
+        # builtins stay out of the scripted IR and the flags resolve to False.
+        @torch.jit.script
+        def scripted_flags():
+            return (
+                torch.compiler.is_compiling()
+                and torch.compiler.is_exporting()
+                and torch.compiler._is_non_strict_tracing()
+            )
+
+        self.assertFalse(scripted_flags())
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()

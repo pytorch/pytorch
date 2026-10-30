@@ -645,6 +645,8 @@ def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
+    if torch.jit.is_scripting():
+        return False
     return _IS_KEY_IN_TLS(_IS_NON_STRICT_TRACING)
 
 
@@ -773,7 +775,10 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _IS_KEY_IN_TLS(_IS_EXPORTING)
+    if torch.jit.is_scripting():
+        return False
+    else:
+        return _IS_KEY_IN_TLS(_IS_EXPORTING)
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
