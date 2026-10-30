@@ -87,7 +87,10 @@ class TracebackVariable(VariableTracker):
         frame_summary: traceback.FrameSummary,
         tb_next: Union["TracebackVariable", ConstantVariable],
     ) -> "TracebackVariable":
-        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+        from .builder import SourcelessBuilder
+
+        summary_vt = SourcelessBuilder.create_internal_frame_summary(frame_summary)
+        return cls(summary_vt, tb_next=tb_next)
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
