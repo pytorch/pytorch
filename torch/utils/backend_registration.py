@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
 
+import inspect
+from typing import Any
+
 import torch
 from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
 from torch.overrides import handle_torch_function, has_torch_function_unary
@@ -8,6 +11,7 @@ from torch.overrides import handle_torch_function, has_torch_function_unary
 __all__ = [
     "rename_privateuse1_backend",
     "generate_methods_for_privateuse1_backend",
+    "register_device_autocast_entry",
 ]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
@@ -144,6 +148,67 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
     _rename_profiler_activity(backend_name)
     _rename_device_type(backend_name)
+
+
+def register_device_autocast_entry(fn: Any, device_type: str) -> None:
+    r"""Register a legacy device-specific autocast entry point for tracing.
+
+    Backends whose AMP autocast mirrors the legacy per-device aliases (e.g.
+    ``torch.cuda.amp.autocast``) can register their entry point here so that
+    TorchDynamo traces it as an autocast context manager under
+    ``torch.compile``. Such entries accept ``(dtype=..., enabled=...,
+    cache_enabled=...)`` and omit ``device_type``, which is supplied from the
+    registration instead. Example::
+
+        >>> import torch.utils
+        >>> torch.utils.register_device_autocast_entry(torch.npu.amp.autocast, "npu")
+
+    ``fn`` must be a subclass of ``torch.amp.autocast_mode.autocast`` whose
+    ``__init__`` accepts exactly those three parameters. Note that Dynamo does
+    not run the class's own ``__init__`` (nor ``__enter__``/``__exit__``) when
+    the entry is traced: it emits ``torch.amp._enter_autocast``/
+    ``torch.amp._exit_autocast`` directly, so any overrides of those methods
+    (or ``__call__``) are bypassed under ``torch.compile``.
+
+    Note: this API is experimental and may change in future releases.
+    """
+    from torch._dynamo.variables.ctx_manager import (
+        _autocast_entries,
+        _autocast_signature,
+    )
+
+    if not (inspect.isclass(fn) and issubclass(fn, torch.amp.autocast_mode.autocast)):
+        raise TypeError(
+            f"expected a subclass of torch.amp.autocast_mode.autocast, got {fn!r}"
+        )
+    if not isinstance(device_type, str):
+        raise TypeError(f"expected a device_type string, got {device_type!r}")
+    if not device_type:
+        raise ValueError(f"expected a non-empty device_type, got {device_type!r}")
+    if fn in _autocast_entries:
+        raise ValueError(f"autocast entry already registered: {fn!r}")
+    signature = _autocast_signature(fn)
+    required = ("dtype", "enabled", "cache_enabled")
+    missing = [name for name in required if name not in signature.parameters]
+    if missing:
+        raise TypeError(
+            "expected an autocast entry accepting (dtype, enabled, "
+            f"cache_enabled), missing parameter(s) {missing} in {fn!r}"
+        )
+    extra = [name for name in signature.parameters if name not in required]
+    if extra:
+        raise TypeError(
+            "expected an autocast entry accepting exactly (dtype, enabled, "
+            f"cache_enabled), got extra parameter(s) {extra} in {fn!r}"
+        )
+    try:
+        signature.bind(dtype=None, enabled=True, cache_enabled=None)
+    except TypeError as exc:
+        raise TypeError(
+            "expected an autocast entry callable as (dtype, enabled, "
+            f"cache_enabled), got {fn!r}: {exc}"
+        ) from exc
+    _autocast_entries[fn] = device_type
 
 
 def _check_register_once(module, attr) -> None:
