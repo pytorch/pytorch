@@ -15788,14 +15788,6 @@ op_db: list[OpInfo] = [
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
-           skips=(
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-           ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
@@ -16692,10 +16684,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
-               # is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
