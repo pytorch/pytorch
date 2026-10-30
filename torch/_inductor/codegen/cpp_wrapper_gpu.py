@@ -720,7 +720,7 @@ class DeferredTritonCallWrapper:
         """Generate scratch space allocations with runtime-known sizes."""
         kernel_name = self.kernel_name
         dtype_str = wrapper.codegen_dtype(torch.uint8)
-        device_type, _ = wrapper.codegen_device(torch.device(get_gpu_type())).split(
+        device_type, _ = wrapper.codegen_device(torch.device(wrapper.device)).split(
             ", "
         )
         device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
@@ -1285,8 +1285,8 @@ class CppWrapperGpu(CppWrapperCpu):
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
-    def __init__(self) -> None:
-        self.device = get_gpu_type()
+    def __init__(self, *, device_type: str | None = None) -> None:
+        self.device = get_gpu_type() if device_type is None else device_type
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
