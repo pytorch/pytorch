@@ -1709,6 +1709,18 @@ op_db: list[OpInfo] = [
             # variant_test_name='grad_oriented'
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
+            # Increased difference on AVX512
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=5e-05, rtol=1e-05),
+                        torch.complex64: tol(atol=5e-05, rtol=1e-05),
+                    }
+                ),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1768,6 +1780,18 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
+            ),
+            # Increased difference on AVX512
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=5e-05, rtol=1e-05),
+                        torch.complex64: tol(atol=5e-05, rtol=1e-05),
+                    }
+                ),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
             ),
         ),
     ),
