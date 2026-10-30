@@ -1012,7 +1012,7 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
         fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
         with torch._C._ExcludeDispatchKeyGuard(fake_key):
             self.assertEqual(t.device, torch.device("cpu"))
-        with torch._C._FakeInKernelInvocation():
+        with torch._C._InKernelInvocation():
             self.assertTrue(torch._C._in_kernel_invocation())
             self.assertEqual(t.device, torch.device("meta"))
         self.assertFalse(torch._C._in_kernel_invocation())
