@@ -7420,7 +7420,10 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn(1, 2, 4, 4, device=device, dtype=torch.float32)
 
         # Extremely large kernel_size (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"value cannot be safely converted without overflow: kernel_size",
+        ):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 100),  # INT64_MAX
@@ -7447,7 +7450,9 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large stride (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"value cannot be safely converted without overflow: stride"
+        ):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -7465,7 +7470,9 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Extremely large padding (would overflow int)
-        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"value cannot be safely converted without overflow: padding"
+        ):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=2,
@@ -7474,7 +7481,10 @@ class TestNNDeviceType(NNTestCase):
             )
 
         # Combined invalid parameters
-        with self.assertRaisesRegex(RuntimeError, r"value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"value cannot be safely converted without overflow: kernel_size",
+        ):
             torch.nn.functional.avg_pool2d(
                 x,
                 kernel_size=(9223372036854775807, 5868783964474102731),

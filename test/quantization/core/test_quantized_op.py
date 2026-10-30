@@ -1936,6 +1936,29 @@ class TestQuantizedOps(TestCase):
                              msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
                                                       qX_hat.q_zero_point())))
 
+    def test_avg_pool_overflow(self):
+        qx2d = torch.quantize_per_tensor(
+            torch.randn(1, 1, 4, 4), scale=0.1, zero_point=0, dtype=torch.quint8
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "value cannot be safely converted without overflow: kernel_size",
+        ):
+            torch.ao.nn.quantized.functional.avg_pool2d(
+                qx2d, kernel_size=2**63 - 1
+            )
+
+        qx3d = torch.quantize_per_tensor(
+            torch.randn(1, 1, 4, 4, 4), scale=0.1, zero_point=0, dtype=torch.quint8
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "value cannot be safely converted without overflow: kernel_size",
+        ):
+            torch.ao.nn.quantized.functional.avg_pool3d(
+                qx3d, kernel_size=2**63 - 1
+            )
+
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
