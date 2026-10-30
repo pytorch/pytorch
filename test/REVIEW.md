@@ -40,6 +40,11 @@ the rules only to files not in the allowlist:
     - Rule 6: Requirements for the migration allowlist
   - Scope: the whole file, not just the modified parts
 
+Notes:
+
+- The rules referenced below are defined in the following sections of this
+document; apply the rules listed for a case to the files named in its Scope.
+
 ## Rule 1: One responsibility per test class
 
 A test class (any class that defines a `test*` method) focuses on exactly one
@@ -83,14 +88,19 @@ responsibilities map to HardwareClassification values as follows:
 - Test methods take no `device`/`devices` parameter.
 - Nothing in the class may be device-dependent:
   - No device-related decorators:
-    - `@skipCUDAIf`
-    - `@skipXPUIf`
-    - ...
+    - `@skipCPUIf`, `@skipCUDAIf`, `@skipXPUIf`, `@skipGPUIf`,
+      `@skipMPSIf`, `@skipPRIVATEUSE1If`
+    - `@onlyCPU`, `@onlyCUDA`, `@onlyMPS`, `@onlyXPU`, `onlyOn`
+      `@onlyAccelerator`, `@onlyPRIVATEUSE1`,
+      `@onlyNativeDeviceTypes`, `@onlyNativeDeviceTypesAnd`
+    - `@dtypesIfCPU`, `@dtypesIfCUDA`, `@dtypesIfXPU`, `@dtypesIfMPS`,
+      `@dtypesIfPRIVATEUSE1`
   - No accelerator APIs:
-    - `torch.cuda.*`
-    - `torch.xpu.*`
     - `torch.accelerator.*`
-    - ...
+    - `torch.cuda.*`
+    - `torch.mps.*`
+    - `torch.xpu.*`
+    - `torch.mtia.*`
 - Class form:
   - May be a plain class
   - May be instantiated via `@instantiate_parametrized_tests` (when the
@@ -106,20 +116,26 @@ available accelerator, and every test receives the device under test via its
 
 - Every test method takes a `device` or `devices` parameter.
 - The class must be generic across all accelerators:
-  - No `@only*` decorators (except `@onlyAccelerator`, which only for tests that genuinely cannot run on CPU):
+  - No `@only*` decorators (except `@onlyAccelerator`, which is only for
+    tests that genuinely cannot run on CPU):
+    - `@onlyCPU`
     - `@onlyCUDA`
+    - `@onlyMPS`
     - `@onlyXPU`
-    - ...
+    - `@onlyPRIVATEUSE1`
+    - `@onlyNativeDeviceTypes`
+    - `@onlyNativeDeviceTypesAnd`
   - No hardcoded devices; use the `device` or `devices` parameter instead:
     - `.cuda()`
     - `.to("cuda")`
     - `device="cuda"`
-    - ...
+    - the same forms with other device names (`"mps"`, `"xpu"`, `"hpu"`)
   - No accelerator-specific APIs (except `torch.accelerator.*`,
     `torch.Event`, `torch.Stream`):
     - `torch.cuda.*`
+    - `torch.mps.*`
+    - `torch.mtia.*`
     - `torch.xpu.*`
-    - ...
   - Allowed device-specific skip decorators:
     - `@skipCPUIf` and its variants
     - `@skipCUDAIf` and its variants
