@@ -398,6 +398,42 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
             cast(Any, fake_mode).set_item_memo(x, memo)
 
 
+# The SymInt memos of a fake (nonzero_memo, unique_memo,
+# unique_consecutive_memo). A C++ fake has no SymNumberMemoDescriptor, so this
+# keeps the descriptor's state in the tensor's __dict__ under the same names,
+# and like the descriptor drops the memo once the tensor is mutated or
+# fake_mode's epoch changes. Unlike the item memo, which goes through the fake
+# mode's own store (maybe_get_item_memo), these memos are only used by the
+# Python fake impls, so they need no C++ store.
+def maybe_get_sym_memo(
+    x: object, name: str, fake_mode: FakeTensorMode
+) -> SymInt | int | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return getattr(x, name)
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    memo = getattr(x, f"_{name}", None)
+    if memo is None:
+        return None
+    mutated = not x.is_inference() and getattr(x, f"_{name}_vc", None) != x._version
+    if mutated or getattr(x, f"_{name}_epoch", None) != fake_mode.epoch:
+        setattr(x, f"_{name}", None)
+        return None
+    return memo
+
+
+def maybe_set_sym_memo(
+    x: object, name: str, value: SymInt | int, fake_mode: FakeTensorMode
+) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        setattr(x, name, value)
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        setattr(x, f"_{name}", value)
+        if not x.is_inference():
+            setattr(x, f"_{name}_vc", x._version)
+        setattr(x, f"_{name}_epoch", fake_mode.epoch)
+
+
 def maybe_get_fake_device(x: object) -> torch.device | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.fake_device
