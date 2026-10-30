@@ -2,6 +2,7 @@
 
 #include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
+#include <initializer_list>
 #include <sstream>
 #include <vector>
 
@@ -36,7 +37,9 @@ TEST(TestHeaderOnlyArrayRef, TestAPIs) {
 
 TEST(TestHeaderOnlyArrayRef, TestFromInitializerList) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  HeaderOnlyArrayRef<int> arr({1, 2, 3, 4, 5, 6, 7});
+  // Keep the backing array alive while arr refers to it.
+  std::initializer_list<int> values = {1, 2, 3, 4, 5, 6, 7};
+  HeaderOnlyArrayRef<int> arr(values);
   auto res_vec = arr.vec();
   for (size_t i = 0; i < vec.size(); i++) {
     EXPECT_EQ(vec[i], res_vec[i]);

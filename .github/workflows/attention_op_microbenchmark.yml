@@ -36,8 +36,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc13-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
@@ -46,7 +46,7 @@ jobs:
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
         ]}
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -62,7 +62,7 @@ jobs:
       docker-image: ${{ needs.attn-microbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
       python-version: "3.11"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -74,8 +74,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-sm100
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc13-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
       test-matrix: |
@@ -83,7 +83,7 @@ jobs:
           { config: "attention_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       python-version: "3.12"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -99,6 +99,6 @@ jobs:
       docker-image: ${{ needs.attention-microbenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.attention-microbenchmark-build-b200.outputs.test-matrix }}
       python-version: "3.12"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
