@@ -1443,16 +1443,20 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
     full_replacement = (
-        self.shape == src.shape
-        and start == 0
+        statically_known_true(sym_eq(self.shape, src.shape))
+        and (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_scatter_dim_size normalize to 0
+            or statically_known_true(start <= -slice_scatter_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_scatter_dim_size)
         )
-        and step == 1
+        and statically_known_true(sym_eq(step, 1))
     )
     partial_self_replacement = (
-        step == 1
+        statically_known_true(sym_eq(step, 1))
         and self.dim() == src.dim()
         and all(
             statically_known_true(sym_eq(src.shape[d], self.shape[d]))
