@@ -4114,6 +4114,16 @@ def get_gpu_shared_memory() -> int:
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
+def get_xpu_rng_launch_policy(device: torch.device) -> tuple[int, int]:
+    """(work-group size, max work-groups) that the eager XPU RNG kernels launch
+    with, mirroring calc_execution_policy() in torch-xpu-ops."""
+    prop = torch.xpu.get_device_properties(device)
+    sub_group_size = max(prop.sub_group_sizes)
+    group_size = sub_group_size * (prop.gpu_eu_count // prop.gpu_subslice_count)
+    max_work_items = sub_group_size * prop.gpu_eu_count * prop.gpu_hw_threads_per_eu
+    return group_size, max_work_items // group_size
+
+
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())

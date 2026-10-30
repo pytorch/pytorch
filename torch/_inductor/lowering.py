@@ -91,6 +91,7 @@ from .utils import (
     convert_symint_to_expr,
     decode_device,
     get_current_backend,
+    get_xpu_rng_launch_policy,
     is_dynamic,
     is_gpu,
     is_nvidia_sm100_or_later,
@@ -3258,6 +3259,9 @@ def get_threads_per_round(device: torch.device):
         threads_per_round = (
             prop.multi_processor_count * prop.max_threads_per_multi_processor
         )
+    elif device.type == "xpu":
+        group_size, max_groups = get_xpu_rng_launch_policy(device)
+        threads_per_round = group_size * max_groups
     else:
         _CPU_GRAIN_SIZE = 32768
         threads_per_round = _CPU_GRAIN_SIZE
@@ -3286,11 +3290,12 @@ def inductor_random(
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    if config.align_random_eager and device.type == "cuda" and mode == "rand":
+    if config.align_random_eager and device.type in ("cuda", "xpu") and mode == "rand":
         threads_per_round = get_threads_per_round(device)
 
         def _vec_from_dtype(dt: torch.dtype) -> int:
-            if dt in (torch.float16, torch.bfloat16):
+            # The XPU dropout kernel handles at most 4 elements per work-item.
+            if device.type == "cuda" and dt in (torch.float16, torch.bfloat16):
                 return 8
             return 4
 

@@ -2674,6 +2674,7 @@ class _XpuDeviceProperties:
     version: str
     max_compute_units: _int
     gpu_eu_count: _int
+    gpu_hw_threads_per_eu: _int
     max_work_group_size: _int
     max_num_sub_groups: _int
     memory_clock_rate: _int
