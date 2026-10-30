@@ -385,7 +385,8 @@ jobs:
                      .agents/skills/pr-review/SKILL.md \
                      .agents/skills/pr-review/review-checklist.md \
                      .agents/skills/pr-review/bc-guidelines.md \
-                     .agents/skills/pr-review/ci-runner-naming.md | sha256sum | cut -c1-16)
+                     .agents/skills/pr-review/ci-runner-naming.md \
+                     .agents/skills/pr-review/ci-dependencies.md | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
       # The review job has neither a token nor API egress, so the conversation
