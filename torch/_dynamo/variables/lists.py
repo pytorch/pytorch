@@ -157,17 +157,26 @@ class BaseListVariable(VariableTracker):
             collections.deque: DequeVariable,
         }[obj]
 
+    _nonvar_fields = {
+        "_checking_python_constant",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(
         self,
         items: list[VariableTracker],
         **kwargs: Any,
     ) -> None:
+        if "_checking_python_constant" in kwargs:
+            kwargs.pop("_checking_python_constant")
         super().__init__(**kwargs)
         if not isinstance(items, list):
             raise AssertionError(f"items must be a list, got {type(items).__name__}")
         if not all(isinstance(x, VariableTracker) for x in items):
             raise AssertionError("all items must be VariableTracker instances")
         self.items: list[VariableTracker] = items
+        # re-entrancy guard for is_python_constant against self-referential lists.
+        self._checking_python_constant = False
 
     def _as_proxy(self) -> list[Any]:
         return [x.as_proxy() for x in self.items]
@@ -186,7 +195,14 @@ class BaseListVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def is_python_constant(self) -> bool:
-        return all(x.is_python_constant() for x in self.items)
+        # cyclic list is not a constant; reconstruct handles the cycle.
+        if self._checking_python_constant:
+            return False
+        self._checking_python_constant = True
+        try:
+            return all(x.is_python_constant() for x in self.items)
+        finally:
+            self._checking_python_constant = False
 
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
