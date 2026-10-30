@@ -55,7 +55,7 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``
   - **All NCCL backends.** Control how much extra time we will wait for dumping the debugging info before we exit and throws timeout exception. ``nccl`` waits this long before aborting the process; its flight recorder dump reads ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC`` first. Default: ``15000``.
 * - ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC``
-  - **`nccl`, `nccl-lazy` and other hooked backends.** Time limit in milliseconds for a flight recorder dump on failure. Falls back to ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``. Default: ``15000``.
+  - **`nccl`, `nccl-lazy` and other hooked backends.** Time limit in milliseconds for a flight recorder dump on failure, and for a re-arm to wait for an in-flight dump signal. Falls back to ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``. Default: ``15000``.
 * - ``TORCH_FR_DUMP_ON_TIMEOUT``
   - **`nccl`, `nccl-lazy` and other hooked backends.** Whether to dump the flight recorder trace when a collective times out or fails, broadcast a dump signal to the other ranks, and dump on theirs. Falls back to ``TORCH_NCCL_DUMP_ON_TIMEOUT``. Default: ``1``.
 * - ``TORCH_NCCL_DUMP_ON_TIMEOUT``

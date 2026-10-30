@@ -1149,18 +1149,26 @@ _DUMP_SIGNAL_KEY = "fr_hook_dump_signal"
 class _SignalStore(dist.Store):
     """Store wrapper that counts dump signal polls and can fail them.
 
-    The poller reads the signal with add(key, 0), so waiting on the count
-    is how a test knows the poller has seen a value, without sleeping.
+    Every read of the signal starts with check([key]), so waiting on the
+    count is how a test knows the poller has seen a value, without sleeping.
     """
+
+    # A stopped poller is detached, not joined, and a poll it started before
+    # remove() can run after the test returns. The C++ side holds the store,
+    # but not this Python object, so freeing it would make that poll call a
+    # pure virtual. Keep every instance until the process exits.
+    _instances = []
 
     def __init__(self, store):
         super().__init__()
+        _SignalStore._instances.append(self)
         self._store = store
         self._cv = threading.Condition()
         self.polls = 0
         self.fail = False
         self.poll_threads = []
-        # Polls from this thread wait for `release` once they have started.
+        # Signal reads and broadcasts from this thread wait for `release` once
+        # they have started.
         self.block_thread = None
         self.blocked = threading.Event()
         self.release = threading.Event()
@@ -1171,29 +1179,30 @@ class _SignalStore(dist.Store):
     def get(self, key):
         return self._store.get(key)
 
-    def check(self, keys):
-        return self._store.check(keys)
+    def _intercept(self):
+        if threading.get_ident() == self.block_thread:
+            self.blocked.set()
+            if not self.release.wait(60):
+                raise RuntimeError("store call was never released")
+        if self.fail:
+            raise RuntimeError("injected store failure")
 
-    def add(self, key, value):
-        if key != _DUMP_SIGNAL_KEY:
-            return self._store.add(key, value)
-        if value != 0:
-            if self.fail:
-                raise RuntimeError("injected store failure")
-            return self._store.add(key, value)
+    def check(self, keys):
+        if keys != [_DUMP_SIGNAL_KEY]:
+            return self._store.check(keys)
         try:
-            if threading.get_ident() == self.block_thread:
-                self.blocked.set()
-                if not self.release.wait(60):
-                    raise RuntimeError("poll was never released")
-            if self.fail:
-                raise RuntimeError("injected store failure")
-            return self._store.add(key, value)
+            self._intercept()
+            return self._store.check(keys)
         finally:
             with self._cv:
                 self.polls += 1
                 self.poll_threads.append(threading.get_ident())
                 self._cv.notify_all()
+
+    def add(self, key, value):
+        if key == _DUMP_SIGNAL_KEY:
+            self._intercept()
+        return self._store.add(key, value)
 
     def wait_polls(self, count, timeout=60.0):
         with self._cv:
@@ -1285,7 +1294,11 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
 
     @staticmethod
     def _signals(store):
-        return int(store.get(_DUMP_SIGNAL_KEY))
+        # Bypasses the wrapper, so this is not counted as a poll. The key only
+        # exists after the first broadcast.
+        if not store._store.check([_DUMP_SIGNAL_KEY]):
+            return 0
+        return int(store._store.get(_DUMP_SIGNAL_KEY))
 
     def test_abort_broadcasts_signal_and_dumps(self):
         store = _SignalStore(dist.HashStore())
@@ -1461,6 +1474,94 @@ class FlightRecorderHookDumpSignalTest(MultiProcessTestCase):
         store.settle()
         self.assertTrue(self._dumped())
         hook.remove()
+
+    def test_signal_during_rearm_is_dropped(self):
+        # A signal the poller reads after rearm() bumped the generation but
+        # before it took the new baseline was decided against the old one: it
+        # belongs to the failure just handled, so it must not dump.
+        store = _SignalStore(dist.HashStore())
+        _, hook = self._attach(store)
+
+        def rearm():
+            store.block_thread = threading.get_ident()
+            FlightRecorderHook._rearm()
+
+        rearming = threading.Thread(target=rearm)
+        rearming.start()
+        self.assertTrue(store.blocked.wait(60))
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertFalse(self._dumped())
+        store.release.set()
+        rearming.join()
+
+        store.add(_DUMP_SIGNAL_KEY, 1)
+        store.settle()
+        self.assertTrue(self._dumped())
+        hook.remove()
+
+    def test_own_broadcast_landing_after_rearm_is_ignored(self):
+        # rearm() waits for a broadcast still in flight, so this process's
+        # signal for the failure just handled is part of the new baseline: it
+        # neither dumps again nor suppresses the next arming's broadcast. Not
+        # deterministic: nothing makes rearm() start waiting before the
+        # broadcast is released, so losing the wait fails only most runs.
+        store = _SignalStore(dist.HashStore())
+        backend, hook = self._attach(store)
+
+        def abort():
+            store.block_thread = threading.get_ident()
+            backend.fire_abort_hooks()
+
+        aborting = threading.Thread(target=abort)
+        aborting.start()
+        # The abort hook dumps before it broadcasts.
+        self.assertTrue(store.blocked.wait(60))
+        self.assertTrue(self._dumped())
+        os.remove(self._dump_file_name())
+        rearming = threading.Thread(target=FlightRecorderHook._rearm)
+        rearming.start()
+        store.release.set()
+        aborting.join()
+        rearming.join()
+        store.block_thread = None
+        self.assertEqual(self._signals(store), 1)
+
+        store.settle()
+        self.assertFalse(self._dumped())
+        backend.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        self.assertEqual(self._signals(store), 2)
+        hook.remove()
+
+    def test_rearm_of_other_backend_keeps_failed_one_disarmed(self):
+        # Groups reconfigure one at a time, and a failed nccl2 group runs its
+        # abort hooks on every watchdog tick until it does. Another group's
+        # rearm() must not turn that into a second dump and signal.
+        store = _SignalStore(dist.HashStore())
+        failed, failed_hook = self._attach(store, "failed")
+        other, other_hook = self._attach(store, "other")
+        failed.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        os.remove(self._dump_file_name())
+
+        FlightRecorderHook._rearm(other)
+        failed.fire_abort_hooks()
+        self.assertFalse(self._dumped())
+        self.assertEqual(self._signals(store), 1)
+        # The rearmed backend is armed.
+        other.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        self.assertEqual(self._signals(store), 2)
+        os.remove(self._dump_file_name())
+
+        # And so is the failed one, once rearmed itself.
+        FlightRecorderHook._rearm(failed)
+        failed.fire_abort_hooks()
+        self.assertTrue(self._dumped())
+        self.assertEqual(self._signals(store), 3)
+        failed_hook.remove()
+        other_hook.remove()
 
     def test_dump_on_timeout_off(self):
         os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "0"

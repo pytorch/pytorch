@@ -5543,13 +5543,23 @@ fabricating 0..size-1, which would collide the dump files of a subgroup.)")
           "Detach the hook from its process group.")
       .def_static(
           "_rearm",
-          &::c10d::FlightRecorderHook::rearm,
+          [](const std::optional<c10::intrusive_ptr<::c10d::Backend>>&
+                 backend) {
+            if (backend && *backend) {
+              ::c10d::FlightRecorderHook::rearm(**backend);
+            } else {
+              ::c10d::FlightRecorderHook::rearm();
+            }
+          },
+          py::arg("backend") = std::nullopt,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Allow this process to dump and broadcast the dump signal again after a
-failure it survived. Applies to every hook in the process. Backends that
-reconfigure (nccl2) call it themselves; dump signals sent before the call are
-ignored.)");
+failure it survived. Backends that reconfigure (nccl2) call it themselves;
+dump signals sent before the call are ignored. With a backend, only that
+backend's abort hooks are rearmed: a backend that failed earlier and was not
+rearmed since keeps reporting the failure already handled. Without one, every
+backend is.)");
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
       module,

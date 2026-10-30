@@ -559,7 +559,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
   // The failure that led here has been dealt with; dump on the next one.
   // Before initNcclResources() starts the watchdog that would detect it.
-  ::c10d::FlightRecorderHook::rearm();
+  ::c10d::FlightRecorderHook::rearm(*this);
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
   TORCH_CHECK(
