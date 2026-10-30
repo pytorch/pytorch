@@ -74,6 +74,8 @@ from ..utils import (
     is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
+    is_strict_cuda_triton,
+    is_strict_float_dtype,
     is_view,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
@@ -3035,7 +3037,23 @@ class ConstructorMoverPass:
         if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
             return True
 
-        return False
+        if (
+            node.target != aten.div.Tensor_mode
+            or node.kwargs.get("rounding_mode") != "trunc"
+        ):
+            return False
+
+        val = node.meta.get("val")
+        divisor = node.args[1]
+        # For strict mode, match eager use of reciprocal multiplication
+        # for CPU scalar divisors.
+        return (
+            isinstance(val, torch.Tensor)
+            and is_strict_cuda_triton(val.device)
+            and is_strict_float_dtype(val.dtype)
+            and isinstance(divisor, fx.Node)
+            and self.is_cpu_scalar_tensor(divisor)
+        )
 
     def get_node_device(self, node: fx.Node) -> torch.device | None:
         """
