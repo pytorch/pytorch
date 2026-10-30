@@ -2783,12 +2783,12 @@ class CachingAutotuner(KernelInterface):
             ) from None
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
-        """Try to build a _FastCudaLauncher-backed version of the launcher.
+        """Try to build a fast-launcher-backed version of the launcher.
 
         Returns a new launcher function with the runner replaced by a
-        _FastCudaLauncher instance (vectorcall C extension), or None if
-        conditions are not met.  Falls back silently on expected errors,
-        logs a warning on unexpected ones.
+        _FastCudaLauncher / _FastXpuLauncher instance (vectorcall C extension),
+        or None if conditions are not met.  Falls back silently on expected
+        errors, logs a warning on unexpected ones.
         """
         import types
 
@@ -2798,19 +2798,19 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
-        # The _FastCudaLauncher vectorcall bypasses run(), so it can't do the
+        # The fast launcher's vectorcall bypasses run(), so it can't do the
         # variable-length TMA descriptor expansion; fall back to the regular
         # (still static) launcher.
         if self.inductor_meta.get("host_tma_descriptor_args"):
             return None
 
-        # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
-        # launchers use SYCL kernels stored in PyCapsules.
-        if self.device_props.type not in ("cuda", "hip"):
-            return None
-
         try:
-            from torch._C import _FastCudaLauncher
+            if self.device_props.type == "xpu":
+                from torch._C import _FastXpuLauncher as fast_launcher_cls
+            elif self.device_props.type in ("cuda", "hip"):
+                from torch._C import _FastCudaLauncher as fast_launcher_cls
+            else:
+                return None
         except ImportError:
             return None
 
@@ -2831,11 +2831,12 @@ class CachingAutotuner(KernelInterface):
                 return None
             if getattr(kernel, "global_scratch_size", 0):
                 return None
-            cu_function = kernel.function
+            # A raw CUfunction on CUDA/HIP, the loaded kernel's capsule on XPU.
+            kernel_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
             arg_tys = kernel.arg_tys
-            if cu_function is None or num_warps is None:
+            if kernel_function is None or num_warps is None:
                 return None
 
             n_scratch = sum(
@@ -2847,8 +2848,8 @@ class CachingAutotuner(KernelInterface):
             if torch.version.hip:
                 n_scratch = max(n_scratch, 2)
 
-            fast_runner = _FastCudaLauncher(
-                cu_function, num_warps, shared, arg_tys, n_scratch
+            fast_runner = fast_launcher_cls(
+                kernel_function, num_warps, shared, arg_tys, n_scratch
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}
@@ -2882,6 +2883,11 @@ class CachingAutotuner(KernelInterface):
             # close()/__del__ then unloads the module and leaves the baked pointer
             # dangling, producing a CUDA "misaligned address" error on the next
             # launch. Keep the owner alive for as long as the fast launcher is.
+            # _FastXpuLauncher holds the kernel capsule itself, so the kernel it
+            # launches cannot be freed either way. The cost of that on XPU is
+            # that close() no longer releases the sycl::kernel and its Level
+            # Zero module for a fast-launched kernel, and a launch after
+            # close() succeeds where run() would have raised.
             new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             return new_launcher
         except (AttributeError, TypeError, KeyError, ValueError):
