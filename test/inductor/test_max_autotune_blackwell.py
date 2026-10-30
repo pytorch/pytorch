@@ -1116,6 +1116,73 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 )
             )
 
+    def test_autows_min_shared_memory_is_dtype_aware(self):
+        def min_shared_memory(
+            block_m,
+            block_n,
+            block_k,
+            *,
+            element_size,
+            ieee_fp32,
+            a_row_major=False,
+            b_row_major=True,
+        ):
+            return CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_min_shared_memory(
+                {
+                    "BLOCK_M": block_m,
+                    "BLOCK_N": block_n,
+                    "BLOCK_K": block_k,
+                    "A_ROW_MAJOR": a_row_major,
+                    "B_ROW_MAJOR": b_row_major,
+                },
+                element_size=element_size,
+                ieee_fp32=ieee_fp32,
+            )
+
+        # B200 opt-in shared memory per block.
+        limit = 232448
+        # IEEE fp32 128x256x128 with a column-major operand fails at launch
+        # (needs 270-344 KB); one stage plus that operand's extra tile is over.
+        self.assertGreater(
+            min_shared_memory(128, 256, 128, element_size=4, ieee_fp32=True), limit
+        )
+        self.assertGreater(
+            min_shared_memory(
+                64,
+                256,
+                128,
+                element_size=4,
+                ieee_fp32=True,
+                a_row_major=True,
+                b_row_major=False,
+            ),
+            limit,
+        )
+        # Configs that fit stay: the same tile in bf16, and smaller fp32 tiles.
+        self.assertLessEqual(
+            min_shared_memory(128, 256, 128, element_size=2, ieee_fp32=False), limit
+        )
+        self.assertLessEqual(
+            min_shared_memory(128, 128, 128, element_size=4, ieee_fp32=True), limit
+        )
+        self.assertLessEqual(
+            min_shared_memory(256, 256, 64, element_size=4, ieee_fp32=True), limit
+        )
+        # Two column-major operands need both extra tiles.
+        self.assertGreater(
+            min_shared_memory(
+                128, 128, 128, element_size=4, ieee_fp32=True, b_row_major=False
+            ),
+            limit,
+        )
+        # Without a column-major operand, IEEE fp32 needs no extra tile.
+        self.assertEqual(
+            min_shared_memory(
+                128, 128, 64, element_size=4, ieee_fp32=True, a_row_major=True
+            ),
+            min_shared_memory(128, 128, 64, element_size=4, ieee_fp32=False),
+        )
+
     def test_two_ctas_requires_tma_store_for_metaws_template(self):
         kwargs = {
             "BLOCK_M": 128,
@@ -1272,6 +1339,58 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertEqual(len(configs), 1)
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
+
+    @parametrize(
+        "dtype,allow_tf32,expect_pruned",
+        (
+            (torch.float32, False, True),
+            (torch.float32, True, False),
+            (torch.bfloat16, False, False),
+        ),
+    )
+    def test_autows_prunes_configs_over_shared_memory(
+        self, dtype, allow_tf32, expect_pruned
+    ):
+        # IEEE fp32 128x256x128 with a column-major B needs over 232 KB at any
+        # pipeline depth and fails at launch, so it is dropped before codegen.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat2.get_dtype.return_value = dtype
+        mat2.get_device.return_value = torch.device("cuda", 0)
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 128,
+            "EPILOGUE_SUBTILE": 8,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": False,
+            "A_ROW_MAJOR": True,
+            "B_ROW_MAJOR": False,
+            "num_stages": 3,
+            "num_warps": 4,
+            "USE_META_WS": True,
+        }
+        heuristic_mod = "torch._inductor.heuristics.template.triton"
+        with (
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+            mock.patch.object(
+                MMKernelInputs, "mnk_symbolic", return_value=(512, 2048, 15360)
+            ),
+            mock.patch(f"{heuristic_mod}.mm_allow_tf32", return_value=allow_tf32),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_max_shared_memory_per_block",
+                return_value=232448,
+            ),
+        ):
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(len(configs), 0 if expect_pruned else 1)
 
 
 @instantiate_parametrized_tests
