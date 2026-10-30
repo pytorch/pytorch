@@ -4906,6 +4906,121 @@ def forward(self, tangents_1):
         self.assertIn((4, 3), _packed_shapes)
 
     @skipIfCppFakeTensor("no nested tensor support")
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    @parametrize("place_at_use", [False, True])
+    def test_saved_tensors_hooks_placement(self, place_at_use):
+        def fn(x):
+            return x.sin().cos().sin().cos()
+
+        def pack(x):
+            return x * 2
+
+        def unpack(packed):
+            return packed / 2
+
+        graphs = {"fw": [], "bw": []}
+
+        def capture(key):
+            def compile_fn(gm, example_inputs):
+                graphs[key].append(gm.graph)
+                return gm
+
+            return make_boxed_compiler(compile_fn)
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm,
+                example_inputs,
+                fw_compiler=capture("fw"),
+                bw_compiler=capture("bw"),
+                partition_fn=default_partition,
+            )
+
+        def hook_nodes(g, target):
+            return [n for n in g.nodes if n.target is target and n.args[1] == 2]
+
+        ref_x = torch.randn(4, 8, requires_grad=True)
+        fn(ref_x).sum().backward()
+
+        torch._dynamo.reset()
+        x = ref_x.detach().clone().requires_grad_()
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        with (
+            torch._functorch.config.patch(
+                saved_tensors_hooks_place_at_use=place_at_use
+            ),
+            torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm),
+        ):
+            out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            out.sum().backward()
+        self.assertEqual(out, fn(ref_x))
+        self.assertEqual(x.grad, ref_x.grad)
+
+        (fw_g,) = graphs["fw"]
+        (bw_g,) = graphs["bw"]
+        # x, sin(x), cos(sin(x)) and sin(cos(sin(x))) are saved for backward.
+        packs = hook_nodes(fw_g, torch.ops.aten.mul.Tensor)
+        unpacks = hook_nodes(bw_g, torch.ops.aten.div.Tensor)
+        self.assertEqual(len(packs), 4)
+        self.assertEqual(len(unpacks), 4)
+
+        if not place_at_use:
+            fw_tail = list(fw_g.nodes)[-len(packs) - 1 : -1]
+            self.assertEqual(set(fw_tail), set(packs))
+            bw_body = [n for n in bw_g.nodes if n.op != "placeholder"]
+            self.assertEqual(set(bw_body[: len(unpacks)]), set(unpacks))
+            return
+
+        # Each pack follows the last forward use of its saved tensor, and each
+        # unpack precedes the first backward use of its result, with only
+        # other hook nodes in between.
+        fw_order = {n: i for i, n in enumerate(fw_g.nodes)}
+        for p in packs:
+            saved = p.args[0]
+            uses = [u for u in saved.users if u is not p and u.op != "output"]
+            last_use = max(uses, key=fw_order.__getitem__)
+            n = p.prev
+            while n is not last_use:
+                self.assertIn(n, packs)
+                n = n.prev
+        bw_order = {n: i for i, n in enumerate(bw_g.nodes)}
+        for u in unpacks:
+            first_use = min(u.users, key=bw_order.__getitem__)
+            n = u.next
+            while n is not first_use:
+                self.assertIn(n, unpacks)
+                n = n.next
+
+    def test_saved_tensors_hooks_place_at_use_views_and_placeholders(self):
+        from torch._functorch._aot_autograd.graph_compile import (
+            _move_pack_hooks_after_last_use,
+        )
+
+        aten = torch.ops.aten
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        y = g.placeholder("y")
+        a = g.call_function(aten.sin.default, (x,))
+        a_t = g.call_function(aten.t.default, (a,))
+        b = g.call_function(aten.cos.default, (a,))
+        c = g.call_function(aten.sin.default, (a_t,))
+        pack_a = g.call_function(aten.mul.Tensor, (a, 2))
+        pack_x = g.call_function(aten.mul.Tensor, (x, 2))
+        pack_y = g.call_function(aten.mul.Tensor, (y, 2))
+        g.output((b, c, pack_a, pack_x, pack_y))
+
+        _move_pack_hooks_after_last_use(
+            g, [(a, [pack_a]), (x, [pack_x]), (y, [pack_y])]
+        )
+        g.lint()
+        # The use of the view a_t keeps a alive past its last direct use b.
+        self.assertIs(pack_a.prev, c)
+        self.assertIs(pack_x.prev, a)
+        # y has no forward use: its pack goes right after the placeholders.
+        self.assertIs(pack_y.prev, y)
+
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
         # marked as activations, but they add some offset
