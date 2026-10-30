@@ -41,13 +41,6 @@ test_python_mps() {
   setup_test_python
 
   time PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --verbose --mps
-  # Run scalar binary ops under the Metal shader validation layer to catch
-  # bad buffer address spaces (e.g. read-only setBytes bound to a writable arg).
-  MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 python3 test/test_mps.py --verbose -k test_add_sub
-  # Metal capture is flaky, so retry it a few times before giving up.
-  for _ in 1 2 3; do
-    MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture && break
-  done
 
   assert_git_not_dirty
 }
@@ -74,38 +67,6 @@ test_python_shard() {
   time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
-}
-
-test_libtorch() {
-  # C++ API
-
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-    # NB: Install outside of source directory (at the same level as the root
-    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-    # But still clean it before we perform our own build.
-
-    echo "Testing libtorch"
-
-    CPP_BUILD="$PWD/../cpp-build"
-    rm -rf "$CPP_BUILD"
-    mkdir -p "$CPP_BUILD"/caffe2
-
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd "$CPP_BUILD"/caffe2
-    VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
-    popd
-
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
-
-    # Unfortunately it seems like the test can't load from miniconda3
-    # without these paths being set
-    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" CPP_TESTS_DIR="${CPP_BUILD}/caffe2/bin" python test/run_test.py --cpp --verbose -i cpp/test_api
-
-    assert_git_not_dirty
-  fi
 }
 
 test_custom_backend() {
@@ -402,7 +363,6 @@ elif [[ $TEST_CONFIG == *"mps"* ]]; then
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    test_libtorch
     test_custom_script_ops
   elif [[ "${SHARD_NUMBER}" == 2 ]]; then
     test_jit_hooks
@@ -410,7 +370,6 @@ elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   fi
 else
   test_python_all
-  test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend

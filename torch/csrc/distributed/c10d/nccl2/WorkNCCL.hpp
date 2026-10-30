@@ -13,14 +13,12 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/ScopeExit.h>
 #include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -49,6 +47,30 @@ class NCCLEventPool {
   const bool event_cache_enabled_;
   const size_t max_event_pool_size_;
   std::atomic<bool> timing_enabled_;
+};
+
+// Hides the dist.record_comm name while it lives. c10d::Work's constructor
+// would otherwise open a second profiler event, without inputs; nccl2 applies
+// the name in WorkNCCL::recordStart instead.
+class ScopedHideCommProfilingName {
+ public:
+  ScopedHideCommProfilingName() : name_(get_comm_profiling_name()) {
+    if (!name_.empty()) {
+      set_comm_profiling_name("");
+    }
+  }
+  ~ScopedHideCommProfilingName() {
+    if (!name_.empty()) {
+      set_comm_profiling_name(name_);
+    }
+  }
+
+  ScopedHideCommProfilingName(const ScopedHideCommProfilingName&) = delete;
+  ScopedHideCommProfilingName& operator=(const ScopedHideCommProfilingName&) =
+      delete;
+
+ private:
+  const std::string name_;
 };
 
 // Work object for the NCCL TorchComms backend. Ported from torchcomms'
@@ -107,6 +129,14 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
+  // Makes getDuration() measure from where first's duration starts.
+  void setDurationStart(const WorkNCCL& first);
+  // Keeps the works' input tensors alive until this work is waited on, without
+  // taking them from the works.
+  void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
@@ -115,7 +145,8 @@ class WorkNCCL : public c10d::Work {
 
  protected:
   // Starts the `nccl:<coll_name>` (or dist.record_comm) profiler event, named
-  // like stock ProcessGroupNCCL's, and records the start CUDA event.
+  // like stock ProcessGroupNCCL's, and records the start CUDA event. An empty
+  // coll_name starts no profiler event.
   void recordStart(
       std::string_view coll_name,
       c10::ArrayRef<at::Tensor> inputs = {});
@@ -126,10 +157,20 @@ class WorkNCCL : public c10d::Work {
   friend class WindowNCCL;
 
  private:
+  // The public constructors delegate here; the temporary hide outlives the
+  // c10d::Work base constructor.
+  WorkNCCL(
+      ScopedHideCommProfilingName&& /*hidden*/,
+      ProcessGroupNCCL* comm,
+      cudaStream_t stream,
+      std::chrono::milliseconds timeout_ms,
+      std::vector<at::Tensor> inputTensors);
+
   struct Events;
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
     void append(InputTensorShelf& other);
+    void appendCopy(InputTensorShelf& other);
     void clear();
 
     std::mutex mutex;
@@ -191,34 +232,20 @@ class WorkNCCL : public c10d::Work {
   c10::intrusive_ptr<c10::ivalue::Future> future_;
 };
 
-// Constructs a c10d::Work subclass with the dist.record_comm name hidden: the
-// c10d::Work constructor would open a second profiler event, without inputs.
-// WorkNCCL::recordStart applies the name instead.
-template <typename T, typename... Args>
-c10::intrusive_ptr<T> makeWork(Args&&... args) {
-  if (get_comm_profiling_name().empty()) {
-    return c10::make_intrusive<T>(std::forward<Args>(args)...);
-  }
-  const std::string name = get_comm_profiling_name();
-  set_comm_profiling_name("");
-  auto restore = c10::make_scope_exit([&] { set_comm_profiling_name(name); });
-  return c10::make_intrusive<T>(std::forward<Args>(args)...);
-}
-
 // Profiles a coalesced op as one event spanning this scope, like stock
-// ProcessGroupNCCL, and suppresses the per-op WorkNCCL events issued in it.
+// ProcessGroupNCCL. The op's per-tensor works are issued with an empty
+// profiling title so they add no events of their own.
 class CoalescedProfilerEvent {
  public:
   CoalescedProfilerEvent(
       std::string_view coll_name,
       c10::ArrayRef<at::Tensor> inputs);
-  ~CoalescedProfilerEvent();
 
   CoalescedProfilerEvent(const CoalescedProfilerEvent&) = delete;
   CoalescedProfilerEvent& operator=(const CoalescedProfilerEvent&) = delete;
 
  private:
-  const bool prevSuppressed_;
+  // Its destructor ends the event.
   at::RecordFunction recordFunction_{at::RecordScope::USER_SCOPE};
 };
 

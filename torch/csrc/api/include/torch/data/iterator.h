@@ -123,7 +123,7 @@ struct SentinelIterator : public IteratorImpl<Batch> {
   }
 
   /// Sentinel iterators always compare equal.
-  bool operator==(const SentinelIterator<Batch>& other) const override {
+  bool operator==(const SentinelIterator<Batch>& /*other*/) const override {
     return true;
   }
 };

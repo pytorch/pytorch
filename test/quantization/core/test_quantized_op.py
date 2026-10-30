@@ -5446,7 +5446,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         )
         previous_num_threads = torch.get_num_threads()
         try:
-            torch.set_num_threads(1)
+            torch.set_num_threads(2)
             for index_dtype, offset_dtype in itertools.product(
                     (torch.int32, torch.int64), repeat=2):
                 for sparse in (False, True):
@@ -5466,13 +5466,13 @@ class TestQuantizedEmbeddingOps(TestCase):
                             )
 
                 # The one-entry mapping takes the dense fallback after sparse
-                # calls and must use the correct dense key.
+                # calls and must rebuild the last dense key.
                 with self.subTest(
                         index_dtype=index_dtype,
                         offset_dtype=offset_dtype,
                         fallback_to_no_sparse=True):
                     run_case(
-                        8,
+                        16,
                         False,
                         False,
                         index_dtype,
