@@ -4,6 +4,8 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <optional>
+
 namespace torch::dynamo {
 
 PyObject* torch_c_dynamo_guards_init();
@@ -48,6 +50,17 @@ struct LocalState {
     } else {
       return override_dispatch_key_set;
     }
+  }
+
+  // C++ FakeTensors carry Fake; masking it lets guards built from fakes match
+  // real tensors. Explicit DispatchKeySet values go through apply() instead,
+  // since programs can branch on whether they contain Fake.
+  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
+    auto result = apply(ks);
+    if (override_dispatch_key_set.empty() && should_mask_python_keys) {
+      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
+    }
+    return result;
   }
 
   LocalState()
