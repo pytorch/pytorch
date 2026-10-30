@@ -884,9 +884,11 @@ def generic_jump(
         ):
             error_msg: VariableTracker = self.pop()
             # Skip over things like `assert True`
-            is_constant, constant = value.try_as_python_constant()
-            if is_constant:
-                if bool(constant):
+            if (
+                value.is_python_constant()
+                and (constant := value.try_as_python_constant())[0]
+            ):
+                if bool(constant[1]):
                     return self.jump(inst)
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
@@ -958,14 +960,16 @@ def generic_jump(
             self.jump(inst)
             return
 
-        is_constant, constant = value.try_as_python_constant()
-        if is_constant:
+        if (
+            value.is_python_constant()
+            and (constant := value.try_as_python_constant())[0]
+        ):
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
             if isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            if truth_fn(constant):
+            if truth_fn(constant[1]):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -3524,8 +3528,7 @@ class InstructionTranslatorBase(
         try:
             result = generic_getattr(self, obj, attr)
         except Unsupported:
-            is_constant, constant = obj.try_as_python_constant()
-            if not is_constant:
+            if not obj.is_python_constant():
                 raise
             # An eager getattr would run a user-defined __get__ at trace time
             # and bake its result into the graph.
@@ -3537,6 +3540,9 @@ class InstructionTranslatorBase(
             ):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
+            is_constant, constant = obj.try_as_python_constant()
+            if not is_constant:
+                raise
             result = VariableTracker.build(self, getattr(constant, attr), source=source)
         self.push(result)
 
@@ -4739,9 +4745,8 @@ class InstructionTranslatorBase(
 
     def GET_LEN(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        is_constant, constant = tos.try_as_python_constant()
-        if is_constant:
-            self.push(VariableTracker.build(self, len(constant)))
+        if tos.is_python_constant() and (constant := tos.try_as_python_constant())[0]:
+            self.push(VariableTracker.build(self, len(constant[1])))
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 

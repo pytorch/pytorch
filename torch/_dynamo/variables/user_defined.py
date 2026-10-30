@@ -75,6 +75,7 @@ from ..source import (
 )
 from ..utils import (
     base_exception_methods,
+    check_constant_args,
     check_positional,
     cmp_name_to_op_mapping,
     defaultdict_methods,
@@ -100,7 +101,6 @@ from ..utils import (
     set_methods,
     tensortype_to_dtype,
     tracked_repr,
-    try_constant_args,
     tuple_methods,
     unpack_iterable,
     unpatched_nn_module_getattr,
@@ -423,7 +423,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return ConstantVariable.create(NotImplemented)
         return ConstantVariable.create(NotImplemented)
 
-    def as_python_constant(self, *, guard: bool = True) -> type[object]:
+    def as_python_constant(self) -> type[object]:
         return self.value
 
     def as_proxy(self) -> object:
@@ -1363,17 +1363,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # device.__new__, which Dynamo skips.
                 return CurrentDeviceVariable(device_arg.value)
 
-        if (
-            self.can_constant_fold_through()
-            and (constants := try_constant_args(args, kwargs))[0]
-        ):
-            _, native_args, native_kwargs = constants
+        if self.can_constant_fold_through() and check_constant_args(args, kwargs):
             # constant fold
             return VariableTracker.build(
                 tx,
                 self.as_python_constant()(  # type: ignore[operator]
-                    *native_args,
-                    **native_kwargs,
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
         elif self.value is torch.nn.CrossEntropyLoss:
@@ -1533,7 +1529,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # compiling rank's, so it must not be captured.
                 variable_cls._get_device_index_fn(args[0].value, optional=True)
                 return CurrentDeviceContextVariable(args[0].value.type, self.value)
-            is_constant, arg = args[0].try_as_python_constant()
+            is_constant, arg = False, None
+            if args[0].is_python_constant():
+                is_constant, arg = args[0].try_as_python_constant()
             if not is_constant:
                 raise_type_error(tx, f"{name} requires a constant argument")
             if _coor_enabled():
@@ -1759,6 +1757,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     index = None
                     if (
                         device_arg is not None
+                        and device_arg.is_python_constant()
                         and (device_constant := device_arg.try_as_python_constant())[0]
                     ):
                         dev = device_constant[1]
@@ -1895,7 +1894,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif self.value is random.Random:
-            if len(args) == 1 and (constant := args[0].try_as_python_constant())[0]:
+            if (
+                len(args) == 1
+                and args[0].is_python_constant()
+                and (constant := args[0].try_as_python_constant())[0]
+            ):
                 seed = constant[1]
             else:
                 seed = None
@@ -2026,9 +2029,6 @@ def call_random_fn(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
     replay_fn: RandomCallOnSource | None = None,
-    *,
-    native_args: list[Any] | None = None,
-    native_kwargs: dict[str, Any] | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
@@ -2038,14 +2038,8 @@ def call_random_fn(
         if isinstance(random_var, variables.RandomVariable):
             return random_var.call_method(tx, fn.__name__, args, kwargs)
 
-    args = (
-        [x.as_python_constant() for x in args] if native_args is None else native_args
-    )
-    kwargs = (
-        {k: v.as_python_constant() for k, v in kwargs.items()}
-        if native_kwargs is None
-        else native_kwargs
-    )
+    args = [x.as_python_constant() for x in args]
+    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
     # NB: it is probably not important for the example_value to be exactly correct,
     # we just need the right type
@@ -2144,13 +2138,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
+    def is_python_constant(self) -> bool:
         # The container base infers constness from the elements without probing
         # as_python_constant(), so it would report a user subclass as a constant
         # that as_python_constant() below refuses to build.
-        return VariableTracker.is_python_constant(self, guard=guard)
+        return VariableTracker.is_python_constant(self)
 
-    def as_python_constant(self, *, guard: bool = True) -> object:
+    def as_python_constant(self) -> object:
         from ..utils import is_pybind11_enum_member
 
         if isinstance(
@@ -3586,16 +3580,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         if (
             self.is_supported_random()
-            and (constants := try_constant_args(args, kwargs))[0]
+            and all(k.is_python_constant() for k in args)
+            and all(v.is_python_constant() for v in kwargs.values())
         ):
-            return call_random_fn(
-                tx,
-                cast(Callable[..., Any], self.value),
-                args,
-                kwargs,
-                native_args=constants[1],
-                native_kwargs=constants[2],
-            )
+            return call_random_fn(tx, self.value, args, kwargs)  # type: ignore[arg-type]
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -4667,7 +4655,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         tx = InstructionTranslator.current_tx()
         return self.tp_getattro_impl(tx, field_name)
 
-    def as_python_constant(self, *, guard: bool = True) -> object:
+    def as_python_constant(self) -> object:
         from dataclasses import fields
 
         import torch.utils._pytree as pytree
@@ -4967,7 +4955,7 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
         else:
             raise AssertionError(f"No constant base type found in MRO of {type(value)}")
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def as_proxy(self) -> Any:
@@ -5220,15 +5208,12 @@ class DefaultDictVariable(ConstDictVariable):
             ),
         )
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
             return False
         return super().is_python_constant()
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         is_constant, factory = self.default_factory.try_as_python_constant()
         if not is_constant:
             raise AsPythonConstantNotImplementedError(
@@ -5859,7 +5844,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def get_construct_fn(self) -> Callable[..., Any]:
         return self.tuple_cls._make  # type: ignore[attr-defined]
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
 
@@ -5907,7 +5892,7 @@ class StructSequenceVariable(UserDefinedTupleVariable):
     def get_construct_fn(self) -> Callable[..., Any]:
         return self.tuple_cls
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = [x.as_python_constant() for x in self.items]
         return self.tuple_cls(items)
 

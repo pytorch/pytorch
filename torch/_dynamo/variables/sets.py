@@ -154,10 +154,7 @@ class BaseSetVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real set, re-hashing the elements (wrong for elements
         # with a side-effecting __hash__).  Check element constness directly.
@@ -217,7 +214,11 @@ class BaseSetVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and (constant := args[0].try_as_python_constant())[0]:
+        if (
+            args[0].source is None
+            and args[0].is_python_constant()
+            and (constant := args[0].try_as_python_constant())[0]
+        ):
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -234,11 +235,14 @@ class BaseSetVariable(VariableTracker):
         self,
         tx: "InstructionTranslatorBase",
         fn: Any,
-        args: list[Any],
-        kwargs: dict[str, Any],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         try:
-            res = fn(self.as_python_constant(), *args, **kwargs)
+            res = fn(
+                *[x.as_python_constant() for x in [self, *args]],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
         except Exception as exc:
             raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
@@ -305,7 +309,7 @@ class BaseSetVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker | None":
-        from ..utils import try_constant_args
+        from ..utils import check_constant_args
         from .dicts import ConstDictVariable
 
         # Constant, exact-builtin fast path: materialize and call the real
@@ -315,13 +319,11 @@ class BaseSetVariable(VariableTracker):
         # is no C fast path to mirror.
         if (
             not any(isinstance(a, (BaseSetVariable, ConstDictVariable)) for a in args)
-            and (constants := try_constant_args(args, kwargs))[0]
+            and check_constant_args(args, kwargs)
             and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
-            return self._fast_set_method(
-                tx, getattr(py_type, name), constants[1], constants[2]
-            )
+            return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
         return None
 
     def isdisjoint(
@@ -588,7 +590,7 @@ class SetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return set
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -837,7 +839,7 @@ class OrderedSetClassVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def as_python_constant(self, *, guard: bool = True) -> type[OrderedSet[Any]]:
+    def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
     def call_method(
@@ -955,7 +957,7 @@ class OrderedSetVariable(BaseSetVariable):
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.items)
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
-    def as_python_constant(self, *, guard: bool = True) -> OrderedSet[Any]:
+    def as_python_constant(self) -> OrderedSet[Any]:
         items = []
         for item in self.items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -1180,7 +1182,7 @@ class FrozensetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -1280,7 +1282,9 @@ class FrozensetVariable(BaseSetVariable):
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
-        is_constant, value = self.try_as_python_constant()
+        is_constant, value = False, None
+        if self.is_python_constant():
+            is_constant, value = self.try_as_python_constant()
         if is_constant:
             return hash(value), False
         is_fake = False
@@ -1326,7 +1330,7 @@ class DictKeySetVariable(BaseSetVariable):
 
         return dict_keys
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()

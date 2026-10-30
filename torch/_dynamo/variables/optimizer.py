@@ -233,6 +233,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         def map_arg(arg: Any) -> Any:
             if (
                 isinstance(arg, VariableTracker)
+                and arg.is_python_constant()
                 and (constant := arg.try_as_python_constant())[0]
             ):
                 return constant[1]

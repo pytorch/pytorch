@@ -150,7 +150,10 @@ class CUDAMemPoolContextVariable(ContextWrappingVariable):
                 _current_cuda_device_source().make_guard(GuardBuilder.EQUALS_MATCH)
             )
             device_index = torch.cuda.current_device()
-        elif (constant := device.try_as_python_constant())[0]:
+        elif (
+            device.is_python_constant()
+            and (constant := device.try_as_python_constant())[0]
+        ):
             device_index = torch.cuda._utils._get_device_index(constant[1])
         else:
             unimplemented(

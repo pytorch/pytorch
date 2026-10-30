@@ -426,10 +426,9 @@ def generic_is_true(
     """
     from .constant import ConstantVariable
 
-    is_constant, value = obj.try_as_python_constant()
-    if is_constant:
+    if obj.is_python_constant():
         try:
-            return ConstantVariable.create(bool(value))
+            return ConstantVariable.create(bool(obj.as_python_constant()))
         except Exception as e:
             raise_observed_exception(type(e), tx, args=[str(e)])
 
@@ -719,7 +718,9 @@ def pynumber_int(
     # Fast path for int (sub)class instances — mirrors PyLong_Check at the
     # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
     # int subclasses like IntEnum whose __int__ calls int() again.
-    is_constant, value = obj.try_as_python_constant()
+    is_constant, value = False, None
+    if obj.is_python_constant():
+        is_constant, value = obj.try_as_python_constant()
     if is_constant and isinstance(value, int):
         return ConstantVariable.create(int(value))
 
@@ -762,29 +763,25 @@ def pylong_from_base(
     inputs cannot be resolved to Python constants.
     """
     # base = PyNumber_AsSsize_t(obase, NULL) -> nb_index.
-    if (
-        issubclass(obase.python_type(), int)
-        and (const := obase.try_as_python_constant())[0]
-    ):
-        is_constant, base = const
+    if obase.is_python_constant() and issubclass(obase.python_type(), int):
         base_vt = obase
     elif obase.tp_as_number.nb_index is not None:
         base_vt = obase.nb_index_impl(tx)
-        is_constant, base = base_vt.try_as_python_constant()
     else:
         raise_type_error(
             tx,
             f"'{obase.python_type_name()}' object cannot be interpreted as an integer",
         )
-    if not (is_constant and issubclass(base_vt.python_type(), int)):
+    if not (base_vt.is_python_constant() and issubclass(base_vt.python_type(), int)):
         return None
+    base = base_vt.as_python_constant()
     if (base != 0 and base < 2) or base > 36:
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
-    is_constant, xval = x.try_as_python_constant()
-    if not is_constant:
+    if not x.is_python_constant():
         return None
+    xval = x.as_python_constant()
     if not isinstance(xval, (str, bytes, bytearray)):
         raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
@@ -807,7 +804,9 @@ def pynumber_float(
     # Fast path: if the value is already a float constant, return it directly.
     # Mirrors PyFloat_CheckExact fast path at the top of PyNumber_Float
     # (abstract.c:1641-1643).
-    is_constant, value = obj.try_as_python_constant()
+    is_constant, value = False, None
+    if obj.is_python_constant():
+        is_constant, value = obj.try_as_python_constant()
     if is_constant and isinstance(value, float):
         return ConstantVariable.create(float(value))
 
@@ -829,7 +828,11 @@ def pynumber_float(
     if issubclass(obj.python_type(), (str, bytes)):
         try:
             return ConstantVariable.create(
-                float(value if is_constant else obj.as_python_constant())
+                float(
+                    typing.cast(str | bytes, value)
+                    if is_constant
+                    else obj.as_python_constant()
+                )
             )
         except ValueError as e:
             raise_observed_exception(ValueError, tx, args=[str(e)])
@@ -1890,6 +1893,8 @@ def python_constant_richcompare_impl(
     op: str,
 ) -> VariableTracker:
     """Constant-fold comparison for types with as_python_constant()."""
+    if not self.is_python_constant() or not other.is_python_constant():
+        return ConstantVariable.create(NotImplemented)
     self_constant = self.try_as_python_constant()
     if (
         not self_constant[0]

@@ -358,6 +358,8 @@ class SideEffects:
                 original_vt = item.tp_getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
+            if not original_vt.is_python_constant():
+                return False
             is_constant, original = original_vt.try_as_python_constant()
             if not is_constant:
                 return False
@@ -555,6 +557,7 @@ class SideEffects:
             and not isinstance(item, AutogradFunctionContextVariable)
             and not self.should_allow_side_effects_in_hop()
             and not self.should_allow_externally_visible_side_effects_in_subtracer()
+            and value.is_python_constant()
             and (constant := value.try_as_python_constant())[0]
         ):
             deferred = self.snapshot_attr_mutation(item, name, constant[1])

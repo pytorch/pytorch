@@ -83,7 +83,6 @@ from ..utils import (
     specialize_symnode,
     str_methods,
     tensortype_to_dtype,
-    try_constant_args,
     unpack_iterable,
 )
 from .base import (
@@ -480,7 +479,7 @@ class BaseBuiltinVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self._fn
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -539,7 +538,9 @@ class BaseBuiltinVariable(VariableTracker):
             if self.as_python_constant() is type:
                 if isinstance(arg, variables.UserDefinedClassVariable):
                     return VariableTracker.build(tx, type.__str__(arg.value))
-                is_constant, value = arg.try_as_python_constant()
+                is_constant, value = False, None
+                if arg.is_python_constant():
+                    is_constant, value = arg.try_as_python_constant()
                 if is_constant and isinstance(value, type):
                     return VariableTracker.build(tx, type.__str__(value))
             return generic_str(tx, arg)
@@ -552,7 +553,9 @@ class BaseBuiltinVariable(VariableTracker):
             if self.as_python_constant() is type:
                 if isinstance(arg, variables.UserDefinedClassVariable):
                     return VariableTracker.build(tx, type.__repr__(arg.value))
-                is_constant, value = arg.try_as_python_constant()
+                is_constant, value = False, None
+                if arg.is_python_constant():
+                    is_constant, value = arg.try_as_python_constant()
                 if is_constant and isinstance(value, type):
                     return VariableTracker.build(tx, type.__repr__(value))
             return generic_repr(tx, arg)
@@ -1141,7 +1144,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return f"{self.__class__.__name__}({name})"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.fn
 
     def get_real_python_backed_value(self) -> Any:
@@ -1460,10 +1463,14 @@ class BuiltinVariable(BaseBuiltinVariable):
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
                     # path with a runtime check
-                    all_constant, values, kwvalues = try_constant_args(args, kwargs)
-                    if all_constant:
+                    if check_unspec_or_constant_args(args, kwargs):
                         try:
-                            res = fn(*values, **kwvalues)
+                            res = fn(
+                                *[x.as_python_constant() for x in args],
+                                **{
+                                    k: v.as_python_constant() for k, v in kwargs.items()
+                                },
+                            )
                         except AsPythonConstantNotImplementedError as exc:
                             unimplemented(
                                 gb_type="constant fold exception",
@@ -1591,6 +1598,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         if args or kwargs:
+            return None
+        if not source.is_python_constant():
             return None
         is_constant, source_str = source.try_as_python_constant()
         if not is_constant:
@@ -1920,6 +1929,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             if (
                 isinstance(obj, UserDefinedObjectVariable)
                 and tx.output.side_effects.is_attribute_mutation(obj)
+                and name_var.is_python_constant()
                 and (constant := name_var.try_as_python_constant())[0]
             ):
                 return obj.method_setattr_standard(
@@ -1955,11 +1965,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
-            all_constant, values, kwvalues = try_constant_args(args, kwargs)
-            if all_constant:
+            if all(a.is_python_constant() for a in args) and all(
+                v.is_python_constant() for v in kwargs.values()
+            ):
                 try:
                     fn = getattr(self.fn, name)
-                    res = fn(*values, **kwvalues)
+                    res = fn(
+                        *(a.as_python_constant() for a in args),
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
                     return VariableTracker.build(tx, res)
                 except Exception as e:
                     raise_observed_exception(
@@ -1983,16 +1997,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             and len(args) == 2
             and not kwargs
             and isinstance(self.fn, type)
-            and (left := args[0].try_as_python_constant())[0]
-            and (right := args[1].try_as_python_constant())[0]
+            and args[0].is_python_constant()
+            and args[1].is_python_constant()
         ):
             # Unbound rich-comparison dunder, e.g. complex.__eq__(1+1j, 2).
             # Invoke only the left type's slot on the constants, mirroring
             # CPython (returns NotImplemented rather than falling back to the
             # reflected operation when the operands are incompatible).
-            lval = left[1]
+            lval = args[0].as_python_constant()
             if isinstance(lval, self.fn):
-                return ConstantVariable.create(getattr(self.fn, name)(lval, right[1]))
+                return ConstantVariable.create(
+                    getattr(self.fn, name)(lval, args[1].as_python_constant())
+                )
 
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name, None)
@@ -2121,10 +2137,14 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if not args and not kwargs:
             return variables.ConstantVariable.create(b"")
-        all_constant, values, kwvalues = try_constant_args(args, kwargs)
-        if all_constant:
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
             try:
-                res = bytes(*values, **kwvalues)
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
                 return VariableTracker.build(tx, res)
             except (TypeError, ValueError) as e:
                 raise_observed_exception(
@@ -2162,12 +2182,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         except NotImplementedError:
             fail(args, kwargs)
 
-        all_constant, values, _ = try_constant_args(args[1:], kwargs)
-        if all_constant:
+        if check_constant_args(args[1:], kwargs):
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
-                    *values,
+                    *[a.as_python_constant() for a in args[1:]],
                 )
             except (TypeError, ValueError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
@@ -2234,7 +2253,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         for item, keyval in zip(items[1:], keyvals[1:]):
             left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
             cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
-            is_constant, comparison = cmp.try_as_python_constant()
+            is_constant, comparison = False, None
+            if cmp.is_python_constant():
+                is_constant, comparison = cmp.try_as_python_constant()
             if not is_constant:
                 unimplemented(
                     gb_type="min/max with non-constant key",
@@ -2499,7 +2520,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
         # Enable specialized VTs for constants to work with dir()
-        is_constant, value = arg.try_as_python_constant()
+        is_constant, value = False, None
+        if arg.is_python_constant():
+            is_constant, value = arg.try_as_python_constant()
         if is_constant:
             return VariableTracker.build(tx, dir(value))
         return None
@@ -2670,7 +2693,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Like the default, a symbolic hint is specialized so that its type and
         # range can be checked here instead of at runtime.
         hint = specialize_symnode(hint)
-        is_constant, val = hint.try_as_python_constant()
+        is_constant, val = False, None
+        if hint.is_python_constant():
+            is_constant, val = hint.try_as_python_constant()
         if is_constant:
             if val is NotImplemented:
                 return default
@@ -3655,11 +3680,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.
-            all_constant, values, _ = try_constant_args(args, kwargs)
-            if not all_constant:
+            if not check_unspec_or_constant_args(args, kwargs):
                 raise
             try:
-                result = getattr(*values)
+                result = getattr(*[a.as_python_constant() for a in args])
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
                 raise
@@ -3680,8 +3704,10 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var = args[1]
         default = args[2] if len(args) > 2 else _NO_DEFAULT
 
-        is_constant, name = name_var.try_as_python_constant()
-        if not is_constant:
+        if (
+            not name_var.is_python_constant()
+            or not (constant := name_var.try_as_python_constant())[0]
+        ):
             unimplemented(
                 gb_type="getattr() with non-constant name argument",
                 context=f"getattr({obj}, {name_var}, {default})",
@@ -3689,6 +3715,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 hints=["Ensure the name argument of getattr() is a string"],
             )
 
+        name = constant[1]
         if not isinstance(name, str):
             type_name = name_var.python_type_name()
             raise_type_error(tx, f"attribute name must be string, not '{type_name}'")
@@ -3725,6 +3752,8 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
         obj, attr = args
+        if not attr.is_python_constant():
+            raise_observed_exception(TypeError, tx)
         is_constant, attr_name = attr.try_as_python_constant()
         if not is_constant:
             raise_observed_exception(TypeError, tx)
@@ -3830,6 +3859,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     dtype = obj.dtype  # type: ignore[attr-defined]
                     if (
                         obj.source is None
+                        and val.is_python_constant()
                         and (constant := val.try_as_python_constant())[0]
                         and constant[1] is True
                         and not obj.requires_grad  # type: ignore[attr-defined]
@@ -4106,11 +4136,13 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
     def _constant_fold_constructor(
         self,
         tx: "InstructionTranslatorBase",
-        args: list[Any],
-        kwargs: dict[str, Any],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> ByteArrayVariable:
+        all_args = [a.as_python_constant() for a in args]
+        all_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         try:
-            result = bytearray(*args, **kwargs)
+            result = bytearray(*all_args, **all_kwargs)
         except TypeError as e:
             raise_type_error(tx, str(e))
         except ValueError as e:
@@ -4127,16 +4159,16 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
             return ByteArrayVariable(bytearray(), mutation_type=ValueMutationNew())
 
         if kwargs or len(args) >= 2:
-            all_constant, values, kwvalues = try_constant_args(args, kwargs)
-            if not all_constant:
+            if not all(a.is_python_constant() for a in args) or not all(
+                v.is_python_constant() for v in kwargs.values()
+            ):
                 raise_type_error(tx, "bytearray() takes only constant arguments")
-            return self._constant_fold_constructor(tx, values, kwvalues)
+            return self._constant_fold_constructor(tx, args, kwargs)
 
         arg = args[0]
 
-        is_constant, value = arg.try_as_python_constant()
-        if is_constant:
-            return self._constant_fold_constructor(tx, [value], {})
+        if arg.is_python_constant():
+            return self._constant_fold_constructor(tx, args, kwargs)
 
         try:
             unpacked = arg.unpack_var_sequence(tx)

@@ -92,7 +92,7 @@ class ItertoolsVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"ItertoolsVariable({self.value})"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def get_real_python_backed_value(self) -> Any:
@@ -190,7 +190,10 @@ class ItertoolsVariable(VariableTracker):
                 key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
-                elif (constant := key.try_as_python_constant())[0]:
+                elif (
+                    key.is_python_constant()
+                    and (constant := key.try_as_python_constant())[0]
+                ):
                     return constant[1]
                 else:
                     unimplemented(
@@ -270,7 +273,9 @@ class ItertoolsVariable(VariableTracker):
             times = bound.arguments.get("times")
             if times is None:
                 return RepeatIteratorVariable(item, mutation_type=ValueMutationNew())
-            is_constant, times_val = times.try_as_python_constant()
+            is_constant, times_val = False, None
+            if times.is_python_constant():
+                is_constant, times_val = times.try_as_python_constant()
             if not is_constant:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.repeat),
@@ -530,10 +535,10 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
-        item = self.item.try_as_python_constant()
-        if not item[0] or not (step_constant := self.step.try_as_python_constant())[0]:
+        if not (self.item.is_python_constant() and self.step.is_python_constant()):
             return super().tp_repr_impl(tx)
-        cnt, step = item[1], step_constant[1]
+        cnt = self.item.as_python_constant()
+        step = self.step.as_python_constant()
         # Suppress step in the repr when it is an integer equal to 1.
         if isinstance(step, int) and step == 1:
             result = f"count({cnt!r})"

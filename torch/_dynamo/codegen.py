@@ -333,8 +333,10 @@ class PyCodegen:
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
-        elif (const := value.try_as_python_constant())[0] and is_safe_constant(
-            const[1]
+        elif (
+            value.is_python_constant()
+            and (const := value.try_as_python_constant())[0]
+            and is_safe_constant(const[1])
         ):
             output.append(self.create_load_const(const[1]))
         elif isinstance(value, TensorWithTFOverrideVariable):

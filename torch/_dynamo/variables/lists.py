@@ -177,10 +177,8 @@ class BaseListVariable(VariableTracker):
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
-        return self.python_type()(
-            [x.as_python_constant(guard=guard) for x in self.items]
-        )
+    def as_python_constant(self) -> Any:
+        return self.python_type()([x.as_python_constant() for x in self.items])
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         return VariableTracker.build(tx, self.debug_repr())
@@ -414,8 +412,11 @@ class BaseListVariable(VariableTracker):
         for a, b in zip(left, right):
             # CPython uses PyObject_RichCompareBool per element, which has
             # an identity shortcut before the full do_richcompare dispatch.
+            a, b = a.unwrap(), b.unwrap()
             eq_result = generic_richcompare_bool(tx, a, b, "__eq__")
-            is_constant, equal = eq_result.try_as_python_constant()
+            is_constant, equal = False, None
+            if eq_result.is_python_constant():
+                is_constant, equal = eq_result.try_as_python_constant()
             if is_constant:
                 if not equal:
                     if cmp_op in (operator.eq, operator.ne):
@@ -707,7 +708,9 @@ class BaseListVariable(VariableTracker):
                 result = variables.BuiltinVariable(operator.lt).call_function(
                     tx, [self.key, other.key], {}
                 )
-                is_constant, value = result.try_as_python_constant()
+                is_constant, value = False, None
+                if result.is_python_constant():
+                    is_constant, value = result.try_as_python_constant()
                 if not is_constant:
                     unimplemented(
                         gb_type="sort with non-constant keys",
@@ -732,11 +735,10 @@ class BaseListVariable(VariableTracker):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
 
-            all_constant, key_values, _ = try_constant_args(keys, {})
-            if all_constant:
+            if all(k.is_python_constant() for k in keys):
                 order = sorted(
                     range(len(saved)),
-                    key=lambda i: key_values[i],
+                    key=lambda i: keys[i].as_python_constant(),
                     reverse=reverse,
                 )
             else:
@@ -927,7 +929,7 @@ class RangeVariable(BaseListVariable):
         )
         return result
 
-    def as_python_constant(self, *, guard: bool = True) -> range:
+    def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
     def getitem_const(
@@ -1692,7 +1694,7 @@ class DequeVariable(BaseListVariable):
             f"{self.python_type_name()}([{items}], maxlen={tracked_repr(tx, self.maxlen)})",
         )
 
-    def as_python_constant(self, *, guard: bool = True) -> collections.deque[Any]:
+    def as_python_constant(self) -> collections.deque[Any]:
         return self.python_type()(
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
@@ -2117,7 +2119,7 @@ class ByteArrayVariable(VariableTracker):
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
 
-    def as_python_constant(self, *, guard: bool = True) -> bytearray:
+    def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
 
     def as_proxy(self) -> bytearray:
@@ -2174,8 +2176,8 @@ class ByteArrayVariable(VariableTracker):
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        is_constant, search = item.try_as_python_constant()
-        if is_constant:
+        if item.is_python_constant():
+            search = item.as_python_constant()
             try:
                 return ConstantVariable.create(search in self.data)
             except (TypeError, ValueError) as e:
@@ -2222,7 +2224,9 @@ class ByteArrayVariable(VariableTracker):
     ) -> bytearray:
         if isinstance(other, ByteArrayVariable):
             return other.data
-        is_constant, const = other.try_as_python_constant()
+        is_constant, const = False, None
+        if other.is_python_constant():
+            is_constant, const = other.try_as_python_constant()
         if is_constant:
             if isinstance(const, (bytes, bytearray)):
                 return bytearray(const)
@@ -2277,10 +2281,9 @@ class ByteArrayVariable(VariableTracker):
         # bytearray_mod: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if reverse:
             return ConstantVariable.create(NotImplemented)
-        is_constant, value = other.try_as_python_constant()
-        if is_constant:
+        if other.is_python_constant():
             try:
-                result = self.data % value
+                result = self.data % other.as_python_constant()
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return ByteArrayVariable(
@@ -2303,11 +2306,10 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        is_constant, value = other.try_as_python_constant()
-        if not is_constant:
+        if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
         try:
-            result = self.data % value
+            result = self.data % other.as_python_constant()
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         tx.output.side_effects.mutation(self)
@@ -2447,9 +2449,8 @@ class SizeVariable(TupleVariable):
 
         int_items: list[int] = []
         for item in self.items:
-            is_constant, value = item.try_as_python_constant()
-            if is_constant:
-                int_items.append(value)
+            if item.is_python_constant():
+                int_items.append(item.as_python_constant())
                 continue
             if isinstance(item, TensorVariable):
                 proxy = getattr(item, "proxy", None)
@@ -2559,9 +2560,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            is_constant, value = v.try_as_python_constant()
-            if is_constant:
-                const_result *= value
+            if v.is_python_constant():
+                const_result *= v.as_python_constant()
             else:
                 if not isinstance(v, SymNodeVariable):
                     raise AssertionError(
@@ -2736,7 +2736,7 @@ class SliceVariable(VariableTracker):
     def python_type(self) -> type:
         return slice
 
-    def as_python_constant(self, *, guard: bool = True) -> slice:
+    def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
     def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
@@ -2880,7 +2880,7 @@ class BaseListIteratorVariable(IteratorVariable):
     def python_type(self) -> type:
         return type(iter([]))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if self.index > 0:
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
@@ -2945,7 +2945,7 @@ class TupleIteratorVariable(BaseListIteratorVariable):
     def python_type(self) -> type:
         return type(iter(()))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if self.index > 0:
             raise NotImplementedError
         return iter(tuple(x.as_python_constant() for x in self.items))
@@ -3133,7 +3133,7 @@ class ListReverseIteratorVariable(IteratorVariable):
     def python_type(self) -> type:
         return type(reversed([]))
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         raise NotImplementedError
 
     def call_obj_hasattr(

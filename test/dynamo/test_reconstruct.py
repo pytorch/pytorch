@@ -9,6 +9,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.utils.checkpoint
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -22,6 +23,12 @@ from torch.utils._triton import (
 
 
 _FROZEN_NUMBERS = frozenset({1, 2, 3})
+_CLASS_HASH_EFFECTS = []
+
+
+class _IgnoreClassOptionsMeta(type):
+    def __new__(cls, name, bases, namespace, **kwargs):
+        return super().__new__(cls, name, bases, namespace)
 
 
 def _filter_instructions(instructions, opname):
@@ -66,6 +73,259 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_module_membership_partial_dict_hash_effects(self):
+        hash_calls = []
+
+        class Key(enum.Enum):
+            ITEM = 1
+
+            def __hash__(self):
+                hash_calls.append("hash")
+                return 1
+
+        modules = torch.nn.ModuleDict({"ok": torch.nn.Identity()})
+        modules.torchdynamo_force_dynamic = False
+
+        def fn(x):
+            payload = {Key.ITEM: 1, "tensor": x}
+            y = x + 1
+            torch._dynamo.graph_break()
+            try:
+                _ = payload in modules
+            except TypeError as error:
+                message = str(error)
+            else:
+                message = "no error"
+            return y + len(hash_calls), payload, message
+
+        counter = torch._dynamo.testing.CompileCounter()
+        executions = []
+
+        def backend(gm, example_inputs):
+            forward = counter(gm, example_inputs)
+
+            def execute(*args):
+                executions.append("forward")
+                return forward(*args)
+
+            return execute
+
+        x = torch.arange(2, dtype=torch.float32)
+        expected = fn(x)
+        eager_hash_calls = list(hash_calls)
+        hash_calls.clear()
+        result = torch.compile(fn, backend=backend, fullgraph=False)(x)
+        self.assertGreater(counter.op_count, 0)
+        self.assertTrue(executions)
+        self.assertEqual(result[2], "unhashable type: 'dict'")
+        self.assertEqual(result[2], expected[2])
+        self.assertIs(result[1]["tensor"], x)
+        self.assertIs(expected[1]["tensor"], x)
+        self.assertEqual(result[0], expected[0])
+        self.assertEqual(hash_calls, eager_hash_calls)
+
+    @parametrize("use_bool", [False, True])
+    def test_truth_testing_partial_constant_dict(self, use_bool):
+        hash_calls = []
+
+        class Key(enum.Enum):
+            ITEM = 7
+
+            def __hash__(self):
+                hash_calls.append("hash")
+                if len(hash_calls) == 2:
+                    raise RuntimeError("unexpected native key rehash")
+                return 7
+
+        def fn(x, values):
+            if use_bool:
+                return x + int(bool(values))
+            if values:
+                return x + 1
+            return x - 1
+
+        x = torch.arange(2, dtype=torch.float32)
+        values = {Key.ITEM: 19, "tensor": x}
+        hash_calls.clear()
+        expected = fn(x, values)
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=counter, fullgraph=True)(x, values)
+        self.assertEqual(result, expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_unbound_setattr_partial_dict_name_hash_effects(self):
+        hash_calls = []
+
+        class Key(enum.Enum):
+            ITEM = 7
+
+            def __hash__(self):
+                hash_calls.append("hash")
+                return 7
+
+        class Holder:
+            pass
+
+        def fn(x, holder, name):
+            prefix = x + 1
+            torch._dynamo.graph_break()
+            try:
+                object.__setattr__(holder, name, 17)
+            except TypeError as exc:
+                return prefix, str(exc)
+            return x - 1, "accepted"
+
+        x = torch.arange(2, dtype=torch.float32)
+        holder = Holder()
+        name = {Key.ITEM: 19, "tensor": x}
+        hash_calls.clear()
+        expected = fn(x, holder, name)
+        self.assertEqual(expected, (x + 1, "attribute name must be string, not 'dict'"))
+        self.assertEqual(hash_calls, [])
+        counter = torch._dynamo.testing.CompileCounter()
+        executions = []
+
+        def backend(gm, inputs):
+            forward = counter(gm, inputs)
+
+            def execute(*args):
+                result = forward(*args)
+                executions.append(1)
+                return result
+
+            return execute
+
+        result = torch.compile(fn, backend=backend, fullgraph=False)(x, holder, name)
+        self.assertEqual(result, expected)
+        self.assertEqual(holder.__dict__, {})
+        self.assertIs(name["tensor"], x)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counter.op_count, 0)
+        self.assertEqual(executions, [1])
+        self.assertEqual(hash_calls, [])
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_unused_class_kwargs_hash_effect_order(self):
+        hash_calls = _CLASS_HASH_EFFECTS
+        hash_calls.clear()
+        self.addCleanup(hash_calls.clear)
+
+        class Key(enum.Enum):
+            ITEM = 7
+
+            def __hash__(self):
+                _CLASS_HASH_EFFECTS.append("hash")
+                return 7
+
+        def fn(x, options):
+            class Generated(metaclass=_IgnoreClassOptionsMeta, options=options):
+                bias = len(_CLASS_HASH_EFFECTS)
+
+            return x + Generated.bias
+
+        x = torch.arange(2, dtype=torch.float32)
+        options = {Key.ITEM: 19}
+        hash_calls.clear()
+        expected = fn(x, options)
+        self.assertEqual(expected, fn(x.double(), options).float())
+        self.assertEqual(hash_calls, [])
+        counter = torch._dynamo.testing.CompileCounter()
+        executions = []
+
+        def backend(gm, inputs):
+            forward = counter(gm, inputs)
+
+            def execute(*args):
+                result = forward(*args)
+                executions.append(1)
+                return result
+
+            return execute
+
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, options)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertGreater(counter.op_count, 0)
+        self.assertEqual(executions, [1])
+        self.assertEqual(list(options.values()), [19])
+        self.assertIs(next(iter(options)), Key.ITEM)
+        self.assertEqual(result, expected)
+
+    @parametrize("original", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_checkpoint_partial_dict_hash_effects(self, original):
+        hash_calls = []
+
+        class Key(enum.Enum):
+            ITEM = 7
+
+            def __hash__(self):
+                hash_calls.append("hash")
+                return 7
+
+        class State:
+            def __init__(self, payload):
+                self.payload = payload
+
+        state = None
+
+        def current_fn(y, payload):
+            y = y + len(payload)
+
+            def body(z):
+                nonlocal state
+                state = payload
+                return z.sin()
+
+            return torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False) + 1
+
+        def original_fn(y, holder):
+            y = y + len(holder.payload)
+
+            def body(z):
+                holder.payload = 17
+                return z.sin()
+
+            return torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False) + 1
+
+        x = torch.arange(2, dtype=torch.float32, requires_grad=True)
+        payload = {Key.ITEM: 19, "tensor": x}
+        holder = State(payload)
+        fn = original_fn if original else current_fn
+        args = (x, holder) if original else (x, payload)
+        hash_calls.clear()
+        expected = fn(*args)
+        expected_state = holder.payload if original else state
+        self.assertEqual(hash_calls, [])
+        state = None
+        holder.payload = payload
+        counter = torch._dynamo.testing.CompileCounter()
+        executions = []
+
+        def backend(gm, inputs):
+            forward = counter(gm, inputs)
+
+            def execute(*args):
+                result = forward(*args)
+                executions.append(1)
+                return result
+
+            return execute
+
+        result = torch.compile(fn, backend=backend)(*args)
+        self.assertEqual(result, expected)
+        if original:
+            self.assertEqual(holder.payload, expected_state)
+        else:
+            self.assertIs(state, expected_state)
+        self.assertIs(payload["tensor"], x)
+        self.assertGreater(counter.frame_count, 0)
+        self.assertGreater(counter.op_count, 0)
+        self.assertEqual(len(executions), counter.frame_count)
+        # Preserve the API parent's hash effects for these two snapshot paths.
+        self.assertEqual(hash_calls, ["hash"] * (1 if original else 3))
 
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""
@@ -860,12 +1120,12 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         from torch._dynamo.variables.base import VariableTracker
 
         class _Parent(VariableTracker):
-            def as_python_constant(self, *, guard: bool = True):
+            def as_python_constant(self):
                 return 42
 
         class _Child(_Parent):
-            def as_python_constant(self, *, guard: bool = True):
-                return super().as_python_constant(guard=guard)
+            def as_python_constant(self):
+                return super().as_python_constant()
 
         child = _Child()
         # With name-based keying, _Child and _Parent share the same key

@@ -64,12 +64,12 @@ from ..source import (
 )
 from ..utils import (
     check_positional,
+    check_unspec_or_constant_args,
     identity,
     istype,
     no_keywords,
     proxy_args_kwargs,
     raise_args_mismatch,
-    try_constant_args,
     unpack_iterable,
 )
 from .base import (
@@ -1435,7 +1435,7 @@ class GetAttrVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         constant = self.obj.as_python_constant()
         try:
             return getattr(constant, self.name)
@@ -1484,7 +1484,9 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            is_constant, value = self.obj.try_as_python_constant()
+            is_constant, value = False, None
+            if self.obj.is_python_constant():
+                is_constant, value = self.obj.try_as_python_constant()
             if is_constant:
                 val = getattr(value, self.name)
                 resolved = VariableTracker.build(tx, val)
@@ -1547,7 +1549,7 @@ class CallMethodVariable(VariableTracker):
         except (AsPythonConstantNotImplementedError, AttributeError):
             return types.MethodType
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return getattr(self.obj.as_python_constant(), self.method_name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1610,7 +1612,7 @@ class PythonModuleVariable(VariableTracker):
     def python_type(self) -> type[types.ModuleType]:
         return types.ModuleType
 
-    def as_python_constant(self, *, guard: bool = True) -> types.ModuleType:
+    def as_python_constant(self) -> types.ModuleType:
         return self.value
 
     def get_real_python_backed_value(self) -> types.ModuleType:
@@ -1656,7 +1658,9 @@ class TypingVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # e.g., List[int] → typing.List[int]
-        is_constant, value = key.try_as_python_constant()
+        is_constant, value = False, None
+        if key.is_python_constant():
+            is_constant, value = key.try_as_python_constant()
         if not is_constant:
             unimplemented(
                 gb_type="non-constant typing subscript",
@@ -1704,7 +1708,9 @@ class TypingVariable(VariableTracker):
     ) -> VariableTracker:
         # GenericAlias types (e.g. Callable[[int], bool]) support __or__ for
         # type unions (e.g. Callable[[int], bool] | None).
-        is_constant, other_val = other.try_as_python_constant()
+        is_constant, other_val = False, None
+        if other.is_python_constant():
+            is_constant, other_val = other.try_as_python_constant()
         if not is_constant:
             return VariableTracker.build(tx, NotImplemented)
         # pyrefly: ignore[bad-argument-count]
@@ -1728,7 +1734,7 @@ class TypingVariable(VariableTracker):
         else:
             return SourcelessBuilder.create(tx, value)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1927,16 +1933,15 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            if (
-                self.can_constant_fold_through(func)
-                and (constants := try_constant_args(args, kwargs))[0]
+            if self.can_constant_fold_through(func) and (
+                check_unspec_or_constant_args(args, kwargs)
             ):
                 # constant fold
                 return VariableTracker.build(
                     tx,
                     self.as_python_constant()(
-                        *constants[1],
-                        **constants[2],
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
                     ),
                 )
 
@@ -1964,7 +1969,7 @@ class NumpyVariable(VariableTracker):
             ],
         )
 
-    def as_python_constant(self, *, guard: bool = True) -> BuiltinFunctionType:
+    def as_python_constant(self) -> BuiltinFunctionType:
         # The declared type is what callers rely on (they call the result), but
         # the builder also routes numpy dtypes and `np._CopyMode` here, so this
         # is a widening the annotation already claimed before `value` was typed.
@@ -2032,10 +2037,15 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        all_constant, values, kwvalues = try_constant_args(sym_args, sym_kwargs)
-        if all_constant:
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
             try:
-                result = format_string.format(*values, **kwvalues)
+                result = format_string.format(
+                    *[v.as_python_constant() for v in sym_args],
+                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
+                )
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
@@ -2328,7 +2338,7 @@ class ConstantLikeVariable(VariableTracker):
 
         return f"{t.__module__}.{t.__qualname__}"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -2617,7 +2627,7 @@ class RandomVariable(VariableTracker):
     def python_type(self) -> type[random.Random]:
         return random.Random
 
-    def as_python_constant(self, *, guard: bool = True) -> random.Random:
+    def as_python_constant(self) -> random.Random:
         return self.random
 
     @staticmethod

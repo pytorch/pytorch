@@ -2339,7 +2339,10 @@ class OutputGraph(OutputGraphCommon):
                             output_return_type[idx] = OutputReturnInfo(
                                 "input", vt.source
                             )
-                        elif (constant := vt.try_as_python_constant())[0]:
+                        elif (
+                            vt.is_python_constant()
+                            and (constant := vt.try_as_python_constant())[0]
+                        ):
                             output_return_type[idx] = OutputReturnInfo(
                                 "constant", constant[1]
                             )

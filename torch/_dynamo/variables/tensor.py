@@ -2540,7 +2540,8 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                (constant := a.try_as_python_constant())[0]
+                a.is_python_constant()
+                and (constant := a.try_as_python_constant())[0]
                 and isinstance(constant[1], int)
                 for a in args
             )
@@ -2559,7 +2560,9 @@ class TensorVariable(VariableTracker):
         data_arg = args[0]
         layout = kwargs.get("layout")
         if layout is not None:
-            is_constant, value = layout.try_as_python_constant()
+            is_constant, value = False, None
+            if layout.is_python_constant():
+                is_constant, value = layout.try_as_python_constant()
             if not is_constant:
                 return None
             if value != torch.strided:
@@ -3792,7 +3795,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         )
         return var
 
-    def as_python_constant(self, *, guard: bool = True) -> type:
+    def as_python_constant(self) -> type:
         return self.value
 
 

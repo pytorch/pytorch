@@ -137,10 +137,10 @@ class ConstantVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
-    def is_python_constant(self, *, guard: bool = True) -> Literal[True]:
+    def is_python_constant(self) -> Literal[True]:
         return True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
@@ -276,12 +276,9 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         from .object_protocol import type_implements_mp_subscript
 
-        if (
-            type_implements_mp_subscript(type(self.value))
-            and (constant := key.try_as_python_constant())[0]
-        ):
+        if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
             try:
-                return ConstantVariable.create(self.value[constant[1]])
+                return ConstantVariable.create(self.value[key.as_python_constant()])
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         return super().mp_subscript_impl(tx, key)
@@ -301,22 +298,18 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         from .object_protocol import type_implements_sq_concat
 
-        if (
-            type_implements_sq_concat(type(self.value))
-            and (constant := other.try_as_python_constant())[0]
-        ):
+        if type_implements_sq_concat(type(self.value)) and other.is_python_constant():
             try:
-                return ConstantVariable.create(self.value + constant[1])
+                return ConstantVariable.create(self.value + other.as_python_constant())
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         return super().sq_concat_impl(tx, other)
 
     def sq_contains_impl(self, tx: InstructionTranslatorBase, item: VariableTracker):
         """Sequence contains for constants."""
-        is_constant, search = item.try_as_python_constant()
-        if is_constant:
+        if item.is_python_constant() and (constant := item.try_as_python_constant())[0]:
             try:
-                result = search in self.value
+                result = constant[1] in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
                 raise_observed_exception(
@@ -575,6 +568,8 @@ class ConstantVariable(VariableTracker):
         # ``op(v, w)`` and re-raise arithmetic exceptions as observed.
         if not type_check(type(self.value)):
             return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
@@ -627,6 +622,8 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L660 (float_floor_div)
         if not isinstance(self.value, (int, float)):
             return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
@@ -647,6 +644,8 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L618 (float_div)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L518 (complex_div)
         if not isinstance(self.value, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
@@ -670,6 +669,8 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L15170 (unicode_mod)
         if not isinstance(self.value, (int, float, str, bytes, bytearray)):
             return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
@@ -690,6 +691,8 @@ class ConstantVariable(VariableTracker):
         # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4126 (long_divmod)
         # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L680 (float_divmod)
         if not isinstance(self.value, (int, float)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
@@ -747,6 +750,8 @@ class ConstantVariable(VariableTracker):
         # so this method should not see them as ``self``.
         from .object_protocol import type_implements_nb_multiply
 
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
         is_constant, other_val = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
@@ -869,6 +874,8 @@ class ConstantVariable(VariableTracker):
         if z is not None:
             z = z.as_python_constant()
 
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
         is_constant, other_value = other.try_as_python_constant()
         if not is_constant:
             return ConstantVariable.create(NotImplemented)
@@ -889,6 +896,8 @@ class ConstantVariable(VariableTracker):
         w: VariableTracker,
     ) -> VariableTracker:
         if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not v.is_python_constant() or not w.is_python_constant():
             return ConstantVariable.create(NotImplemented)
         v_constant = v.try_as_python_constant()
         if not v_constant[0] or not (w_constant := w.try_as_python_constant())[0]:
@@ -962,13 +971,13 @@ class FakeIdVariable(VariableTracker):
         self.value = value
         self.kind = kind
 
-    def as_python_constant(self, *, guard: bool = True) -> int:
+    def as_python_constant(self) -> int:
         return self.value
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
+    def is_python_constant(self) -> bool:
         return False
 
-    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
+    def try_as_python_constant(self) -> tuple[bool, Any]:
         return False, None
 
     def python_type(self) -> type:
@@ -1022,7 +1031,9 @@ class FakeIdVariable(VariableTracker):
     def _operand_int(self, other: VariableTracker) -> int | None:
         if isinstance(other, FakeIdVariable):
             return other.value
-        is_constant, val = other.try_as_python_constant()
+        is_constant, val = False, None
+        if other.is_python_constant():
+            is_constant, val = other.try_as_python_constant()
         if is_constant:
             if isinstance(val, int):
                 return val

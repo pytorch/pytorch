@@ -98,16 +98,16 @@ class CustomClassVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
+    def is_python_constant(self) -> bool:
         # prevents constant folding of attribute accesses on
         # opaque classes. this ensures tp_getattro_impl is called,
         # allowing for proper validation and error handling
         return False
 
-    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
+    def try_as_python_constant(self) -> tuple[bool, Any]:
         return False, None
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -568,7 +568,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             ],
         )
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if isinstance(self.value, FakeScriptObject):
             return self.value.real_obj
         elif is_opaque_constant_type(type(self.value)):

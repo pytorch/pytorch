@@ -182,10 +182,7 @@ class ConstDictVariable(VariableTracker):
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
@@ -203,7 +200,7 @@ class ConstDictVariable(VariableTracker):
         finally:
             self._checking_python_constant = False
 
-    def as_python_constant(self, *, guard: bool = True) -> dict[Any, Any]:
+    def as_python_constant(self) -> dict[Any, Any]:
         items = {}
         for k, v in self.items.items():
             is_constant, key = k.vt.try_as_python_constant()
@@ -466,7 +463,11 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and (constant := args[0].try_as_python_constant())[0]:
+        if (
+            args[0].source is None
+            and args[0].is_python_constant()
+            and (constant := args[0].try_as_python_constant())[0]
+        ):
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -919,11 +920,8 @@ class OrderedDictVariable(ConstDictVariable):
         last = True
         if len(args) == 2 and args[0].is_python_constant():
             last = args[1].as_python_constant()
-        if (
-            "last" in kwargs
-            and (constant := kwargs["last"].try_as_python_constant())[0]
-        ):
-            last = constant[1]
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
 
         self.items.move_to_end(HashableTracker(args[0]), last=last)
         return ConstantVariable.create(None)
@@ -940,13 +938,10 @@ class OrderedDictVariable(ConstDictVariable):
             )
 
         last = True
-        if len(args) == 1 and (constant := args[0].try_as_python_constant())[0]:
-            last = constant[1]
-        if (
-            "last" in kwargs
-            and (constant := kwargs["last"].try_as_python_constant())[0]
-        ):
-            last = constant[1]
+        if len(args) == 1 and args[0].is_python_constant():
+            last = args[0].as_python_constant()
+        if "last" in kwargs and kwargs["last"].is_python_constant():
+            last = kwargs["last"].as_python_constant()
 
         k, v = self.items.popitem(last=last)
         self.should_reconstruct_all = True
@@ -959,9 +954,7 @@ class OrderedDictVariable(ConstDictVariable):
         "popitem": Method(popitem),
     }
 
-    def as_python_constant(
-        self, *, guard: bool = True
-    ) -> "collections.OrderedDict[Any, Any]":
+    def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
 
     @staticmethod

@@ -80,6 +80,8 @@ from ..source import (
     TypeSource,
 )
 from ..utils import (
+    check_constant_args,
+    check_unspec_or_constant_args,
     FrameState,
     identity,
     is_function,
@@ -88,7 +90,6 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
-    try_constant_args,
     unpack_iterable,
 )
 from .base import (
@@ -773,13 +774,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn = fn
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         if istype(self, UserFunctionVariable):
             return self.fn
         # istype, not isinstance: the wrapper subclasses below stand for a
         # decorated callable, not for `fn` itself. Methods are no longer
         # subclasses of this class at all.
-        return super().as_python_constant(guard=guard)
+        return super().as_python_constant()
 
     def reconstruct_pycode(self, codegen):
         if self.source:
@@ -1214,6 +1215,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _extract_tree_map_only_types(
         self, selector: VariableTracker
     ) -> tuple[type, ...] | None:
+        if not selector.is_python_constant():
+            return None
         is_constant, raw_value = selector.try_as_python_constant()
         if not is_constant:
             return None
@@ -2280,7 +2283,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
-    def as_python_constant(self, *, guard: bool = True) -> types.FunctionType:
+    def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
@@ -2329,9 +2332,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
-    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
+    def try_as_python_constant(self) -> tuple[bool, Any]:
         try:
-            return True, self.as_python_constant(guard=guard)
+            return True, self.as_python_constant()
         except (NotImplementedError, Unsupported):
             return False, None
 
@@ -2667,7 +2670,7 @@ class SkipFunctionVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.value
 
     def get_real_python_backed_value(self) -> Any:
@@ -2740,19 +2743,24 @@ class SkipFunctionVariable(VariableTracker):
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
-        if (
-            self.value in (importlib.util.find_spec, importlib.metadata.version)
-            and (constants := try_constant_args(args, {}))[0]
+        if self.value in (importlib.util.find_spec, importlib.metadata.version) and all(
+            a.is_python_constant() for a in args
         ):
             fn = cast(Callable[..., Any], self.value)
-            return VariableTracker.build(tx, fn(*constants[1]))
+            return VariableTracker.build(
+                tx, fn(*(a.as_python_constant() for a in args))
+            )
 
         if (
             self.value in RE_CONSTANT_FOLD_FNS
-            and (constants := try_constant_args(args, kwargs))[0]
+            and all(a.is_python_constant() for a in args)
+            and all(v.is_python_constant() for v in kwargs.values())
         ):
             fold_fn = cast(Callable[..., Any], self.value)
-            result = fold_fn(*constants[1], **constants[2])
+            result = fold_fn(
+                *(a.as_python_constant() for a in args),
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
             return VariableTracker.build(tx, result)
 
         def unimplemented_direct_disable_call(api_name: str) -> Never:
@@ -3469,8 +3477,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     )
 
                 op_var = item.tp_getattro_impl(tx, "op")
-                is_constant, op = op_var.try_as_python_constant()
-                if is_constant:
+                if op_var.is_python_constant():
+                    op = op_var.as_python_constant()
                     if op not in (dist.isend, dist.irecv):
                         raise torch._dynamo.exc.InternalTorchDynamoError(
                             f"unexpected P2POp op {op}"
@@ -3541,7 +3549,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.fn
 
     def call_function(
@@ -3550,10 +3558,13 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        constant_args, values, kwvalues = try_constant_args(args, kwargs)
+        constant_args = check_constant_args(args, kwargs)
         if constant_args:
             try:
-                value = self.fn(*values, **kwvalues)
+                value = self.fn(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
             except TypeError as exc:
                 raise_observed_exception(
                     type(exc),
@@ -3672,7 +3683,7 @@ class FunctoolsPartialVariable(VariableTracker):
         except NotImplementedError:
             raise_observed_exception(AttributeError, tx, args=[name])
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return functools.partial(
             self.func.as_python_constant(),
             *[arg.as_python_constant() for arg in self.args],
@@ -3764,11 +3775,11 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if (
-            self.can_constant_fold_through()
-            and (constants := try_constant_args(args, kwargs))[0]
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
         ):
-            _, const_args, const_kwargs = constants
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
             try:
                 # use the original function which is faster than the polyfill
                 result = self.fn(*const_args, **const_kwargs)
@@ -3785,7 +3796,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         ):
             values = []
             for x in args[0].items:
-                is_constant, value = x.try_as_python_constant()
+                is_constant, value = False, None
+                if x.is_python_constant():
+                    is_constant, value = x.try_as_python_constant()
                 if is_constant and isinstance(value, int):
                     values.append(value)
                 elif (
@@ -3846,7 +3859,7 @@ class PolyfilledFunctionVariable(VariableTracker):
         except NotImplementedError:
             return super().hash_impl(tx)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.fn
 
 
@@ -4055,6 +4068,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         for k, v in combined_args.items():
             if (
                 isinstance(v, VariableTracker)
+                and v.is_python_constant()
                 and (constant := v.try_as_python_constant())[0]
             ):
                 constant_args[k] = constant[1]
@@ -4648,7 +4662,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def python_type(self) -> type:
         return types.WrapperDescriptorType
 
-    def as_python_constant(self, *, guard: bool = True) -> types.WrapperDescriptorType:
+    def as_python_constant(self) -> types.WrapperDescriptorType:
         return self.descriptor
 
     def get_real_python_backed_value(self) -> types.WrapperDescriptorType:
@@ -4747,13 +4761,10 @@ class MethodWrapperVariable(VariableTracker):
     def get_real_python_backed_value(self) -> types.MethodWrapperType:
         return self.as_python_constant()
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
 
-    def as_python_constant(self, *, guard: bool = True) -> types.MethodWrapperType:
+    def as_python_constant(self) -> types.MethodWrapperType:
         is_constant, obj_value = self.obj.try_as_python_constant()
         if not is_constant:
             raise AsPythonConstantNotImplementedError(self)
@@ -4852,7 +4863,7 @@ class MethodDescriptorVariable(DescriptorVariable):
     def python_type(self) -> type:
         return types.MethodDescriptorType
 
-    def as_python_constant(self, *, guard: bool = True) -> types.MethodDescriptorType:
+    def as_python_constant(self) -> types.MethodDescriptorType:
         return self.descriptor
 
     def get_real_python_backed_value(self) -> types.MethodDescriptorType:
@@ -4994,7 +5005,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):
             return self.descriptor.__get__(None, obj)
@@ -5049,9 +5060,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     def python_type(self) -> type:
         return types.ClassMethodDescriptorType
 
-    def as_python_constant(
-        self, *, guard: bool = True
-    ) -> types.ClassMethodDescriptorType:
+    def as_python_constant(self) -> types.ClassMethodDescriptorType:
         return self.descriptor
 
     def get_real_python_backed_value(self) -> types.ClassMethodDescriptorType:
@@ -5163,7 +5172,7 @@ class StaticMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return staticmethod
 
-    def as_python_constant(self, *, guard: bool = True) -> staticmethod:  # type: ignore[type-arg]
+    def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
         return staticmethod(self.descriptor.as_python_constant())
 
     def lookup_instance_dict(
@@ -5243,7 +5252,7 @@ class ClassMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return classmethod
 
-    def as_python_constant(self, *, guard: bool = True) -> classmethod:  # type: ignore[type-arg]
+    def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         return classmethod(self.descriptor.as_python_constant())
 
     def lookup_instance_dict(
@@ -5356,7 +5365,7 @@ class MemberDescriptorVariable(DescriptorVariable):
     def python_type(self) -> type:
         return types.MemberDescriptorType
 
-    def as_python_constant(self, *, guard: bool = True) -> types.MemberDescriptorType:
+    def as_python_constant(self) -> types.MemberDescriptorType:
         return self.descriptor
 
     def tp_descr_get_impl(
@@ -5464,10 +5473,10 @@ class GetSetDescriptorVariable(DescriptorVariable):
         "__get__": GetSet(_getset_descriptor_get, readonly_setter),
     }
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
+    def is_python_constant(self) -> bool:
         return True
 
-    def as_python_constant(self, *, guard: bool = True) -> types.GetSetDescriptorType:
+    def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
 
     def tp_richcompare_impl(
@@ -5657,7 +5666,7 @@ class PropertyVariable(VariableTracker):
     def python_type(self) -> type:
         return property
 
-    def as_python_constant(self, *, guard: bool = True) -> property:
+    def as_python_constant(self) -> property:
         return self.descriptor
 
     def tp_descr_set_impl(
@@ -5747,7 +5756,7 @@ class TupleGetterVariable(VariableTracker):
     def python_type(self) -> type:
         return _collections._tuplegetter
 
-    def as_python_constant(self, *, guard: bool = True) -> "_collections._tuplegetter":
+    def as_python_constant(self) -> "_collections._tuplegetter":
         return self.descriptor
 
     # _tuplegetter exposes __doc__ as a writable T_OBJECT member.
