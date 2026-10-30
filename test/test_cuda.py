@@ -12908,10 +12908,6 @@ class TestGDS(TestCase):
         torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
-        # cuFileWrite/cuFileRead are host-blocking but are not ordered against
-        # any CUDA stream, so the transfer below would otherwise race with the
-        # kernels that were launched asynchronously to produce the tensors.
-        torch.cuda.synchronize()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
@@ -12930,13 +12926,58 @@ class TestGDS(TestCase):
         self._require_gds()
         src = torch.arange(4096, device="cuda", dtype=torch.float32)
         dest = torch.empty_like(src)
-        # The transfer is not stream ordered; drain the producing kernel.
-        torch.cuda.synchronize()
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             file.save_storage(src.untyped_storage())
             file.load_storage(dest.untyped_storage())
         self.assertEqual(src, dest)
+
+    def test_gds_stream_ordered(self):
+        # The blocking transfers wait for the kernels already enqueued on the
+        # current (side) stream before transferring.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream), TemporaryFileName() as f:
+            src = torch.empty(4096, device="cuda")
+            dest = torch.empty_like(src)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            # Each kernel is enqueued while the device sleeps, so a transfer
+            # that does not wait for it would save stale data from src, or have
+            # its loaded data overwritten by dest.zero_().
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage(src.untyped_storage())
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            dest.zero_()
+            file.load_storage(dest.untyped_storage())
+            self.assertEqual(src, dest)
+
+    def test_gds_graph_capture_unsupported(self):
+        # Waiting for the stream would invalidate the capture, and the stream
+        # APIs do not support CUDA graphs. Each call is rejected before touching
+        # the stream, so the capture remains usable.
+        self._require_gds()
+        storage = torch.empty(1024, device="cuda").untyped_storage()
+        x = torch.zeros(1, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                for transfer in transfers:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "not supported during CUDA graph capture"
+                    ):
+                        transfer(storage)
+                # Continue recording work within the CUDA graph.
+                x.add_(1)
+        g.replay()
+        self.assertEqual(x.item(), 1)
 
     @parametrize("dtype", [torch.float32, torch.float64, torch.int64, torch.uint8])
     def test_gds_dtypes(self, dtype):
@@ -12948,7 +12989,6 @@ class TestGDS(TestCase):
             src = torch.randint(0, 128, (4096,), device="cuda", dtype=dtype)
         dest = torch.empty_like(src)
         torch.cuda.gds.gds_register_buffer(src.untyped_storage())
-        torch.cuda.synchronize()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
@@ -12962,7 +13002,6 @@ class TestGDS(TestCase):
         # Explicit handle lifecycle plus the guard assertions in GdsFile.
         self._require_gds()
         storage = torch.randn(1024, device="cuda").untyped_storage()
-        torch.cuda.synchronize()
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
             # The constructor already registered the handle.
@@ -13127,26 +13166,6 @@ class TestGDS(TestCase):
                 return
             torch.cuda.current_stream().synchronize()
             self.assertLess(written.item(), 0)
-
-    def test_gds_async_graph_capture_unsupported(self):
-        # The stream APIs do not support CUDA graphs. The call is rejected
-        # before touching the stream, so the capture remains usable.
-        self._require_gds()
-        storage = torch.empty(1024, device="cuda").untyped_storage()
-        x = torch.zeros(1, device="cuda")
-        with TemporaryFileName() as f:
-            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
-                for transfer in (file.save_storage_async, file.load_storage_async):
-                    with self.assertRaisesRegex(
-                        RuntimeError, "not supported during CUDA graph capture"
-                    ):
-                        transfer(storage)
-                # Continue recording work within the CUDA graph.
-                x.add_(1)
-        g.replay()
-        self.assertEqual(x.item(), 1)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

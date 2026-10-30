@@ -134,9 +134,6 @@ class GdsFile:
         >>> src1 = torch.randn(1024, device="cuda")
         >>> src2 = torch.randn(2, 1024, device="cuda")
         >>> file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-        >>> # save_storage/load_storage are not stream ordered, synchronize
-        >>> # to ensure kernels (torch.randn) are finished.
-        >>> torch.cuda.synchronize()
         >>> file.save_storage(src1.untyped_storage(), offset=0)
         >>> file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
         >>> dest1 = torch.empty(1024, device="cuda")
@@ -201,6 +198,12 @@ class GdsFile:
             self._async_io_events[key] = torch.cuda.Event()
         self._async_io_events[key].record(stream)
 
+    def _wait_for_current_stream(self, storage: Storage, fn_name: str) -> None:
+        # Synchronizing during capture would invalidate the caller's capture.
+        if torch.cuda.is_current_stream_capturing():
+            raise RuntimeError(f"{fn_name} is not supported during CUDA graph capture")
+        torch.cuda.current_stream(storage.device).synchronize()
+
     def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
 
@@ -209,20 +212,23 @@ class GdsFile:
         into the storage. On ROCm, a storage larger than ``2**31`` bytes minus
         the page size raises a ``RuntimeError`` (see :ref:`rocm-gds`).
 
-        .. note::
-            ``load_storage`` is not ordered with respect to other asynchronous
-            operations (such as kernel launches) previously enqueued in the
-            current stream, as stated in the `cuFile docs
-            <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api-functional-specification>`__.
-            This means the user must ensure they synchronize the stream or
-            device in order to guarantee that ``load_storage`` executes after
-            previously enqueued asynchronous operations.
-            :meth:`load_storage_async` is the stream-ordered alternative.
+        ``cuFileRead`` is not ordered with respect to any stream, so this first
+        waits for the work already enqueued on the current stream of
+        ``storage``'s device, then blocks until the load completes. As with a
+        blocking :meth:`~torch.Tensor.copy_`, the caller must synchronize work on
+        other streams (see :ref:`cuda-stream-semantics`), and making a
+        dedicated stream current avoids waiting on unrelated work. Raises a
+        ``RuntimeError`` during CUDA graph capture.
+
+        For a load that returns without waiting, use :meth:`load_storage_async`.
+        It is enqueued on the stream rather than waiting for it on the host,
+        so it is fully stream ordered.
 
         Args:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
         """
+        self._wait_for_current_stream(storage, "load_storage")
         if self.handle is None:
             raise AssertionError("Cannot load data from a file that is not registered.")
         torch._C._gds_load_storage(self.handle, storage, offset)
@@ -282,20 +288,23 @@ class GdsFile:
         On ROCm, a storage larger than ``2**31`` bytes minus the page size
         raises a ``RuntimeError`` (see :ref:`rocm-gds`).
 
-        .. note::
-            ``save_storage`` is not ordered with respect to other asynchronous
-            operations (such as kernel launches) previously enqueued in the
-            current stream, as stated in the `cuFile docs
-            <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api-functional-specification>`__.
-            This means the user must ensure they synchronize the stream or
-            device in order to guarantee that ``save_storage`` executes after
-            previously enqueued asynchronous operations.
-            :meth:`save_storage_async` is the stream-ordered alternative.
+        ``cuFileWrite`` is not ordered with respect to any stream, so this first
+        waits for the work already enqueued on the current stream of
+        ``storage``'s device, then blocks until the save completes. As with a
+        blocking :meth:`~torch.Tensor.copy_`, the caller must synchronize work on
+        other streams (see :ref:`cuda-stream-semantics`), and making a
+        dedicated stream current avoids waiting on unrelated work. Raises a
+        ``RuntimeError`` during CUDA graph capture.
+
+        For a save that returns without waiting, use :meth:`save_storage_async`.
+        It is enqueued on the stream rather than waiting for it on the host,
+        so it is fully stream ordered.
 
         Args:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
         """
+        self._wait_for_current_stream(storage, "save_storage")
         if self.handle is None:
             raise AssertionError("Cannot save data to a file that is not registered.")
         torch._C._gds_save_storage(self.handle, storage, offset)
