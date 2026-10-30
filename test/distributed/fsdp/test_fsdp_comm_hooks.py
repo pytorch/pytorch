@@ -40,7 +40,6 @@ class Net(nn.Module):
     def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
         # to ensure determinism
         torch.manual_seed(0)
-        torch.accelerator.random.manual_seed(0)
         super().__init__()
 
         if has_wrapping:
@@ -337,7 +336,6 @@ class TestCommunicationHooks(FSDPTestContinuous):
     ):
         # keep everything deterministic for input data
         torch.manual_seed(0)
-        torch.accelerator.random.manual_seed(0)
 
         fsdp_with_hook = self._init_model(
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
