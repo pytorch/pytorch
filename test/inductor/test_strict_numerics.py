@@ -201,6 +201,24 @@ class StrictNumericsConfigTest(TestCase):
 
 class StrictNumericsFallbackTest(TestCase):
     @dtypes(torch.float32, torch.float64)
+    @parametrize("numerics", NUMERICS_MODES)
+    def test_log_ndtr_without_decompositions(self, device, dtype, numerics):
+        from torch._inductor.compile_fx import compile_fx
+
+        def backend(gm, inputs):
+            return compile_fx(gm, inputs, decompositions={})
+
+        x = _min_max_specials(dtype, device)
+        with config.patch(numerics=numerics):
+            actual = torch.compile(
+                torch.special.log_ndtr, backend=backend, fullgraph=True
+            )(x)
+        self.assertEqual(
+            actual.view(_BIT_VIEW[dtype]),
+            torch.special.log_ndtr(x).view(_BIT_VIEW[dtype]),
+        )
+
+    @dtypes(torch.float32, torch.float64)
     @parametrize("numerics", ("default", "strict_reduction"))
     @parametrize("decimals", (-3, 3))
     def test_round_decimals_without_decompositions(
@@ -1980,8 +1998,6 @@ POINTWISE_XFAIL = frozenset(
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
-        ("hypot", "float16"),
-        ("hypot", "float32"),
         ("mvlgamma_mvlgamma_p_1", "bfloat16"),
         ("mvlgamma_mvlgamma_p_1", "float16"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
@@ -1992,20 +2008,16 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
-        ("special_log_ndtr", "float32"),
     }
 )
 
 BACKWARD_XFAIL = frozenset(
     {
         ("float_power", "float32"),
-        ("hypot", "float16"),
-        ("hypot", "float32"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
         ("mvlgamma_mvlgamma_p_3", "float32"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
         ("special_erfcx", "float32"),
-        ("special_log_ndtr", "float32"),
     }
 )
 
@@ -2019,6 +2031,8 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "hypot",
+        "special_log_ndtr",
         "i0",
         "special_bessel_j0",
         "special_bessel_j1",

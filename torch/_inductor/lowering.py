@@ -9352,6 +9352,16 @@ for name in pointwise_overrides_data:
         )
 
 
+_log_ndtr_default = lowerings[aten.special_log_ndtr.default]
+
+
+@register_lowering(aten.special_log_ndtr.default, type_promotion_kind=None)
+def log_ndtr(x):
+    if is_strict_cuda_triton(x.get_device()) and x.get_dtype() == torch.float32:
+        return make_pointwise(ops_wrapper("log_ndtr"))(x)
+    return _log_ndtr_default(x)
+
+
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
 )
