@@ -3970,6 +3970,11 @@ class TestConvolutionNNDevice(NNTestCase):
         helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=1)
         helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=16)
 
+    # CPU conv3d does not preserve channels_last_3d for half, nor for float at
+    # larger spatial sizes, so the memory-format assertions below only hold on
+    # accelerators.
+    @onlyAccelerator
+    @expectedFailureMPS
     @dtypes(torch.half, torch.float)
     def test_conv3d_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, out_channels, kernel_size, groups):
