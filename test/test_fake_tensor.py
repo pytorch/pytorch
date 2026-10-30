@@ -3892,6 +3892,57 @@ class TestFakeTensorProp(TestCase):
             mode.epoch += 1
             self.assertFalse(statically_known_true(op(x).shape[0] == m))
 
+    @parametrize(
+        "op",
+        [torch.nonzero, torch.unique, torch.unique_consecutive],
+        name_fn=lambda op: op.__name__,
+    )
+    def test_nonzero_unique_memo_dropped_by_set_data(self, op):
+        # A C++ fake keeps these memos on the C++ tensor, which set_data
+        # replaces. A Python FakeTensor keeps them, since set_data does not bump
+        # the version counter.
+        if not CPP_FAKETENSOR:
+            self.skipTest("Python FakeTensor keeps the memo across set_data")
+        with FakeTensorMode(shape_env=ShapeEnv()):
+            x = torch.randint(0, 3, (10,))
+            n = op(x).shape[0]
+            x.data = torch.randint(0, 3, (20,))
+            self.assertFalse(statically_known_true(op(x).shape[0] == n))
+
+    def test_failed_sym_memo_set_leaves_no_memo(self):
+        # Recording a memo reads the version counter, which a non-inference
+        # tensor has disabled after inference_tensor.data = tensor. The failed
+        # set must not leave a memo behind for a later get.
+        if not CPP_FAKETENSOR:
+            self.skipTest("Python FakeTensor raises on the get as well")
+        from torch._subclasses.fake_tensor import maybe_get_sym_memo, maybe_set_sym_memo
+
+        with FakeTensorMode(shape_env=ShapeEnv()):
+            with torch.inference_mode():
+                x = torch.randint(0, 3, (10,))
+            x.data = torch.randint(0, 3, (10,))
+            self.assertFalse(x.is_inference())
+            with self.assertRaisesRegex(RuntimeError, "version counter"):
+                maybe_set_sym_memo(x, "nonzero_memo", 3)
+            self.assertIsNone(maybe_get_sym_memo(x, "nonzero_memo"))
+
+    @parametrize(
+        "op",
+        [torch.nonzero, torch.unique, torch.unique_consecutive],
+        name_fn=lambda op: op.__name__,
+    )
+    def test_save_after_nonzero_unique_memo(self, op):
+        # The memos must not become tensor state that torch.save pickles, which
+        # would also make the default weights_only torch.load reject the file
+        with FakeTensorMode(shape_env=ShapeEnv()):
+            x = torch.randint(0, 3, (10,))
+            op(x)
+        buf = io.BytesIO()
+        with torch.serialization.skip_data(materialize_fake_tensors=True):
+            torch.save(x, buf)
+        buf.seek(0)
+        self.assertEqual(torch.load(buf).shape, x.shape)
+
 
 instantiate_parametrized_tests(TestFakeTensorProp)
 make_propagate_real_tensors_cls(TestFakeTensorProp)
