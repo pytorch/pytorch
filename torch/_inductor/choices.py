@@ -37,7 +37,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
     from functools import partial
 
     from triton import Config as TritonConfig
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from . import ir
     from .ir import ChoiceCaller
     from .kernel_template_choice import KernelTemplateChoice
 
@@ -73,6 +74,21 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MultiTemplateFusionDecision:
+    """A backend's decision for fusing a MultiTemplateBuffer with a candidate.
+
+    ``fuse=False`` declines the fusion. ``fuse=True`` accepts it with ``choice``,
+    one of the buffer's Triton template choices, which the buffer is finalized to
+    when the scheduler commits the fusion. ``choice`` may be omitted only if the
+    buffer is already finalized to a Triton template. The scheduler declines an
+    accepted fusion that has no valid template or fails a legality check.
+    """
+
+    fuse: bool
+    choice: ChoiceCaller | None = None
 
 
 @dataclasses.dataclass
@@ -458,6 +474,26 @@ class InductorChoices:
     ) -> ChoiceCaller:
         """Hook to override the autotuning best choice after benchmarking."""
         return best_choice
+
+    def multi_template_fusion_decision(
+        self,
+        scheduler: Scheduler,
+        multi_node: ir.MultiTemplateBuffer,
+        other_nodes: Sequence[BaseSchedulerNode],
+        epilogue: bool,
+    ) -> MultiTemplateFusionDecision | None:
+        """Hook to decide a MultiTemplateBuffer fusion instead of benchmarking it.
+
+        Called from ``Scheduler.speedup_by_fusion`` for a pair where one side's
+        template node is a MultiTemplateBuffer; ``other_nodes`` are the nodes of
+        the other side, an epilogue if ``epilogue`` else a prologue. Returning
+        None keeps the default benchmark-based decision. Decisions are immediate
+        (they do not compete as pending template fusions); an accepted one is
+        committed right away if it passes the scheduler's legality checks. Not
+        consulted when ``config.multi_kernel_hints`` is set. The hook should not
+        mutate state.
+        """
+        return None
 
     def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
         """Hook to transform fused kernel names during codegen"""
