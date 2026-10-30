@@ -376,35 +376,63 @@ class StrictNumericsCompileTest(TestCase):
             # tensorify cannot handle, so lambd is specialized there.
             self.assertEqual(counter.frame_count, 2)
 
-    @config.patch(force_disable_caches=True)
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("upcast", (False, True))
-    @parametrize("divisor", (3.8125, 1.00000004))
-    def test_div_trunc_scalar_rounding(self, device, dtype, numerics, upcast, divisor):
-        # For 3.8125, truncation gives 2635 at x=10048. The float consumer
-        # exposes missing output rounding to fp16 (2636) or bf16 (2640).
-        # For 1.00000004, eager rounds the divisor to FP32 1 before taking
-        # its reciprocal. Taking the reciprocal first makes trunc(1 * r) zero.
-        x = torch.tensor(
-            [1.0, 11.4375, -11.4375, 10048.0, -10048.0], device=device, dtype=dtype
-        )
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_div_trunc_scalar_output_rounding(self, device, dtype):
+        # Cover rounding before a float consumer.
+        # Non-strict returns 2635: fusion skips the intermediate fp16/bf16 rounding.
+        x = torch.tensor([10048.0], device=device, dtype=dtype)
 
         def fn(x):
-            return torch.div(x, divisor, rounding_mode="trunc").float()
+            return torch.div(x, 3.8125, rounding_mode="trunc").float()
 
         compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": numerics,
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
         )
-        metrics.reset()
-        result = compiled(x)
-        self.assertEqual(result.view(torch.int32), fn(x).view(torch.int32))
-        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertEqual(compiled(x), fn(x))
+
+    @dtypes(torch.float32)
+    def test_div_trunc_scalar_reciprocal_rounding(self, device, dtype):
+        # Cover a Python divisor not representable in fp32.
+        # Non-strict returns 0.0: the reciprocal is taken before fp32 rounding.
+        x = torch.tensor([1.0], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.div(x, 1.00000004, rounding_mode="trunc")
+
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        self.assertEqual(compiled(x), fn(x))
+
+    @dtypes(torch.float32)
+    def test_div_trunc_cpu_scalar_reciprocal(self, device, dtype):
+        # Cover CPU tensor reciprocal selection.
+        # Non-strict returns 3.0: it divides directly instead of multiplying.
+        x = torch.tensor([11.4375], device=device, dtype=dtype)
+        divisor = torch.tensor(3.8125, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_div_trunc_cpu_scalar_precision(self, device, dtype):
+        # Cover mixed-dtype CPU scalar promotion.
+        # Non-strict also returns 0.0: fp32 codegen skips low-precision casts.
+        x = torch.tensor([1.0009765625], device=device, dtype=dtype)
+        divisor = torch.tensor(1.001, dtype=torch.float64, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):

@@ -7950,25 +7950,36 @@ def _floor_div_floating(a, b):
     return make_pointwise(fn)(a, b, nan, neg_one, zero)
 
 
-def _div_trunc_cuda_scalar(a: TensorBox | IRNode, b: int | float) -> TensorBox:
-    """Apply truncating division pointwise with a scalar divisor.
+def _div_trunc_cuda_scalar(
+    a: TensorBox | IRNode, b: TensorBox | IRNode | int | float
+) -> TensorBox:
+    # Match eager CUDA: reciprocal and product in FP32, round after truncation.
+    if isinstance(b, (int, float)):
+        b = ir.Constant(value=b, dtype=torch.float32, device=a.get_device_or_error())
+    b = expand(b, a.get_size())
 
-    Match eager CUDA by computing the reciprocal and product in FP32, then
-    rounding to the tensor's dtype after truncation.
-    """
-
-    def fn(value):
+    def fn(value, divisor):
         value = ops.to_dtype(value, torch.float32)
         reciprocal = ops.div_rn(
-            ops.constant(1.0, torch.float32), ops.constant(b, torch.float32)
+            ops.constant(1.0, torch.float32), ops.to_dtype(divisor, torch.float32)
         )
         return ops.trunc(ops.mul(value, reciprocal))
 
-    return make_pointwise(fn, force_output_cast=True)(a)
+    return make_pointwise(fn, force_output_cast=True)(a, b)
 
 
-@register_lowering(aten.div, broadcast=True)
+@register_lowering(aten.div, type_promotion_kind=None)
 def div_mode(a, b, rounding_mode=None):
+    is_cpu_scalar = (
+        isinstance(b, (TensorBox, IRNode))
+        and b.get_device() == torch.device("cpu")
+        and not b.get_size()
+    )
+    # Preserve CPU scalar shape and dtype before broadcasting and promotion.
+    scalar_divisor = b if isinstance(b, (int, float)) or is_cpu_scalar else None
+    (a, b), _ = transform_args(
+        [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
+    )
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
@@ -7995,10 +8006,10 @@ def div_mode(a, b, rounding_mode=None):
             isinstance(a, (TensorBox, IRNode))
             and (device := a.get_device()) is not None
             and is_strict_cuda_triton(device)
-            and isinstance(b, (int, float))
+            and scalar_divisor is not None
             and a.get_dtype() in (torch.bfloat16, torch.float16, torch.float32)
         ):
-            return _div_trunc_cuda_scalar(a, b)
+            return _div_trunc_cuda_scalar(a, scalar_divisor)
         return trunc(div(a, b))
     return div(a, b)
 
