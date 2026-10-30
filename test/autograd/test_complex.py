@@ -137,16 +137,23 @@ class TestReductionComplexDtypeBackwardDevice(TestCase):
     def test_mixed_precision_grad_not_downcast(self, device, op, dtype):
         # The dtype= cast must not rewrite real-to-real grads: mean used to
         # cast the fp32 grad down to fp16 before dividing, which overflows
-        # under fp16 loss scaling (GradScaler default scale is 2**16).
+        # under fp16 loss scaling (GradScaler default scale is 2**16). Use a
+        # loss-scaled grad so a premature fp16 downcast overflows to inf while
+        # the correct fp32 divide keeps the result finite.
         x = torch.randn(2, 3, dtype=dtype, device=device, requires_grad=True)
         y = op(x, dtype=torch.float32)
-        y.backward(torch.ones_like(y))
+        y.backward(torch.full_like(y, 2.0**16))
         self.assertEqual(x.grad.dtype, dtype)
         n = x.numel()
         expected = torch.full_like(
-            x, 1.0 / n if op is torch.mean else 1.0, dtype=torch.float32
+            x, 2.0**16 / n if op is torch.mean else 2.0**16, dtype=torch.float32
         )
         self.assertEqual(x.grad, expected.to(dtype))
+        if op is torch.mean:
+            # Only mean divides, so only mean keeps a loss-scaled grad finite in
+            # fp16; a premature downcast would have produced inf here. (sum's
+            # result is the unscaled grad and overflows fp16 either way.)
+            self.assertTrue(torch.isfinite(x.grad).all())
 
     def test_real_to_complex_backward_no_cast_warning(self, device):
         # at::real drops the imaginary part silently; a plain .to() cast here
