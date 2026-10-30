@@ -306,10 +306,11 @@ struct C10_API ExtraMeta {
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
   // The SymInt memos of a C++ fake (nonzero_memo, unique_memo,
-  // unique_consecutive_memo), by name. The copy constructor does not copy
-  // them, so a shallow copy (e.g. set_data) drops them.
+  // unique_consecutive_memo), by name; see TensorImpl::set_fake_sym_memo. The
+  // copy constructor does not copy them, so a shallow copy (e.g. set_data)
+  // drops them.
   struct FakeSymMemo {
-    std::unique_ptr<c10::SafePyObject> value;
+    c10::SymInt value;
     std::optional<uint32_t> version;
     uint64_t epoch = 0;
   };
@@ -1572,39 +1573,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->real_tensor_;
   }
 
+  // Records memo as this fake's SymInt memo `name`, set in fake mode epoch
+  // `epoch`. Like fake_sym_memo, safe to call concurrently.
   void set_fake_sym_memo(
       const std::string& name,
-      std::unique_ptr<c10::SafePyObject> memo,
-      uint64_t epoch) {
-    auto& entry = get_extra_meta().fake_sym_memos_[name];
-    entry.value = std::move(memo);
-    entry.version = is_inference()
-        ? std::nullopt
-        : std::optional<uint32_t>(version_counter().current_version());
-    entry.epoch = epoch;
-  }
+      c10::SymInt memo,
+      uint64_t epoch);
 
-  // The memo named `name`, or nullptr if there is none or it is stale: the
+  // The memo named `name`, or nullopt if there is none or it is stale: the
   // tensor was mutated since, or it was set in an epoch other than `epoch`.
   // A stale memo is dropped.
-  c10::SafePyObject* fake_sym_memo(const std::string& name, uint64_t epoch) {
-    if (!extra_meta_) {
-      return nullptr;
-    }
-    auto& memos = extra_meta_->fake_sym_memos_;
-    auto it = memos.find(name);
-    if (it == memos.end()) {
-      return nullptr;
-    }
-    const auto& entry = it->second;
-    bool mutated = entry.version.has_value() &&
-        *entry.version != version_counter().current_version();
-    if (entry.value == nullptr || mutated || entry.epoch != epoch) {
-      memos.erase(it);
-      return nullptr;
-    }
-    return entry.value.get();
-  }
+  std::optional<c10::SymInt> fake_sym_memo(
+      const std::string& name,
+      uint64_t epoch);
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
   // Used as the identity key for FakeTensorMode constant tracking.
