@@ -514,9 +514,34 @@
 - name: ROCm
   patterns:
   - '**rocm**'
+  - '**ROCm**'
+  - '**Rocm**'
   - '**hip**'
+  - '**HIP**'
+  - '**Hip**'
+  - '-**ship**'
+  - '**miopen**'
+  - '**MIOpen**'
+  - '**aotriton**'
+  - '**flydsl**'
+  - '**rccl**'
+  - '**rocshmem**'
+  - '**Rocprof**'
+  - '**Rocblas**'
+  - '**amdsmi**'
+  - '**Gfx9**'
+  - '**_ck_**'
+  - tools/amd_build/**
+  - .github/scripts/amd/**
+  - aten/src/ATen/cuda/tunable/**
+  - aten/src/ATen/native/TunableOp.h
+  - torch/cuda/tunable.py
+  - docs/source/cuda.tunable.md
+  - test/**
+  - torch/testing/**
   approved_by:
   - jeffdaily
+  - jithunnair-amd
   mandatory_checks_name:
   - EasyCLA
   - Lint
