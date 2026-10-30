@@ -2,6 +2,7 @@
 # Owner(s): ["module: unknown"]
 
 import importlib.util
+import json
 import multiprocessing
 import os
 import random
@@ -667,7 +668,7 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-from torch.utils.collect_env import get_pretty_env_info
+from torch.utils.collect_env import get_intel_gpu_onboard, get_pretty_env_info
 
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
@@ -678,6 +679,29 @@ class TestCollectEnv(TestCase):
         self.assertIn("ROCm SDK used to build PyTorch:", info_output)
         self.assertIn("HIP used to build PyTorch:", info_output)
         self.assertNotIn("ROCM used to build PyTorch:", info_output)
+
+    def test_intel_gpu_onboard_without_device_name(self):
+        # xpu-smi 2.x lists GPUs hidden by ZE_AFFINITY_MASK without a
+        # device_name, describing them by device_state only (e.g.
+        # "survivability mode"); get_intel_gpu_onboard must report such
+        # entries by their state instead of raising KeyError. run_lambda is
+        # mocked, so no real XPU device is needed.
+        discovery = {
+            "device_list": [
+                {"device_id": 0, "device_name": "Intel(R) Arc(TM) Pro B60 Graphics"},
+                {"device_id": 1, "device_state": "survivability mode"},
+                {"device_id": 2},
+            ]
+        }
+        run_lambda = unittest.mock.Mock(return_value=(0, json.dumps(discovery), ""))
+        with unittest.mock.patch(
+            "torch.utils.collect_env.get_platform", return_value="linux"
+        ):
+            onboard = get_intel_gpu_onboard(run_lambda)
+        self.assertEqual(
+            onboard,
+            "* Intel(R) Arc(TM) Pro B60 Graphics\n* survivability mode\n* N/A",
+        )
 
 
 class TestHipify(TestCase):
