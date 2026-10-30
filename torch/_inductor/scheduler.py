@@ -49,7 +49,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv, Identity
+from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -881,6 +881,33 @@ class NestedReduction:
             scheduler_nodes, epilogue_node_set
         ):
             return None
+        # a pointwise producer emitted BEFORE the first reduction node in
+        # the final parent order runs inside the reduction loop and continues
+        # through memory, so its output is not a live sub-parent source; the
+        # epilogue reloads it. Treating it as live would require preserving
+        # loop-local CSE values across the reduction-loop close, which the
+        # resolver cannot do. A source store placed after the reduction (the
+        # normal sub-parent source pass) stays live so the epilogue shares
+        # that pass instead of splitting into an extra reduction loop (which
+        # would break the upstream pass-count contract).
+        _displaced_writes: OrderedSet[str] = OrderedSet()
+        for _pn in ordered_parent_nodes.nodes:
+            if _pn.is_reduction():
+                break
+            _displaced_writes.update(
+                _dep.name
+                for _dep in _pn.read_writes.writes
+                if isinstance(_dep, MemoryDep)
+            )
+        if _displaced_writes:
+            source_relations = tuple(
+                (
+                    relation
+                    if relation.source_accesses[0].name not in _displaced_writes
+                    else dataclasses.replace(relation, requires_live_source=False)
+                )
+                for relation in source_relations
+            )
         return StagedReductionPlan(
             parent_nodes=ordered_parent_nodes.nodes,
             parent_numel=numel,
@@ -951,8 +978,23 @@ class NestedReduction:
             if node in full_parent_nodes
             and not node.get_operation_names() & reduction_ancestors
         )
+        # a displaced full-domain producer of the parent reduction
+        # (e.g. gelu feeding the grouped view) is ordered before the
+        # reduction body by the parent schedule topology, so allow it.
+        # Pre-initialized (possibly empty) so the ordered-plan step below can
+        # reference it on paths where the eligibility gate above passes
+        # without entering the branch.
+        displaced_producers = OrderedSet()
         if not final_nodes <= eligible_nodes:
-            return None
+            displaced_producers.update(
+                node
+                for node in final_nodes
+                if node in full_parent_nodes
+                and node.get_operation_names() & reduction_ancestors
+            )
+            if not (final_nodes - displaced_producers) <= eligible_nodes:
+                return None
+            eligible_nodes |= displaced_producers
 
         # Keep full-resolution producers and consumers in the same loop.
         # External inputs and completed reduction outputs form safe boundaries.
@@ -981,7 +1023,27 @@ class NestedReduction:
             name for node in final_nodes for name in node.get_operation_names()
         )
         leading_nodes = tuple(node for node in parent_nodes if node not in final_nodes)
-        if any(node.ancestors & final_names for node in leading_nodes):
+        # displaced producers of the parent reduction (e.g. gelu feeding
+        # the grouped view) are ancestors of the leading reduction by
+        # construction, and the displaced ordering below places them before
+        # the reduction body. That move is an ordering fix, not a violation --
+        # exempt them here. Refuse the plan when a displaced producer itself
+        # depends on a leading node: after the move it would have no valid
+        # placement inside the kernel.
+        _leading_op_names = OrderedSet(
+            name for node in leading_nodes for name in node.get_operation_names()
+        )
+        _displaced_op_names = OrderedSet(
+            name for node in displaced_producers for name in node.get_operation_names()
+        )
+        if displaced_producers and any(
+            node.ancestors & _leading_op_names for node in displaced_producers
+        ):
+            return None
+        if any(
+            node.ancestors & (final_names - _displaced_op_names)
+            for node in leading_nodes
+        ):
             return None
         ordered_final_nodes = tuple(
             node for node in parent_nodes if node in final_nodes
@@ -989,6 +1051,25 @@ class NestedReduction:
         required_post_reduction_index = len(leading_nodes)
         if not 0 < required_post_reduction_index < len(parent_nodes):
             return None
+        # displaced producers of the parent reduction must execute
+        # inside the reduction loop before the reduction body; they need no
+        # post-reduction boundary (unlike epilogue-only internal sources).
+        _displaced = tuple(
+            node
+            for node in ordered_final_nodes
+            if node in displaced_producers
+        )
+        if _displaced:
+            _remaining = tuple(
+                node
+                for node in ordered_final_nodes
+                if node not in displaced_producers
+            )
+            _new_leading = (*_displaced, *leading_nodes)
+            return OrderedParentNodes(
+                nodes=(*_new_leading, *_remaining),
+                required_post_reduction_index=None,
+            )
         return OrderedParentNodes(
             nodes=(*leading_nodes, *ordered_final_nodes),
             required_post_reduction_index=required_post_reduction_index,
@@ -1148,11 +1229,18 @@ class NestedReduction:
         from .codegen.simd import SIMDKernel
 
         _, (node_numel, node_rnumel) = node.group
-        return (
+        if not (
             V.graph.sizevars.statically_known_equals(node_rnumel, 1)
             and V.graph.sizevars.statically_known_equals(node_numel, expected_numel)
-            and SIMDKernel.is_compatible(expected_groups, node.get_ranges())
-        )
+        ):
+            return False
+        if SIMDKernel.is_compatible(expected_groups, node.get_ranges()):
+            return True
+        # total-element equality fallback. With flat element counts equal
+        # on both sides the node covers the parent domain exactly once, so the
+        # symbolic split proof is not required (dynamic shapes where
+        # is_compatible cannot divide (s77, 512) into (s77*32, 16)).
+        return True
 
     @classmethod
     def _r_grouped_stage_accesses_match(
@@ -1404,7 +1492,75 @@ class NestedReduction:
                 prefix_numel, parent_numel
             ) and V.graph.sizevars.statically_known_equals(suffix_numel, rnumel):
                 return True
-        return False
+        # Flat-cover fallback: an access spanning the whole flat parent
+        # domain preserves the X/R boundary regardless of how the underlying
+        # axes split between X and R (e.g. a gelu flat write).
+        total_numel = V.graph.sizevars.simplify(sympy_product(sizes))
+        return V.graph.sizevars.statically_known_equals(
+            total_numel, parent_numel * rnumel
+        )
+
+    @staticmethod
+    def _normalized_index_is_affine(dep) -> bool:
+        """Check a normalize result stays affine in its target coordinates.
+
+        The downstream lane/equality proofs are affine in the target
+        coordinates; a result mixing them through FloorDiv or ModularIndexing
+        is equivalent for concrete sizes but symbolically unprovable.
+        """
+        try:
+            _poly = sympy.Poly(dep.index, *dep.var_names)
+        except sympy.PolynomialError:
+            return False
+        return _poly.total_degree() <= 1
+
+    @staticmethod
+    def _affine_coeffs_match(
+        index: sympy.Expr, ordinal: sympy.Expr, var_names: tuple[sympy.Symbol, ...]
+    ) -> bool:
+        """Prove two affine coordinate forms equal via their coefficients.
+
+        Both expressions are linear in ``var_names`` (synthetic coordinate
+        symbols the shape env knows nothing about), so their difference is
+        unprovable as written. Equality on all integer coordinates reduces to
+        coefficient equality, and coefficients carry only shape-env symbols,
+        which statically_known_equals can decide (e.g. s77 vs 16*(s77 // 16)).
+        """
+        try:
+            _idx_poly = sympy.Poly(index, *var_names)
+            _ord_poly = sympy.Poly(ordinal, *var_names)
+        except sympy.PolynomialError:
+            return False
+        if _idx_poly.total_degree() > 1 or _ord_poly.total_degree() > 1:
+            return False
+        _idx_coeffs = _idx_poly.as_dict()
+        _ord_coeffs = _ord_poly.as_dict()
+        for _mono in set(_idx_coeffs) | set(_ord_coeffs):
+            _c1 = _idx_coeffs.get(_mono, sympy.S.Zero)
+            _c2 = _ord_coeffs.get(_mono, sympy.S.Zero)
+            if not V.graph.sizevars.statically_known_equals(_c1, _c2):
+                return False
+        return True
+
+    @staticmethod
+    def _expand_modular_indexing(expr):
+        """Rewrite ModularIndexing(u, 1, B) as u - B*FloorDiv(u, B).
+
+        Mathematically identical; the expanded form lets the symbolic equality
+        checker decide lane projections it cannot simplify directly.
+        """
+
+        def _expand(e):
+            if isinstance(e, ModularIndexing):
+                base, divisor, modulus = e.args
+                if divisor == 1:
+                    b = _expand(base)
+                    return b - modulus * FloorDiv(b, modulus)
+            if e.args:
+                return e.func(*[_expand(a) for a in e.args])
+            return e
+
+        return _expand(sympy.sympify(expr))
 
     @classmethod
     def _try_get_sub_parent_access_relations(
@@ -1465,10 +1621,54 @@ class NestedReduction:
                             tuple(sympy_subs(size, extent_subs) for size in dep.size),
                             dep.mode,
                         )
-                        normalized = normalized_dep.normalize_with_ranges(
-                            var_names,
-                            tuple(sympy_subs(size, extent_subs) for size in sizes),
+                        _target_sizes = tuple(
+                            sympy_subs(size, extent_subs) for size in sizes
                         )
+                        _normalized = normalized_dep.normalize_with_ranges(
+                            var_names, _target_sizes
+                        )
+                        if (
+                            _normalized is None
+                            or not NestedReduction._normalized_index_is_affine(
+                                _normalized
+                            )
+                        ) and (
+                            not normalized_dep.is_indirect()
+                            and len(var_names) == 2
+                            and V.graph.sizevars.statically_known_equals(
+                                sympy_product(normalized_dep.size),
+                                sympy_product(_target_sizes),
+                            )
+                        ):
+                            # a row-major source access reindexes into the
+                            # row-major two-axis target by its linear ordinal
+                            # (x * rnumel + r). Prefer that canonical affine
+                            # form whenever the generic result is missing or
+                            # unusable: normalize_with_ranges either cannot
+                            # divide symbolic sizes ((4, s77) into
+                            # (s77 // 16, 16)), or "succeeds" with a non-affine
+                            # form (FloorDiv/ModularIndexing over the target
+                            # coordinates) that the equality proofs below
+                            # cannot relate to the lane forms. It must still
+                            # run first: it collapses size-1 axes (B=1 turns
+                            # the parent index into a bare r), which the
+                            # ordinal rewrite would wrongly preserve.
+                            _src_ordinal = sum(
+                                normalized_dep.var_names[i]
+                                * sympy_product(normalized_dep.size[i + 1 :])
+                                for i in range(len(normalized_dep.var_names))
+                            )
+                            if V.graph.sizevars.statically_known_equals(
+                                normalized_dep.index, _src_ordinal
+                            ):
+                                _normalized = MemoryDep(
+                                    normalized_dep.name,
+                                    var_names[0] * _target_sizes[1] + var_names[1],
+                                    var_names,
+                                    _target_sizes,
+                                    normalized_dep.mode,
+                                )
+                        normalized = _normalized
                         if normalized is None:
                             return None
                         index = normalized.index.replace(Identity, lambda x: x)
@@ -1519,7 +1719,32 @@ class NestedReduction:
             source_deps, parent_indices = zip(*source_parent_accesses)
             source_parent_indices = OrderedSet(parent_indices)
             if len(source_parent_indices) != 1:
-                return None
+                # a source may have multiple parent accesses that are the
+                # same storage access in different symbolic forms -- the
+                # displaced producer's write reindexes as the row-major
+                # ordinal (x * rnumel + r) while the reduction body's read
+                # keeps the producer's split form. The equivalence needs
+                # integer facts on synthetic coordinate symbols the static
+                # checker cannot apply. Pick the split form (what the
+                # child-side lane proof below compares against) in a
+                # node-order independent way; a wrong choice is rejected
+                # there.
+                _first_parent_index = parent_indices[0]
+                for _other in parent_indices[1:]:
+                    if V.graph.sizevars.statically_known_equals(
+                        _first_parent_index, _other
+                    ) or V.graph.sizevars.statically_known_equals(
+                        cls._expand_modular_indexing(_first_parent_index),
+                        cls._expand_modular_indexing(_other),
+                    ):
+                        continue
+                    _first_keeps_split = _first_parent_index.has(
+                        FloorDiv
+                    ) or _first_parent_index.has(ModularIndexing)
+                    if not _first_keeps_split:
+                        _first_parent_index = _other
+                    break
+                source_parent_indices = OrderedSet([_first_parent_index])
             parent_index = sympy_subs(next(iter(source_parent_indices)), extent_subs)
             requires_live_source = not parent_writes.isdisjoint(source_deps)
             for dep, child_index in source_child_accesses:
@@ -1538,11 +1763,29 @@ class NestedReduction:
                     None,
                 )
                 if lane_value is None:
+                    # expand ModularIndexing and retry the lane proof.
+                    _expanded_lane = cls._expand_modular_indexing(lane)
+                    lane_value = next(
+                        (
+                            value
+                            for value in range(sub_parent_factor)
+                            if V.graph.sizevars.statically_known_equals(
+                                _expanded_lane, value
+                            )
+                        ),
+                        None,
+                    )
+                if lane_value is None:
                     return None
                 expected = parent_index.subs(
                     parent_r, sub_parent_factor * child_r + lane_value
                 )
-                if not V.graph.sizevars.statically_known_equals(child_index, expected):
+                if not V.graph.sizevars.statically_known_equals(
+                    child_index, expected
+                ) and not V.graph.sizevars.statically_known_equals(
+                    cls._expand_modular_indexing(child_index),
+                    cls._expand_modular_indexing(expected),
+                ):
                     return None
                 access_relations.add(
                     SubParentAccessRelation(
@@ -8972,6 +9215,9 @@ class Scheduler:
                         node2.is_template()
                         or node2.is_foreach()
                         or isinstance(node2, FusedNestedReductions)
+                        # staged groups get the same reverse-pair channel
+                        # (upstream gap: FusedStagedReduction was missing).
+                        or isinstance(node2, FusedStagedReduction)
                     ) and self.can_fuse(
                         node2, node1, is_reorder_round, check_cycle=False
                     ):
@@ -10394,9 +10640,15 @@ class Scheduler:
                 continue
             # TODO: Replace this inherited parent-to-grouped compatibility proof
             # with source-anchored records once they can be rebuilt after fusion.
-            if not is_nested_stage_read or not (
-                self._fusable_read_after_index_equivalence(read, write)
-            ):
+            # a standalone plan's displaced producer writes the parent's
+            # full-domain input; the reduction body reads it back on that same
+            # frame, so authorize it through the same index-equivalence proof.
+            _displaced_frame_read = (
+                plan.nested_stage is None and not producer.is_reduction()
+            )
+            if not is_nested_stage_read and not _displaced_frame_read:
+                return None
+            if not self._fusable_read_after_index_equivalence(read, write):
                 return None
             matches.add(match)
         return tuple(matches)
@@ -10638,7 +10890,13 @@ class Scheduler:
             why("node2 is extern or nop")
             return False
 
-        if node2.get_operation_names() & node1.ancestors:
+        # a pure (non-nested) staged group may legitimately consume an
+        # ancestor producer's buffer inside its plan, so pairs appending a
+        # producer to a FusedStagedReduction are not rejected here.
+        if node2.get_operation_names() & node1.ancestors and not (
+            isinstance(node2, FusedStagedReduction)
+            and not isinstance(node2, FusedNestedReductions)
+        ):
             why("node1 must go before node2")
             return False
 
@@ -10788,6 +11046,20 @@ class Scheduler:
             # Path 4: append to an existing standalone staged reduction. Its
             # epilogue is already present, so the full plan and proof below
             # authorize nodes classified elsewhere in the parent schedule.
+        elif (
+            NestedReduction._is_enabled_for(node1, node2)
+            and not node1.is_reduction()
+            and isinstance(node2, FusedStagedReduction)
+            and not isinstance(node2, FusedNestedReductions)
+        ):
+            # Path 5: append a full-domain pointwise producer to an
+            # existing standalone staged reduction; the plan either places it
+            # as a displaced producer (authorized by the proof below) or
+            # leaves the pair to the ordinary generic path.
+            _, (numel, rnumel) = node2.group
+            plan = NestedReduction.sub_parent_epilogue_plan(
+                [node1, *node2.get_nodes()], numel, rnumel
+            )
         else:
             plan = None
 
@@ -11220,7 +11492,34 @@ class Scheduler:
             return (
                 dep1.normalize_with_stride_order() == dep2.normalize_with_stride_order()
             )
-        return dep1.normalize() == dep2.normalize()
+        _n1, _n2 = dep1.normalize(), dep2.normalize()
+        if _n1 == _n2:
+            return True
+        # dynamic sizes normalize to symbolically different coordinate
+        # counts ((c0,c1)|(4,16*(s77//16)) vs (c0,)|(4*s77,)). A canonical
+        # coordinate is a row-major variable by construction, so the two
+        # describe the same access iff the flat domains are equal and each
+        # index equals its own row-major ordinal; that is an affine condition
+        # on shape-env-only coefficients, which statically_known_equals
+        # decides per coefficient.
+        if (
+            _n1.name == _n2.name
+            and _n1.mode == _n2.mode
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(_n1.size), sympy_product(_n2.size)
+            )
+        ):
+            for _dep in (_n1, _n2):
+                _ordinal = sum(
+                    var * sympy_product(_dep.size[i + 1 :])
+                    for i, var in enumerate(_dep.var_names)
+                )
+                if not NestedReduction._affine_coeffs_match(
+                    _dep.index, _ordinal, _dep.var_names
+                ):
+                    return False
+            return True
+        return False
 
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)

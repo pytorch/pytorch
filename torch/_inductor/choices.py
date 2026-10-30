@@ -691,6 +691,16 @@ class InductorChoices:
         if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
+            # a staged sub-parent fusion carries its producer into the
+            # kernel, so "no shared data" (exact-dep overlap) is not a valid
+            # rejection signal; the plan already proved the cross-domain access.
+            try:
+                _dev = node1.get_device()
+                _cand = [*node1.get_nodes(), *node2.get_nodes()]
+                if scheduler.get_backend(_dev).has_sub_parent_epilogue(_cand):
+                    return True
+            except Exception:
+                pass
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
                 common_buf_names: OrderedSet[str] = (
                     node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
@@ -765,6 +775,15 @@ class InductorChoices:
             # distance.
             return True
         if shared_data_score < config.score_fusion_memory_threshold:
+            # a staged sub-parent fusion carries its producer into the
+            # kernel; the plan already proved the cross-domain access.
+            try:
+                _dev = node1.get_device()
+                _cand = [*node1.get_nodes(), *node2.get_nodes()]
+                if scheduler.get_backend(_dev).has_sub_parent_epilogue(_cand):
+                    return True
+            except Exception:
+                pass
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):

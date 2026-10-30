@@ -855,7 +855,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit(remaining[i], expr)
+                # the divisor may be a symbolically unresolved quotient
+                # of the remaining size itself (16 vs s77 // (s77 // 16));
+                # equality is sufficient (quotient 1).
+                if not sv.statically_known_equals(remaining[i], expr):
+                    raise CantSplit(remaining[i], expr)
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -951,7 +955,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit(size, remaining[current_group])
+                        # divisibility through a FloorDiv divisor. The
+                        # multiple-of checker cannot chain s77 == 16*(s77//16)
+                        # (a guard-backed fact statically_known_equals
+                        # decides) into (4*s77) % (4*(s77//16)) == 0; prove
+                        # the quotient instead.
+                        if not sv.statically_known_equals(
+                            FloorDiv(size, remaining[current_group])
+                            * remaining[current_group],
+                            size,
+                        ):
+                            raise CantSplit(size, remaining[current_group])
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
@@ -3190,8 +3204,9 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
-            return (node_numel == numel and node_rnumel == rnumel) or (
-                node_numel == numel * rnumel and node_rnumel == 1
+            _eq = V.graph.sizevars.statically_known_equals
+            return (_eq(node_numel, numel) and _eq(node_rnumel, rnumel)) or (
+                _eq(node_numel, numel * rnumel) and _eq(node_rnumel, 1)
             )
 
         def fits_outside_reduction(n):
