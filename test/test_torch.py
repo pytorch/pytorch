@@ -7070,7 +7070,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
     @onlyAccelerator
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5662
     def test_bmm_matmul_mixed_dtype_error(self, device):
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
@@ -7086,6 +7085,15 @@ class TestTorchDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
+
+    @onlyAccelerator
+    def test_baddbmm_mixed_dtype_error(self, device):
+        inp = torch.randn(2, 8, 64, device=device, dtype=torch.float16)
+        a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type|same dtype"):
+            torch.baddbmm(inp, a, b)
 
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5661")
     def test_split_with_sizes_copy_out(self, device):
