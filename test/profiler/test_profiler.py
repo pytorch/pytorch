@@ -1282,6 +1282,80 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_global_profiler_left_running_at_exit(self):
+        script = """
+import threading
+import torch
+from torch.profiler import profile, ProfilerActivity
+config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
+p = profile(activities=[ProfilerActivity.CPU], experimental_config=config)
+p.start()
+started = threading.Event()
+
+def work():
+    torch.ones(10) * 2
+    started.set()
+    while True:
+        torch.ones(10) * 2
+
+threading.Thread(target=work, daemon=True).start()
+started.wait()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stderr.count("Process is exiting without stopping the profiler"),
+            1,
+            proc.stderr,
+        )
+
+    @parametrize("close_while_active", [False, True])
+    def test_global_callback_session_close(self, close_while_active):
+        script = """
+import sys
+import torch
+from torch.autograd import _close_global_callback_session
+from torch.profiler import profile, ProfilerActivity
+config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
+for _ in range(2):
+    with profile(activities=[ProfilerActivity.CPU], experimental_config=config) as prof:
+        torch.ones(10) * 2
+    print("aten::mul" in {e.name for e in prof.events()})
+with profile(activities=[ProfilerActivity.CPU], experimental_config=config) as prof:
+    with torch.profiler.record_function("spans_exit"):
+        torch.ones(10) + 1
+        if sys.argv[1] == "True":
+            _close_global_callback_session()
+        torch.ones(10) * 2
+names = {e.name for e in prof.events()}
+_close_global_callback_session()
+print("spans_exit" in names, "aten::add" in names, "aten::mul" in names)
+for _ in range(2):
+    with profile(activities=[ProfilerActivity.CPU], experimental_config=config) as restarted:
+        torch.ones(10) * 2
+    print("aten::mul" in {e.name for e in restarted.events()})
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(close_while_active)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout.strip().splitlines()[-5:],
+            ["True", "True", f"True True {not close_while_active}", "False", "False"],
+        )
+        self.assertEqual(
+            proc.stderr.count("Process is exiting without stopping the profiler"),
+            int(close_while_active),
+        )
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)

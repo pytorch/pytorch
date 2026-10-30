@@ -449,6 +449,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       disableProfiler,
       py::call_guard<py::gil_scoped_release>());
   m.def(
+      "_close_global_callback_session",
+      closeGlobalCallbackSession,
+      "Use only at process exit to keep global callbacks from accessing Kineto "
+      "after it is destroyed. This permanently disables recording and "
+      "correlation pops across the process, so later profile_all_threads and "
+      "on-demand sessions cannot record CPU operations. Python registers "
+      "this hook automatically with atexit.",
+      py::call_guard<py::gil_scoped_release>());
+  m.def(
       "_prepare_profiler",
       [](const ProfilerConfig& config,
          const std::set<ActivityType>& activities,
