@@ -45,6 +45,7 @@ from torch._inductor.heuristics.triton_codegen.reduction import (
     ROCmReductionHeuristic,
     XPUReductionHeuristic,
 )
+from torch._inductor.runtime import triton_heuristics
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -70,6 +71,7 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotuner,
     CachingAutotunerPlugin,
     check_autotune_cache,
+    DebugAutotuner,
     DEFER,
     make_matmul_triton_config,
     template,
@@ -77,6 +79,13 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+def _get_raw_stream():
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    device_interface = get_interface_for_device(GPU_TYPE)
+    return device_interface.get_raw_stream(device_interface.current_device())
 
 
 class _FindNamesProbe:
@@ -228,24 +237,6 @@ class TestTritonHeuristics(TestCase):
             self.assertIn("triton_poi_fused_add_0", _find_names(probe))
         finally:
             del namespace
-
-    def test_unbound_kernel_falls_back_to_inductor_meta_name(self):
-        """
-        The label DebugAutotuner.run derives for an unbound kernel. The stack
-        walk made _find_names return ['obj', 'self'], so max(..., key=len)
-        picked "self" instead of reaching the inductor_meta fallback.
-        """
-
-        class FakeAutotuner:
-            inductor_meta = {"kernel_name": "triton_poi_fused_add_0"}
-
-            def kernel_name(self):
-                possible_names = _find_names(self)
-                if possible_names:
-                    return f"{max(possible_names, key=len)}"
-                return self.inductor_meta["kernel_name"]
-
-        self.assertEqual(FakeAutotuner().kernel_name(), "triton_poi_fused_add_0")
 
     def test_triton_config(self):
         """
@@ -1255,6 +1246,113 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(len(benchmark_calls), 1)
 
 
+@triton.jit
+def debug_cos_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)
+    xmask = xindex < xnumel
+    tmp0 = tl.load(in_ptr0 + xindex, xmask)
+    tl.store(out_ptr0 + xindex, tl_math.cos(tmp0), xmask)
+
+
+@skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+class TestDebugAutotuner(TestCase):
+    numel = 1000
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(triton_heuristics, "collected_calls", []))
+
+    def _make_autotuner(self, fn, *, regex_filter=""):
+        signature = {
+            "in_ptr0": "*fp32",
+            "out_ptr0": "*fp32",
+            "xnumel": "i32",
+            "XBLOCK": "constexpr",
+        }
+        return DebugAutotuner(
+            fn=fn,
+            triton_meta={
+                "signature": signature,
+                "device": DeviceProperties.create(torch.device(GPU_TYPE)),
+                "constants": {},
+                "configs": [
+                    AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())
+                ],
+            },
+            configs=[triton_config({"x": 1024}, 128)],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=True,
+            heuristic_type=HeuristicType.POINTWISE,
+            size_hints={"x": 1024},
+            regex_filter=regex_filter,
+            inductor_meta={"grid_type": "Grid1D", "kernel_name": fn.__name__},
+        )
+
+    def _run(self, kernel, x, out):
+        stream = _get_raw_stream()
+        kernel.run(x, out, self.numel, stream=stream)
+
+    def _check_cos_calls(self, kernel, n):
+        for i in range(n):
+            x = torch.randn(self.numel, device=GPU_TYPE)
+            out = torch.full_like(x, float("nan"))
+            self._run(kernel, x, out)
+            self.assertEqual(out, torch.cos(x), msg=f"call {i}")
+
+    def test_every_call_reports_the_one_timing(self):
+        kernel = self._make_autotuner(debug_cos_kernel)
+        x = torch.randn(self.numel, device=GPU_TYPE)
+        with patch.object(kernel, "bench", wraps=kernel.bench) as bench:
+            for _ in range(3):
+                self._run(kernel, x, torch.empty_like(x))
+        bench.assert_called_once()
+        self.assertEqual(triton_heuristics.collected_calls, [kernel.cached] * 3)
+
+    def test_the_regex_matches_the_name_the_kernel_is_bound_to(self):
+        kernel = self._make_autotuner(
+            debug_cos_kernel, regex_filter="triton_poi_fused_cos"
+        )
+        namespace = {"triton_poi_fused_cos_0": kernel}
+        try:
+            self._check_cos_calls(kernel, 1)
+            self.assertEqual(kernel.cached[-1], "triton_poi_fused_cos_0")
+        finally:
+            del namespace
+
+    def test_an_unbound_kernel_is_named_from_inductor_meta(self):
+        kernel = self._make_autotuner(debug_cos_kernel, regex_filter="triton_poi")
+        kernel.inductor_meta = {**kernel.inductor_meta, "kernel_name": "triton_poi_0"}
+        self._check_cos_calls(kernel, 1)
+        self.assertEqual(kernel.cached[-1], "triton_poi_0")
+
+    def test_a_kernel_the_regex_does_not_select_is_not_timed(self):
+        kernel = self._make_autotuner(debug_cos_kernel, regex_filter="no_such_kernel")
+        x = torch.randn(self.numel, device=GPU_TYPE)
+        with patch.object(kernel, "bench") as bench:
+            for _ in range(2):
+                self._run(kernel, x, torch.empty_like(x))
+        bench.assert_not_called()
+        self.assertIsNone(kernel.cached)
+        self.assertEqual(triton_heuristics.collected_calls, [])
+
+    def test_being_benchmarked_it_only_runs(self):
+        # How TritonBenchmarkRequest runs it: no name lookup, no timing.
+        kernel = self._make_autotuner(debug_cos_kernel)
+        kernel.with_bandwidth_info = False
+        find_names = patch(
+            "torch._inductor.runtime.triton_heuristics._find_names",
+            wraps=triton_heuristics._find_names,
+        )
+        with find_names as found, patch.object(kernel, "bench") as bench:
+            self._check_cos_calls(kernel, 2)
+        found.assert_not_called()
+        bench.assert_not_called()
+        self.assertIsNone(kernel.cached)
+        self.assertEqual(triton_heuristics.collected_calls, [])
+
+
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
 )
@@ -1292,13 +1390,6 @@ class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
 
     @staticmethod
-    def _get_stream():
-        from torch._dynamo.device_interface import get_interface_for_device
-
-        device_interface = get_interface_for_device(GPU_TYPE)
-        return device_interface.get_raw_stream(device_interface.current_device())
-
-    @staticmethod
     def _make_kernel_inputs():
         in_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
         out_ptr = torch.zeros(16, device=GPU_TYPE, dtype=torch.float32)
@@ -1325,7 +1416,7 @@ class TestCachingAutotunerPlugin(TestCase):
             patch.object(autotuner, "autotune_to_one_config") as mock_autotune,
         ):
             result = autotuner.run(
-                *self._make_kernel_inputs(), stream=self._get_stream()
+                *self._make_kernel_inputs(), stream=_get_raw_stream()
             )
 
         self.assertIs(result, sentinel)
@@ -1342,7 +1433,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner = self._make_autotuner([_Plugin()])
         with patch.object(autotuner, "autotune_to_one_config") as mock_autotune:
             result = autotuner.run(
-                *self._make_kernel_inputs(), stream=self._get_stream()
+                *self._make_kernel_inputs(), stream=_get_raw_stream()
             )
 
         self.assertIs(result, sentinel)
@@ -1364,7 +1455,7 @@ class TestCachingAutotunerPlugin(TestCase):
         autotuner = self._make_autotuner(
             [_Plugin("a"), _Plugin("b"), _Plugin("c", sentinel), _Plugin("d")]
         )
-        result = autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
+        result = autotuner.run(*self._make_kernel_inputs(), stream=_get_raw_stream())
 
         self.assertIs(result, sentinel)
         self.assertEqual(seen, ["a", "b", "c"])
@@ -1382,7 +1473,7 @@ class TestCachingAutotunerPlugin(TestCase):
         full_args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
         autotuner = self._make_autotuner([_Plugin()], configs=full_args["configs"][:1])
 
-        autotuner.run(*self._make_kernel_inputs(), stream=self._get_stream())
+        autotuner.run(*self._make_kernel_inputs(), stream=_get_raw_stream())
 
         self.assertEqual(seen, ["pre_dispatch"])
         self.assertEqual(len(autotuner.launchers), 1)
