@@ -882,8 +882,10 @@ class _DynamoCapture(Capture[_P, _R]):
         each graph-break continuation is bound as a resume function in its module's
         globals. Loading the artifact here binds those same resume names, and an
         installed artifact refuses frames with live entries, so the capturing process
-        could not serve its own artifact. Only what this capture compiled is
-        released; a later torch.compile of these frames recompiles them.
+        could not serve its own artifact. Every cache entry of the frames the capture
+        compiled is dropped, including one an earlier torch.compile of the same frames
+        made (which recompiles on its next call), and so are the resume functions it
+        bound; frames the capture did not compile are untouched.
         """
         from torch._C._dynamo.eval_frame import reset_code
         from torch._dynamo.utils import CleanupHook
@@ -2674,31 +2676,28 @@ def _split_graph_sources(
     """Move each Inductor graph's output code out of a copy of ``backends``.
 
     Returns the copy, its graphs' ``source_code`` emptied, and the code keyed
-    f"{backend_id}.fw" / ".bw". The artifact carries the code once, as editable text
-    (GRAPH_SOURCES), and the driver puts it back before deserializing a graph.
+    f"{backend_id}.fw" / ".bw"; only the objects on the path to each graph are
+    copied. The artifact carries the code as editable text (GRAPH_SOURCES), and the
+    driver puts it back before deserializing a graph. The kernel sources a graph
+    bundles for its precompiled kernels stay in the copy, and are dropped on load
+    when the graph's code was edited.
     """
     stripped = dict(backends)
     sources: dict[str, str] = {}
     for backend_id, artifact in backends.items():
-        parts = [
-            (
-                part,
-                getattr(
-                    getattr(artifact.content, f"compiled_{part}", None), "result", None
-                ),
-            )
-            for part in ("fw", "bw")
-        ]
-        parts = [
-            (p, g) for p, g in parts if isinstance(getattr(g, "source_code", None), str)
-        ]
-        if not parts:
-            continue
-        artifact = stripped[backend_id] = copy.deepcopy(artifact)
-        for part, _ in parts:
-            graph = getattr(artifact.content, f"compiled_{part}").result
+        for part in ("fw", "bw"):
+            compiled = getattr(artifact.content, f"compiled_{part}", None)
+            graph = getattr(compiled, "result", None)
+            if not isinstance(getattr(graph, "source_code", None), str):
+                continue
+            if stripped[backend_id] is artifact:
+                stripped[backend_id] = copy.copy(artifact)
+                stripped[backend_id].content = copy.copy(artifact.content)
             sources[f"{backend_id}.{part}"] = graph.source_code
-            graph.source_code = ""
+            compiled = copy.copy(compiled)
+            compiled.result = copy.copy(graph)
+            compiled.result.source_code = ""
+            setattr(stripped[backend_id].content, f"compiled_{part}", compiled)
     return stripped, sources
 
 
