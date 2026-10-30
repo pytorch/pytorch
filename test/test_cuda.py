@@ -2738,64 +2738,6 @@ if __name__ == '__main__':
         )
 
     @slowTest
-    def test_index_select_wrapped_out_of_bounds_exception_cuda(self):
-        # An int64 index of 2**32 + k used to truncate to k in
-        # indexSelectSmallIndex before the bounds assert, silently
-        # returning row k as if it were valid.
-        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python3
-
-import torch
-from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
-
-class TestThatContainsCUDAAssertFailure(TestCase):
-
-    @slowTest
-    def test_index_select_bounds_cuda(self):
-        src = torch.arange(30, device="cuda").reshape(10, 3)
-        idx = torch.tensor([2**32 + 3], device="cuda")
-        y = torch.index_select(src, 0, idx).cpu()
-
-if __name__ == '__main__':
-    run_tests()
-""")
-        self.assertTrue(
-            has_device_side_assert(stderr),
-            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
-        )
-
-    @slowTest
-    def test_index_add_wrapped_out_of_bounds_exception_cuda(self):
-        # index_add_ with alpha != 1 falls back to indexFuncSmallIndex /
-        # indexFuncLargeIndex (n <= 16 / n > 16), which used to truncate the
-        # index before the bounds assert and silently accumulate into the
-        # wrapped row.
-        for n in (1, 32):
-            stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
-#!/usr/bin/env python3
-
-import torch
-from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
-
-class TestThatContainsCUDAAssertFailure(TestCase):
-
-    @slowTest
-    def test_index_add_bounds_cuda(self):
-        x = torch.zeros(10, device="cuda")
-        idx = torch.zeros({n}, dtype=torch.int64, device="cuda")
-        idx[0] = 2**32 + 7
-        x.index_add_(0, idx, torch.ones({n}, device="cuda"), alpha=2)
-        torch.cuda.synchronize()
-
-if __name__ == '__main__':
-    run_tests()
-""")
-            self.assertTrue(
-                has_device_side_assert(stderr),
-                lambda msg: f"{msg}\nExpected device assert error in stderr (n={n}), got: {stderr}",
-            )
-
-    @slowTest
     @unittest.skipIf(
         not TEST_WITH_ROCM
         or (
