@@ -3538,6 +3538,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
+    broadcast_scalar_loads = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
     block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
     tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
@@ -5454,7 +5455,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
                 line = f"tl.load({var} + ({original_index}))"
-                append_broadcast = indexing.expand_str
+                if self.broadcast_scalar_loads:
+                    append_broadcast = indexing.expand_str
                 shape = ()
             else:
                 self._reject_if_template_host_tma(var)
@@ -9111,8 +9113,14 @@ class TritonScheduling(SIMDScheduling):
             if fused_name:
                 fused_name = V.choices.customize_fused_kernel_name(fused_name, src_code)
             kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            backend_prefix = "gluon" if "@gluon.jit" in src_code else "triton"
             kernel_name = "_".join(
-                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+                [
+                    backend_prefix,
+                    kernel_category,
+                    fused_name,
+                    wrapper.next_kernel_suffix(),
+                ]
             )
             if config.aot_inductor.model_name_for_generated_files:
                 # When AOTI compiles multiple submodules, we need to use the model name to
