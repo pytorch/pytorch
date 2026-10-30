@@ -1486,9 +1486,17 @@ if HAS_CUDA_AND_TRITON:
             for hits in range(2):
                 torch._dynamo.reset()
                 counters.clear()
-                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+                log_stream, ctx = logs_to_string(
+                    "torch._inductor.cudagraph_utils", "cudagraphs"
+                )
+                with ctx():
+                    foo(torch.ones([10], device="cuda"), torch.ones([20]))
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+                FileCheck().check("skipping cudagraphs due to cpu device").run(
+                    log_stream.getvalue()
+                )
+            self.assertIsNone(self.get_manager())
 
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)

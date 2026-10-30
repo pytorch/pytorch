@@ -6507,10 +6507,12 @@ torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 allow = saved["allow_serve_time_compiles"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
+calls = model.calls.clone()
 with (
     contextlib.nullcontext() if training else torch.no_grad(),
     torch._inductor.config.patch(saved["config"]),
 ):
+    flag = torch._inductor.config.triton.cudagraphs
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
@@ -6519,13 +6521,16 @@ with (
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
+    restored = int(torch._inductor.config.triton.cudagraphs == flag)
+bumps = int((model.calls - calls).max())
 manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
 nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
 for node in nodes:
     nodes.extend(child for children in node.children.values() for child in children)
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
-print("skips", skips, "recorded", recorded, "captured", captured)
+print("restored", restored, "bumps", bumps, "skips", skips, end=" ")
+print("recorded", recorded, "captured", captured)
 """
 
 
@@ -6575,10 +6580,12 @@ class TestPrecompileCudagraphs(TestCase):
         serve_time=False,
         config=None,
         skips=None,
+        bumps=0,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
         # by the loading process while serving the artifact, under its env and
-        # the inductor config patch.
+        # the inductor config patch. bumps: how much the three calls raise
+        # model.calls.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "x": self.x if x is None else x,
@@ -6597,10 +6604,14 @@ class TestPrecompileCudagraphs(TestCase):
             env={**os.environ, **(env or {})},
         )
         self.assertEqual(out.returncode, 0, out.stderr)
-        _, served_skips, _, recorded, _, captured = out.stdout.split()[-6:]
+        served = out.stdout.splitlines()[-1].split()
+        served = dict(zip(served[::2], map(int, served[1::2])))
+        # The serve-time config patch is reverted after each call.
+        self.assertEqual(served["restored"], 1)
+        self.assertEqual(served["bumps"], bumps)
         if skips is not None:
-            self.assertEqual(int(served_skips), skips)
-        return int(recorded), int(captured)
+            self.assertEqual(served["skips"], skips)
+        return served["recorded"], served["captured"]
 
     @parametrize("how", ["mode", "options"])
     @parametrize("serving", ["standalone", "installed"])
@@ -6618,7 +6629,7 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertTrue(config["triton.cudagraphs"])
         self.assertTrue(config["triton.cudagraph_trees"])
         # The loading process leaves triton.cudagraphs at its default (off).
-        recorded, _ = self._serve_in_fresh_process(y)
+        recorded, _ = self._serve_in_fresh_process(y, skips=0)
         self.assertGreater(recorded, 0)
 
     def test_a_capture_under_the_ambient_cudagraph_flag_serves_cudagraphs(self):
@@ -6643,8 +6654,10 @@ class TestPrecompileCudagraphs(TestCase):
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad():
             expected = fn(self.model, miss)
-        recorded, _ = self._serve_in_fresh_process(expected, x=miss, serve_time=True)
-        self.assertGreater(recorded, 0)
+        served = self._serve_in_fresh_process(
+            expected, x=miss, serve_time=True, skips=0
+        )
+        self.assertGreater(served[0], 0)
 
     def test_a_serve_time_compile_traces_under_the_capture_cudagraph_config(self):
         fn = self.mod.reads_the_cudagraph_flag
@@ -6709,7 +6722,7 @@ class TestPrecompileCudagraphs(TestCase):
         options = {"triton.cudagraphs": True}
         y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
         no_trees = {"triton.cudagraph_trees": False}
-        recorded, _ = self._serve_in_fresh_process(y, config=no_trees)
+        recorded, _ = self._serve_in_fresh_process(y, config=no_trees, bumps=3)
         self.assertGreater(recorded, 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
