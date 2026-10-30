@@ -12,6 +12,7 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
@@ -1317,7 +1318,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1343,7 +1348,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -1456,6 +1461,16 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         )
 
 
+def _flex_needs_small_blocks(
+    capability: tuple[int, int], head_dim: int, v_head_dim: int | None
+) -> bool:
+    # Triton miscompiles flex attention on sm_10x when the QK or V head_dim is
+    # > 256 and a block dim is >= 64 (fwd BLOCK_M; bwd BLOCK_N1/BLOCK_M2),
+    # faulting with "misaligned address" or "unspecified launch failure".
+    # https://github.com/triton-lang/triton/issues/10309
+    return capability[0] == 10 and max(head_dim, v_head_dim or 0) > 256
+
+
 class CUDAConfigHeuristic(BaseConfigHeuristic):
     """
     Child class for CUDA device specific gemm/flex attention/conv/ configs.
@@ -1528,17 +1543,29 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
-            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+                flex_attn_fwd_configs = self.exhaustive_flex_attn_fwd_configs
+            else:
+                flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_fwd_configs = [
+                    c for c in flex_attn_fwd_configs if c.block_m < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_fwd_configs
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
@@ -1560,11 +1587,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = self.a100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
+        elif dtype == torch.float32:
+            default_config = FlexConfig(32, 16, 3, 4)
+        elif prune_large_blocks:
+            default_config = FlexConfig(32, 32, 2, 4)
         else:
-            if dtype == torch.float32:
-                default_config = FlexConfig(32, 16, 3, 4)
-            else:
-                default_config = FlexConfig(64, 32, 3, 4)
+            default_config = FlexConfig(64, 32, 3, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1572,14 +1600,25 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
+        """Return flex attention backward configs for the current CUDA device."""
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+                flex_attn_bwd_configs = self.exhaustive_flex_attn_bwd_configs
+            else:
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_bwd_configs = [
+                    c
+                    for c in flex_attn_bwd_configs
+                    if max(c.block_m1, c.block_n1, c.block_m2, c.block_n2) < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_bwd_configs
 
         major, minor = capability
         if dtype == torch.float32:
@@ -1627,16 +1666,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 )
             ),
             "sm12x": lambda h: (
-                FlexBwDConfig(32, 128, 128, 32, 3, 4)
-                if h < 64
-                else FlexBwDConfig(
-                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
-                )
+                FlexBwDConfig(32, 128, 128, 32, 3, 4) if h < 64 else
+                FlexBwDConfig(64, 64, 64, 64, 2, 4) if h < 128 else
+                FlexBwDConfig(64, 64, 64, 64, 1, 4) if h == 128 else
+                FlexBwDConfig(32, 32, 32, 32, 2, 4)
             ),
         }
         # fmt: on
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             default_config = config_map[capability_class](head_dim)
         else:
             default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -2132,7 +2170,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 yield self.triton_config(**kwargs)
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -2178,7 +2220,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -2296,7 +2338,11 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -2325,7 +2371,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -2378,17 +2424,22 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 # Template-specific mixin classes
 def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
-    if device_type == "xpu":
-        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-        return bool(torch.backends.mkldnn.allow_tf32)
+    allow_tf32 = False
+    if isinstance(device_type, str):
+        try:
+            iface = get_interface_for_device(device_type)
+        except NotImplementedError:
+            iface = None
+        else:
+            allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda":
-        # allow_tf32 alignment heuristics based on reverse engineering
-        # H100 CUDA 12.8 behavior
+        # CUDA applies a shape threshold on top of the backend flag.
+        # Based on reverse engineering H100 CUDA 12.8 behavior.
         size_threshold = V.graph.sizevars.statically_known_true(
             sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
-        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-    return False
+        return allow_tf32 and size_threshold
+    return allow_tf32
 
 
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -3306,29 +3357,6 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
             return False
         return True
 
-    # pyrefly: ignore [bad-override]
-    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
-        """
-        Filter out bad configs for specific hardware.
-        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
-        """
-
-        def should_skip_mi350x_config(config: BaseConfig) -> bool:
-            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
-            try:
-                return (
-                    config.block_k <= 64
-                    and IS_ROCM
-                    and torch.cuda.get_device_capability() >= (9, 5)
-                )
-            except RuntimeError:
-                # If no HIP GPUs are available, we can't check device capability
-                # so we don't skip any configs
-                return False
-
-        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
-        return super()._filter_configs(filtered_configs)
-
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
 class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
@@ -3381,6 +3409,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -3722,6 +3751,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -3933,8 +3963,11 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
+        if rocm_gfx_arch() in ("gfx950", "gfx1250"):
+            configs = [c for c in configs if c.block_k > 64]
         return super()._filter_configs(configs)
 
 
