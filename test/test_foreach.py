@@ -21,7 +21,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -1223,7 +1222,7 @@ class TestForeachDevice(TestCase):
             ),
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64)
     def test_foreach_norm_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets:
@@ -1259,7 +1258,7 @@ class TestForeachDevice(TestCase):
                 ]
                 self.assertEqual(expect, actual)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
     def test_foreach_max_ragged_chunks(self, device, dtype):
         # Heavily ragged list stresses the compact per-tensor partial offsets
