@@ -6524,7 +6524,8 @@ nodes = [] if manager is None else [n for ns in manager.roots.values() for n in 
 for node in nodes:
     nodes.extend(child for children in node.children.values() for child in children)
 recorded = len(nodes)
-print("recorded", recorded, "captured", captured)
+skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
+print("skips", skips, "recorded", recorded, "captured", captured)
 """
 
 
@@ -6573,6 +6574,7 @@ class TestPrecompileCudagraphs(TestCase):
         x=None,
         serve_time=False,
         config=None,
+        skips=None,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
         # by the loading process while serving the artifact, under its env and
@@ -6595,7 +6597,9 @@ class TestPrecompileCudagraphs(TestCase):
             env={**os.environ, **(env or {})},
         )
         self.assertEqual(out.returncode, 0, out.stderr)
-        _, recorded, _, captured = out.stdout.split()[-4:]
+        _, served_skips, _, recorded, _, captured = out.stdout.split()[-6:]
+        if skips is not None:
+            self.assertEqual(int(served_skips), skips)
         return int(recorded), int(captured)
 
     @parametrize("how", ["mode", "options"])
@@ -6685,9 +6689,10 @@ class TestPrecompileCudagraphs(TestCase):
         self.model.zero_grad(set_to_none=True)
         fn(self.model, self.x).sum().backward()
         grad = self.model.lin.weight.grad.clone()
-        recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
-        # A forward kept out keeps its backward out too.
-        self.assertEqual(recorded, 1 if graph == "backward" else 0)
+        # A forward kept out keeps its backward out too, and each is a logged skip.
+        skips = 1 if graph == "backward" else 2
+        served = self._serve_in_fresh_process(y, expected_grad=grad, skips=skips)
+        self.assertEqual(served[0], 1 if graph == "backward" else 0)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
