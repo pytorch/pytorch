@@ -170,11 +170,15 @@ class _ExportedPython:
                     self._runnable = self._load()
         if not self._check:
             return self._runnable(*args, **kwargs)
+
+        def copy(t: torch.Tensor) -> torch.Tensor:
+            c = t.detach().clone().requires_grad_(t.requires_grad)
+            # A non-leaf stays one, so eager may write to it in place as fn did.
+            return c if t.is_leaf else c.clone()
+
         # Copied before the artifact runs, so an in-place write cannot reach eager.
         eager_args, eager_kwargs = pytree.tree_map_only(
-            torch.Tensor,
-            lambda t: t.detach().clone().requires_grad_(t.requires_grad),
-            (args, kwargs),
+            torch.Tensor, copy, (args, kwargs)
         )
         result = self._runnable(*args, **kwargs)
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile

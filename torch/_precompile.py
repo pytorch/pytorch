@@ -3579,6 +3579,10 @@ def _matching_cache(
             cache = f.read()
     except FileNotFoundError:
         return None
+    except OSError as e:
+        raise PrecompileError(
+            f"precompile could not read the cache (cache_path={cache_path!r}): {e}"
+        ) from e
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
     except Exception:
