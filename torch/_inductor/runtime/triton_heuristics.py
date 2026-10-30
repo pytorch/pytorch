@@ -2358,6 +2358,23 @@ class CachingAutotuner(KernelInterface):
         # Currently num_ctas is already captured via config_to_dict(launcher.config)
         # for scratch space scaling, but is not used in the actual kernel launch.
         binary_metadata = binary.metadata
+        triton_meta = self.triton_meta
+        compiled_signature = getattr(launcher, "signature", None)
+        if compiled_signature and triton_meta is not None:
+            # Host-side TMA operands are tensordesc<> in the compiled kernel;
+            # the C++ wrapper must launch them as descriptors.
+            tma_rewrites = {
+                name: sig
+                for name, sig in compiled_signature.items()
+                if isinstance(sig, str)
+                and sig.startswith("tensordesc<")
+                and triton_meta.get("signature", {}).get(name) != sig
+            }
+            if tma_rewrites:
+                triton_meta = {
+                    **triton_meta,
+                    "signature": {**triton_meta["signature"], **tma_rewrites},
+                }
         legacy_tensordesc_meta = (
             binary_metadata.get("tensordesc_meta")
             if isinstance(binary_metadata, dict)
@@ -2372,7 +2389,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -2403,7 +2420,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -3677,6 +3694,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 ]
             launcher.def_args = def_args
             launcher.call_args = call_args
+            # The compiled signature: host-side TMA operands are tensordesc<>
+            # here though triton_meta still has them as pointers. The C++
+            # wrapper launches from it (save_gpu_kernel).
+            launcher.signature = dict(compile_meta["signature"])
             kernel_metadata = getattr(self.kernel, "metadata", None)
 
             # for the scratch arguments: None indicates that the kernel doesn't
