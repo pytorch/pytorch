@@ -14705,6 +14705,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
         # CPU accumulates in half precision, so MPS is closer to the float32 result
         'nn.functional.adaptive_avg_pool3d',
+        # Only for backward pass, which sums fp16 gradients of repeated elements with
+        # index_put(accumulate=True) in a different order than CPU
+        'combinations',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
