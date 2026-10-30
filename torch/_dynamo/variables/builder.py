@@ -2073,7 +2073,7 @@ class VariableBuilder:
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
-                BuiltinVariable(float, source=self.source),
+                variables.FloatBuiltinVariable(source=self.source),
                 value.__name__,
                 py_type=type(value),
             )

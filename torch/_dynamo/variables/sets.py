@@ -603,14 +603,14 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # set.__new__(cls, iterable=()); `self` is the BuiltinVariable(set)
+        # set.__new__(cls, iterable=()); `self` is the SetBuiltinVariable
         # __new__ was found on, `args[0]` is the actual (possibly subclassed)
         # cls. set.__new__ (tp_new) ignores extra args *and* kwargs --
         # population happens later via __init__, called separately after
         # __new__ returns.
         if not args:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
-        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is set:
+        if args[0].as_python_constant() is set:
             return SetVariable([], mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], [], tx=tx
@@ -766,9 +766,9 @@ class SetVariable(BaseSetVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
+        from .builtin import SetBuiltinVariable
 
-        temp_set_vt = SourcelessBuilder.create(tx, set).call_set(tx, *args, **kwargs)
+        temp_set_vt = SetBuiltinVariable().call_function(tx, args, kwargs)
         tx.output.side_effects.mutation(self)
         self.items.clear()
         self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
@@ -1193,7 +1193,7 @@ class FrozensetVariable(BaseSetVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # frozenset.__new__(cls, iterable=()); `self` is the
-        # BuiltinVariable(frozenset) __new__ was found on, `args[0]` is the
+        # FrozenSetBuiltinVariable __new__ was found on, `args[0]` is the
         # actual (possibly subclassed) cls. frozenset is immutable:
         # frozenset.__new__ (tp_new) populates contents directly from the
         # iterable, since frozenset.__init__ is a no-op, and (unlike set)
@@ -1208,7 +1208,7 @@ class FrozensetVariable(BaseSetVariable):
             raise_type_error(
                 tx, f"{cls.__name__} expected at most 1 argument, got {len(args) - 1}"
             )
-        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is frozenset:
+        if cls is frozenset:
             init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
             return FrozensetVariable(init_args, mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(

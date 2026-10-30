@@ -2071,19 +2071,16 @@ class TupleVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # tuple.__new__(cls, iterable=()); `self` is the BuiltinVariable(tuple)
-        # __new__ was found on (there's no TupleBuiltinVariable -- BuiltinVariable
-        # delegates here explicitly), `args[0]` is the actual (possibly
-        # subclassed) cls.
-        from .builtin import BuiltinVariable
-
+        # tuple.__new__(cls, iterable=()); `self` is the TupleBuiltinVariable
+        # __new__ was found on, `args[0]` is the actual (possibly subclassed)
+        # cls.
         if not 1 <= len(args) <= 2:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
         # tuple_new rejects keywords only when tuple's own tp_init would run.
         cls = args[0].as_python_constant()
         if cls is tuple or cls.__init__ is tuple.__init__:
             no_keywords(tx, "tuple", kwargs)
-        if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+        if cls is tuple:
             init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
             return TupleVariable(init_args, mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(
