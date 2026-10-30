@@ -550,6 +550,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_inputs: OrderedSet[str] = OrderedSet()
         self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: dict[str, ir.Buffer] = {}
+        self.helion_matmul_inputs: dict[str, tuple[ir.IRNode, ir.IRNode]] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
         # Buffers that share memory through a realized alias (e.g. the output of a
         # fallback view kernel such as aten.view.dtype), in both directions: the
