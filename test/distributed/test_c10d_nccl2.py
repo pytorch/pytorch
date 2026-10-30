@@ -2461,6 +2461,25 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full_like(t, expected))
 
 
+def _run_python_child(
+    test: TestCase, script: str, env: dict[str, str] | None = None
+) -> str:
+    """Runs script in a fresh interpreter and returns its combined output."""
+    try:
+        return subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+            env=env,
+            timeout=300,
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        test.fail("child process timed out")
+    except subprocess.CalledProcessError as e:
+        test.fail(f"child process failed with:\n{e.output}")
+
+
 _UNINITIALIZED_CUDA_SCRIPT = """\
 import torch
 import torch.distributed as dist
@@ -2510,22 +2529,11 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
         device_id: str = 'torch.device("cuda:0")',
         child_env: dict[str, str] | None = None,
     ) -> None:
-        try:
-            subprocess.check_output(
-                [
-                    sys.executable,
-                    "-c",
-                    _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
-                ],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=child_env,
-                timeout=300,
-            )
-        except subprocess.TimeoutExpired:
-            self.fail("child process timed out")
-        except subprocess.CalledProcessError as e:
-            self.fail(f"child process failed with:\n{e.output.decode()}")
+        _run_python_child(
+            self,
+            _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
+            child_env,
+        )
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
@@ -2577,6 +2585,136 @@ backend.shutdown()
         # into the same allocator: without lazyInitDevice() it hits the identical
         # assert one call later.
         self._run_child("dist.barrier()")
+
+
+_IGNORED_ENV_WARNING = "nccl2 ignores these legacy ProcessGroupNCCL"
+# Every knob nccl2 warns about, with a value legacy would act on.
+_IGNORED_ENV = {
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS": "0",
+    "TORCH_NCCL_PROPAGATE_ERROR": "true",
+    "TORCH_NCCL_DESYNC_DEBUG": "1",
+    "TORCH_NCCL_NAN_CHECK": "1",
+    "TORCH_NCCL_BCAST_UNIQUEID": "0",
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "60",
+    "TORCH_NCCL_COORD_CHECK_MILSEC": "500",
+    "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/nonexistent/pipe",
+    "TORCH_NCCL_NONBLOCKING_TIMEOUT": "60",
+}
+_IGNORED_ENV_SCRIPT = """\
+import torch
+import torch.distributed as dist
+
+dist.init_process_group(
+    "nccl2",
+    rank=0,
+    world_size=1,
+    store=dist.HashStore(),
+    device_id=torch.device("cuda:0"),
+)
+dist.new_group([0])
+dist.destroy_process_group()
+"""
+
+
+class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
+    """Runs in a subprocess because the warning fires once per process."""
+
+    def _run_child(self, env: dict[str, str]) -> str:
+        scrubbed = {
+            *_IGNORED_ENV,
+            "NCCL_DESYNC_DEBUG",
+            "TORCH_NCCL_TEARDOWN_ON_TIMEOUT",
+            "TORCH_NCCL_EXTRA_DUMP_ON_EXEC",
+            "TORCH_DISTRIBUTED_DEBUG",
+            "TORCH_CPP_LOG_LEVEL",
+            "TORCH_NCCL_ENABLE_TIMING",
+            "NCCL_ENABLE_TIMING",
+        }
+        child_env = {k: v for k, v in os.environ.items() if k not in scrubbed}
+        child_env.update(env)
+        return _run_python_child(self, _IGNORED_ENV_SCRIPT, child_env)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_warns_once_for_each_setting(self) -> None:
+        output = self._run_child({**_IGNORED_ENV, "TORCH_DISTRIBUTED_DEBUG": "DETAIL"})
+        # init_process_group and new_group each construct a backend.
+        self.assertEqual(output.count(_IGNORED_ENV_WARNING), 1, output)
+        for name, value in _IGNORED_ENV.items():
+            self.assertIn(f"{name}={value}", output)
+        self.assertIn("TORCH_NCCL_NAN_CHECK=1 (use TORCH_DIST_NAN_CHECK=1)", output)
+        self.assertIn(
+            "TORCH_NCCL_NONBLOCKING_TIMEOUT=60 (nccl2 uses the PG timeout)", output
+        )
+        self.assertIn(
+            "TORCH_NCCL_DESYNC_DEBUG=1 (for timing set TORCH_NCCL_ENABLE_TIMING=1)",
+            output,
+        )
+        self.assertIn('Use backend "nccl-legacy"', output)
+        # The DETAIL note follows, without repeating the timing hint.
+        self.assertIn(
+            "otherwise unset them. At debug level DETAIL, nccl-legacy also enables "
+            "desync debug and timing; nccl2 does not (for desync debug use backend "
+            '"nccl-legacy").',
+            output,
+        )
+        self.assertEqual(output.count("TORCH_NCCL_ENABLE_TIMING=1"), 1, output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_alias_and_malformed_value(self) -> None:
+        output = self._run_child(
+            {
+                "NCCL_DESYNC_DEBUG": "1",
+                "TORCH_NCCL_PROPAGATE_ERROR": "bogus",
+                "NCCL_ENABLE_TIMING": "1",
+                "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
+            }
+        )
+        # The name actually set, and no getCvarBool deprecation warning naming
+        # TORCH_NCCL_DESYNC_DEBUG.
+        self.assertNotIn("TORCH_NCCL_DESYNC_DEBUG", output)
+        self.assertIn("NCCL_DESYNC_DEBUG=1", output)
+        # A malformed value is reported rather than failing construction.
+        self.assertIn("TORCH_NCCL_PROPAGATE_ERROR=bogus", output)
+        # Timing is already on (via its alias): no timing hint anywhere.
+        self.assertIn('(for desync debug use backend "nccl-legacy").', output)
+        self.assertNotIn("for timing", output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_matching_values_not_reported(self) -> None:
+        output = self._run_child(
+            {
+                "TORCH_NCCL_RETHROW_CUDA_ERRORS": "1",
+                # Excluded knobs: nccl2 already behaves (nearly) as =1.
+                "TORCH_NCCL_TEARDOWN_ON_TIMEOUT": "1",
+                "TORCH_NCCL_PROPAGATE_ERROR": "False",
+                "TORCH_NCCL_DESYNC_DEBUG": "0",
+                # Shadowed by TORCH_NCCL_DESYNC_DEBUG, as in legacy.
+                "NCCL_DESYNC_DEBUG": "1",
+                "TORCH_NCCL_EXTRA_DUMP_ON_EXEC": "1",
+                "TORCH_NCCL_NAN_CHECK": "0",
+                "TORCH_NCCL_BCAST_UNIQUEID": "yes",
+                "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "",
+                "TORCH_NCCL_COORD_CHECK_MILSEC": "",
+                "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "",
+                "TORCH_NCCL_NONBLOCKING_TIMEOUT": "",
+                "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
+            }
+        )
+        self.assertNotIn(_IGNORED_ENV_WARNING, output)
+        # DETAIL alone gets the note but no advice to unset anything.
+        self.assertEqual(output.count("At debug level DETAIL"), 1, output)
+        self.assertIn(
+            'nccl2 does not (for desync debug use backend "nccl-legacy"; '
+            "for timing set TORCH_NCCL_ENABLE_TIMING=1).",
+            output,
+        )
+        self.assertNotIn("otherwise unset them", output)
 
 
 if __name__ == "__main__":
