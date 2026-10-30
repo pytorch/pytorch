@@ -141,20 +141,27 @@ def _guard_nan_key(key: VariableTracker) -> None:
         install_guard(key.make_guard(GuardBuilder.ID_MATCH))
 
 
-def _key_has_user_hash(tx: "InstructionTranslatorBase", key: VariableTracker) -> bool:
+def _key_has_user_hash_or_eq(
+    tx: "InstructionTranslatorBase", key: VariableTracker
+) -> bool:
     key = key.realize()
+    eq_fn = mro_lookup(key.python_type(), "__eq__")
+    if eq_fn is not None and not isinstance(
+        eq_fn, (types.WrapperDescriptorType, types.MethodDescriptorType)
+    ):
+        return True
     hash_fn = mro_lookup(key.python_type(), "__hash__")
     # Inherited hashes consume builtin storage, not overridden iteration.
     if hash_fn is tuple.__hash__:
         items = variables.TupleVariable.unpack_var_sequence(
             cast(variables.TupleVariable, key), tx
         )
-        return any(_key_has_user_hash(tx, item) for item in items)
+        return any(_key_has_user_hash_or_eq(tx, item) for item in items)
     if hash_fn is frozenset.__hash__:
         items = variables.FrozensetVariable.unpack_var_sequence(
             cast(variables.FrozensetVariable, key), tx
         )
-        return any(_key_has_user_hash(tx, item) for item in items)
+        return any(_key_has_user_hash_or_eq(tx, item) for item in items)
     return not (
         hash_fn is None
         or isinstance(hash_fn, types.WrapperDescriptorType)
@@ -389,6 +396,7 @@ class ConstDictVariable(VariableTracker):
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx, guard_keys=True)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -440,6 +448,7 @@ class ConstDictVariable(VariableTracker):
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx, guard_keys=True)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -508,7 +517,6 @@ class ConstDictVariable(VariableTracker):
         # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
-            # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
                 key_var = key.vt
@@ -527,7 +535,10 @@ class ConstDictVariable(VariableTracker):
                     (ValueMutationExisting, AttributeMutationExisting),
                 ) and (
                     self.should_reconstruct_all
-                    or (key_var.source is not None and key_var.source.is_dict_key())
+                    or (
+                        isinstance(key_var.source, ConstDictKeySource)
+                        and key_var.source.base == self.source
+                    )
                 ):
                     self.install_dict_order_guard(codegen.tx, guard_keys=True)
                 codegen(key_var)
@@ -900,6 +911,14 @@ class ConstDictVariable(VariableTracker):
                     "popitem(): dictionary is empty",
                 ],
             )
+        if isinstance(self, OrderedDictVariable):
+            unimplemented(
+                gb_type="dict.popitem on OrderedDict",
+                context=self.python_type().__name__,
+                explanation="dict.popitem removes storage without updating OrderedDict links.",
+                hints=["Use OrderedDict.popitem to keep its linked order consistent."],
+                skip_frame=True,
+            )
         k, v = self.items.popitem()
         self.should_reconstruct_all = True
         self.has_deleted_keys = True
@@ -1085,13 +1104,7 @@ class ConstDictVariable(VariableTracker):
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        self.install_dict_order_guard(tx, guard_keys=True)
-        reversed_keys: list[VariableTracker] = [
-            k.vt for k in reversed(list(self.items.keys()))
-        ]
-        return variables.ListIteratorVariable(
-            reversed_keys, mutation_type=ValueMutationNew()
-        )
+        return DictKeysVariable(self).dict_view_reversed(tx, args, kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
@@ -1422,14 +1435,14 @@ class OrderedDictVariable(ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.source and any(
-            _key_has_user_hash(tx, key) for key in (*self.original_items, args[0])
+            _key_has_user_hash_or_eq(tx, key) for key in (*self.original_items, args[0])
         ):
-            # Replay applies native moves after tracing their hash callbacks.
+            # Replay repeats hash/equality callbacks already executed during tracing.
             # Skip the whole frame so fallback does not replay callbacks twice.
             unimplemented(
-                gb_type="OrderedDict mutation with user-defined hash",
+                gb_type="OrderedDict mutation with user-defined hash or equality",
                 context="OrderedDict.move_to_end",
-                explanation="Dynamo cannot replay input OrderedDict moves without repeating user hash callbacks.",
+                explanation="Dynamo cannot replay input OrderedDict moves without repeating user hash or equality callbacks.",
                 hints=["Construct the OrderedDict inside the compiled function."],
                 skip_frame=True,
             )
@@ -1518,6 +1531,16 @@ class OrderedDictVariable(ConstDictVariable):
     ) -> VariableTracker:
         return super().dict_items(tx, args, kwargs).clone(is_ordered=True)
 
+    def dict_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictKeysVariable(self, is_ordered=True).dict_view_reversed(
+            tx, args, kwargs
+        )
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "copy": Method(dict_copy),
@@ -1527,6 +1550,7 @@ class OrderedDictVariable(ConstDictVariable):
         "keys": Method(dict_keys),
         "values": Method(dict_values),
         "items": Method(dict_items),
+        "__reversed__": Method(dict_reversed),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
@@ -1710,7 +1734,13 @@ class FrozenDictVariable(VariableTracker):
         def visit(item: VariableTracker) -> None:
             nonlocal found
             item = item.realize()
-            if isinstance(item, variables.UserDefinedObjectVariable):
+            if isinstance(
+                item,
+                (
+                    variables.UserDefinedObjectVariable,
+                    variables.UserDefinedClassVariable,
+                ),
+            ):
                 hash_fn = item.python_type().__hash__
                 frozen_type = cast(type, FrozenDictVariable._cpython_type)
                 found |= hash_fn not in (None, object.__hash__, frozen_type.__hash__)

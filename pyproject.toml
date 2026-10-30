@@ -368,7 +368,7 @@ dev = [
     "fsspec>=0.8.5",
     "hypothesis",
     "jinja2",
-    "lintrunner ; platform_machine != 's390x'",
+    "lintrunner ; platform_machine != \"s390x\"",
     "networkx>=2.5.1",
     "optree>=0.13.0",
     "optree>=0.20.0 ; python_version >= '3.15'",  # for builtins.frozendict support
