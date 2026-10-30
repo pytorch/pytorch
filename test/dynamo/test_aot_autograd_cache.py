@@ -5068,6 +5068,41 @@ class HOPCacheTests(CacheKeyEquivalenceMixin, torch._dynamo.test_case.TestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
+    def test_nested_sac_context_fn_with_cache_hash_causes_cache_hit(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y):
+            def context_fn():
+                return create_selective_checkpoint_contexts(_policy_save_mm)
+
+            context_fn.cache_hash = "nested_policy_save_mm_v1"
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            fn_with_checkpoint(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     def test_checkpoint_with_dropout_caches_correctly(self):
         def gn(x):
             return torch.dropout(x, p=0.5, train=True)

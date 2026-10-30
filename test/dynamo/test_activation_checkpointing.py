@@ -2955,6 +2955,41 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         b = torch.randn(4, 4, requires_grad=True, device="cpu")
         self.assertEqual(opt_fn(a, b), fn(a, b))
 
+    def test_sac_nested_context_fn_preserves_cache_hash(self):
+        cache_hash = "nested_context_fn_v1"
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    [torch.ops.aten.mm.default]
+                )
+
+            context_fn.cache_hash = cache_hash
+            return torch.utils.checkpoint.checkpoint(
+                f, x, y, use_reentrant=False, context_fn=context_fn
+            )
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+        opt_fn(a, b)
+
+        stored_context_fn = None
+        for gm in backend.graphs:
+            for module in gm.modules():
+                if "_checkpoint_context_fn" in module.meta:
+                    stored_context_fn = module.meta["_checkpoint_context_fn"]
+                    break
+            if stored_context_fn is not None:
+                break
+
+        self.assertIsNotNone(stored_context_fn)
+        self.assertEqual(getattr(stored_context_fn, "cache_hash", None), cache_hash)
+
     def test_sac_nested_context_fn_nonconstant_closure_graph_breaks(self):
         # A nested context_fn that closes over a tensor cannot be resolved to a
         # Python callable at trace time. That is a graph break, not an internal
