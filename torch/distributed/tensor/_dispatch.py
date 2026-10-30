@@ -426,7 +426,9 @@ class OpDispatcher:
                             f"DTensor random op {op_call} does not support local tensors on "
                             f"{first_local_arg.device.type} when the DTensor RNG tracker is on "
                             f"{tracker_device_type}, since RNG cannot be coordinated across ranks. "
-                            "Run the op on DTensor.to_local() instead."
+                            f"Either run the op on {tracker_device_type} before offloading, or run "
+                            "it on DTensor.to_local() after seeding each rank's CPU generator so "
+                            "that shards get different values and replicas get the same values."
                         )
                     accelerator = torch.accelerator.current_accelerator()
                     if (

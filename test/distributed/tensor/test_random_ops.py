@@ -1130,6 +1130,24 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
             with self.assertRaisesRegex(RuntimeError, "local tensors on cpu"):
                 lin.weight.normal_()
 
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_user_generator_used_when_distribute_region_disabled(self):
+        mesh = self.build_device_mesh()
+        t = torch.empty(4, 4, device=self.device_type)
+        dtensor = distribute_tensor(t, mesh, [Replicate()])
+        dtensor.uniform_()  # lazily constructs the RNG tracker
+        random._rng_tracker.distribute_region_enabled = False
+
+        gen = torch.Generator(device=self.device_type).manual_seed(42)
+        state_before = gen.get_state()
+        dtensor.uniform_(generator=gen)
+
+        ref_gen = torch.Generator(device=self.device_type).manual_seed(42)
+        expected = torch.empty_like(t).uniform_(generator=ref_gen)
+        self.assertEqual(dtensor.to_local(), expected)
+        self.assertNotEqual(gen.get_state(), state_before)
+
 
 if __name__ == "__main__":
     run_tests()
