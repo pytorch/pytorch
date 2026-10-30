@@ -326,6 +326,8 @@ class KernelTests(_KernelTestsBase):
 
 
 class KernelTestsArgReductionSemantics(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton
     def test_dim_max_min_reuse_argreduce_value(self):
@@ -898,6 +900,8 @@ def forward(self, x_1, output_1):
 
 
 class KernelTestsFloatingPointRewrites(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @requires_cuda_and_triton
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self):
         def fn(x):
@@ -5322,6 +5326,8 @@ class MutationTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 class MutationTestsTritonLauncher(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipUnless(
         HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
         "requires gpu or triton cpu",
@@ -6192,6 +6198,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
 
 class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     def test_wrap_triton_triton_interpret_eager(self):
         script = """
@@ -7239,6 +7247,8 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
