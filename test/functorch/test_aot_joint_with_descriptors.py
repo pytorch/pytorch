@@ -1247,7 +1247,7 @@ class inner_f(torch.nn.Module):
         )
 
 
-class TestAOTJointWithDescriptorsFlexAttention(TestCase):
+class TestAOTJointWithDescriptorsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_capabilities(Capability.attention.flex_attention)
@@ -1359,7 +1359,7 @@ class TestAOTJointWithDescriptorsFlexAttention(TestCase):
 
 
 instantiate_device_type_tests(
-    TestAOTJointWithDescriptorsFlexAttention,
+    TestAOTJointWithDescriptorsDevice,
     globals(),
     allow_xpu=True,
 )
