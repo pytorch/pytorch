@@ -7502,7 +7502,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta, SparseXPU: values_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: values_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: values_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: values_nested
     CompositeExplicitAutograd: values_default
   device_check: NoCheck
@@ -7511,7 +7511,7 @@
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: crow_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: crow_indices_sparse_csr
     CompositeExplicitAutograd: crow_indices_default
   device_check: NoCheck
   device_guard: False
@@ -7519,7 +7519,7 @@
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: col_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: col_indices_sparse_csr
     CompositeExplicitAutograd: col_indices_default
   device_check: NoCheck
   device_guard: False
@@ -7527,7 +7527,7 @@
 - func: ccol_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: ccol_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: ccol_indices_sparse_csr
     CompositeExplicitAutograd: ccol_indices_default
   device_check: NoCheck
   device_guard: False
@@ -7535,7 +7535,7 @@
 - func: row_indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: row_indices_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: row_indices_sparse_csr
     CompositeExplicitAutograd: row_indices_default
   device_check: NoCheck
   device_guard: False
