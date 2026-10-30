@@ -1498,16 +1498,17 @@ class TestTensorCreation(TestCase):
     def test_meshgrid_empty(self, device):
         self.assertEqual(torch.meshgrid(indexing='ij'), ())
         self.assertEqual(torch.meshgrid([], indexing='xy'), ())
-        self.assertEqual(torch.meshgrid(*[], indexing='ij'), ())
         self.assertEqual(torch.meshgrid(), ())
         self.assertEqual(torch.meshgrid([]), ())
-        self.assertEqual(torch.meshgrid(*[]), ())
         with self.assertRaisesRegex(RuntimeError,
                                     'indexing must be one of "xy" or "ij"'):
             torch.meshgrid(indexing='foo')
         with self.assertRaisesRegex(RuntimeError,
                                     'indexing must be one of "xy" or "ij"'):
             torch.meshgrid([], indexing='foo')
+        with self.assertRaisesRegex(RuntimeError,
+                                    'indexing must be one of "xy" or "ij"'):
+            torch._refs.meshgrid([], indexing='foo')
         aten_empty = torch.ops.aten.meshgrid([], indexing='ij')
         self.assertEqual(aten_empty, [])
         self.assertEqual(torch._refs.meshgrid([], indexing='ij'), aten_empty)
