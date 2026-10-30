@@ -965,11 +965,6 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            # ConstDictVariable is optimized to be very lazy about insertion of
-            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
-            # here.
-            if isinstance(value, ConstDictVariable) and value.source:
-                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
@@ -1024,7 +1019,11 @@ def generic_jump(
                 self.jump(inst)
         elif not value.is_tensor():
             result = generic_is_true(self, value)  # type: ignore[arg-type]
-            if truth_fn(result):
+            if isinstance(result, SymNodeVariable):
+                result_val = result.evaluate_expr()
+            else:
+                result_val = result.as_python_constant()
+            if truth_fn(result_val):
                 if push:
                     self.push(value)
                 self.jump(inst)
