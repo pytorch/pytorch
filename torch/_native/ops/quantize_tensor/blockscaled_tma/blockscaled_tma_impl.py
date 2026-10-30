@@ -64,17 +64,19 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
 class _CanonicalMatrixInput(NamedTuple):
     r"""TMA input and metadata for returning results in the caller's axis order.
 
-    For contiguous ``[*B0, M, *B1, K, B2]``, canonicalization moves all batch
-    axes ahead of ``(M, K)`` and folds them into ``B_product``. Batch axes retain
-    their physical stride order even when their logical positions change.
+    A view-compatible batched input keeps batch axes around the matrix axes in
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
+    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
+    axes ahead of ``(M, K)`` in physical stride order and folds them into
+    ``(B_product, M, 1, K)`` after materialization.
 
     Attributes:
         input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
         dim (_SingleQuantDim): Quantization axis pair in ``input`` coordinates;
           ``(1, 3)`` quantizes the last matrix axis of a 4D input, while
           ``(3, 1)`` quantizes the first.
-        batch_shape (tuple[int, ...]): Sizes of batch axes in canonical order,
-          before folding them into ``input``.
+        batch_shape (tuple[int, ...]): Sizes of batch axes in physical stride
+          order, used to unfold the output's batch dimension.
         inverse_permutation (tuple[int, ...]): Permutation that restores the
           original logical axis order after the batch axes are unfolded.
         swap_dual_outputs (bool): Whether the physical matrix-axis order
@@ -98,12 +100,7 @@ def _validate_blockscaled_tma_input(
 ) -> None:
     r"""Validate caller-visible input metadata before materializing the tensor."""
 
-    if dual:
-        if not is_scale_swizzled:
-            raise ValueError("dual quantization does not support compact scales")
-        if is_square_scaling:
-            raise ValueError("dual quantization does not support square scaling")
-    elif not is_scale_swizzled and is_square_scaling:
+    if not is_scale_swizzled and is_square_scaling:
         raise ValueError("compact scales do not support square scaling")
 
     if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
@@ -136,16 +133,16 @@ def _canonicalize_matrix_input(
 ) -> _CanonicalMatrixInput:
     r"""Arrange matrix and batch axes for the 2D or 4D TMA kernel.
 
-    For contiguous ``[*B0, M, *B1, K, B2]``, the trailing ``B2`` prevents
-    TMA from directly loading an ``(M, K)`` tile. Permute to
-    ``[*B0, *B1, B2, M, K]``, materialize contiguous storage, and fold the
-    batch axes into ``(B_product, M, 1, K)``. Keep batch axes in physical stride
-    order when materializing, even if their logical order differs. For single
+    Use a 2D or 4D TMA view when the physical strides and recipe permit. For
+    batched input ``[*B0, M, *B1, K, *B2]``, a 4D view has shape
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), preserving
+    batch axes around the matrix axes. Otherwise, move batch axes ahead of the
+    matrix axes in physical stride order and materialize contiguous storage.
+    Batched inputs then fold those axes into ``(B_product, M, 1, K)``; 2D
+    inputs remain 2D. Trailing ``*B2`` axes can prevent a view. For single
     quantization, materialization places the requested quantized axis last
-    (dim-k); dual quantization keeps both matrix orientations. When the physical
-    matrix axes permit a direct TMA load, instead use a view shaped like
-    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), without
-    materializing. Return normalized axes and metadata to undo the permutation.
+    (dim-k); dual quantization keeps both matrix orientations. Return
+    normalized axes and metadata to undo the permutation.
 
     Args:
         input (Tensor): Input whose two matrix axes are specified by ``dim``.
@@ -258,9 +255,9 @@ def _restore_matrix_output(
 ) -> _BlockscaledTmaOutput:
     r"""Restore result axes after quantizing the canonical matrix input.
 
-    For contiguous ``[*B0, M, *B1, K, B2]``, unfold each qdata result's
+    For contiguous ``[*B0, M, *B1, K, *B2]``, unfold each qdata result's
     leading ``B_product`` axis from ``(B_product, M, K)`` to
-    ``[*B0, *B1, B2, M, K]``, then permute it to ``[*B0, M, *B1, K, B2]``.
+    ``[*B0, *B1, *B2, M, K]``, then permute it to ``[*B0, M, *B1, K, *B2]``.
     Scale tensors undergo the same axis permutation, but their last two axes
     hold scale data, not necessarily ``M`` and ``K`` elements; swizzled scales
     use packed storage. Swap the dual result pairs if the physical matrix axes
