@@ -6436,6 +6436,7 @@ class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("calls", torch.zeros(8))
 
     def forward(self, x):
         return torch.relu(self.lin(x))
@@ -6453,6 +6454,11 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+def bumps_a_buffer(model, x):
+    model.calls.add_(1)
+    return model(x).sin()
 
 
 def kernelless_backward(model, x):
@@ -6485,7 +6491,10 @@ torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 allow = saved["allow_serve_time_compiles"]
 f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 training = saved["expected_grad"] is not None
-with contextlib.nullcontext() if training else torch.no_grad():
+with (
+    contextlib.nullcontext() if training else torch.no_grad(),
+    torch._inductor.config.patch(saved["config"]),
+):
     for _ in range(3):
         torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
@@ -6536,16 +6545,24 @@ class TestPrecompileCudagraphs(TestCase):
             return y, _parse_artifact_metadata(f.read())
 
     def _serve_in_fresh_process(
-        self, expected, env=None, expected_grad=None, x=None, serve_time=False
+        self,
+        expected,
+        env=None,
+        expected_grad=None,
+        x=None,
+        serve_time=False,
+        config=None,
     ):
         # (nodes recorded in the CUDA graph tree, CUDA graphs captured at all)
-        # by the loading process while serving the artifact.
+        # by the loading process while serving the artifact, under its env and
+        # the inductor config patch.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "x": self.x if x is None else x,
             "expected": expected,
             "expected_grad": expected_grad,
             "allow_serve_time_compiles": serve_time,
+            "config": config or {},
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6635,6 +6652,15 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, captured = self._serve_in_fresh_process(y)
         self.assertEqual(recorded, 0)
         self.assertGreater(captured, 0)
+
+    def test_a_tree_artifact_mutating_a_buffer_serves_cudagraphs_without_trees(self):
+        # A buffer is a static input, whose mutation CUDA graph trees allow; the
+        # tree manager the artifact is served by must not re-read cudagraph_trees.
+        options = {"triton.cudagraphs": True}
+        y, _ = self._capture_step(self.mod.bumps_a_buffer, options=options)
+        no_trees = {"triton.cudagraph_trees": False}
+        recorded, _ = self._serve_in_fresh_process(y, config=no_trees)
+        self.assertGreater(recorded, 0)
 
     def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
         # Post-compile would take the partitioned wrapper in a loading process
