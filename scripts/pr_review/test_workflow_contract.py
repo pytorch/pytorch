@@ -1223,6 +1223,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "Read(//tmp/pr-diff.txt),"
             "Read(//tmp/pr-files.txt),"
             "Read(//tmp/pr-comments.json),"
+            # Changes since the commit the latest automated review saw.
+            "Read(//tmp/pr-interdiff.txt),"
             # pr-review's sub-agents. They inherit this session's rules.
             "Agent"
         ),
@@ -1596,6 +1598,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
+            # Decides which changes a re-review treats as the author's.
+            "scripts/pr_review/interdiff.py",
             # Stage A's skill. It carries the review logic, so omitting it lets
             # the whole checklist be rewritten under an unmoved hash.
             ".agents/skills/pr-review/SKILL.md",
@@ -2696,6 +2700,8 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "PREVIOUS_MERGE_BASE_SHA",
+            "PREVIOUS_REVIEW_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
             "PR_COMMENTS",
@@ -3023,7 +3029,10 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
         )
         self.assertEqual(
             sorted(set(runs)),
-            ["trusted/scripts/pr_review/extract_verdict.py"],
+            [
+                "trusted/scripts/pr_review/extract_verdict.py",
+                "trusted/scripts/pr_review/interdiff.py",
+            ],
             f"the review job runs {sorted(set(runs))}; every program it "
             "executes must come from the trusted checkout.",
         )
