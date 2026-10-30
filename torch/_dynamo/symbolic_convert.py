@@ -2377,6 +2377,7 @@ class InstructionTranslatorBase(
         name = inst.argval
         cell = self._cellvar(name)
         if isinstance(cell, CellVariable) and cell._current_contents(self) is None:
+            cell.graph_break_if_empty_before_tracing(self)
             # format_exc_unbound: an empty free var cell raises NameError, an
             # empty cell var UnboundLocalError.
             if name in self.f_code.co_freevars:

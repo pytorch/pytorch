@@ -3115,6 +3115,66 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaisesRegex(ValueError, "Cell is empty"):
             f.__closure__[0].cell_contents
 
+    def test_cell_empty_before_tracing_filled_later(self):
+        def make(body):
+            a = 0
+            del a
+
+            def set_a(v):
+                nonlocal a
+                a = v
+
+            def read():
+                return a
+
+            def load_deref(x):
+                try:
+                    return x + a
+                except NameError:
+                    return x - 1
+
+            def inlined_read(x):
+                try:
+                    return x + read()
+                except NameError:
+                    return x - 1
+
+            def cell_contents(x):
+                def f():
+                    return a
+
+                try:
+                    return x + f.__closure__[0].cell_contents
+                except ValueError:
+                    return x - 1
+
+            def has_attr(x):
+                def f():
+                    return a
+
+                try:
+                    return x + 100 if hasattr(f.__closure__[0], "cell_contents") else x
+                except ValueError:
+                    return x - 1
+
+            fns = {
+                "load_deref": load_deref,
+                "inlined_read": inlined_read,
+                "cell_contents": cell_contents,
+                "has_attr": has_attr,
+            }
+            return fns[body], set_a
+
+        x = torch.ones(2)
+        for body in ("load_deref", "inlined_read", "cell_contents", "has_attr"):
+            with self.subTest(body=body):
+                torch._dynamo.reset()
+                fn, set_a = make(body)
+                opt_fn = torch.compile(fn, backend="eager")
+                self.assertEqual(opt_fn(x), fn(x))
+                set_a(10)
+                self.assertEqual(opt_fn(x), fn(x))
+
     def test_return_nested_function(self):
         out = None
 

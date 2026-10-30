@@ -74,6 +74,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     GetSet,
     getset_build,
     Member,
@@ -657,9 +658,26 @@ class CellVariable(VariableTracker):
             return None
         return contents
 
+    def graph_break_if_empty_before_tracing(
+        self, tx: "InstructionTranslatorBase"
+    ) -> None:
+        # No guard keeps a cell from before tracing empty, so an exception
+        # observed here would stay in the cached graph after the cell is filled.
+        if isinstance(
+            self.mutation_type, AttributeMutationNew
+        ) or tx.output.side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
+            return
+        unimplemented(
+            gb_type="Read uninitialized cell",
+            context=str(self),
+            explanation="Attempted to read a cell variable that has not been populated yet.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
+
     def _get_cell_contents(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         contents = self._current_contents(tx)
         if contents is None:
+            self.graph_break_if_empty_before_tracing(tx)
             raise_value_error(tx, "Cell is empty")
         return contents
 
