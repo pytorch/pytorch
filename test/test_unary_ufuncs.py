@@ -721,6 +721,18 @@ class TestUnaryUfuncs(TestCase):
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_angle_signed_zero(self, device, dtype):
+        x = torch.tensor([-0.0, 0.0, -1.0, 1.0, nan], device=device, dtype=dtype)
+        x_np = x.cpu().to(
+            torch.float64 if dtype == torch.float64 else torch.float32
+        ).numpy()
+
+        actual = torch.angle(x)
+        expected = torch.from_numpy(np.angle(x_np)).to(dtype)
+
+        self.assertEqual(actual, expected)
+
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
         # Constructs random complex values
@@ -1880,6 +1892,18 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
+
+    @skipIfNoSciPy
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("stride", (1, 2))
+    def test_erfinv_near_endpoints(self, device, dtype, stride):
+        bits = 24 if dtype == torch.float32 else 53
+        values = [1 - 2.0**-k for k in range(2, bits + 1)]
+        values += [-x for x in values]
+        x = torch.empty(len(values) * stride, device=device, dtype=dtype)[::stride]
+        x.copy_(torch.tensor(values, device=device, dtype=dtype))
+        expected = torch.from_numpy(scipy.special.erfinv(x.cpu().numpy()))
+        self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
 
 
 class TestUnaryUfuncsCpuOnly(TestCase):
