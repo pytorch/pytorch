@@ -5534,7 +5534,7 @@ class TestAOTAutocastStates(AOTTestCase):
 
     @parametrize("device_type", ["cpu", "mtia"])
     def test_collect_metadata_detects_autocast_dtype_mutation(self, device_type: str):
-        from torch.amp.autocast_mode import _get_autocast_nesting
+        from torch._functorch._aot_autograd.utils import _get_autocast_nesting
 
         prior_dtype = torch.get_autocast_dtype(device_type)
         prior_nesting = _get_autocast_nesting()
@@ -5578,7 +5578,7 @@ class TestAOTAutocastStates(AOTTestCase):
         collect(x)
 
     def test_collect_metadata_allows_balanced_cpu_autocast_context(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
+        from torch._functorch._aot_autograd.utils import _get_autocast_nesting
 
         prior_nesting = _get_autocast_nesting()
 
@@ -5602,8 +5602,10 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
 
     def test_aot_function_allows_balanced_cpu_autocast(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-        from torch._functorch._aot_autograd.utils import _get_autocast_states
+        from torch._functorch._aot_autograd.utils import (
+            _get_autocast_nesting,
+            _get_autocast_states,
+        )
 
         def f(x: torch.Tensor) -> torch.Tensor:
             with torch.autocast("cpu"):

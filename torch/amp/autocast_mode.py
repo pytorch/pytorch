@@ -37,23 +37,6 @@ def is_autocast_available(device_type: str) -> bool:
     return torch._C._is_autocast_available(device_type)
 
 
-def _get_autocast_nesting() -> int:
-    # No public getter; peek via a no-net-effect increment+decrement pair.
-    nesting = torch.autocast_increment_nesting()
-    torch.autocast_decrement_nesting()
-    return nesting - 1
-
-
-def _set_autocast_nesting(target: int) -> None:
-    delta = _get_autocast_nesting() - target
-    for _ in range(delta):
-        # Match autocast.__exit__: clear the cast cache when leaving nesting 0.
-        if torch.autocast_decrement_nesting() == 0:
-            torch.clear_autocast_cache()
-    for _ in range(-delta):
-        torch.autocast_increment_nesting()
-
-
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):

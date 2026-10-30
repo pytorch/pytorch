@@ -114,6 +114,21 @@ def _get_autocast_states() -> dict[str, tuple[bool, torch.dtype]]:
     }
 
 
+def _get_autocast_nesting() -> int:
+    nesting = torch.autocast_increment_nesting()
+    torch.autocast_decrement_nesting()
+    return nesting - 1
+
+
+def _set_autocast_nesting(target: int) -> None:
+    delta = _get_autocast_nesting() - target
+    for _ in range(delta):
+        if torch.autocast_decrement_nesting() == 0:
+            torch.clear_autocast_cache()
+    for _ in range(-delta):
+        torch.autocast_increment_nesting()
+
+
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
     @simple_wraps(f)
     def g(args: list[Any]) -> Any:

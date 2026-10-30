@@ -24,7 +24,6 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.amp.autocast_mode import _get_autocast_nesting, _set_autocast_nesting
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     HardwareClassification,
     IS_WINDOWS,
@@ -41,6 +40,24 @@ log = logging.getLogger(__name__)
 
 _AutocastStateSpec = tuple[str, Callable[[], Any], Callable[[Any], None]]
 _AutocastState = tuple[Any, ...]
+
+
+def _autocast_nesting() -> int:
+    # There is no direct getter for the autocast nesting counter, only
+    # autocast_increment_nesting()/autocast_decrement_nesting(), so read it
+    # via a no-net-effect increment+decrement pair.
+    n = torch.autocast_increment_nesting()
+    torch.autocast_decrement_nesting()
+    return n - 1
+
+
+def _restore_autocast_nesting(target: int) -> None:
+    delta = _autocast_nesting() - target
+    for _ in range(delta):
+        if torch.autocast_decrement_nesting() == 0:
+            torch.clear_autocast_cache()
+    for _ in range(-delta):
+        torch.autocast_increment_nesting()
 
 
 @cache
@@ -68,7 +85,7 @@ def _autocast_state_specs() -> tuple[_AutocastStateSpec, ...]:
             torch.is_autocast_cache_enabled,
             torch.set_autocast_cache_enabled,
         ),
-        ("autocast nesting depth", _get_autocast_nesting, _set_autocast_nesting),
+        ("autocast nesting depth", _autocast_nesting, _restore_autocast_nesting),
     )
 
 

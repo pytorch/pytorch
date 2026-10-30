@@ -23,7 +23,6 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
-from torch.amp.autocast_mode import _get_autocast_nesting, _set_autocast_nesting
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -62,7 +61,14 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
+from .utils import (
+    _get_autocast_nesting,
+    _get_autocast_states,
+    _set_autocast_nesting,
+    KNOWN_TYPES,
+    simple_wraps,
+    strict_zip,
+)
 
 
 if TYPE_CHECKING:
