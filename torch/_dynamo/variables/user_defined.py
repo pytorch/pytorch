@@ -3994,6 +3994,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return VariableTracker.build(tx, resolved, source)
 
+    def method_load_qualname(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        descriptor: object,
+    ) -> str | None:
+        from ..side_effects import _MUTABLE_GETATTRIBUTES
+
+        # _PyObject_GetMethod skips binding for an unshadowed class descriptor
+        # with generic getattr, e.g. D().popitem(1) reports dict.popitem().
+        if (
+            isinstance(descriptor, types.MethodDescriptorType)
+            and self.lookup_class_mro_attr("__getattribute__") in _MUTABLE_GETATTRIBUTES
+            and self.lookup_class_mro_attr("__getattr__") is NO_SUCH_SUBOBJ
+            and self.lookup_class_mro_attr(name) is descriptor
+            and self.lookup_instance_dict(tx, name) is None
+        ):
+            return descriptor.__qualname__
+        return None
+
+    def install_method_load_guards(self) -> None:
+        if self.cls_source:
+            for attr in ("__getattribute__", "__getattr__"):
+                if self.lookup_class_mro_attr(attr) is NO_SUCH_SUBOBJ:
+                    guard = self.cls_source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=attr)
+                    )
+                else:
+                    guard = AttrSource(self.cls_source, attr).make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                install_guard(guard)
+
     def resolve_type_attr(
         self,
         tx: "InstructionTranslatorBase",
@@ -4027,6 +4060,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 isinstance(type_attr, types.MethodDescriptorType)
                 and self.lookup_method_descriptor(type_attr) is not None
             ):
+                if self.cls_source:
+                    # A later accessor or method override must retrace this dispatch.
+                    install_guard(
+                        AttrSource(self.cls_source, "__getattribute__").make_guard(
+                            GuardBuilder.FUNCTION_MATCH
+                        )
+                    )
+                    install_guard(
+                        self.get_source_by_walking_mro(tx, name).make_guard(
+                            GuardBuilder.FUNCTION_MATCH
+                        )
+                    )
                 return variables.BoundBuiltinMethodVariable(
                     type_attr, self, source=source
                 )
