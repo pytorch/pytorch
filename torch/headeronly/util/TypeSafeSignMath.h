@@ -33,7 +33,7 @@ inline constexpr bool is_negative(const T& x) {
 /// Returns true if the sign bit of x is set
 /// NOTE: Unlike is_negative, returns true for -0.0 and -NaN
 template <typename T>
-C10_HOST_DEVICE inline bool signbit(const T& x) {
+C10_HOST_DEVICE inline bool signbit(T x) {
   if constexpr (std::is_integral_v<T>) {
     return is_negative(x);
   } else if constexpr (std::is_floating_point_v<T>) {
