@@ -11131,7 +11131,8 @@ class TestLinalgCudaOnly(TestCase):
             torch.backends.cuda.preferred_blas_library("cublas")
             torch.nn.functional.linear(x, w, bias)
 
-            assert torch.backends.cuda.preferred_blas_library("cublaslt") == torch._C._BlasBackend.Cublaslt
+            if torch.backends.cuda.preferred_blas_library("cublaslt") != torch._C._BlasBackend.Cublaslt:
+                raise AssertionError("switching to hipBLASLt did not take effect")
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_duration(1)
             torch.cuda.tunable.set_max_tuning_iterations(1)
