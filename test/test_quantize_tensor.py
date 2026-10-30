@@ -854,8 +854,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 "contiguous",
                 side_effect=AssertionError("materialized input"),
             ):
-                canonical = _canonicalize_matrix_input(data_hp, matrix_layout)
-            self.assertEqual(canonical.input.data_ptr(), data_hp.data_ptr())
+                matrix_input = _canonicalize_matrix_input(data_hp, matrix_layout)
+            self.assertEqual(matrix_input.data_ptr(), data_hp.data_ptr())
         swizzle_type = (
             SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
         )

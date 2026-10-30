@@ -198,8 +198,7 @@ def _blockscaled_tma_impl_on_current_device(
         is_scale_swizzled=is_scale_swizzled,
     )
     plan = _plan_blockscaled_tma_launch(input, layout, spec)
-    canonical = _canonicalize_matrix_input(input, layout)
-    input = canonical.input
+    input = _canonicalize_matrix_input(input, layout)
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
         input = input.clone()
     launch = _prepare_blockscaled_tma_launch(input, spec, plan)

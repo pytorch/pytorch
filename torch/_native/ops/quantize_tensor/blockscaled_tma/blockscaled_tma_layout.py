@@ -66,9 +66,28 @@ def normalize_quantize_dim(dim: object, ndim: int) -> _SingleQuantDim:
 class _MatrixInputLayout(NamedTuple):
     r"""Planned canonical shape, axis order, and output restoration metadata.
 
-    ``matrix_axes`` are in caller coordinates and ordered as the kernel's M/K
-    axes. ``input_permutation`` keeps interleaved batches in place for a TMA
-    view, but moves batches ahead of the matrix axes for a copy.
+    A view-compatible batched input keeps batch axes around the matrix axes in
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
+    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
+    axes ahead of ``(M, K)`` in physical stride order and folds them into
+    ``(B_product, M, 1, K)`` after materialization.
+
+    Attributes:
+        shape (tuple[int, ...]): Shape of the planned 2D or 4D TMA input.
+        dim (_SingleQuantDim): Ordered quantization axes in canonical kernel
+          coordinates, not in the caller's tensor.
+        matrix_axes (_SingleQuantDim): Ordered kernel M/K axes in caller
+          coordinates.
+        input_permutation (tuple[int, ...]): Caller axes ordered to keep
+          interleaved batches in a view, or move them ahead for a copy.
+        use_tma_view (bool): Whether the input admits a TMA view before pointer
+          alignment; otherwise the input must be materialized.
+        batch_shape (tuple[int, ...]): Sizes of the caller's batch axes in the
+          planner's physical batch-axis order.
+        inverse_permutation (tuple[int, ...]): Restores the caller's axis order
+          after unfolding the batch axes ahead of the matrix axes.
+        swap_dual_outputs (bool): Whether to swap the two result pairs to return
+          the caller's requested quantization pair first.
     """
 
     shape: tuple[int, ...]
@@ -79,25 +98,6 @@ class _MatrixInputLayout(NamedTuple):
     batch_shape: tuple[int, ...]
     inverse_permutation: tuple[int, ...]
     swap_dual_outputs: bool
-
-
-class _CanonicalMatrixInput(NamedTuple):
-    r"""TMA input and metadata for returning results in the caller's axis order.
-
-    A view-compatible batched input keeps batch axes around the matrix axes in
-    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
-    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
-    axes ahead of ``(M, K)`` in physical stride order and folds them into
-    ``(B_product, M, 1, K)`` after materialization.
-
-    Attributes:
-        input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
-        layout (_MatrixInputLayout): Metadata for restoring the input's logical
-          axis order after quantization.
-    """
-
-    input: torch.Tensor
-    layout: _MatrixInputLayout
 
 
 def _validate_blockscaled_tma_input(
@@ -327,7 +327,7 @@ def _plan_matrix_input(
 
 def _canonicalize_matrix_input(
     input: torch.Tensor, layout: _MatrixInputLayout
-) -> _CanonicalMatrixInput:
+) -> torch.Tensor:
     r"""Apply a planned TMA view or copy to the input."""
 
     matrix_input = (
@@ -342,7 +342,7 @@ def _canonicalize_matrix_input(
         matrix_input = matrix_input.contiguous()
         if layout.batch_shape:
             matrix_input = matrix_input.view(layout.shape)
-    return _CanonicalMatrixInput(matrix_input, layout)
+    return matrix_input
 
 
 def _restore_matrix_output(
