@@ -4721,20 +4721,20 @@ def single(model, x):
     return model(x).sum(dim=0)
 
 
-def scaled(x):
-    return (x * 7.25).relu()
-
-
-def scaled_backward(x):
-    (x * 7.25).relu().sum().backward()
-
-
 def reads_unregistered(model, x):
     return model(x).sum(dim=0) * unregistered.SCALE
 
 
 def train_step(model, x):
     model(x).sum().backward()
+
+
+def scaled(x):
+    return (x * 7.25).relu()
+
+
+def scaled_backward(x):
+    (x * 7.25).relu().sum().backward()
 
 
 def breaking_helper(y):
