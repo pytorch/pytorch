@@ -107,12 +107,22 @@ class _ExportedPython:
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic)
         self._runnable: PrecompiledRunnable | None = None
+        # Reentrant, so a call fn makes to itself while it is captured gets the clear
+        # error below rather than waiting on its own first call.
         self._lock = threading.RLock()
+        self._capturing = False
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         if self._runnable is None:
             with self._lock:
                 if self._runnable is None:
+                    if self._capturing:
+                        raise PrecompileError(
+                            f"export_python: {getattr(self._fn, '__qualname__', self._fn)!r} "
+                            "called itself during the first call, which is being "
+                            "captured into a file not written yet. Recurse through an "
+                            "undecorated function instead."
+                        )
                     if not os.path.exists(self._path):
                         return self._capture(*args, **kwargs)
                     self._runnable = load(self._path, self._cache_path)
@@ -127,10 +137,12 @@ class _ExportedPython:
             tracer=self._tracer,
             backend=self._backend,
         )
+        self._capturing = True
         try:
             with cap:
                 result = cap(*args, **kwargs)
         finally:
+            self._capturing = False
             # The capture's live compile holds the names its artifact binds on load,
             # and one that raised must not stay live under the next call's capture.
             cast(_DynamoCapture, cap)._release_live_compile()
