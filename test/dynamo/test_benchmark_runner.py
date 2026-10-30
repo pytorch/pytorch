@@ -281,8 +281,16 @@ class HuggingFacePrefillTestCase(TestCase):
             version = importlib.metadata.version("transformers")
         except importlib.metadata.PackageNotFoundError:
             raise unittest.SkipTest("requires transformers") from None
-        if Version(version) < Version("5.14.1"):
-            raise unittest.SkipTest("requires transformers >= 5.14.1")
+        try:
+            with mock.patch(
+                "subprocess.check_call",
+                side_effect=unittest.SkipTest("requires compatible transformers"),
+            ):
+                from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
+        except ImportError:
+            raise unittest.SkipTest("requires compatible transformers") from None
+        if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
+            raise unittest.SkipTest(f"requires transformers >= {MIN_TRANSFORMERS_VERSION}")
         from transformers import AutoConfig
 
         with (
@@ -508,6 +516,34 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             args.prompt_length = 2097
             with self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"):
                 runner.validate_args(args)
+
+    def test_prompt_validation_does_not_download_sweep_configs(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--prompt-length=7")
+        with mock.patch.object(
+            self.huggingface.AutoConfig,
+            "from_pretrained",
+            side_effect=OSError("config unavailable"),
+        ) as download:
+            runner.validate_args(args)
+        download.assert_not_called()
+
+    def test_prompt_config_download_retries(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=7")
+        config = mock.Mock()
+        config.get_text_config.return_value.max_position_embeddings = 4096
+        with (
+            mock.patch.object(
+                self.huggingface.AutoConfig,
+                "from_pretrained",
+                side_effect=[OSError("temporary download failure"), config],
+            ) as download,
+            mock.patch.object(common.time, "sleep") as sleep,
+        ):
+            runner.validate_args(args)
+        self.assertEqual(download.call_args_list, [mock.call(args.only)] * 2)
+        sleep.assert_called_once_with(30)
 
     @parametrize("mode", ("prefill", "decode"))
     def test_prefill_performance_run(self, mode):

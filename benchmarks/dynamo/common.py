@@ -2062,7 +2062,7 @@ class BenchmarkRunner:
         # Return the timed iteration and its optional, untimed per-request setup.
         return self.model_iter_fn, None
 
-    def use_model_forward_for_compilation(self):
+    def use_model_forward_for_accuracy(self):
         return False
 
     def get_request_tokens(self, example_inputs):
@@ -2476,9 +2476,9 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
-                        # Not hf_llm: generate-mode accuracy compiles forward_pass,
+                        # Generate-mode accuracy compiles forward_pass,
                         # while performance compiles the forward under generate().
-                        if self.use_model_forward_for_compilation():
+                        if self.use_model_forward_for_accuracy():
                             model_copy.forward = optimize_ctx(model_copy.forward)
                             optimized_model_iter_fn = self.model_iter_fn
                         else:
