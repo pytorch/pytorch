@@ -168,7 +168,9 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [unpack_iterable(tx, arg) for arg in args]
+            seqs: list[list[VariableTracker]] = (
+                [] if r == 0 else [unpack_iterable(tx, arg) for arg in args]
+            )
             items = [
                 variables.TupleVariable(list(item))
                 for item in itertools.product(*seqs, repeat=r)
