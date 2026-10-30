@@ -396,9 +396,10 @@ class OptimizeForInferenceTemplate(TestCase):
         three = _concat_mm((15, 20, 10), transposed=True)
         two = _concat_mm((15, 20), transposed=True)
         addmm = _concat_mm((15, 20, 10), transposed=True, bias=True)
-        _check_fused_mm(self, three, column_major=True)
-        _check_fused_mm(self, two, column_major=True)
-        _check_fused_mm(self, addmm, column_major=True)
+        column_major = self.device != "cpu"
+        _check_fused_mm(self, three, column_major=column_major)
+        _check_fused_mm(self, two, column_major=column_major)
+        _check_fused_mm(self, addmm, column_major=column_major)
 
         # Row-major and mixed layouts are not affected by the flag.
         _check_fused_mm(self, _concat_mm((15, 20, 10)))
@@ -408,7 +409,7 @@ class OptimizeForInferenceTemplate(TestCase):
         # A (K, 1) weight has stride (1, 1) whether it is stored row- or column-major,
         # so it must not prevent the other weights from staying column-major.
         single_col = ConcatMM([torch.rand(15, 10).t(), torch.rand(10, 1)], [])
-        _check_fused_mm(self, single_col, column_major=True)
+        _check_fused_mm(self, single_col, column_major=column_major)
 
     def test_static_indices_cudagraph(self):
         if self.device != "cuda":

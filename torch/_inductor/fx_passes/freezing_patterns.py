@@ -229,10 +229,11 @@ def addmm_patterns_init():
         return (inp @ w1, inp @ w2, inp @ w3)
 
     def cat_weights(weights: list[torch.Tensor]) -> torch.Tensor:
-        # Keep column-major weights column-major: cat their row-major transposes
-        # along dim 0 and transpose back instead of copying into row-major.
+        # Keep column-major weights column-major (on GPU): cat their row-major
+        # transposes along dim 0 and transpose back instead of copying into row-major.
         preserve_layout = config.freezing_weights_concat_preserve_layout
-        if preserve_layout and check_transposed_weights(weights):
+        cpu = weights[0].is_cpu
+        if preserve_layout and not cpu and check_transposed_weights(weights):
             return torch.cat([w.t() for w in weights], dim=0).t()
         return torch.cat(weights, dim=1)
 

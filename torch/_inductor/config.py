@@ -1860,8 +1860,8 @@ freezing_discard_parameters: bool = False
 # Frozen GEMM weights that multiply a common input are concatenated into one weight,
 # trading several GEMMs for a single bigger one. If this flag is set and all of the
 # weights are column-major (transposed), the concatenated weight stays column-major
-# instead of being copied into row-major; mixed layouts still become row-major. This
-# helps when column-major is the more efficient layout for the matmul.
+# instead of being copied into row-major (on GPU only); mixed layouts still become
+# row-major.
 freezing_weights_concat_preserve_layout: bool = False
 
 # decompose some memory bound matmul/bmm to mul
