@@ -396,6 +396,72 @@ class CustomOpDef:
             else:
                 self._disabled_kernel.discard(device_type)
 
+    def _make_backend_fn(
+        self, device_type: str | None, fn: Callable[..., object]
+    ) -> Callable[..., object]:
+        """Wraps fn to choose between the default implementation or the
+        device-specific one, depending on whether device_type's kernel is
+        disabled."""
+
+        @torch._disable_dynamo
+        def wrapped_fn(*args, **kwargs):
+            if device_type in self._disabled_kernel:
+                return self._init_fn(*args, **kwargs)
+            else:
+                return fn(*args, **kwargs)
+
+        return wrapped_fn
+
+    def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
+        """Makes the dispatcher kernel for device_type, which runs the function
+        registered for it and checks the result against the schema."""
+
+        def backend_impl(*args, **kwargs):
+            result = self._backend_fns[device_type](*args, **kwargs)
+
+            def get_module():
+                fn = self._backend_fns[device_type]
+                return inspect.getmodule(fn)
+
+            schema = self._opoverload._schema
+            if self._is_inplace:
+                if result is not args[0]:
+                    raise RuntimeError(
+                        f"{self._name} (with implementation in {get_module()}): "
+                        "An operator tagged with torch.Tag.inplace must "
+                        "return its first argument."
+                    )
+            elif self._is_out:
+                out_kwarg_names = self._out_kwarg_names
+                if len(out_kwarg_names) == 1:
+                    returns_out_args = result is kwargs[out_kwarg_names[0]]
+                else:
+                    returns_out_args = (
+                        isinstance(result, tuple)
+                        and len(result) == len(out_kwarg_names)
+                        and all(
+                            result[i] is kwargs[name]
+                            for i, name in enumerate(out_kwarg_names)
+                        )
+                    )
+                if not returns_out_args:
+                    raise RuntimeError(
+                        f"{self._name} (with implementation in {get_module()}): "
+                        "An operator tagged with torch.Tag.out must "
+                        "return its mutable keyword-only arguments."
+                    )
+            elif not schema._is_view_op():
+                utils._c_check_aliasing_constraint(
+                    self._name,
+                    args,
+                    kwargs,
+                    result,
+                    get_module,
+                )
+            return result
+
+        return backend_impl
+
     def register_kernel(
         self, device_types: device_types_t, fn: Callable | None = None, /
     ) -> Callable:
@@ -447,63 +513,10 @@ class CustomOpDef:
                 if device_type is not None:
                     key = _C._dispatch_key_for_device(device_type)
                 if device_type not in self._backend_fns:
-
-                    def backend_impl(*args, **kwargs):
-                        result = self._backend_fns[device_type](*args, **kwargs)
-
-                        def get_module():
-                            fn = self._backend_fns[device_type]
-                            return inspect.getmodule(fn)
-
-                        schema = self._opoverload._schema
-                        if self._is_inplace:
-                            if result is not args[0]:
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {get_module()}): "
-                                    "An operator tagged with torch.Tag.inplace must "
-                                    "return its first argument."
-                                )
-                        elif self._is_out:
-                            out_kwarg_names = self._out_kwarg_names
-                            if len(out_kwarg_names) == 1:
-                                returns_out_args = result is kwargs[out_kwarg_names[0]]
-                            else:
-                                returns_out_args = (
-                                    isinstance(result, tuple)
-                                    and len(result) == len(out_kwarg_names)
-                                    and all(
-                                        result[i] is kwargs[name]
-                                        for i, name in enumerate(out_kwarg_names)
-                                    )
-                                )
-                            if not returns_out_args:
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {get_module()}): "
-                                    "An operator tagged with torch.Tag.out must "
-                                    "return its mutable keyword-only arguments."
-                                )
-                        elif not schema._is_view_op():
-                            utils._c_check_aliasing_constraint(
-                                self._name,
-                                args,
-                                kwargs,
-                                result,
-                                get_module,
-                            )
-                        return result
-
+                    backend_impl = self._make_backend_impl(device_type)
                     self._lib.impl(self._name, backend_impl, key)
 
-                # Wrap function to choose between the default implementation or the device-specific
-                # implementation depending on if the kernel is disabled.
-                @torch._disable_dynamo
-                def wrapped_fn(*args, **kwargs):
-                    if device_type in self._disabled_kernel:
-                        return self._init_fn(*args, **kwargs)
-                    else:
-                        return fn(*args, **kwargs)
-
-                self._backend_fns[device_type] = wrapped_fn
+                self._backend_fns[device_type] = self._make_backend_fn(device_type, fn)
                 self._backend_fn_callers[key] = utils.caller_module()
             return fn
 
