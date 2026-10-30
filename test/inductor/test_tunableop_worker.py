@@ -562,9 +562,9 @@ class BenchmarkJobCallTest(TestCase):
         self.assertEqual(self._run(job, calls, device=3, filename="w.csv"), 1.5)
         # Device first, then filename, then flags; cudagraphs cleared.
         self.assertEqual(
-            [c[0] for c in calls],
+            " ".join(c[0] for c in calls),
             "set_device set_filename enable tuning_enable "
-            "_nearest_match_enable benchmark".split(),
+            "_nearest_match_enable benchmark",
         )
         self.assertEqual(calls[0], ("set_device", 3))
         self.assertEqual(calls[1], ("set_filename", "w.csv", False))
