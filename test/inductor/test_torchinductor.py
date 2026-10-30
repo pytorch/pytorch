@@ -23854,7 +23854,9 @@ if HAS_TRITON:
 if RUN_CPU:
 
     class CheckModelStrideSemanticsTest(TestCase):
-        def test_check_model_exact_stride_ignores_insignificant_strides(self):
+        hw_classification = HardwareClassification.GENERIC
+
+        def test_check_model_exact_stride_ignores_insignificant_strides(self, device):
             def fn(x, y):
                 return torch.einsum("aij,ajk->aik", x, y)
 
@@ -23869,7 +23871,9 @@ if RUN_CPU:
                 reference_in_float=False,
             )
 
-        def test_significant_stride_check_rejects_meaningful_stride_mismatch(self):
+        def test_significant_stride_check_rejects_meaningful_stride_mismatch(
+            self, device
+        ):
             _assert_same_significant_strides(
                 self,
                 torch.empty_strided((1, 2, 4), (4, 4, 1)),
@@ -23884,7 +23888,9 @@ if RUN_CPU:
                 )
 
     class TestFull(TestCase):
-        def test_full_dtype(self):
+        hw_classification = HardwareClassification.ACCELERATOR
+
+        def test_full_dtype(self, device):
             pytypes = (
                 bool,
                 int,
@@ -23914,9 +23920,7 @@ if RUN_CPU:
                 else:
                     raise AssertionError(f"Unexpected Python type: {pytype}")
 
-                return torch.full(
-                    (4, 6), fill_value, dtype=dtype, device=torch.device("cpu")
-                )
+                return torch.full((4, 6), fill_value, dtype=dtype, device=device)
 
             fn_opt = torch.compile(fn, backend="inductor")
 
@@ -23959,6 +23963,16 @@ if HAS_TRITON:
         if legacy_cls is not None:
             _apply_template_name_overrides(
                 (legacy_cls,), globals(), {GPU_TYPE: ""}, {GPU_TYPE: name}
+            )
+    del test_cls, name, legacy_cls
+if RUN_CPU:
+    for test_cls in (CheckModelStrideSemanticsTest, TestFull):
+        name = test_cls.__name__
+        instantiate_device_type_tests(test_cls, globals(), only_for="cpu")
+        legacy_cls = globals().get(f"{name}CPU")
+        if legacy_cls is not None:
+            _apply_template_name_overrides(
+                (legacy_cls,), globals(), {"cpu": ""}, {"cpu": name}
             )
     del test_cls, name, legacy_cls
 
