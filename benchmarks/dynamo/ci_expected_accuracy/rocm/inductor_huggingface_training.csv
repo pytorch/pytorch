@@ -122,6 +122,10 @@ google/gemma-3-4b-it,eager_fail_to_run,0
 
 
 
+openai/whisper-large-v3-turbo,pass,9
+
+
+
 openai/whisper-tiny,pass,9
 
 

@@ -134,4 +134,8 @@ meta-llama/Llama-3.2-1B,eager_fail_to_run,0
 
 
 
+openai/whisper-large-v3-turbo,eager_2nd_run_OOM,0
+
+
+
 openai/whisper-tiny,pass,9

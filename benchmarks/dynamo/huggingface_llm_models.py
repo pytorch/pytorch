@@ -46,7 +46,11 @@ class WhisperBenchmark(Benchmark):
     @staticmethod
     def get_model_and_inputs(model_name, device, training=False):
         processor = WhisperProcessor.from_pretrained(model_name)
-        model = WhisperForConditionalGeneration.from_pretrained(model_name).to(device)
+        # whisper-large-v3-turbo's checkpoint is float16. Start from float32, as
+        # whisper-tiny's checkpoint does, so that the precision flags decide the dtype.
+        model = WhisperForConditionalGeneration.from_pretrained(
+            model_name, dtype=torch.float32
+        ).to(device)
         model.config.forced_decoder_ids = None
 
         model.generation_config.do_sample = False
@@ -304,6 +308,7 @@ HF_LLM_MODELS: dict[str, Benchmark] = {
     "google/gemma-2-2b": TextGenerationBenchmark,
     "google/gemma-3-4b-it": TextGenerationBenchmark,
     "openai/whisper-tiny": WhisperBenchmark,
+    "openai/whisper-large-v3-turbo": WhisperBenchmark,
     "Qwen/Qwen3-0.6B": TextGenerationBenchmark,
     "Qwen/Qwen3.5-0.8B": TextGenerationBenchmark,
     "Qwen/Qwen2.5-0.5B-Instruct": TextGenerationBenchmark,
