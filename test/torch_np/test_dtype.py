@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
 import warnings
 
 import numpy
@@ -95,6 +96,12 @@ class TestConvertDType(TestCase):
     def test_numpy_c_scalar_alias_matches_canonical_name(self):
         for scalar in (numpy.uintc, numpy.intc, numpy.uintp, numpy.intp):
             self.assertEqual(tnp.dtype(scalar), tnp.dtype(numpy.dtype(scalar).name))
+
+    def test_numpy_nonnative_dtype_raises(self):
+        opposite = ">f4" if sys.byteorder == "little" else "<f4"
+        with self.assertRaises(TypeError):
+            tnp.dtype(numpy.dtype(opposite))
+        self.assertNotEqual(tnp.dtype("float32"), numpy.dtype(opposite))
 
 
 if __name__ == "__main__":

@@ -289,7 +289,10 @@ def _sctype_from_numpy_arg(arg: object) -> type[generic] | None:
             return None
         return sctype_from_string(np.dtype(arg).name)
     # np.dtype("float32")
+    # .name drops byte order, so a non-native dtype must not become the native scalar.
     if isinstance(arg, np.dtype):
+        if not arg.isnative:
+            return None
         return sctype_from_string(arg.name)
     return None
 
