@@ -127,8 +127,10 @@ def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
 
 def check_quack_sm90_operands(gemm_arg: TensorBox, blockscaled: bool) -> None:
     """Reject operands QuACK's SM90 (WGMMA) mainloop cannot compute."""
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+
     device = gemm_arg.get_device_or_error()
-    if device.type != "cuda" or torch.cuda.get_device_capability(device)[0] != 9:
+    if device.type != "cuda" or get_device_capacity(device)[0] != 9:
         return
     if blockscaled:
         raise NotImplementedError(
@@ -588,17 +590,28 @@ def normalize_flex_gemm_1d_captures(
     return normalized
 
 
-def validate_bmm_capture_views(graph_module: torch.fx.GraphModule) -> None:
-    """Views lower as aliases, so they must preserve broadcast axes and dtype."""
+def validate_bmm_capture_views(
+    graph_module: torch.fx.GraphModule, gemm_node: torch.fx.Node
+) -> None:
+    """Views lower as aliases, so they must preserve broadcast axes and dtype.
+
+    Captures are classified by their placeholder shape, so a view that flattens
+    or reorders axes would read a capture combined with it along the wrong axis.
+    GEMM-derived views returned directly from the epilogue (terminal storage
+    views) are exempt; output plans own those.
+    """
     from ..gemm_epilogue_codegen import _cute_op_name
 
+    gemm_derived = OrderedSet([gemm_node])
     for node in graph_module.graph.nodes:
-        if node.op != "call_function" or _cute_op_name(node.target) not in (
-            "view",
-            "reshape",
-            "squeeze",
-            "unsqueeze",
-        ):
+        if any(arg in gemm_derived for arg in node.all_input_nodes):
+            gemm_derived.add(node)
+    returned = OrderedSet(graph_module.graph.output_node().all_input_nodes)
+    view_ops = ("view", "reshape", "squeeze", "unsqueeze")
+    for node in graph_module.graph.nodes:
+        if node.op != "call_function" or _cute_op_name(node.target) not in view_ops:
+            continue
+        if node in returned and node in gemm_derived:
             continue
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
@@ -683,6 +696,7 @@ def flex_gemm_quack_configs(
         selection_callback,
     )
     from torch._inductor.virtualized import V
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
     from torch._vendor.quack.gemm_config import cta_tile_shape_m, get_all_configs
     from torch._vendor.quack.gemm_runtime.autotune import legal_mod_configs
 
@@ -705,8 +719,9 @@ def flex_gemm_quack_configs(
         varlen_m=template_config.varlen_axis == "m",
         varlen_k=template_config.varlen_axis == "k",
     )
-    if isinstance(output_transform, FlexGemmOutputContraction) and (
-        torch.cuda.get_device_capability(device)[0] == 9
+    if (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and get_device_capacity(device)[0] == 9
     ):
         # Grouped-main stores need a full tile along N, and SM90 tiles are wide.
         min_tile_n = min(c.tile_n for c in get_all_configs() if c.device_capacity == 9)
@@ -721,15 +736,18 @@ def flex_gemm_quack_configs(
     if mat1.get_dtype() is torch.float32:
         a_k_major = statically_known_equal(mat1.get_stride()[-1], 1)
         b_n_major = statically_known_equal(mat2.get_stride()[-1], 1)
-        # MN-major TF32 needs a 32-element SW128_32B atom per CTA. Two-CTA MMA
-        # halves B's N extent; smaller swizzles can silently produce zeros.
+        # Two-CTA MMA halves B's N extent per CTA. MN-major TF32 needs whole
+        # 32-element SW128_32B atoms per CTA; smaller swizzles can silently produce
+        # zeros. K-major TF32 aborts CuTeDSL compilation, killing the process
+        # (e.g. mid-autotune), when that extent exceeds one atom but is not whole
+        # atoms (found empirically on GB300: two-CTA tile_n 160 and 224).
         tf32_legal = []
         for c in legal:
             b_mn_major = not a_k_major if c.swap_ab else b_n_major
-            if c.device_capacity in (10, 11) and b_mn_major:
+            if c.device_capacity in (10, 11):
                 cta_m = cta_tile_shape_m(c.tile_m, c.cluster_m, c.device_capacity)
-                mma_ctas = c.tile_m // cta_m
-                if c.tile_n % (32 * mma_ctas):
+                cta_n = c.tile_n // (c.tile_m // cta_m)
+                if cta_n % 32 and (b_mn_major or cta_n > 32):
                     continue
             tf32_legal.append(c)
         legal = tuple(tf32_legal)
@@ -875,8 +893,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
-    check_quack_fp32_operand(gemm_args[mat1_index])
     check_quack_sm90_operands(gemm_args[mat1_index], blockscaled is not None)
+    check_quack_fp32_operand(gemm_args[mat1_index])
     if grouped_mm:
         # QuACK's varlen path reads [0, *offs]; pad in-graph so Inductor owns
         # the buffer instead of the runtime allocating during CUDA graph capture.
@@ -908,8 +926,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_args[capture_start:],
         gemm_fx_node.meta["val"].shape,
     )
-    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
-        validate_bmm_capture_views(subgraph.graph_module)
+    bmm_captures = gemm_op is torch.ops.aten.bmm.default and bool(epilogue_args)
+    if bmm_captures:
+        validate_bmm_capture_views(subgraph.graph_module, gemm_fx_node)
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
         for index, arg in enumerate(gemm_operand_nodes)
@@ -1086,17 +1105,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         output_stride,
     )
     mainloop_scale_count = len(mainloop_scale_nodes)
+    if bmm_captures and output_transform is not None:
+        raise NotImplementedError(
+            "FlexGEMM bmm captured tensor reads require a shape-preserving main output"
+        )
     epilogue_arg_kinds = (
         *("scalar" for _ in range(mainloop_scale_count)),
         *infer_flex_gemm_epilogue_arg_kinds(
             gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
         ),
     )
-    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
-        if output_transform is not None:
-            raise NotImplementedError(
-                "FlexGEMM bmm captured tensor reads require a shape-preserving main output"
-            )
+    if bmm_captures:
         # Batch-shared captures become the 2-D forms QuACK broadcasts over every
         # batch; the runtime then passes rows and columns rank-1.
         epilogue_args = [

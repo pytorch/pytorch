@@ -124,7 +124,7 @@ class GroupedMainStore(TileStore):
         if config.device_capacity == 9:
             # WGMMA fragments keep adjacent N columns in one thread, so a pair
             # contracts in registers; the STSM store then needs QuACK's gated
-            # register permute (see store_convert).
+            # register permute (see store_convert) and its tile_n % 32 contract.
             return (
                 self.group == 2
                 and self.min_fragment_n is None
@@ -166,6 +166,8 @@ class GroupedMainStore(TileStore):
     def config_support_error(self, configs):
         if self.group == 4:
             return "group-4 grouped main outputs require an SM100 config"
+        if self.min_fragment_n is not None:
+            return "paired fragment reductions require an SM100 or SM110 config"
         return "group-2 grouped main outputs require an SM90, SM100, or SM110 config"
 
     def to_params(self, gemm, args):

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <torch/library.h>
 #include <algorithm>
+#include <c10/util/irange.h>
 
 namespace c10d {
 namespace {
@@ -155,12 +156,12 @@ __device__ __forceinline__ void checkChunk(BytePack* ptr) {
   int nWorkers = blockDim.x * gridDim.x;
 // First load values from global memory into tmp buffer
 #pragma unroll 8
-  for (int j = 0; j < UNROLL; j++) {
+  for (const auto j : c10::irange(UNROLL)) {
     tmp[j] = ptr[nWorkers * j];
   }
 // Then check each BytePack in the tmp buffer
 #pragma unroll 8
-  for (int j = 0; j < UNROLL; j++) {
+  for (const auto j : c10::irange(UNROLL)) {
     CheckBytePack<T, sizeof(BytePack) / sizeof(T)>::check(tmp + j);
   }
   // Note: we separate the check from the load for efficient loading
