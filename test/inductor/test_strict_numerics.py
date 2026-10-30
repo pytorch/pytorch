@@ -2120,6 +2120,148 @@ def _min_max_specials(dtype, device):
     return torch.cat((x, bits.view(dtype)))
 
 
+# Native CUDA domain endpoints and piecewise formula switches.
+POINTWISE_BOUNDARIES = {
+    "log": (0, 1),
+    "log2": (0, 1),
+    "log10": (0, 1),
+    "log1p": (-1, 0),
+    "sqrt": (0,),
+    "rsqrt": (0,),
+    "asin": (-1, 0, 1),
+    "acos": (-1, 0, 1),
+    "atanh": (-1, 0, 1),
+    "acosh": (1,),
+    "sinc": (0,),
+    "nn.functional.relu": (0,),
+    "nn.functional.hardswish": (-3, 3),
+    "nn.functional.hardtanh": (-1, 1),
+    "nn.functional.softshrink": (-0.5, 0.5),
+    "special.log_ndtr": (-1,),
+    "special.erfcx": (-26.7, -6.1, 0, 50, 5e7),
+    "special.bessel_j0": (-5, -1e-5, 0, 1e-5, 5),
+    "special.bessel_j1": (-5, 0, 5),
+    "special.bessel_y0": (0, 5),
+    "special.bessel_y1": (0, 5),
+    "special.modified_bessel_i0": (-8, 0, 8),
+    "special.modified_bessel_i1": (-8, 0, 8),
+    "special.spherical_bessel_j0": (-0.5, 0, 0.5),
+}
+POINTWISE_EDGE_NAMES = frozenset(POINTWISE_BOUNDARIES) | {
+    "clamp",
+    "lerp",
+    "logit",
+    "nn.functional.softplus",
+}
+POINTWISE_EDGE_OPS = [op for op in POINTWISE_OPS if op.name in POINTWISE_EDGE_NAMES]
+POINTWISE_EDGE_DTYPES = (*POINTWISE_DTYPES, torch.float64)
+
+
+def _pointwise_subnormals(dtype):
+    # Construct on CPU so input generation is independent of CUDA flushing.
+    zero = torch.tensor(0.0, dtype=dtype)
+    tiny = torch.nextafter(zero, torch.tensor(float("inf"), dtype=dtype))
+    normal = torch.tensor(torch.finfo(dtype).tiny, dtype=dtype)
+    positive = torch.stack(
+        (
+            zero,
+            tiny,
+            tiny * 2,
+            torch.nextafter(normal, zero),
+            normal,
+            torch.nextafter(normal, torch.tensor(float("inf"), dtype=dtype)),
+        )
+    )
+    return torch.cat((positive, -positive))
+
+
+def _pointwise_grad_values(dtype, device):
+    return torch.cat(
+        (_pointwise_subnormals(dtype).to(device), _min_max_specials(dtype, device))
+    )
+
+
+def _pointwise_neighbors(boundaries, dtype):
+    centers = torch.tensor(boundaries, dtype=dtype)
+    centers = centers[torch.isfinite(centers)]
+    return torch.cat(
+        (
+            torch.nextafter(centers, torch.full_like(centers, -float("inf"))),
+            centers,
+            torch.nextafter(centers, torch.full_like(centers, float("inf"))),
+        )
+    )
+
+
+def _pointwise_boundary_values(boundaries, dtype, device):
+    return torch.cat(
+        (
+            _pointwise_neighbors(boundaries, dtype).to(device),
+            _pointwise_subnormals(dtype).to(device),
+            _min_max_specials(dtype, device),
+        )
+    )
+
+
+def _pointwise_edge_calls(op, device, dtype, *, backward=False):
+    calls = []
+
+    def add(label, inp, args=(), kwargs=None):
+        if backward:
+            # Cross every input tuple with every upstream-gradient encoding.
+            count = _pointwise_grad_values(dtype, "cpu").numel()
+            inp = inp.repeat_interleave(count)
+            args = tuple(
+                a.repeat_interleave(count) if isinstance(a, torch.Tensor) else a
+                for a in args
+            )
+        calls.append((f"edge_{label}", inp, args, kwargs or {}))
+
+    if op.name in POINTWISE_BOUNDARIES:
+        x = _pointwise_boundary_values(POINTWISE_BOUNDARIES[op.name], dtype, device)
+        add("boundary", x)
+    elif op.name == "lerp":
+        weight = _pointwise_boundary_values((-0.5, 0, 0.5, 1), dtype, device)
+        start = torch.tensor([1, -1, 0.0, -0.0], dtype=dtype, device=device)
+        end = torch.tensor([-1, 1, -0.0, 0.0], dtype=dtype, device=device)
+        add(
+            "tensor_weight",
+            start.repeat_interleave(weight.numel()),
+            (end.repeat_interleave(weight.numel()), weight.repeat(start.numel())),
+        )
+        for value in _pointwise_neighbors((-0.5, 0, 0.5, 1), dtype).tolist():
+            add(f"scalar_weight_{value}", start, (end, value))
+    elif op.name == "logit":
+        acc_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        tiny = _pointwise_subnormals(dtype)[1].item()
+        for eps in (None, -1.0, -1e-50, 0.0, tiny, 0.2, 0.6, float("nan")):
+            boundaries = [0, 1]
+            if eps is not None:
+                lo = torch.tensor(eps, dtype=acc_dtype)
+                boundaries += [lo.item(), (1 - lo).item()]
+            x = _pointwise_boundary_values(boundaries, dtype, device)
+            add(f"eps_{eps}", x, kwargs={"eps": eps})
+    elif op.name == "nn.functional.softplus":
+        for beta, threshold in ((1, 20), (2, 1), (-2, 1)):
+            x = _pointwise_boundary_values((0, threshold / beta), dtype, device)
+            add(
+                f"beta_{beta}_threshold_{threshold}",
+                x,
+                kwargs={"beta": beta, "threshold": threshold},
+            )
+    elif op.name == "clamp":
+        x = _pointwise_boundary_values((-1, 1), dtype, device)
+        for lo, hi in ((-1.0, 1.0), (-1.0, None), (None, 1.0), (1.0, -1.0)):
+            add(f"scalar_bounds_{lo}_{hi}", x, (lo, hi))
+        bounds = _min_max_specials(dtype, device)
+        x = x.repeat_interleave(bounds.numel())
+        lo = bounds.repeat(x.numel() // bounds.numel())
+        add("tensor_min", x, (lo, None))
+        add("tensor_max", x, (None, lo))
+        add("tensor_bounds", x, (lo, lo.flip(0)))
+    return calls
+
+
 def _diff_kind(a, b):
     r"""Classify mismatches as shape, value, NaN payload, or signed zero."""
     if isinstance(a, (tuple, list)):
@@ -2565,9 +2707,10 @@ class PointwiseStrictNumericsTest(TestCase):
         if metrics.generated_kernel_count == 0:
             self.skipTest("no Triton kernel generated (op falls back to ATen)")
 
-    def _sweep(self, device, op, dtype, cfg):
+    def _sweep(self, device, op, dtype, cfg, *, calls=None):
         r"""Return mismatching (source, index, shape, kwargs, kind) records."""
-        calls = self._collect_calls(device, op, dtype)
+        if calls is None:
+            calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
             return op.op(inp, *args, **kwargs)
@@ -2626,6 +2769,12 @@ class PointwiseStrictNumericsTest(TestCase):
             mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
         )
 
+    @ops(POINTWISE_EDGE_OPS, allowed_dtypes=POINTWISE_EDGE_DTYPES)
+    def test_pointwise_edges(self, device, dtype, op):
+        calls = _pointwise_edge_calls(op, device, dtype)
+        mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG, calls=calls)
+        self.assertFalse(mismatches, f"{_op_id(op)} {dtype} edge outputs: {mismatches}")
+
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
@@ -2666,9 +2815,10 @@ class PointwiseStrictNumericsTest(TestCase):
         )
         return out, grads
 
-    def _sweep_backward(self, device, op, dtype, cfg):
+    def _sweep_backward(self, device, op, dtype, cfg, *, calls=None):
         r"""Compare input gradients with identical upstream gradients."""
-        calls = self._collect_calls(device, op, dtype)
+        if calls is None:
+            calls = self._collect_calls(device, op, dtype)
 
         def fn(inp, args, kwargs):
             return op.op(inp, *args, **kwargs)
@@ -2701,23 +2851,30 @@ class PointwiseStrictNumericsTest(TestCase):
                 ]
                 if any(t.shape != probe_out.shape for t in diff_ts):
                     continue
-                gen = torch.Generator(device=probe_out.device).manual_seed(0)
-                grad_output = torch.randn(
-                    probe_out.shape,
-                    generator=gen,
-                    device=probe_out.device,
-                    dtype=probe_out.dtype,
-                )
-                # Seed signed zeros, which randn does not reliably generate.
-                flat = grad_output.reshape(-1)
-                if flat.numel() >= 2:
-                    flat[0] = 0.0
-                    flat[1] = -0.0
+                if tag.startswith("edge_"):
+                    values = _pointwise_grad_values(probe_out.dtype, probe_out.device)
+                    grad_output = values.repeat(probe_out.numel() // values.numel())
+                    grad_output = grad_output.reshape(probe_out.shape)
+                else:
+                    gen = torch.Generator(device=probe_out.device).manual_seed(0)
+                    grad_output = torch.randn(
+                        probe_out.shape,
+                        generator=gen,
+                        device=probe_out.device,
+                        dtype=probe_out.dtype,
+                    )
+                    # Seed signed zeros, which randn does not reliably generate.
+                    flat = grad_output.reshape(-1)
+                    if flat.numel() >= 2:
+                        flat[0] = 0.0
+                        flat[1] = -0.0
                 try:
                     _, eager_grads = self._input_grads(
                         fn, inp, args, kwargs, grad_output
                     )
                 except Exception:
+                    if tag.startswith("edge_"):
+                        raise
                     continue
                 if eager_grads is None:
                     continue
@@ -2741,6 +2898,19 @@ class PointwiseStrictNumericsTest(TestCase):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
             mismatches, op, dtype, "backward", BACKWARD_XFAIL, "BACKWARD_XFAIL"
+        )
+
+    @ops(
+        [op for op in POINTWISE_EDGE_OPS if op.supports_autograd],
+        allowed_dtypes=POINTWISE_EDGE_DTYPES,
+    )
+    def test_pointwise_edges_backward(self, device, dtype, op):
+        calls = _pointwise_edge_calls(op, device, dtype, backward=True)
+        mismatches = self._sweep_backward(
+            device, op, dtype, POINTWISE_STRICT_CFG, calls=calls
+        )
+        self.assertFalse(
+            mismatches, f"{_op_id(op)} {dtype} edge gradients: {mismatches}"
         )
 
 
