@@ -4947,6 +4947,9 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertEqual(ast.literal_eval(literal), source)
             self.assertEqual(literal.count("\n"), source.count("\n"))
 
+    # Served in a fresh process, which lacks the crossref dispatch mode the
+    # capture's guards recorded.
+    @skipIfCrossRef
     def test_compiled_graph_code_is_editable(self):
         from torch.compiler.precompile import no_compilation
 
@@ -4995,6 +4998,9 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, r"missing \['.*\.fw'\]"):
             load(self.artifact, None)
 
+    # Served in a fresh process, which lacks the crossref dispatch mode the
+    # capture's guards recorded.
+    @skipIfCrossRef
     def test_an_edited_backward_graph_runs(self):
         x = torch.randn(8, requires_grad=True)
         with self._capture(self.mod.scaled_backward) as cap:
