@@ -337,15 +337,49 @@ class CondModels:
 
     class OperandStrides(torch.nn.Module):
         def forward(self, p, a, b):
-            def true_fn(x, y):
-                return x.sum(0) + y.sum(0)
+            # Exact reductions, so results don't depend on summation order.
+            def true_fn(x, y, z):
+                return x.amax(0) + y.amax(0) + z.amax((0, 1))
 
-            def false_fn(x, y):
-                return x.amax(0) - y.amax(0)
+            def false_fn(x, y, z):
+                return x.amin(0) - y.amin(0) - z.amin((0, 1))
 
-            # Eager gives both operands a.t()'s column-major strides. Inductor
-            # lays out x row-major (it follows b) and pads y's leading stride.
-            return torch.cond(p, true_fn, false_fn, (a.t() + b, a.t().relu()))
+            # Eager gives the operands a.t()'s column-major strides. Left to
+            # itself, Inductor would lay x and z's base out row-major
+            # (following b) and pad y's leading stride.
+            x, y = a.t() + b, a.t().relu()
+            z = (a.t() - b)[None].expand(3, -1, -1)
+            return torch.cond(p, true_fn, false_fn, (x, y, z))
+
+    class OperandStridesCopy(torch.nn.Module):
+        # With layout optimization the conv output is channels-last, a fixed
+        # layout that differs from eager's, so the operand needs a copy.
+        def __init__(self, mutate):
+            super().__init__()
+            self.mutate = mutate
+
+        def forward(self, p, a, w):
+            def true_fn(y):
+                if self.mutate:
+                    y.mul_(2)
+                return y.sum((0, 2, 3))
+
+            def false_fn(y):
+                return y.amax((0, 2, 3))
+
+            y = torch.nn.functional.conv2d(a, w)
+            return torch.cond(p, true_fn, false_fn, (y,)), y.sum((0, 2, 3))
+
+
+def check_operand_strides(test, model, device, dynamic, selectors):
+    # Not _run_test: its dynamic mode tiles dim 0 of every input, which breaks
+    # the models' a.t() + b.
+    compiled = torch.compile(model, fullgraph=True, dynamic=dynamic)
+    for n in (8261, 8300) if dynamic else (8261,):
+        a, b = torch.randn(19, n, device=device), torch.randn(n, 19, device=device)
+        for sel in selectors:
+            s = torch.tensor(sel, device=device)
+            test.assertEqual(compiled(s, a, b), model(s, a, b))
 
 
 class CondTests(TestCase):
@@ -417,14 +451,30 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    def test_cond_operand_strides(self, device):
-        # The branches are compiled for the operands' eager strides. 8261 rows
-        # trigger stride padding on GPU.
-        self._run_test(
-            model=CondModels.OperandStrides(),
-            inputs=(torch.randn(19, 8261), torch.randn(8261, 19)),
-            device=device,
+    @parametrize("dynamic", [False, True])
+    def test_cond_operand_strides(self, device, dynamic):
+        # The branches are compiled for the operands' eager strides. 8261
+        # columns trigger stride padding on GPU.
+        check_operand_strides(
+            self, CondModels.OperandStrides(), device, dynamic, [True, False]
         )
+
+    @requires_gpu
+    @parametrize("mutate", [False, True])
+    @torch._inductor.config.patch(force_layout_optimization=True)
+    def test_cond_operand_strides_copy(self, mutate):
+        # Branches may mutate operands under no_grad; a mutation of a copied
+        # operand must reach the original.
+        model = CondModels.OperandStridesCopy(mutate)
+        a = torch.randn(2, 3, 16, 16, device=GPU_TYPE)
+        w = torch.randn(8, 3, 3, 3, device=GPU_TYPE)
+        compiled = torch.compile(model, fullgraph=True)
+        with torch.no_grad():
+            for pred in (True, False):
+                p = torch.tensor(pred)
+                self.assertEqual(
+                    compiled(p, a, w), model(p, a, w), atol=1e-4, rtol=1e-4
+                )
 
     @requires_gpu
     @torch._functorch.config.patch("donated_buffer", True)
@@ -2712,6 +2762,20 @@ class SwitchModels:
         def forward(self, idx, x):
             return switch(idx, [self.b0, self.b1, self.b2], (x,))
 
+    class OperandStrides(torch.nn.Module):
+        def forward(self, idx, a, b):
+            # See CondModels.OperandStrides.
+            x, y = a.t() + b, a.t().relu()
+            return switch(
+                idx,
+                [
+                    lambda x, y: x.amax(0) + y.amax(0),
+                    lambda x, y: x.amin(0) - y.amin(0),
+                    lambda x, y: x.abs().amax(0) * y.amin(0),
+                ],
+                (x, y),
+            )
+
 
 class SwitchTests(TestCase):
     def _run_test(
@@ -2764,6 +2828,14 @@ class SwitchTests(TestCase):
             inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_operand_strides(self, device, dynamic):
+        check_operand_strides(
+            self, SwitchModels.OperandStrides(), device, dynamic, [0, 1, 2]
         )
 
     @requires_gpu
