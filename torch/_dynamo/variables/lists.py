@@ -185,10 +185,6 @@ class BaseListVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self) -> Any:
-        if self.python_type() is SizeVariable:
-            raise AssertionError(
-                "SizeVariable should not use BaseListVariable.as_proxy"
-            )
         return self.python_type()(self._as_proxy())
 
     def getitem_const(
