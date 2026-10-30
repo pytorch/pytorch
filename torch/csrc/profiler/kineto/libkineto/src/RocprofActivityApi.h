@@ -10,6 +10,7 @@
 #ifdef HAS_ROCTRACER
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <set>
 
@@ -48,6 +49,7 @@ class RocprofActivityApi {
   void setTimeOffset(timestamp_t toffset);
   void setMaxEvents(uint32_t maxEvents);
   void setPerThreadBuffers(bool enabled);
+  void setDispatchRecordWait(std::chrono::milliseconds wait);
 
   virtual int processActivities(
       std::function<void(const rocprofBase*)> handler,
