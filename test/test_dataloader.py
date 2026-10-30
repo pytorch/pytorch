@@ -3724,6 +3724,9 @@ class DeviceAwareCustomBatch:
         self.data = self.data.pin_memory()
         return self
 
+    def is_pinned(self):
+        return self.data.is_pinned()
+
 
 # Workaround for https://github.com/pytorch/pytorch/issues/50661
 # Classes from  `__main__` can not be correctly unpickled from spawned module
@@ -3838,14 +3841,15 @@ class TestCustomPinFn(TestCase):
         self.assertIs(_utils.pin_memory.pin_memory(copy_batch, "xpu"), copy_batch)
         self.assertFalse(copy_batch.copy)
 
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_pin_storage_no_device_argument(self):
-        storage = torch.UntypedStorage(4)
-        with mock.patch.object(
-            torch.UntypedStorage, "pin_memory", return_value=storage
-        ) as pin, warnings.catch_warnings(record=True) as caught:
+        storage = torch.arange(4, dtype=torch.uint8).untyped_storage()
+        device = torch.accelerator.current_accelerator().type
+        with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self.assertIs(_utils.pin_memory.pin_memory(storage, "cuda"), storage)
-        pin.assert_called_once_with()
+            pinned = _utils.pin_memory.pin_memory(storage, device)
+        self.assertTrue(pinned.is_pinned())
+        self.assertEqual(list(pinned), list(storage))
         self.assertFalse(caught)
 
     def test_custom_device_pin_dataloader(self):
@@ -3872,6 +3876,7 @@ class TestCustomPinFn(TestCase):
     def test_custom_batch_pin(self):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
+            (collate_with_device, self_module.DeviceAwareCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (
                 collate_into_packed_sequence_batch_first,
@@ -3885,11 +3890,16 @@ class TestCustomPinFn(TestCase):
             for sample in loader:
                 self.assertIsInstance(sample, elem_cls)
                 self.assertTrue(sample.is_pinned())
+                if isinstance(sample, self_module.DeviceAwareCustomBatch):
+                    self.assertEqual(
+                        sample.device, torch.accelerator.current_accelerator().type
+                    )
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_batch_pin_worker(self):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
+            (collate_with_device, self_module.DeviceAwareCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (
                 collate_into_packed_sequence_batch_first,
@@ -3907,6 +3917,10 @@ class TestCustomPinFn(TestCase):
             for sample in loader:
                 self.assertIsInstance(sample, elem_cls)
                 self.assertTrue(sample.is_pinned())
+                if isinstance(sample, self_module.DeviceAwareCustomBatch):
+                    self.assertEqual(
+                        sample.device, torch.accelerator.current_accelerator().type
+                    )
 
 
 class TestWorkerQueueDataset(Dataset):
