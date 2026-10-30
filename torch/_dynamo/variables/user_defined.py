@@ -277,6 +277,8 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
     self.mode can be guarded rather than baked into the graph. Unsupported
     cases return None for the caller to handle.
     """
+    from .builder import SourcelessBuilder
+
     if (
         args
         or kwargs
@@ -284,15 +286,15 @@ def maybe_reconstruct_decorator_ctx_manager_clone(
     ):
         return None
     if func is torch.utils._contextlib._DecoratorContextManager.clone:
-        return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
-            tx, [], {}
-        )
+        return SourcelessBuilder.create_internal_torch_ctx_manager(
+            obj.__class__
+        ).call_function(tx, [], {})
     if obj_source is None:
         return None
     mode_var = VariableTracker.build(tx, obj.mode, AttrSource(obj_source, "mode"))
-    return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
-        tx, [mode_var], {}
-    )
+    return SourcelessBuilder.create_internal_torch_ctx_manager(
+        obj.__class__
+    ).call_function(tx, [mode_var], {})
 
 
 def is_generic_ctx_manager_cls(cls: type) -> bool:
@@ -678,10 +680,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
                 meta_getattr, types.FunctionType
             ):
-                return variables.UserMethodVariable(
-                    variables.UserFunctionVariable(meta_getattr, source=None),
-                    self,
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, meta_getattr).call_function(
+                    tx,
+                    [self, variables.ConstantVariable.create(name)],
+                    {},
+                )
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -772,6 +777,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
+        from .builder import VariableBuilder
+
         if (
             source is not None
             and name == "from_tensor"
@@ -818,7 +825,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(cls_attr, source=source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(cls_attr, source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
         # property_descr_get with obj=NULL returns self.
@@ -829,7 +836,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return variables.PropertyVariable(cls_attr, source=descriptor_source)
+            return variables.PropertyVariable.create(cls_attr, descriptor_source)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -839,8 +846,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            return variables.MemberDescriptorVariable(
-                cls_attr, source=descriptor_source
+            return variables.MemberDescriptorVariable.create(
+                cls_attr, descriptor_source
             )
 
         if isinstance(cls_attr, _collections._tuplegetter):
@@ -849,7 +856,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            tg_vt = variables.TupleGetterVariable(cls_attr, source=descriptor_source)
+            tg_vt = variables.TupleGetterVariable.create(cls_attr, descriptor_source)
             return tg_vt.tp_descr_get_impl(tx, None, self)
 
         # TODO(tp_descr_get) - Comparison dunders must be checked before
@@ -870,7 +877,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.WrapperDescriptorVariable(
+            return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
@@ -882,7 +889,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            return variables.MethodDescriptorVariable(
+            return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
                 source=source,
@@ -1380,7 +1387,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # than device_arg itself to keep that true. The rank-relative device
                 # is not a constant, so without this branch the call falls through to
                 # device.__new__, which Dynamo skips.
-                return CurrentDeviceVariable(device_arg.value)
+                return CurrentDeviceVariable.create(device_arg.value)
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
@@ -1547,7 +1554,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # context manager, as eager does. The index it returns is the
                 # compiling rank's, so it must not be captured.
                 variable_cls._get_device_index_fn(args[0].value, optional=True)
-                return CurrentDeviceContextVariable(args[0].value.type, self.value)
+                return CurrentDeviceContextVariable.create(
+                    args[0].value.type, self.value
+                )
             if not args[0].is_python_constant():
                 raise_type_error(tx, f"{name} requires a constant argument")
             arg = args[0].as_python_constant()
@@ -1580,7 +1589,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     # graph. Dynamo's own reconstruct at a graph break re-enters
                     # through here, so this is what stops a resumed frame from
                     # pinning the compiling rank.
-                    return CurrentDeviceContextVariable(cur.type, self.value)
+                    return CurrentDeviceContextVariable.create(cur.type, self.value)
             return variable_cls.create(tx, arg)
         elif (
             issubclass(type(self.value), type)
@@ -1829,7 +1838,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     if uses_current_device and _coor_device_index_is_current(
                         stream.device
                     ):
-                        current_device = CurrentDeviceVariable(
+                        current_device = CurrentDeviceVariable.create(
                             torch.device(stream.device.type)
                         )
                 reconstruct_args = list(args)
@@ -3244,10 +3253,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 wrapped: Any = polyfill_handlers.get(method)  # type: ignore[arg-type]
                 if wrapped is not None:
                     traceable_fn = wrapped.__torch_dynamo_polyfill__
-                    return variables.UserMethodVariable(
-                        variables.UserFunctionVariable(traceable_fn, source=None),
-                        self,
-                    ).call_function(tx, args, kwargs)
+                    from .builder import SourcelessBuilder
+
+                    return SourcelessBuilder.create(tx, traceable_fn).call_function(
+                        tx, [self, *args], kwargs
+                    )
 
         if name == "__call__":
             unimplemented(
@@ -3907,6 +3917,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
+
         # TODO - Check what is this _is_c_defined_property and if this handling should be moved inside the PropertyVariable.
         if isinstance(type_attr, property) and not self._is_c_defined_property(
             type_attr
@@ -3916,7 +3927,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the property wrapper.
             if self.source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = variables.PropertyVariable(type_attr, source=source)
+            prop_vt = variables.PropertyVariable.create(type_attr, source)
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3934,7 +3945,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+            md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
             return md_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3953,13 +3964,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         ],
                     )
                 return result
-            gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+            gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
             return gs_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
 
         if isinstance(type_attr, _collections._tuplegetter):
-            tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+            tg_vt = variables.TupleGetterVariable.create(type_attr, source)
             return tg_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3993,6 +4004,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         """Handle non-data descriptors and plain class attributes from the type MRO."""
         from ..mutation_guard import unpatched_nn_module_init
+        from .builder import VariableBuilder
 
         if (
             type_attr is unpatched_nn_module_init
@@ -4040,24 +4052,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
-            cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+            cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
             return cmd_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
         elif isinstance(type_attr, types.WrapperDescriptorType):
             class_vt = self.tp_getattro_impl(tx, "__class__")
-            wd_vt = variables.WrapperDescriptorVariable(
+            wd_vt = VariableBuilder.create_internal_wrapper_descriptor(
                 type_attr, owner=class_vt, source=source
             )
             return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
             class_vt = self.tp_getattro_impl(tx, "__class__")
-            md_vt = variables.MethodDescriptorVariable(
+            md_vt = VariableBuilder.create_internal_method_descriptor(
                 type_attr, owner=class_vt, source=source
             )
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
-            fn_vt = variables.WrapperUserFunctionVariable(
+            fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                 type_attr, "__wrapped__", source=source
             )
             return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
@@ -4065,7 +4077,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if inspect.getattr_static(type_attr, "_torchdynamo_inline", False):
                 if can_use_mro_source:
                     source = self.get_source_by_walking_mro(tx, name)
-                fn_vt = variables.WrapperUserFunctionVariable(
+                fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                     type_attr, "_torchdynamo_inline", source=source
                 )
                 return variables.WrapperUserMethodVariable(fn_vt, self, source=source)
@@ -4129,7 +4141,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
-        owner_var = UserDefinedClassVariable(type(self.value))
+        owner_var = VariableTracker.build(tx, type(self.value))
         return variables.UserMethodVariable(
             variables.UserFunctionVariable(
                 # descriptor_get_source is type(descriptor).__get__, which is
@@ -5264,8 +5276,10 @@ class DefaultDictVariable(ConstDictVariable):
         key: "VariableTracker",
     ) -> "VariableTracker":
         """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        if key in self:
-            return self.getitem_const(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is not None:
+            return value
         return self.call_method(tx, "__missing__", [key], {})
 
     def nb_or_impl(
@@ -5546,9 +5560,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
         # them. See the generated list___init__ wrapper's tp_new comparison:
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
-        # 3.10 predates that comparison and only rejects keyword args for exact
-        # list, so every subclass tolerates them there.
-        if sys.version_info >= (3, 11) and type(self.value).__new__ is list.__new__:
+        if type(self.value).__new__ is list.__new__:
             no_keywords(tx, "list", kwargs)
         # UDOV.tp_init_impl would vectorcall the C list.__init__. Route to
         # ListVariable's, which populates this object's storage in place.
@@ -5941,8 +5953,13 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             collections.abc.Mapping.get,
             dict.get,
         ):
+            from .builder import SourcelessBuilder
+
+            fn_vt = SourcelessBuilder.create_internal_user_function(
+                polyfills.mapping_get
+            )
             return variables.UserMethodVariable(
-                variables.UserFunctionVariable(polyfills.mapping_get, source=None),
+                fn_vt,
                 self,
             )
         return None
