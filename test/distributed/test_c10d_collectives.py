@@ -58,6 +58,47 @@ class CollectivesTestMixin:
     def _expected_tensor(self, count, dtype, rank):
         return self._tensor(count, dtype, rank=rank)
 
+    def _distinct_tensor(self, src, dst, shape, memory_format=torch.contiguous_format):
+        # Positive values distinct per element, source and destination rank.
+        base = torch.arange(1, torch.Size(shape).numel() + 1, device=self.device)
+        tensor = (base + 100 * src + 1000 * dst).float().view(shape)
+        return tensor.contiguous(memory_format=memory_format)
+
+    def _expected_distinct_reduce(self, shape, op):
+        # Reduction over sources of what each rank sent to this rank.
+        inputs = torch.stack(
+            [
+                self._distinct_tensor(src, self.rank, shape)
+                for src in range(self.world_size)
+            ]
+        )
+        if op == dist.ReduceOp.SUM:
+            return inputs.sum(0)
+        if op == dist.ReduceOp.PRODUCT:
+            return inputs.prod(0)
+        if op == dist.ReduceOp.MIN:
+            return inputs.amin(0)
+        if op == dist.ReduceOp.MAX:
+            return inputs.amax(0)
+        if op == dist.ReduceOp.AVG:
+            return inputs.mean(0)
+        if op == dist.ReduceOp.PREMUL_SUM:
+            return (inputs * 0.5).sum(0)
+        raise AssertionError(f"Unhandled reduce op: {op}")
+
+    def _sentinel(self, shape, memory_format=torch.contiguous_format):
+        # Never a valid result: distinct inputs and their reductions are
+        # positive.
+        return torch.full(shape, -1.0, device=self.device).contiguous(
+            memory_format=memory_format
+        )
+
+    def _memory_formats(self, mixed):
+        # Mixed: even ranks use channels_last, odd ranks contiguous.
+        if mixed and self.rank % 2:
+            return torch.contiguous_format
+        return torch.channels_last
+
     def _wait(self, work, async_op):
         if async_op:
             self.assertIsNotNone(work)
@@ -244,6 +285,36 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
                         output,
                         torch.full_like(output, self._value(rank, output.dtype)),
                     )
+
+    def test_all_gather_multidim(self):
+        # Distinct per-element values catch misplaced or transposed rows.
+        for async_op in ASYNC_OPS:
+            with self.subTest(async_op=async_op):
+                base = torch.arange(6, dtype=torch.float32, device=self.device)
+                input = (base + 100 * self.rank).view(2, 3)
+                outputs = [torch.empty_like(input) for _ in range(self.world_size)]
+                work = dist.all_gather(outputs, input, async_op=async_op)
+                self._wait(work, async_op)
+                for rank, output in enumerate(outputs):
+                    self.assertEqual(output, (base + 100 * rank).view(2, 3))
+
+    def test_all_gather_channels_last(self):
+        # Ranks with different memory formats must issue the same collective
+        # and gather logical values.
+        shape = (2, 3, 2, 2)
+        for mixed in (False, True):
+            memory_format = self._memory_formats(mixed)
+            for async_op in ASYNC_OPS:
+                with self.subTest(mixed=mixed, async_op=async_op):
+                    input = self._distinct_tensor(self.rank, 0, shape, memory_format)
+                    outputs = [
+                        self._sentinel(shape, memory_format)
+                        for _ in range(self.world_size)
+                    ]
+                    work = dist.all_gather(outputs, input, async_op=async_op)
+                    self._wait(work, async_op)
+                    for rank, output in enumerate(outputs):
+                        self.assertEqual(output, self._distinct_tensor(rank, 0, shape))
 
     def test_all_gather_single(self):
         self._test_transport_matrix(self._test_all_gather_single)
@@ -441,6 +512,66 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
                         sizes[self.rank], torch.float32, dist.ReduceOp.SUM
                     ),
                 )
+
+    def _distinct_reduce_ops(self):
+        ops = list(self._reduce_ops(torch.float32))
+        if torch.float32 in self.premul_sum_dtypes:
+            ops.append(dist.ReduceOp.PREMUL_SUM(0.5))
+        return ops
+
+    def test_reduce_scatter_distinct_inputs(self):
+        # Distinct values per element and destination catch misplaced rows.
+        shape = (2, 3)
+        for op in self._distinct_reduce_ops():
+            for async_op in ASYNC_OPS:
+                with self.subTest(op=op, async_op=async_op):
+                    inputs = [
+                        self._distinct_tensor(self.rank, dst, shape)
+                        for dst in range(self.world_size)
+                    ]
+                    output = self._sentinel(shape)
+                    work = dist.reduce_scatter(output, inputs, op=op, async_op=async_op)
+                    self._wait(work, async_op)
+                    self.assertEqual(output, self._expected_distinct_reduce(shape, op))
+
+    def test_reduce_scatter_channels_last(self):
+        self._test_reduce_scatter_memory_format(mixed=False)
+
+    def test_reduce_scatter_mixed_memory_formats(self):
+        # Ranks with different memory formats must issue the same collective
+        # and reduce logical values.
+        self._test_reduce_scatter_memory_format(mixed=True)
+
+    def _test_reduce_scatter_memory_format(self, mixed):
+        shape = (2, 3, 2, 2)
+        memory_format = self._memory_formats(mixed)
+        for op in self._distinct_reduce_ops():
+            for async_op in ASYNC_OPS:
+                with self.subTest(op=op, async_op=async_op):
+                    inputs = [
+                        self._distinct_tensor(self.rank, dst, shape, memory_format)
+                        for dst in range(self.world_size)
+                    ]
+                    output = self._sentinel(shape, memory_format)
+                    work = dist.reduce_scatter(output, inputs, op=op, async_op=async_op)
+                    self._wait(work, async_op)
+                    self._assert_equal_on_all_ranks(
+                        output, self._expected_distinct_reduce(shape, op)
+                    )
+
+    def _assert_equal_on_all_ranks(self, actual, expected):
+        # Agree on the result before asserting, so a failure on one rank (an
+        # expected failure) does not leave the others in the next collective.
+        failure = None
+        try:
+            self.assertEqual(actual, expected)
+        except AssertionError as e:
+            failure = e
+        ok = torch.tensor([failure is None], dtype=torch.int32, device=self.device)
+        dist.all_reduce(ok, op=dist.ReduceOp.MIN)
+        if failure is not None:
+            raise failure
+        self.assertEqual(ok.item(), 1, "result mismatch on another rank")
 
     def test_reduce_scatter_single(self):
         for count in COUNTS:
@@ -846,13 +977,31 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
     def test_all_gather_mixed_devices(self):
+        self._test_all_gather_mixed_devices([4] * self.world_size)
+
+    def test_all_gather_uneven_mixed_devices(self):
+        # Uneven sizes take the per-rank path, which stages outputs on other
+        # devices.
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        if not self.supports_uneven_all_gather_mixed_devices:
+            # nccl-legacy hangs creating a communicator for the other device.
+            self.skipTest(
+                f"{self.backend_name} does not support uneven all-gather to "
+                "other devices"
+            )
+        self._test_all_gather_mixed_devices(
+            [rank + 1 for rank in range(self.world_size)]
+        )
+
+    def _test_all_gather_mixed_devices(self, sizes):
         if self.device_type != "cuda":
             self.skipTest(f"{self.backend_name} does not use CUDA")
         self._init_pg()
-        tensor = self._tensor(4, torch.float32)
+        tensor = self._tensor(sizes[self.rank], torch.float32)
         other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
-        outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        outputs[-1] = torch.empty(4, device=other_device)
+        outputs = [torch.empty(size, device=self.device) for size in sizes]
+        outputs[-1] = torch.empty(sizes[-1], device=other_device)
         torch.cuda.set_device(other_device)
 
         work = dist.all_gather(outputs, tensor, async_op=True)

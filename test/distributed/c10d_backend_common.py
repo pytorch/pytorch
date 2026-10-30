@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import os
 import unittest
 from dataclasses import dataclass
@@ -51,6 +52,13 @@ class BackendConfig:
     supports_work_result: bool = False
     supports_gather_single: bool = False
     supports_uneven_all_gather: bool = False
+    # Uneven all_gather with an output on another rank's device.
+    supports_uneven_all_gather_mixed_devices: bool = False
+    # Test methods that fail deterministically on this backend. They pass while
+    # the failure persists and fail once the backend is fixed. Every rank must
+    # fail with an AssertionError, or the other ranks hang or error. Names are
+    # "<base class>.<test>".
+    expected_failures: tuple[str, ...] = ()
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
@@ -133,12 +141,19 @@ C10D_BACKENDS = (
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        # Reduces raw memory, so mixed memory formats reduce the wrong values.
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
     ),
     BackendConfig(
         "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
     ),
     BackendConfig(
         "nccl-legacy",
@@ -152,6 +167,12 @@ C10D_BACKENDS = (
         supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
+        # Reduces into a contiguous copy of a channels_last output and never
+        # copies it back.
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_channels_last",
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
     ),
     BackendConfig(
         "nccl2",
@@ -164,6 +185,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
+        supports_uneven_all_gather_mixed_devices=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -185,6 +207,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
+        supports_uneven_all_gather_mixed_devices=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -276,6 +299,37 @@ class C10dBackendTestContinuous:
         super()._run_test_given_id(test_id, **kwargs)
 
 
+def _expect_failure(fn):
+    # Expects an AssertionError on every rank. unittest.expectedFailure would
+    # act in the main process, which would also mask rank crashes and timeouts,
+    # and MultiProcContinuousTest skips the rest of the class after a rank fails.
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            fn(self, *args, **kwargs)
+        except AssertionError:
+            return
+        raise AssertionError(
+            f"{fn.__name__} passed on {self.backend_name}; remove it from "
+            "expected_failures"
+        )
+
+    return wrapper
+
+
+def _expected_failures(backend, base_class):
+    prefix = f"{base_class.__name__}."
+    names = [
+        name.removeprefix(prefix)
+        for name in backend.expected_failures
+        if name.startswith(prefix)
+    ]
+    for name in names:
+        if not hasattr(base_class, name):
+            raise AssertionError(f"{backend.name}: unknown expected failure {name}")
+    return names
+
+
 def instantiate_backend_tests(
     namespace, suite_name, base_class, backends, *, harness=MultiProcessTestCase
 ):
@@ -299,10 +353,17 @@ def instantiate_backend_tests(
                 "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
+                "supports_uneven_all_gather_mixed_devices": (
+                    backend.supports_uneven_all_gather_mixed_devices
+                ),
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
                 "complex_dtypes": backend.complex_dtypes,
+                **{
+                    name: _expect_failure(getattr(base_class, name))
+                    for name in _expected_failures(backend, base_class)
+                },
             },
         )
         test_class = unittest.skipIf(
