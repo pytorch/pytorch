@@ -23,11 +23,16 @@ void launch_grid_sampler_2d_backward_kernel(
     bool align_corners, std::array<bool, 2> output_mask);
 
 #ifdef USE_ROCM
-// True when launch_grid_sampler_2d_backward_kernel would select the
-// channel-parallel kernel given a channels-last grad_input, so the caller
-// accumulates into a channels-last scratch instead of the returned gradient.
-bool rocm_grid_sampler_2d_backward_use_channels_last_scratch(
-    const TensorBase &input, const TensorBase &grid);
+// Kernel selection for launch_grid_sampler_2d_backward_kernel. The caller
+// allocates grad_input from `scratch` (a channels-last buffer copied into the
+// contiguous result) and the launcher selects the kernel from `channel_lane`,
+// so both follow one set of rules.
+struct RocmGridSampler2dBackwardDispatch {
+  bool channel_lane = false;
+  bool scratch = false;
+};
+RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
+    const TensorBase &input, const TensorBase &grid, bool input_requires_grad);
 #endif
 
 void launch_grid_sampler_3d_backward_kernel(

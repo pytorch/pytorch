@@ -49,7 +49,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
-    skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
+    skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipCUDAIfNotRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -12087,8 +12087,28 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
 
+    # Default dispatch, and the ROCm channel-parallel kernel forced on or off.
+    # The default enables that kernel on one architecture only, so forcing it
+    # on is how other architectures, including CI's, execute it.
+    _ROCM_CHANNEL_LANE_POLICIES = {"default": None, "on": "1", "off": "0"}
+
+    @contextlib.contextmanager
+    def _rocm_channel_lane(self, policy):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE", None)
+            value = self._ROCM_CHANNEL_LANE_POLICIES[policy]
+            if value is not None:
+                os.environ["PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE"] = value
+            yield
+
+    def _rocm_channel_lane_enabled(self, policy, device):
+        if policy == "default":
+            return "gfx1250" in torch.cuda.get_device_properties(device).gcnArchName
+        return policy == "on"
+
     @onlyCUDA
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward layout")
+    @skipCUDAIfNotRocm
+    @parametrize_test("channel_lane", ["default", "on"])
     @parametrize_test("shape,layout,out_hw", [
         ((1, 8, 8, 8), "channels_last", (1, 64)),
         ((1, 2, 8, 8), "channels_last", (1, 64)),
@@ -12107,7 +12127,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("grad_output_cl", [False, True])
     @parametrize_test("input_requires_grad", [False, True])
     def test_grid_sample_2d_backward_rocm_grad_input_memory_format(
-            self, device, shape, layout, out_hw, grad_output_cl, input_requires_grad):
+            self, device, channel_lane, shape, layout, out_hw, grad_output_cl, input_requires_grad):
         # Eager and Fake gradients stay contiguous for every input layout,
         # including the channels-last scratch path, mixed layouts, generic
         # fallbacks, singleton dimensions and empty tensors.
@@ -12125,7 +12145,8 @@ class TestNNDeviceType(NNTestCase):
         grid = torch.rand(shape[0], *out_hw, 2, device=device) * 2 - 1
         bw = torch.ops.aten.grid_sampler_2d_backward.default
         args = (grad_output, inp, grid, 0, 0, False, [input_requires_grad, True])
-        eager = bw(*args)
+        with self._rocm_channel_lane(channel_lane):
+            eager = bw(*args)
         with FakeTensorMode() as fake_mode:
             fake_args = tuple(
                 fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args)
@@ -12152,9 +12173,10 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(fake_cpu[0].stride(), expected_cpu.stride())
 
     @onlyCUDA
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @skipCUDAIfNotRocm
     @largeTensorTest("12GB", device="cuda")
-    def test_grid_sample_2d_backward_rocm_launch_fallback_memory_format(self, device):
+    @parametrize_test("channel_lane", ["default", "on"])
+    def test_grid_sample_2d_backward_rocm_launch_fallback_memory_format(self, device, channel_lane):
         # The channel-parallel kernel needs one block per output point, which HIP
         # bounds by gridDim.x * blockDim.x <= UINT32_MAX. Past that bound the
         # kernel is ineligible and dispatch falls back to the generic kernel.
@@ -12170,7 +12192,8 @@ class TestNNDeviceType(NNTestCase):
                                   dtype=torch.half, memory_format=torch.channels_last).fill_(1)
         grid = torch.full((1, 1, w_out, 2), 2, device=device, dtype=torch.half)
         args = (grad_output, inp, grid, 1, 0, False, [True, True])
-        grad_input = bw(*args)[0]
+        with self._rocm_channel_lane(channel_lane):
+            grad_input = bw(*args)[0]
         self.assertTrue(grad_input.is_contiguous())
         self.assertEqual(grad_input, torch.zeros_like(inp))
 
@@ -12223,13 +12246,15 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(actual[1].cpu(), expected[1])
 
     @onlyCUDA
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @skipCUDAIfNotRocm
     @dtypes(torch.float, torch.double)
-    def test_grid_sample_2d_backward_rocm_reference_values(self, device, dtype):
+    @parametrize_test("channel_lane", ["default", "on", "off"])
+    def test_grid_sample_2d_backward_rocm_reference_values(self, device, dtype, channel_lane):
         # No OpInfo sample reaches the ROCm channel-parallel kernel: the
         # grid_sampler_2d samples use three contiguous channels, below the
-        # ordinary-layout C >= 32 threshold. Check
-        # both gradients against CPU on eligible shapes and generic fallbacks.
+        # ordinary-layout C >= 32 threshold. Check both gradients against CPU
+        # on shapes that are eligible for it and on generic fallbacks; with the
+        # kernel forced on, eligible shapes execute it on any ROCm architecture.
         # Nearest mode is covered separately -- its coordinate rounding makes
         # exact ties device-dependent, which is a property of the mode rather
         # than of this kernel.
@@ -12237,10 +12262,12 @@ class TestNNDeviceType(NNTestCase):
         tol = ({"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float
                else {"atol": 1e-9, "rtol": 1e-7})
 
-        # Cover both thresholds, the one-channel fallback and mixed layouts.
+        # Cover both thresholds, the one-channel fallback, mixed layouts, a
+        # partial block (C=3 on 4 lanes) and more channels than lanes (C=257).
         for channels, channels_last, grad_output_cl in (
                 (8, True, True), (32, False, False), (1, True, True), (2, True, True),
-                (4, True, False), (8, True, False), (16, True, False)):
+                (4, True, False), (8, True, False), (16, True, False),
+                (3, True, True), (257, True, True)):
             gen = torch.Generator().manual_seed(1234 + channels)
             inp = torch.randn(2, channels, 7, 5, generator=gen).to(dtype)
             grad_output = torch.randn(2, channels, 3, 4, generator=gen).to(dtype)
@@ -12261,7 +12288,8 @@ class TestNNDeviceType(NNTestCase):
                         for mask in ([True, True], [False, True]):
                             tail = (mode, padding_mode, align_corners, mask)
                             expected = bw(*cpu_args, *tail)
-                            actual = bw(*dev_args, *tail)
+                            with self._rocm_channel_lane(channel_lane):
+                                actual = bw(*dev_args, *tail)
                             msg = (f"C={channels} channels_last={channels_last} "
                                    f"mode={mode} padding_mode={padding_mode} "
                                    f"align_corners={align_corners} mask={mask}")
@@ -12272,9 +12300,10 @@ class TestNNDeviceType(NNTestCase):
                                              msg=msg, **tol)
 
     @onlyCUDA
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @skipCUDAIfNotRocm
     @dtypes(torch.half, torch.float)
-    def test_grid_sample_2d_backward_rocm_nearest_zero_grid_grad(self, device, dtype):
+    @parametrize_test("channel_lane", ["default", "on"])
+    def test_grid_sample_2d_backward_rocm_nearest_zero_grid_grad(self, device, dtype, channel_lane):
         # Nearest mode has no grid gradient, so the backward must store an exact
         # zero. Computing it as `coordinate_scale * 0` yields NaN whenever the
         # scale overflows the dtype -- half with inp_W == 65536 makes it inf.
@@ -12285,7 +12314,8 @@ class TestNNDeviceType(NNTestCase):
             grad_output = torch.randn(1, 4, 1, 1, device=device, dtype=dtype
                                       ).contiguous(memory_format=torch.channels_last)
             grid = torch.zeros(1, 1, 1, 2, device=device, dtype=dtype)
-            grad_grid = bw(grad_output, inp, grid, 1, 0, False, [True, True])[1]
+            with self._rocm_channel_lane(channel_lane):
+                grad_grid = bw(grad_output, inp, grid, 1, 0, False, [True, True])[1]
             self.assertEqual(grad_grid, torch.zeros_like(grad_grid),
                              msg=f"nearest grid gradient must be zero (W={width})")
 
@@ -12301,35 +12331,90 @@ class TestNNDeviceType(NNTestCase):
              torch.randn(1, 8, 4, 4, device=device).contiguous(memory_format=torch.channels_last),
              torch.zeros(1, 4, device=device)),
         )
-        for grad_output, inp, grid in cases:
-            with self.assertRaisesRegex(RuntimeError, r"grid_sampler\(\): expected"):
+        # Also with the ROCm channel-parallel kernel forced on (a no-op elsewhere).
+        for (grad_output, inp, grid), channel_lane in itertools.product(cases, ("default", "on")):
+            with self._rocm_channel_lane(channel_lane), \
+                    self.assertRaisesRegex(RuntimeError, r"grid_sampler\(\): expected"):
                 bw(grad_output, inp, grid, 0, 0, False, [True, True])
 
     @onlyCUDA
-    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @skipCUDAIfNotRocm
     @dtypes(torch.half, torch.bfloat16)
-    def test_grid_sample_2d_backward_rocm_low_precision_grid_grad(self, device, dtype):
+    @parametrize_test("channel_lane", ["default", "on", "off"])
+    def test_grid_sample_2d_backward_rocm_low_precision_grid_grad(self, device, dtype, channel_lane):
         # The grid gradient sums over channels. Summing in the input dtype
         # stalls (FP16 1024 + 0.5 rounds back to 1024) or overflows before
-        # opposite channels cancel. On gfx1250, reduced-precision calls must
-        # keep the opmath reduction whether or not grad_input is requested.
+        # opposite channels cancel. Where the channel-parallel kernel runs,
+        # reduced-precision calls keep its opmath reduction whether or not
+        # grad_input is requested, and scale the sum before rounding it.
         bw = torch.ops.aten.grid_sampler_2d_backward.default
-        stall = (torch.tensor([[0., 1.], [0., 1.]]).expand(1, 2048, 2, 2),
-                 torch.ones(1, 2048, 1, 1), torch.contiguous_format, [2048., 0.])
-        cancel = (torch.tensor([[-60000., 60000.], [-60000., 60000.]]).expand(1, 2, 2, 2),
-                  torch.tensor([1., -1.]).reshape(1, 2, 1, 1), torch.channels_last, [0., 0.])
-        exact = "gfx1250" in torch.cuda.get_device_properties(device).gcnArchName
-        for inp, grad_output, fmt, expected in (stall, cancel):
+        zero = torch.zeros(1, 1, 1, 2)
+        # (input, grad_output, memory format, grid, padding_mode, align_corners, expected)
+        cases = [
+            (torch.tensor([[0., 1.], [0., 1.]]).expand(1, 2048, 2, 2),
+             torch.ones(1, 2048, 1, 1), torch.contiguous_format, zero, 0, False, [2048., 0.]),
+            (torch.tensor([[-60000., 60000.], [-60000., 60000.]]).expand(1, 2, 2, 2),
+             torch.tensor([1., -1.]).reshape(1, 2, 1, 1), torch.channels_last, zero, 0, False, [0., 0.]),
+        ]
+        # Channel sums that are finite in opmath but overflow the dtype, while
+        # the scaled result is representable: -2v or 2v per pair of channels.
+        if dtype == torch.half:
+            v, g = 60000., torch.tensor([1., 1.])
+        else:
+            v, g = 2.0 ** 127, torch.tensor([1., 255. / 256.])
+        g = g.reshape(1, 2, 1, 1)
+        flat = torch.full((1, 2, 2, 2), v)
+        for padding_mode in (1, 2):  # border, reflection: a clipped coordinate has zero gradient
+            cases += [
+                (flat, g, torch.channels_last, torch.tensor([[[[1.5, 0.]]]]), padding_mode, False, [0., 0.]),
+                (flat, g, torch.channels_last, torch.tensor([[[[0., 1.5]]]]), padding_mode, False, [0., 0.]),
+            ]
+        # At the centre with align_corners=True, the coordinate multiplier is 0.5.
+        cases += [
+            (torch.tensor([[0., v], [0., v]]).expand(1, 2, 2, 2), g, torch.channels_last, zero, 0, True, [v, 0.]),
+            (torch.tensor([[0., 0.], [v, v]]).expand(1, 2, 2, 2), g, torch.channels_last, zero, 0, True, [0., v]),
+        ]
+        exact = self._rocm_channel_lane_enabled(channel_lane, device)
+        for inp, grad_output, fmt, grid, padding_mode, align_corners, expected in cases:
             inp = inp.to(device, dtype).contiguous(memory_format=fmt)
             grad_output = grad_output.to(device, dtype).contiguous(memory_format=fmt)
-            grid = torch.zeros(1, 1, 1, 2, device=device, dtype=dtype)
-            grid_only = bw(grad_output, inp, grid, 0, 0, False, [False, True])[1]
-            both = bw(grad_output, inp, grid, 0, 0, False, [True, True])[1]
+            grid = grid.to(device, dtype)
+            tail = (0, padding_mode, align_corners)
+            with self._rocm_channel_lane(channel_lane):
+                grid_only = bw(grad_output, inp, grid, *tail, [False, True])[1]
+                both = bw(grad_output, inp, grid, *tail, [True, True])[1]
             self.assertEqual(grid_only, both, atol=0, rtol=0,
                              msg="grad_grid must not depend on whether grad_input is requested")
             if exact:
                 self.assertEqual(grid_only.flatten().float().cpu(), torch.tensor(expected),
-                                 atol=0, rtol=0)
+                                 atol=0, rtol=0, msg=f"grid={grid.tolist()} padding_mode={padding_mode}")
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @parametrize_test("channel_lane", ["default", "on", "off"])
+    def test_grid_sample_2d_backward_rocm_channel_lane_policy(self, device, channel_lane):
+        # Both kernels produce the same values, so the numerical tests cannot
+        # tell whether the policy took effect. A channels-last call requesting
+        # grad_input runs the channel-parallel kernel into a scratch buffer and
+        # copies it into the contiguous result; the generic kernel writes the
+        # result directly. Check the copy appears exactly when the policy
+        # enables the kernel, including forced off where it is the default.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        gen = torch.Generator().manual_seed(1234)
+        inp = torch.randn(1, 8, 8, 8, generator=gen).contiguous(memory_format=torch.channels_last)
+        grad_output = torch.randn(1, 8, 4, 4, generator=gen).contiguous(memory_format=torch.channels_last)
+        grid = torch.rand(1, 4, 4, 2, generator=gen) * 2 - 1
+        expected = bw(grad_output, inp, grid, 0, 0, False, [True, True])
+        dev_args = tuple(t.to(device) for t in (grad_output, inp, grid))
+        with self._rocm_channel_lane(channel_lane), \
+                torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
+            actual = bw(*dev_args, 0, 0, False, [True, True])
+        names = {e.name for e in p.events()}
+        self.assertIn("aten::grid_sampler_2d_backward", names)
+        self.assertEqual("aten::copy_" in names, self._rocm_channel_lane_enabled(channel_lane, device),
+                         msg=f"channel_lane={channel_lane}")
+        for a, e in zip(actual, expected):
+            self.assertEqual(a.cpu(), e, atol=2e-4, rtol=2e-4)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

@@ -11,6 +11,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/env.h>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -406,10 +407,9 @@ namespace {
     return lanes;
   }
 
-  // Preserving channels-last gradients exposed regressions in small-channel
-  // and mixed-layout generic calls; their measured channel-lane cutoff is C=2.
-  // Earlier C=1..32 sweeps reached >=1.6x at C=4 channels-last and >=1.34x at
-  // C=32 contiguous (1.07x at C=16). The launcher restricts the architecture.
+  // Channel and launch-size limits: channels-last tensors pay off from C=2,
+  // other layouts from C=32. rocm_grid_sampler_2d_backward_dispatch applies the
+  // remaining dtype, layout and architecture rules.
   bool rocm_grid_sampler_2d_backward_use_channel_lane(
       int64_t num_channels, bool channels_last, int64_t nblocks_nhw) {
     const bool enough_channels =
@@ -424,8 +424,15 @@ namespace {
         kHipMaxGlobalWorkSize / rocm_grid_sampler_2d_backward_lanes(num_channels);
   }
 
-  // Enable the channel-parallel mapping only on the measured architecture.
+  // By default, enable the channel-parallel mapping only on the measured
+  // architecture. PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE=1 enables it on any
+  // ROCm architecture (tests use this to cover the kernel), =0 disables it.
+  // Read on every call so tests can toggle it.
   bool rocm_grid_sampler_2d_backward_arch_supported(c10::DeviceIndex device) {
+    if (const auto forced =
+            c10::utils::check_env("PYTORCH_ROCM_GRID_SAMPLER_CHANNEL_LANE")) {
+      return *forced;
+    }
     static const std::vector<std::string> supported_archs = {"gfx1250"};
     return at::detail::getCUDAHooks().isGPUArch(supported_archs, device);
   }
@@ -441,24 +448,18 @@ namespace {
 
   // ROCm channel-lane mapping with a parallel grid-gradient reduction.
   //
-  // Same work decomposition as grid_sampler_2d_backward_kernel_rocm_channel_lane
-  // -- one block per (n, h, w), lanes striding over channels -- with the
-  // grad_grid reduction fixed. In that earlier revision lane 0 gathered four
-  // input neighbours for every channel serially while the other lanes idled,
-  // and repeated the whole gather once per channel-loop iteration when
-  // C > blockDim. It measured slower than the generic kernel on large-C
-  // channels-last backward; this revision measured faster than both.
-  //
-  // Here each lane accumulates the grad_grid contribution for the channels it
-  // already owns -- reusing the neighbour coordinates and weights it computed
-  // for the scatter -- and the block reduces once, after the loop. With
-  // channels-last input those per-lane gathers are coalesced across the wave.
+  // One block per (n, h, w); its lanes stride over the channels. Each lane
+  // scatters grad_input for the channels it owns and accumulates their
+  // grad_grid contribution in opmath_t, reusing the neighbour coordinates and
+  // weights it computed for the scatter. The block then reduces those partial
+  // sums once, after the channel loop. With channels-last tensors the per-lane
+  // gathers and atomics are coalesced across the wave.
   //
   // Requires blockDim.x to be a power of two (the launcher guarantees it) so the
   // tree reduction below is exact.
   template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
-  __global__ void grid_sampler_2d_backward_kernel_rocm_channel_lane_v2(
+  __global__ void grid_sampler_2d_backward_kernel_rocm_channel_lane(
       const index_t nblocks_nhw,  // N * out_H * out_W
       TensorInfo<const scalar_t, index_t> grad_output,
       TensorInfo<const scalar_t, index_t> input,
@@ -664,8 +665,11 @@ namespace {
         gGrid_ptr[0] = static_cast<scalar_t>(0);
         gGrid_ptr[1] = static_cast<scalar_t>(0);
       } else {
-        gGrid_ptr[0] = static_cast<scalar_t>(gix_mult * static_cast<scalar_t>(s_gix[0]));
-        gGrid_ptr[1] = static_cast<scalar_t>(giy_mult * static_cast<scalar_t>(s_giy[0]));
+        // Scale in opmath_t before the single rounding: a sum outside the
+        // dtype's range can still have a representable product (e.g. a clipped
+        // coordinate has a zero multiplier).
+        gGrid_ptr[0] = static_cast<scalar_t>(static_cast<opmath_t>(gix_mult) * s_gix[0]);
+        gGrid_ptr[1] = static_cast<scalar_t>(static_cast<opmath_t>(giy_mult) * s_giy[0]);
       }
     }
   }
@@ -1412,28 +1416,46 @@ static void launch_grid_sampler_2d_backward_generic(
 
 
 #ifdef USE_ROCM
-bool rocm_grid_sampler_2d_backward_use_channels_last_scratch(
-    const TensorBase &input, const TensorBase &grid) {
-  // Mirrors the dispatch below for a channels-last grad_input with input
-  // strides. At C=2 the scratch zeroing and copy cost more than the channel
-  // parallelism gains on gfx1250 (4x2x16x16 input, 512 points: +8.6% versus
-  // the generic kernel), so the scratch path starts at C=3, except for
-  // reduced precision, which needs the channel-lane grid-gradient reduction.
-  // This runs before the launcher validates shapes; leave malformed inputs to
-  // its checks.
+RocmGridSampler2dBackwardDispatch rocm_grid_sampler_2d_backward_dispatch(
+    const TensorBase &input, const TensorBase &grid, bool input_requires_grad) {
+  // The allocation in GridSampler.cpp calls this before the launcher validates
+  // shapes; leave malformed inputs to the launcher's checks.
   if (input.dim() != 4 || grid.dim() != 4) {
-    return false;
+    return {};
   }
-  const auto C = input.size(1);
-  const int64_t min_channels =
-      rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type()) ? 2 : 3;
-  if (C < min_channels || !input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    return false;
+  // Reject small channel counts before inspecting layouts or device properties.
+  const int64_t C = input.size(1);
+  if (C < 2) {
+    return {};
   }
+  const bool reduced_precision =
+      rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type());
+  const bool input_channels_last =
+      input.is_contiguous(at::MemoryFormat::ChannelsLast);
+  // grad_input is returned contiguous. Channels-last input accumulates into a
+  // channels-last scratch, which coalesces the atomics, and is copied out. At
+  // C=2 the zeroing and copy cost more than the channel parallelism gains, so
+  // FP32/FP64 start at C=3; reduced precision keeps the scratch from C=2 for
+  // the opmath reduction.
+  const bool wants_scratch = input_requires_grad && input_channels_last &&
+      C >= (reduced_precision ? 2 : 3);
+  // Layout the kernel writes and reads: a contiguous 1x1 gradient is also
+  // channels-last.
+  const bool channels_last = input_channels_last &&
+      (!input_requires_grad || wants_scratch ||
+       (input.size(2) == 1 && input.size(3) == 1));
   const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
-  return rocm_grid_sampler_2d_backward_use_channel_lane(
-             C, /*channels_last=*/true, nblocks_nhw) &&
+  RocmGridSampler2dBackwardDispatch dispatch;
+  // Without channels-last tensors, FP32 grid-gradient-only calls measured
+  // slower than the generic kernel, so FP32/FP64 use it; reduced precision
+  // keeps the channel-lane kernel so that requesting grad_input does not
+  // change grad_grid.
+  dispatch.channel_lane =
+      (channels_last || input_requires_grad || reduced_precision) &&
+      rocm_grid_sampler_2d_backward_use_channel_lane(C, channels_last, nblocks_nhw) &&
       rocm_grid_sampler_2d_backward_arch_supported(input.get_device());
+  dispatch.scratch = dispatch.channel_lane && wants_scratch;
+  return dispatch;
 }
 #endif
 
@@ -1456,39 +1478,20 @@ void launch_grid_sampler_2d_backward_kernel(
   const auto input_requires_grad = output_mask[0];
 
 #ifdef USE_ROCM
-  const auto N = input.size(0);
-  const auto C = input.size(1);
-  const auto H = grid.size(1);
-  const auto W = grid.size(2);
-  const int64_t nblocks_nhw = N * H * W;
-
-  // Reject small channel counts before inspecting layouts or device properties.
-  bool eligible = C >= 2;
-  if (eligible) {
-    const bool channels_last =
-        input.is_contiguous(at::MemoryFormat::ChannelsLast) &&
-        (!input_requires_grad ||
-         grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
-    // Without channels-last input the channel-parallel kernel only pays off
-    // when it also scatters grad_input; FP32 grid-gradient-only calls measured
-    // slower than the generic kernel on gfx1250 (+65% for the ticket shape).
-    eligible = (channels_last || input_requires_grad ||
-                rocm_grid_sampler_2d_backward_needs_opmath_reduction(input.scalar_type())) &&
-        rocm_grid_sampler_2d_backward_use_channel_lane(
-                   C, channels_last, nblocks_nhw) &&
-        rocm_grid_sampler_2d_backward_arch_supported(input.get_device());
-  }
-  if (!eligible) {
+  const auto dispatch =
+      rocm_grid_sampler_2d_backward_dispatch(input, grid, input_requires_grad);
+  if (!dispatch.channel_lane) {
     launch_grid_sampler_2d_backward_generic(
         grad_input, grad_grid, grad_output, input, grid, interpolation_mode,
         padding_mode, align_corners, input_requires_grad);
     return;
   }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !dispatch.scratch ||
+      grad_input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-  if (nblocks_nhw <= 0) {
-    return;
-  }
-
+  const int64_t C = input.size(1);
+  const int64_t nblocks_nhw = input.size(0) * grid.size(1) * grid.size(2);
   const int lanes =
       static_cast<int>(rocm_grid_sampler_2d_backward_lanes(C));
   const auto blocks = static_cast<unsigned int>(nblocks_nhw);
@@ -1497,7 +1500,7 @@ void launch_grid_sampler_2d_backward_kernel(
       input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
     if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
         canUse32BitIndexMath(grad_output)) {
-      grid_sampler_2d_backward_kernel_rocm_channel_lane_v2<scalar_t, int>
+      grid_sampler_2d_backward_kernel_rocm_channel_lane<scalar_t, int>
           <<<blocks, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
               static_cast<int>(nblocks_nhw),
               getTensorInfo<const scalar_t, int>(grad_output),
@@ -1511,7 +1514,7 @@ void launch_grid_sampler_2d_backward_kernel(
               input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
               input_requires_grad);
     } else {
-      grid_sampler_2d_backward_kernel_rocm_channel_lane_v2<scalar_t, int64_t>
+      grid_sampler_2d_backward_kernel_rocm_channel_lane<scalar_t, int64_t>
           <<<blocks, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
               nblocks_nhw,
               getTensorInfo<const scalar_t, int64_t>(grad_output),

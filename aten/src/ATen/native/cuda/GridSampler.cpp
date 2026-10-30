@@ -49,15 +49,17 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto input_requires_grad = output_mask[0];
 #ifdef USE_ROCM
   // The channel-parallel kernel coalesces its atomics only into a
-  // channels-last gradient (6.57 ms -> 0.79 ms for large-C channels-last
-  // backward). The returned gradient stays contiguous on every architecture,
-  // so eligible calls accumulate into a channels-last scratch and copy it out.
+  // channels-last gradient. The returned gradient stays contiguous on every
+  // architecture, because Meta/FakeTensor strides cannot depend on the GPU
+  // architecture, so eligible calls accumulate into a channels-last scratch
+  // and copy it out. The scratch is a transient second grad_input-sized
+  // buffer, which raises the call's peak memory.
   Tensor grad_input_scratch;
 #endif
   Tensor grad_input = ([&]() {
     if (input_requires_grad) {
 #ifdef USE_ROCM
-      if (rocm_grid_sampler_2d_backward_use_channels_last_scratch(input, grid)) {
+      if (rocm_grid_sampler_2d_backward_dispatch(input, grid, input_requires_grad).scratch) {
         grad_input_scratch = input.new_empty_strided(input.sizes(), input.strides()).zero_();
         // Fully overwritten by the copy below, so it needs no zeroing.
         return at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
