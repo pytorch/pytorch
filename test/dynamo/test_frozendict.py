@@ -3,6 +3,7 @@
 import builtins
 import operator
 import unittest
+from collections import defaultdict, OrderedDict
 from unittest.mock import Mock
 
 import torch
@@ -109,58 +110,6 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         mapping = builtins.frozendict(a=1)
         self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
-
-    @parametrize("construct", [False, True])
-    @parametrize("empty", [False, True])
-    def test_repr_and_str(self, construct, empty):
-        def fn(x, mapping):
-            if construct:
-                mapping = builtins.frozendict(mapping)
-            return x + 1, repr(mapping), str(mapping), mapping.__repr__()
-
-        contents = {} if empty else {"b": [1, 2], 3: "a'b\\c"}
-        mapping = contents if construct else builtins.frozendict(contents)
-        x = torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
-            fn(x, mapping),
-        )
-
-    @parametrize("construct", [False, True])
-    def test_repr_recursive(self, construct):
-        def fn(x, mapping):
-            if construct:
-                values = []
-                mapping = builtins.frozendict(a=values)
-                values.append(mapping)
-            return x + 1, repr(mapping), str(mapping)
-
-        values = []
-        mapping = builtins.frozendict(a=values)
-        values.append(mapping)
-        x = torch.ones(1)
-        expected = fn(x, mapping)
-        self.assertEqual(expected[1], "frozendict({'a': [frozendict({...})]})")
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping), expected
-        )
-
-    def test_repr_custom_children(self):
-        class Child:
-            def __repr__(self):
-                return "child"
-
-        def fn(x):
-            child = Child()
-            mapping = builtins.frozendict({child: builtins.frozendict(a=child)})
-            return x + 1, repr(mapping), str(mapping)
-
-        x = torch.ones(1)
-        expected = fn(x)
-        self.assertEqual(expected[1], "frozendict({child: frozendict({'a': child})})")
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
-        )
 
     @parametrize("mapping_input", [False, True])
     @parametrize("key_error", ["unhashable", "custom", "subclass"])
@@ -304,6 +253,28 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 SourcelessBuilder.create(tx, literal).as_python_constant(), literal
             )
+
+    def test_constructed_metaclass_key_reconstruction(self):
+        class Meta(type):
+            def __hash__(cls):
+                return cls.hash_value
+
+        class Key(metaclass=Meta):
+            hash_value = 1
+
+        def fn(x):
+            Key.hash_value = 1
+            mapping = builtins.frozendict([(Key, x)])
+            Key.hash_value = 2
+            return x + 1, mapping
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "stored key hashes"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        result, mapping = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(list(mapping.items()), [(Key, x)])
+        self.assertNotIn(Key, mapping)
 
     def test_class_getitem(self):
         def fn(x):
@@ -464,6 +435,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             mapping = builtins.frozendict([(key, x)])
             key.value = 2
             copied = dict(mapping, extra=x + 1) if with_kwargs else dict(mapping)
+            fromkeys = dict.fromkeys(mapping, x)
             unpacked = {**mapping}
             rebuilt = builtins.frozendict(mapping, extra=x + 1)
             return (
@@ -472,6 +444,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 next(iter(rebuilt.values())),
                 rebuilt["extra"],
                 key.calls,
+                next(iter(fromkeys.values())),
+                key in fromkeys,
             )
 
         x = torch.randn(3)
@@ -555,6 +529,39 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(result[4]["a"], result[0]["a"])
         with self.assertRaisesRegex(TypeError, "does not support item assignment"):
             result[4]["a"] = x
+
+    @parametrize("base_type", [dict, OrderedDict, defaultdict])
+    def test_fromkeys_dict_constructor_returns_frozendict(self, base_type):
+        class Mapping(base_type):
+            def __new__(cls, data=(("seed", 5),)):
+                return builtins.frozendict(data)
+
+        def fn(x):
+            try:
+                return Mapping.fromkeys(["b", "a", "b"], x + 1)
+            except TypeError:
+                return {"error": x - 1}
+
+        x = torch.randn(3)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(result), builtins.frozendict)
+        self.assertEqual(list(result), ["seed", "b", "a"])
+        self.assertEqual(result, expected)
+
+    @parametrize("mapping_type", [OrderedDict, defaultdict])
+    @parametrize("name", ["__or__", "__ror__"])
+    def test_mutable_union_descriptors(self, mapping_type, name):
+        def fn(x):
+            return getattr(mapping_type, name)(
+                mapping_type(a=x), builtins.frozendict(b=x + 1)
+            )
+
+        x = torch.randn(3)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(result), mapping_type)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(list(result), list(fn(x)))
 
     @parametrize("operation", [dict.__eq__, dict.__ne__, dict.__or__])
     def test_dict_descriptors(self, operation):

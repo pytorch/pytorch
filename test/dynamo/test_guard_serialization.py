@@ -1564,6 +1564,11 @@ _RAW_DESCRIPTORS = [
 class _OrderedDictSubclass(collections.OrderedDict):
     __slots__ = ("slot",)
 
+    def __setattr__(self, name, value):
+        if name == "__dict__":
+            raise AssertionError("State restoration must bypass __setattr__")
+        super().__setattr__(name, value)
+
 
 class _KeyNormalizingOrderedDict(collections.OrderedDict):
     def __setitem__(self, key, value):
@@ -1572,7 +1577,7 @@ class _KeyNormalizingOrderedDict(collections.OrderedDict):
 
 class _OrderedDictWithGetState(collections.OrderedDict):
     def __init__(self):
-        super().__init__()
+        super().__init__(constructor=0)
         self.recreated = object()
         self.saved = 0
 
@@ -1585,6 +1590,18 @@ class _OrderedDictWithSetState(_OrderedDictWithGetState):
         self.__dict__.update(state)
         self.state_restored = tuple(self)
         self.move_to_end("b")
+
+
+class _OrderedDictMeta(type):
+    def __call__(cls):
+        result = super().__call__()
+        result["constructor"] = 0
+        result.recreated, result.saved = object(), 0
+        return result
+
+
+class _OrderedDictWithMeta(collections.OrderedDict, metaclass=_OrderedDictMeta):
+    __getstate__ = _OrderedDictWithGetState.__getstate__
 
 
 _generic_class_getitem = typing.Generic.__dict__["__class_getitem__"]
@@ -1614,6 +1631,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         mapping.slot = shared
         mapping["self"] = mapping
         mapping.alias = mapping
+        if mapping_type is _KeyNormalizingOrderedDict and not nan_key:
+            mapping["a"] = []  # normalization must keep the last linked-order value
         mapping.move_to_end(key)
         buf = io.BytesIO()
         GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(
@@ -1621,26 +1640,35 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         )
         loaded, attrs = load_guards_state(buf.getvalue())
         self.assertIs(type(loaded), mapping_type)
-        loaded_key = next(iter(dict.keys(loaded)))
+        loaded_key = list(loaded)[-1]
         if nan_key:
             self.assertTrue(math.isnan(loaded_key))
         else:
             self.assertEqual(
                 loaded_key, "a" if mapping_type is _KeyNormalizingOrderedDict else "A"
             )
-        self.assertEqual(list(dict.keys(loaded))[1:], ["b", "self"])
-        self.assertEqual(list(loaded)[:2], ["b", "self"])
-        self.assertIs(list(loaded)[-1], loaded_key)
+        linked_order = ["b", "self", loaded_key]
+        self.assertEqual(list(loaded), linked_order)
+        self.assertEqual(
+            list(dict.keys(loaded)),
+            linked_order
+            if mapping_type is _KeyNormalizingOrderedDict
+            else [loaded_key, "b", "self"],
+        )
         self.assertIs(loaded[loaded_key], loaded["b"])
         self.assertIs(loaded.slot, loaded[loaded_key])
         self.assertIs(loaded["self"], loaded)
         self.assertIs(loaded.alias, loaded)
         self.assertIs(loaded.__dict__, attrs)
 
-    @parametrize("mapping_type", [_OrderedDictWithGetState, _OrderedDictWithSetState])
+    @parametrize(
+        "mapping_type",
+        [_OrderedDictWithGetState, _OrderedDictWithSetState, _OrderedDictWithMeta],
+    )
     @parametrize("saved", [None, 3])
     def test_ordered_dict_state_hooks(self, mapping_type, saved):
         mapping = mapping_type()
+        mapping.clear()
         mapping.update(a=1, b=2)
         mapping.move_to_end("a")
         mapping.saved = saved
@@ -1649,24 +1677,29 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
         loaded = load_guards_state(buf.getvalue())
         self.assertEqual(list(loaded), list(expected))
-        self.assertEqual(list(dict.keys(loaded)), ["a", "b"])
+        self.assertEqual(list(dict.keys(loaded)), list(dict.keys(expected)))
         self.assertEqual(loaded.saved, expected.saved)
         self.assertEqual(vars(loaded).keys(), vars(expected).keys())
         self.assertIsNot(loaded.recreated, mapping.recreated)
         if mapping_type is _OrderedDictWithSetState and saved is not None:
             self.assertEqual(loaded.state_restored, expected.state_restored)
 
-    def test_ordered_dict_registered_reducer(self):
+    @parametrize("reducer", ["registered", "__reduce__", "__reduce_ex__"])
+    def test_ordered_dict_registered_reducer(self, reducer):
         mapping = _OrderedDictSubclass(a=1)
+        if reducer != "registered":
+            setattr(mapping, reducer, lambda *args: (dict, ()))
         buf = io.BytesIO()
         with mock.patch.dict(
             copyreg.dispatch_table,
-            {_OrderedDictSubclass: lambda value: (dict, (dict(value),))},
+            {_OrderedDictSubclass: lambda value: (dict, ())}
+            if reducer == "registered"
+            else {},
         ):
             GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
         loaded = load_guards_state(buf.getvalue())
         self.assertIs(type(loaded), dict)
-        self.assertEqual(loaded, {"a": 1})
+        self.assertEqual(loaded, {})
 
     @parametrize("descriptor", _RAW_DESCRIPTORS)
     def test_raw_descriptors_require_an_immutable_owner(self, descriptor):
