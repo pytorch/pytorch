@@ -43,7 +43,6 @@
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Batch.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
@@ -664,12 +663,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   // Publish/retire nccl_comm_ to the symmetric-memory registry via the NCCL
   // comm-registration hook (NCCLCommRegistrationHook.hpp), so this class does
-  // not depend on the symm_mem DevCommManager header, and on NCCLX/RCCL builds
-  // add/drop it in the comm-dump registry (dumpNcclComms). Fired from
-  // initNcclResources() and the comm-teardown paths, respectively.
+  // not depend on the symm_mem DevCommManager header, and on
+  // (IS_NCCLX || USE_ROCM) && NCCL_COMM_DUMP builds add/drop it in the
+  // comm-dump registry (dumpNcclComms). Published by initNcclResources(),
+  // which retires it if publishing or starting the watchdog throws; retired by
+  // the comm-teardown paths.
   void publishComm();
   void retireComm();
-  // Drops nccl_comm_ from the NCCLX comm-dump registry (dumpNcclComms), waiting
+  // Drops nccl_comm_ from the comm-dump registry (dumpNcclComms), waiting
   // (bounded) for an in-flight dump. Part of retireComm(); called alone before
   // a failed split/shrink aborts or reconfigure revokes nccl_comm_, and by the
   // destructor.

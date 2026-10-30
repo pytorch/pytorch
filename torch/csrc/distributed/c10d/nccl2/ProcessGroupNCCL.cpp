@@ -23,6 +23,7 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/NCCLCommRegistrationHook.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/CommDump.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -377,20 +378,28 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  // Publish before the watchdog starts, as it can abort the communicator.
-  publishComm();
-
-  // Start the watchdog last: nothing may throw once it runs, or the joinable
-  // thread would terminate the process when destroyed or reassigned.
+  // Attach before publishing, so a failure leaves the group-name keyed
+  // registries untouched; a shrink child shares its live parent's name.
   try {
     attachMemoryHook();
+  } catch (...) {
+    // Deregisters any addresses registered before the failure.
+    detachMemoryHook();
+    throw;
+  }
+
+  // Publish before the watchdog starts, as it can abort the communicator. Start
+  // the watchdog last: nothing may throw once it runs, or the joinable thread
+  // would terminate the process when destroyed or reassigned.
+  try {
+    publishComm();
     if (!blocking_wait_ && !shutdown_) {
       timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
     }
   } catch (...) {
-    // Undo the hook attach and publishComm()'s registrations.
-    detachMemoryHook();
+    // Undoes whatever publishComm() registered, then the attach.
     retireComm();
+    detachMemoryHook();
     throw;
   }
 }
