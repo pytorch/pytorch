@@ -150,6 +150,11 @@ if(INTERN_BUILD_ATEN_OPS)
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
       "90a;100a;103f;110a")
+    # For the cvt.rz/rp.ue8m0x2.f32 instructions behind __nv_cvt_float_to_e8m0,
+    # which are only emitted for arch-specific targets.
+    _BUILD_FOR_ADDITIONAL_ARCHS(
+      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RoundedConversion.cu"
+      "100a;103a;110a;120a;121a")
 
   endif()
 
