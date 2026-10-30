@@ -3216,8 +3216,9 @@ class NoNetworkTestCase(TestCase):
 class TestAddNumberedLabel(NoNetworkTestCase):
     def added_label(self, labels: list[str]) -> str:
         add = self.patch("trymerge.gh_add_labels")
-        pr = GitHubPR.__new__(GitHubPR)
-        pr.org, pr.project, pr.pr_num, pr.labels = "pytorch", "pytorch", 1, labels
+        self.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
+        pr = GitHubPR("pytorch", "pytorch", 1)
+        pr.labels = labels
         pr.add_numbered_label("merged", False)
         return add.call_args.args[3][0]
 
