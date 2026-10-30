@@ -2261,14 +2261,14 @@ def _custom_op_modules(
                 # Taken as registered by the C++ extension the op's module loads.
                 unrecorded_kernels.add((op_name, overload))
             elif not os.path.realpath(paths[k]).startswith(torch_dir):
-                untracked_kernels.add((op_name, k))
+                untracked_kernels.add((qualname, k))
                 unrecorded_kernels.add((op_name, overload))
             elif caller is None:
                 # Through a Library torch made, as _scoped_library's, and not by
                 # the last register_kernel or torch.library.impl call recorded.
                 unrecorded_kernels.add((op_name, overload))
             elif caller.partition(".")[0] != "torch":
-                untracked_kernels.add((op_name, k))
+                untracked_kernels.add((qualname, k))
                 unrecorded_kernels.add((op_name, overload))
     lazy_ops = tuple((s, tuple(sorted(ops))) for s, ops in sorted(lazy.items()))
     ordered = tuple(m for m in sys.modules if m in modules)
@@ -2295,7 +2295,7 @@ def _warn_unregistered_ops(
             ", ".join(ops),
             setup,
         )
-    names = sorted({op_name for op_name, _ in found.unrecorded})
+    names = sorted({f"{n}.{o}" if o else n for n, o in found.unrecorded})
     kernels = [f"{n} ({k})" for n, k in found.untracked_kernels if n not in names]
     if not names and not kernels:
         return

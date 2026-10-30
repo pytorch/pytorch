@@ -262,9 +262,10 @@ def custom_op(
                 )
         result.register_kernel(device_types)(fn)
         # The op's own kernel, not one the module running custom_op overrides it with.
-        result._backend_fn_callers = dict.fromkeys(
-            result._backend_fn_callers, fn.__module__
-        )
+        if isinstance(module := getattr(fn, "__module__", None), str):
+            result._backend_fn_callers = dict.fromkeys(
+                result._backend_fn_callers, module
+            )
         result._opoverload._enable_pyobj_dispatch(True)
         return result
 
