@@ -595,7 +595,7 @@ class BaseTorchVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return self.value
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         return self.value
 
     def get_real_python_backed_value(self) -> Any:

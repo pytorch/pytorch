@@ -769,12 +769,12 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         from torch._dynamo.variables.base import VariableTracker
 
         class _Parent(VariableTracker):
-            def as_python_constant(self):
+            def as_python_constant(self, *, guard: bool = True):
                 return 42
 
         class _Child(_Parent):
-            def as_python_constant(self):
-                return super().as_python_constant()
+            def as_python_constant(self, *, guard: bool = True):
+                return super().as_python_constant(guard=guard)
 
         child = _Child()
         # With name-based keying, _Child and _Parent share the same key
