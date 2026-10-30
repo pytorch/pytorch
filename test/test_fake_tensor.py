@@ -5272,6 +5272,19 @@ class CppFakeTensorModeBindingsTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a meta tensor"):
             torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
 
+    def test_unsafe_data_ptr_access(self):
+        mode, _ = self._make_mode()
+        self.assertEqual(
+            mode.allow_unsafe_data_ptr_access,
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
+        )
+        mode.allow_unsafe_data_ptr_access = False
+        fake = torch._C._from_meta_and_device(
+            torch.empty(2, device="meta"), torch.device("cpu"), mode
+        )
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            fake.data_ptr()
+
 
 if __name__ == "__main__":
     run_tests()
