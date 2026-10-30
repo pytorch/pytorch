@@ -51,7 +51,8 @@ class TracingGuard {
       const at::Tensor& output_tensor);
 
   // Records the given split sizes rather than each tensor's numel, like stock
-  // all_to_allv: empty for an equal split, else the per-rank splits.
+  // all_to_allv: empty for an equal split, else the per-rank splits. Takes
+  // nccl2's uint64_t splits and converts only when the profiler is active.
   TracingGuard(
       const TracingGuardInfo& info,
       std::string_view collective_name,
@@ -59,8 +60,8 @@ class TracingGuard {
       uint64_t sequence_number,
       const at::Tensor& input_tensor,
       const at::Tensor& output_tensor,
-      const std::vector<int64_t>& input_split_sizes,
-      const std::vector<int64_t>& output_split_sizes);
+      const std::vector<uint64_t>& input_split_sizes,
+      const std::vector<uint64_t>& output_split_sizes);
 
   void initializeTracingCommon(
       const TracingGuardInfo& info,

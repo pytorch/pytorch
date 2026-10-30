@@ -2752,6 +2752,58 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
             dist.destroy_process_group(single)
 
     @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_reconfigure_drops_global_ranks(self) -> None:
+        # Reconfigure handles carry no world ranks, so the group's members are
+        # unknown afterwards; profiler metadata must not keep describing the
+        # construction-time members (here reversed world ranks).
+        torch.cuda.set_device(self.device)
+        name = "zzz_reconf_prof"
+        store = dist.PrefixStore(name, dist.distributed_c10d._get_default_store())
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.enable_reconfigure = True
+        opts.group_name = name
+        opts.global_ranks_in_group = list(reversed(range(self.world_size)))
+        backend = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+        try:
+            handles = dist.PrefixStore("handles", store)
+            handles.set(str(self.rank), backend.get_reconfigure_handle())
+            reconfigure_opts = ReconfigureOptions()
+            reconfigure_opts.uuid = 1
+            reconfigure_opts.handles = [
+                handles.get(str(rank)).decode() for rank in range(self.world_size)
+            ]
+            reconfigure_opts.timeout = timedelta(seconds=30)
+            backend.reconfigure(reconfigure_opts).wait()
+
+            t = torch.ones(4, device=self.device)
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                record_shapes=True,
+            ) as prof:
+                backend.allreduce([t]).wait()
+                torch.cuda.synchronize()
+        finally:
+            backend.shutdown()
+
+        (args,) = [
+            a
+            for a in _param_comms_args(prof)
+            if a.get("Collective name") == "allreduce"
+        ]
+        self.assertEqual(args["Process Group Name"], name)
+        self.assertEqual(args["Process Group Ranks"], "[]")
+        self.assertNotIn("Global rank start", args)
+        self.assertNotIn("Global rank stride", args)
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_profiler_records_one_wait_per_wait_call(self) -> None:
         # "wait" used to be recorded in synchronize() and skipped for completed

@@ -521,6 +521,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   rank_ = newRank;
   size_ = newSize;
   device_ = device;
+  // Handles carry no world ranks, so the members' world ranks are unknown:
+  // record -1 ("unknown") in profiler metadata rather than the old members'
+  // start/stride. options_c10d_->global_ranks_in_group is left as is.
+  global_rank_start_ = -1;
+  global_rank_stride_ = -1;
 
   c10::cuda::CUDAGuard gpuGuard(device_);
 

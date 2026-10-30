@@ -489,11 +489,12 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   childOpts->group_desc = ncclOpts->group_desc;
 
   // The child's membership in world-rank terms, as stock's split() records it.
-  // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
-  // which otherwise falls back to identity ranks. Map through this group's own
-  // map, not the passed-in Options': an empty map means "spans the world in
-  // rank order", and a merged group inherits its parent's shorter map, so
-  // treat anything too short the same way instead of indexing out of bounds.
+  // The child's constructor derives its profiler global rank start/stride from
+  // it, and FlightRecorderHook reads it (falling back to identity ranks
+  // without it). Map through this group's own map, not the passed-in
+  // Options': an empty map means "spans the world in rank order", and a
+  // merged group inherits its parent's shorter map, so treat anything too
+  // short the same way instead of indexing out of bounds.
   const auto& parentRanks = options_c10d_->global_ranks_in_group;
   const bool parentSpansWorld =
       parentRanks.size() < static_cast<size_t>(getSize());
@@ -1738,9 +1739,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
       output_total <= static_cast<uint64_t>(output.size(0)),
       "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
 
-  auto toInt64 = [](const std::vector<uint64_t>& v) {
-    return std::vector<int64_t>(v.begin(), v.end());
-  };
   TracingGuard tracingGuard(
       tracingInfo(),
       "all_to_allv",
@@ -1748,8 +1746,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
       sequence_number_,
       input,
       output,
-      toInt64(input_split_sizes),
-      toInt64(output_split_sizes));
+      input_split_sizes,
+      output_split_sizes);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);

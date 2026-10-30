@@ -167,8 +167,8 @@ TracingGuard::TracingGuard(
     uint64_t sequence_number,
     const at::Tensor& input_tensor,
     const at::Tensor& output_tensor,
-    const std::vector<int64_t>& input_split_sizes,
-    const std::vector<int64_t>& output_split_sizes) {
+    const std::vector<uint64_t>& input_split_sizes,
+    const std::vector<uint64_t>& output_split_sizes) {
   record_function_guard_.emplace(at::RecordScope::FUNCTION);
   if (!record_function_guard_->isActive()) {
     return;
@@ -180,8 +180,9 @@ TracingGuard::TracingGuard(
       sequence_number,
       {input_tensor},
       {output_tensor},
-      input_split_sizes,
-      output_split_sizes);
+      std::vector<int64_t>(input_split_sizes.begin(), input_split_sizes.end()),
+      std::vector<int64_t>(
+          output_split_sizes.begin(), output_split_sizes.end()));
 }
 
 } // namespace c10d::nccl2
