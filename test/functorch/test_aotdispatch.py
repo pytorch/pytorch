@@ -8667,11 +8667,11 @@ def forward(self, primals_1, tangents_1):
 
         with (
             mock_patch(
-                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                "torch._prims_common.AcceleratorRngStateHelper.get_torch_state_as_tuple",
                 mock_get_rng_state,
             ),
             mock_patch(
-                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                "torch._prims_common.AcceleratorRngStateHelper.set_new_offset",
                 mock_set_offset,
             ),
         ):
@@ -8699,11 +8699,11 @@ def forward(self, primals_1, tangents_1):
 
         with (
             mock_patch(
-                "torch._prims_common.CUDARngStateHelper.get_torch_state_as_tuple",
+                "torch._prims_common.AcceleratorRngStateHelper.get_torch_state_as_tuple",
                 mock_get_rng_state,
             ),
             mock_patch(
-                "torch._prims_common.CUDARngStateHelper.set_new_offset",
+                "torch._prims_common.AcceleratorRngStateHelper.set_new_offset",
                 mock_set_offset,
             ),
         ):
