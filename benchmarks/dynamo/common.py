@@ -3624,7 +3624,7 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--hf-inference-mode",
-        choices=("generate", "prefill", "decode"),
+        choices=("generate", "prefill", "decode", "encode"),
         default="generate",
         help="Inference workload for registered Hugging Face generation models.",
     )

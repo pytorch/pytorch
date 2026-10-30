@@ -13,6 +13,7 @@ try:
         AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
+        EncoderDecoderCache,
         StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
@@ -25,6 +26,7 @@ finally:
         AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
+        EncoderDecoderCache,
         StaticCache,
         WhisperForConditionalGeneration,
         WhisperProcessor,
@@ -42,9 +44,17 @@ class WhisperBenchmark(Benchmark):
     DURATION = 30.0  # seconds
     # Roughly the token count of a transcript of DURATION seconds of speech.
     LABEL_LENGTH = 128
+    DECODE_LENGTH = 128
 
     @staticmethod
-    def get_model_and_inputs(model_name, device, training=False):
+    def get_model_and_inputs(
+        model_name,
+        device,
+        training=False,
+        batch_size=1,
+        inference_mode="generate",
+        decode_length=DECODE_LENGTH,
+    ):
         processor = WhisperProcessor.from_pretrained(model_name)
         # whisper-large-v3-turbo's checkpoint is float16. Start from float32, as
         # whisper-tiny's checkpoint does, so that the precision flags decide the dtype.
@@ -57,10 +67,12 @@ class WhisperBenchmark(Benchmark):
         model.generation_config.temperature = 0.0
 
         num_samples = int(WhisperBenchmark.DURATION * WhisperBenchmark.SAMPLE_RATE)
-        audio = torch.randn(num_samples) * 0.1
+        audio = torch.randn(batch_size, num_samples) * 0.1
         inputs = dict(
             processor(
-                audio, sampling_rate=WhisperBenchmark.SAMPLE_RATE, return_tensors="pt"
+                list(audio.numpy()),
+                sampling_rate=WhisperBenchmark.SAMPLE_RATE,
+                return_tensors="pt",
             )
         )
         inputs["input_features"] = inputs["input_features"].to(device)
@@ -71,17 +83,100 @@ class WhisperBenchmark(Benchmark):
             model.config.use_cache = False
             inputs["labels"] = torch.randint(
                 model.config.vocab_size,
-                (inputs["input_features"].shape[0], WhisperBenchmark.LABEL_LENGTH),
+                (batch_size, WhisperBenchmark.LABEL_LENGTH),
                 device=device,
             )
             return model, inputs
 
+        if inference_mode == "encode":
+            return WhisperEncodeModel(model.get_encoder()), inputs
+
         decoder_start_token = model.config.decoder_start_token_id
-        inputs["decoder_input_ids"] = torch.tensor(
-            [[decoder_start_token]], device=device
+        inputs["decoder_input_ids"] = torch.full(
+            (batch_size, 1), decoder_start_token, device=device
         )
+        if inference_mode == "decode":
+            # Match generate()'s static cache, which holds one position fewer than
+            # the max_target_positions tokens that Whisper generates at most.
+            cache_capacity = model.config.max_target_positions - 1
+            if 1 + decode_length > cache_capacity:
+                raise ValueError(
+                    f"decode length {decode_length} plus the decoder start token "
+                    f"exceeds {model_name}'s {cache_capacity}-position static cache"
+                )
+            # Fixed tokens instead of argmax, so eager, compiled, and fp64 runs match.
+            inputs["decode_ids"] = torch.randint(
+                model.config.vocab_size, (batch_size, decode_length), device=device
+            )
+            return WhisperDecodeModel(model, cache_capacity), inputs
 
         return model, inputs
+
+
+class WhisperEncodeModel(torch.nn.Module):
+    def __init__(self, encoder):
+        super().__init__()
+        self.encoder = encoder
+
+    def forward(self, input_features):
+        return self.encoder(input_features).last_hidden_state
+
+
+class WhisperDecodeModel(torch.nn.Module):
+    def __init__(self, model, cache_capacity):
+        super().__init__()
+        self.model = model
+        self.cache_capacity = cache_capacity
+        self.cache = None
+        self.encoder_hidden_states = None
+
+    def prepare_for_decode(self, input_features, decoder_input_ids):
+        config = self.model.config
+        if self.cache is None:
+            cache_shape = self.model._get_static_cache_init_shape()
+            if cache_shape is None:
+                raise RuntimeError(
+                    f"{type(self.model).__name__} cannot preallocate a static cache"
+                )
+            num_heads, head_dim = cache_shape
+            # The cross-attention cache holds the encoder output.
+            caches = [
+                StaticCache(config=config, max_cache_len=max_cache_len)
+                for max_cache_len in (self.cache_capacity, config.max_source_positions)
+            ]
+            for cache in caches:
+                cache.early_initialization(
+                    batch_size=input_features.shape[0],
+                    num_heads=num_heads,
+                    head_dim=head_dim,
+                    dtype=self.model.dtype,
+                    device=self.model.device,
+                )
+            self.cache = EncoderDecoderCache(*caches)
+        else:
+            self.cache.reset()
+        # Encode and prefill the start token outside the compiled forward. The
+        # prefill fills the cross-attention cache that every decode step reuses.
+        with torch.no_grad():
+            encoder = self.model.get_encoder()
+            self.encoder_hidden_states = encoder(input_features).last_hidden_state
+            self.model(
+                encoder_outputs=(self.encoder_hidden_states,),
+                decoder_input_ids=decoder_input_ids,
+                past_key_values=self.cache,
+                use_cache=True,
+            )
+
+    def forward(self, decoder_input_ids):
+        if self.cache is None:
+            raise RuntimeError("prepare_for_decode() must be called before forward()")
+        outputs = self.model(
+            encoder_outputs=(self.encoder_hidden_states,),
+            decoder_input_ids=decoder_input_ids,
+            past_key_values=self.cache,
+            use_cache=True,
+        )
+        return outputs.logits[:, -1, :]
 
 
 class TextGenerationBenchmark(Benchmark):
@@ -332,9 +427,24 @@ PREFILL_MODELS = {
 # in a Python int, so compiled decode recompiles every step.
 DECODE_MODELS = {
     "meta-llama/Llama-3.2-1B",
+    "openai/whisper-large-v3-turbo",
+    "openai/whisper-tiny",
     "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3.5-0.8B",
+}
+
+
+ENCODE_MODELS = {
+    "openai/whisper-large-v3-turbo",
+    "openai/whisper-tiny",
+}
+
+
+INFERENCE_MODE_MODELS = {
+    "prefill": PREFILL_MODELS,
+    "decode": DECODE_MODELS,
+    "encode": ENCODE_MODELS,
 }
 
 
