@@ -9,6 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
@@ -425,6 +426,57 @@ if HAS_GPU_AND_TRITON:
             ):
                 self._check_tma_store_view_epilogue_fuses()
             self.assertTrue(tma_store_choices)
+
+        @unittest.skipIf(not SM90OrLater, "Triton grouped MM template needs SM90+")
+        @fresh_cache()
+        @config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
+            }
+        )
+        def test_grouped_mm_epilogue_fusion_benchmarked(self):
+            def f(a, b, offs, bias):
+                return torch.relu(
+                    torch._grouped_mm(a, b.transpose(-2, -1), offs=offs) + bias
+                )
+
+            G, M, N, K = 4, 256, 128, 64
+            a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
+            offs = torch.arange(
+                M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32
+            )
+            bias = torch.randn(N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+            orig_benchmark_codegened_module = (
+                TritonScheduling.benchmark_codegened_module
+            )
+            benchmark_offs = []
+
+            def benchmark_codegened_module(
+                scheduling, mod, *args, input_overrides=None, **kwargs
+            ):
+                ms, path = orig_benchmark_codegened_module(
+                    scheduling, mod, *args, input_overrides=input_overrides, **kwargs
+                )
+                if input_overrides:
+                    self.assertTrue(math.isfinite(ms))
+                    benchmark_offs.extend(input_overrides.values())
+                return ms, path
+
+            with unittest.mock.patch.object(
+                TritonScheduling,
+                "benchmark_codegened_module",
+                benchmark_codegened_module,
+            ):
+                out = torch.compile(f)(a, b, offs, bias)
+
+            self.assertEqual(out, f(a, b, offs, bias), atol=1e-1, rtol=1e-2)
+            self.assertTrue(benchmark_offs)
+            for t in benchmark_offs:
+                self.assertEqual(t[-1].item(), M)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
