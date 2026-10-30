@@ -159,9 +159,13 @@ def _test_addmm_addmv(
             return mat
 
     if mode == "all_sparse":
-        res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        t_sparse, m_sparse, v_sparse = map(convert_layout, (t, m, v))
+        res1 = f(t_sparse, m_sparse, v_sparse, alpha=alpha, beta=beta)
         test_case.assertEqual(res1.layout, layout)
         res1 = res1.to_dense()
+        # in-place
+        res_inplace = getattr(t_sparse.clone(), f.__name__ + "_")(m_sparse, v_sparse, alpha=alpha, beta=beta)
+        test_case.assertEqual(res_inplace.to_dense(), res1)
     elif mode == "dense_result":
         res1 = f(t, convert_layout(m), convert_layout(v), alpha=alpha, beta=beta)
     else:
@@ -2091,6 +2095,21 @@ class TestSparseCSR(TestCase):
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
         _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
+
+        # TODO: enable on CPU once CSC results whose number of specified elements changes are fixed there
+        if self.device_type == 'cuda':
+            for beta in (0, 2):
+                # Test sp(C) != sp(A @ B), where sp denotes a sparse pattern
+                # Here, m1 is lower-triangular, while m1 @ m2 is not
+                m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+                m2 = torch.randn(10, 10, device=device).to(dtype)
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=beta, layout=layout, mode="all_sparse")
+
+                # Test sp(C) == sp(A @ B), where sp denotes a sparse pattern
+                # Here, m1 is lower-triangular, so is m2, and so is (m1 @ m2)
+                m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+                m2 = torch.randn(10, 10, device=device).to(dtype).tril()
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=beta, layout=layout, mode="all_sparse")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
