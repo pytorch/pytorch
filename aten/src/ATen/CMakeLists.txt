@@ -55,6 +55,37 @@ set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
 set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
+# The architectures CK SDPA kernels are built for: the candidates that
+# PYTORCH_ROCM_ARCH also asks for. The CK codegen target families, the ck_sdpa
+# target's HIP_ARCHITECTURES and the runtime check in Context.cpp are all
+# derived from this one list.
+#
+# gfx1200/gfx1201 (RDNA4, WMMA) is opt-in through USE_ROCM_CK_SDPA_GFX12 (OFF by
+# default): those arches are already in the ROCm wheel arch list, so building CK
+# SDPA for them would add code generation and compile cost to existing builds.
+set(AT_ROCM_CK_SDPA_ARCHS "")
+if(USE_ROCM AND USE_ROCM_CK_SDPA AND USE_FLASH_ATTENTION)
+  set(_ck_sdpa_candidate_archs gfx942 gfx950)
+  if(USE_ROCM_CK_SDPA_GFX12)
+    list(APPEND _ck_sdpa_candidate_archs gfx1200 gfx1201)
+  endif()
+  foreach(ARCH IN LISTS _ck_sdpa_candidate_archs)
+    if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+      list(APPEND AT_ROCM_CK_SDPA_ARCHS ${ARCH})
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES AT_ROCM_CK_SDPA_ARCHS)
+endif()
+string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
+# Alongside the other generated ATen headers (see cmake/Codegen.cmake).
+configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
+
+# CK GEMM allowlist (TORCH_CK_GEMM_ARCH_LIST, top-level CMakeLists.txt) surfaced
+# to Context.cpp and the ck_gemm .hip dispatch, so the runtime check stays in
+# step with the build arch filter (torch_filter_ck_gemm_arches).
+string(REPLACE ";" "," TORCH_CK_GEMM_ARCH_LIST_STR "${TORCH_CK_GEMM_ARCH_LIST}")
+configure_file(ROCmCKGEMMConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKGEMMConfig.h" @ONLY)
+
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
 # At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
@@ -74,7 +105,7 @@ if(NOT BUILD_LITE_INTERPRETER)
 endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
-file(GLOB base_h CONFIGURE_DEPENDS "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/vec256/zarch/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
+file(GLOB base_h CONFIGURE_DEPENDS "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec128/zarch/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
 file(GLOB base_cpp CONFIGURE_DEPENDS "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp" "accelerator/*.cpp")
 file(GLOB cuda_h CONFIGURE_DEPENDS "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh" "cuda/tunable/*.cuh" "cuda/tunable/*.h")
 file(GLOB cuda_cpp CONFIGURE_DEPENDS "cuda/*.cpp" "cuda/detail/*.cpp" "cuda/tunable/*.cpp")
@@ -158,6 +189,7 @@ file(GLOB native_cuda_cu CONFIGURE_DEPENDS "native/cuda/*.cu")
 file(GLOB native_cuda_cpp CONFIGURE_DEPENDS "native/cuda/*.cpp")
 file(GLOB native_cuda_h CONFIGURE_DEPENDS "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp CONFIGURE_DEPENDS "native/cuda/linalg/*.cpp")
+file(GLOB native_cuda_linalg_cu CONFIGURE_DEPENDS "native/cuda/linalg/*.cu")
 file(GLOB native_hip_h CONFIGURE_DEPENDS "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
 file(GLOB native_cudnn_cpp CONFIGURE_DEPENDS "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu CONFIGURE_DEPENDS "native/sparse/cuda/*.cu")
@@ -198,21 +230,12 @@ file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/fla
 if(USE_FLASH_ATTENTION)
   # Now building CK by default
   if(USE_ROCM)
-    # CK SDPA only supports gfx942/gfx950. Auto-disable when none of those archs
-    # are in PYTORCH_ROCM_ARCH; otherwise the ck_sdpa target ends up with an
-    # empty HIP_ARCHITECTURES and CMake errors out.
-    if(USE_ROCM_CK_SDPA)
-      set(_have_ck_sdpa_arch FALSE)
-      foreach(ARCH gfx942 gfx950)
-        if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-          set(_have_ck_sdpa_arch TRUE)
-          break()
-        endif()
-      endforeach()
-      if(NOT _have_ck_sdpa_arch)
-        message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no MI3xx arch (gfx942/gfx950)")
-        caffe2_update_option(USE_ROCM_CK_SDPA OFF)
-      endif()
+    # AT_ROCM_CK_SDPA_ARCHS, resolved at the top of this file, is what CK SDPA
+    # is built for. Auto-disable when it is empty; otherwise the ck_sdpa target
+    # ends up with an empty HIP_ARCHITECTURES and CMake errors out.
+    if(USE_ROCM_CK_SDPA AND NOT AT_ROCM_CK_SDPA_ARCHS)
+      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
+      caffe2_update_option(USE_ROCM_CK_SDPA OFF)
     endif()
   endif()
   if(USE_ROCM AND USE_ROCM_CK_SDPA)
@@ -263,9 +286,6 @@ if(USE_FLASH_ATTENTION)
     #  list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
     #endif()
 
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-early-inline-all=true)
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-function-calls=false)
-
     # Additional CK compiler flags
     set(CK_SDPA_EXTRA_HIPCC_OPTIONS
         CK_ENABLE_BF16
@@ -295,23 +315,22 @@ if(USE_FLASH_ATTENTION)
     file(GLOB ck_sdpa_sources_hip CONFIGURE_DEPENDS
          "native/transformers/hip/flash_attn/ck/*.hip"
          "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+    # Take the generated FMHA instances from the blob lists this configure
+    # wrote instead of from the glob: they are generated into the source tree,
+    # which can also hold instances from an earlier configure that asked for
+    # different target families.
+    list(FILTER ck_sdpa_sources_hip EXCLUDE REGEX "/fmha_[^/]*\\.hip$")
+    list(APPEND ck_sdpa_sources_hip ${CK_FMHA_GENERATED_SOURCES})
 
     set_source_files_properties(${ck_sdpa_sources_hip} PROPERTIES LANGUAGE HIP)
-
-    # Only build for MI3xx series architectures as building for all targets takes too long
-    # We will selectively add supported architectures when/if needed
-    set(_ck_sdpa_hip_arches "")
-    foreach(ARCH gfx942 gfx950)
-      if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
-        list(APPEND _ck_sdpa_hip_arches ${ARCH})
-      endif()
-    endforeach()
 
     add_library(ck_sdpa STATIC ${ck_sdpa_sources_hip})
     target_compile_options(ck_sdpa PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${CK_SDPA_EXTRA_HIPCC_FLAGS}> ${HIP_CXX_FLAGS})
     set_target_properties(ck_sdpa PROPERTIES
       POSITION_INDEPENDENT_CODE ON
-      HIP_ARCHITECTURES "${_ck_sdpa_hip_arches}")
+      # Only the architectures CK SDPA instances were generated for, to limit
+      # build cost.
+      HIP_ARCHITECTURES "${AT_ROCM_CK_SDPA_ARCHS}")
     target_compile_definitions(ck_sdpa PUBLIC ${CK_SDPA_EXTRA_HIPCC_OPTIONS})
     target_compile_definitions(ck_sdpa PRIVATE AITER_EMBEDDED_HSA_HEADER="aiter_embedded_hsa.h")
     target_include_directories(ck_sdpa PUBLIC
@@ -351,6 +370,12 @@ if(USE_CUDA AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     FLASHATTENTION_DISABLE_SOFTCAP
     UNFUSE_FMA
   )
+
+  if(MSVC)
+    target_compile_definitions(flash_attention PRIVATE _USE_MATH_DEFINES)
+    target_compile_options(flash_attention PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/permissive>)
+  endif()
 
   set_target_properties(flash_attention PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -513,6 +538,7 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  append_filelist("aten_native_xnnpack_source_list" all_cpu_cpp)
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
@@ -594,9 +620,9 @@ if(USE_CUDA)
     ${native_sparse_cuda_cpp}
     ${native_transformers_cuda_cpp}
   )
-  set(ATen_CUDA_LINALG_SRCS ${native_cuda_linalg_cpp})
+  set(ATen_CUDA_LINALG_SRCS ${native_cuda_linalg_cpp} ${native_cuda_linalg_cu})
   if(NOT BUILD_LAZY_CUDA_LINALG)
-    list(APPEND ATen_CUDA_CU_SRCS ${native_cuda_linalg_cpp})
+    list(APPEND ATen_CUDA_CU_SRCS ${native_cuda_linalg_cpp} ${native_cuda_linalg_cu})
   endif()
   if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_CPP_SRCS ${cudnn_cpp})
@@ -653,14 +679,15 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   else()
-    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
-    # compile for that arch. Build CK GEMM as a separate library with gfx1250
-    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
-    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). Build CK GEMM as a separate
+    # library restricted to that subset via HIP_ARCHITECTURES so every other
+    # requested arch still builds. Dependencies.cmake turns USE_ROCM_CK_GEMM off
+    # when the subset is empty, so this branch always has at least one arch.
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
-    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
-    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    torch_filter_ck_gemm_arches(_ck_gemm_hip_arches)
     set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
     add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
     set_target_properties(ck_gemm PROPERTIES
@@ -738,30 +765,30 @@ if(UNIX)
   set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
   CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
   if(HAVE_MMAP)
-    add_definitions(-DHAVE_MMAP=1)
+    add_compile_definitions(HAVE_MMAP=1)
   endif(HAVE_MMAP)
   # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
-  add_definitions(-D_FILE_OFFSET_BITS=64)
+  add_compile_definitions(_FILE_OFFSET_BITS=64)
   CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
   if(HAVE_SHM_OPEN)
-    add_definitions(-DHAVE_SHM_OPEN=1)
+    add_compile_definitions(HAVE_SHM_OPEN=1)
   endif(HAVE_SHM_OPEN)
   CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
   if(HAVE_SHM_UNLINK)
-    add_definitions(-DHAVE_SHM_UNLINK=1)
+    add_compile_definitions(HAVE_SHM_UNLINK=1)
   endif(HAVE_SHM_UNLINK)
   CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
   if(HAVE_MALLOC_USABLE_SIZE)
-    add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
+    add_compile_definitions(HAVE_MALLOC_USABLE_SIZE=1)
   endif(HAVE_MALLOC_USABLE_SIZE)
   set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
   CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
   if(HAVE_POSIX_FALLOCATE)
-    add_definitions(-DHAVE_POSIX_FALLOCATE=1)
+    add_compile_definitions(HAVE_POSIX_FALLOCATE=1)
   endif(HAVE_POSIX_FALLOCATE)
 endif(UNIX)
 
-ADD_DEFINITIONS(-DUSE_EXTERNAL_MZCRC)
+add_compile_definitions(USE_EXTERNAL_MZCRC)
 
 if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
@@ -805,6 +832,12 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_DISABLE_OPENMP ON CACHE BOOL "OpenMP only used by sleef DFT and tests, both disabled" FORCE)
     if(WIN32)
       set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+      # Turn off SLEEF SVE on Windows:
+      # - MSVC 14.51 (VS 2026) ships arm_sve.h, so SLEEF's SVE check passes
+      # - SLEEF has no MSVC flag that defines __ARM_FEATURE_SVE, so its SVE files fail to build
+      # - MSVC 14.44 (VS 2022) had no arm_sve.h, so SVE was already off
+      # - ATen builds no SVE kernels with MSVC, so nothing uses SLEEF SVE here
+      set(SLEEF_DISABLE_SVE ON CACHE BOOL "Disable SLEEF SVE on Windows" FORCE)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
@@ -832,9 +865,10 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
-  add_definitions(-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1)
-  add_definitions(-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1)
-  add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
+  add_compile_definitions(
+    CUTLASS_ENABLE_TENSOR_CORE_MMA=1
+    CUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1
+    CUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
 
@@ -930,15 +964,26 @@ if(USE_MPS)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_32.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.2")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
+            # Shaders built for Metal 4.0 as well. BundledShaderLibrary resolves a
+            # kernel to kernels_40 when it defines it and to kernels_basic otherwise,
+            # so every kernel in these shaders runs the 4.0 build on MPP devices and
+            # every other kernel runs the 3.2 build. A shader must be listed when it
+            # has C10_METAL_HAS_MPP kernels (checked at build time below).
+            set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM TriangularSolve)
+            set(SHADER_STEMS)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
+                list(APPEND SHADER_STEMS ${TGT_STEM})
+                if(NOT TGT_STEM IN_LIST METAL_40_SHADERS)
+                    continue()
+                endif()
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
                 # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
@@ -946,6 +991,19 @@ if(USE_MPS)
                 # MPP kernels assume the 26.2+ layout, so pin the target explicitly.
                 metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0;-mmacos-version-min=26.2")
             endforeach()
+            foreach(TGT_STEM ${METAL_40_SHADERS})
+                if(NOT TGT_STEM IN_LIST SHADER_STEMS)
+                    message(FATAL_ERROR "METAL_40_SHADERS lists ${TGT_STEM}, but there is no ${TGT_STEM}.metal")
+                endif()
+            endforeach()
+            set(METAL_40_CHECK ${CMAKE_SOURCE_DIR}/cmake/CheckMetal40Shaders.cmake)
+            add_custom_command(
+                COMMAND ${CMAKE_COMMAND} "-DSHADERS=${native_mps_metal};${native_mps_sparse_metal}" "-DMETAL_40_SHADERS=${METAL_40_SHADERS}" -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DSTAMP=${CMAKE_CURRENT_BINARY_DIR}/metal_40_shaders.stamp -P ${METAL_40_CHECK}
+                DEPENDS ${native_mps_metal} ${native_mps_sparse_metal} ${METAL_HEADER_DEPS} ${METAL_40_CHECK}
+                OUTPUT metal_40_shaders.stamp
+                COMMENT "Checking METAL_40_SHADERS"
+                VERBATIM)
+            list(APPEND METALLIB_DEPS metal_40_shaders.stamp)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
         endif()

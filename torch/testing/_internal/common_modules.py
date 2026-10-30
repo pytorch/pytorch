@@ -4156,16 +4156,11 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
-               skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
                skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),
                    # Fails on backward check if output size is 1x1
                    DecorateInfo(
                        unittest.expectedFailure,
@@ -4321,6 +4316,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(skipIfXpu, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4591,10 +4588,7 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_MSELoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # See #119108: tolerance issue
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
-                                device_type='mps', dtypes=[torch.float16]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.MarginRankingLoss,
                module_inputs_func=module_inputs_torch_nn_MarginRankingLoss,
@@ -4955,10 +4949,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
@@ -5036,29 +5026,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Tanh,
                module_inputs_func=module_inputs_torch_nn_Tanh,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Tanhshrink,
                module_inputs_func=module_inputs_torch_nn_Tanhshrink,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Threshold,
                module_inputs_func=module_inputs_torch_nn_Threshold,
@@ -5154,15 +5124,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ZeroPad2d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad3d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.CircularPad1d,
                module_inputs_func=module_inputs_torch_nn_CircularPad1d,
@@ -5184,14 +5148,8 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ConstantPad2d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ConstantPad3d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                )
 ]

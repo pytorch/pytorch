@@ -20,6 +20,7 @@
 #include <ATen/ops/allclose.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <memory>
 #include <unordered_map>
 
@@ -115,8 +116,10 @@ std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
     const std::string& source) {
   try {
     return std::make_unique<ModuleStaticRuntimeTestContext>(source);
-    // Could not parse as TorchScript, assume it's IR
-  } catch (const std::runtime_error&) {
+    // Could not parse as TorchScript, assume it's IR. The parser raises
+    // c10::Error, which derives from std::exception but not from
+    // std::runtime_error.
+  } catch (const std::exception&) {
     return std::make_unique<GraphStaticRuntimeContext>(source);
   }
 }
@@ -176,7 +179,7 @@ void compareResults(
     auto lhs = expect.toTupleRef().elements();
     auto rhs = actual.toTupleRef().elements();
     ASSERT_TRUE(lhs.size() == rhs.size());
-    for (size_t i = 0; i < lhs.size(); i++) {
+    for (const auto i : c10::irange(lhs.size())) {
       compareResults(lhs[i], rhs[i]);
     }
   } else if (expect.isList()) {
@@ -184,7 +187,7 @@ void compareResults(
     auto lhs = expect.toList();
     auto rhs = actual.toList();
     ASSERT_TRUE(lhs.size() == rhs.size());
-    for (size_t i = 0; i < lhs.size(); i++) {
+    for (const auto i : c10::irange(lhs.size())) {
       compareResults(lhs[i], rhs[i]);
     }
   } else if (expect.isGenericDict()) {

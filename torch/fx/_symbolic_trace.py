@@ -302,7 +302,7 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        autowrap_modules: tuple[ModuleType] = (math,),
+        autowrap_modules: tuple[ModuleType, ...] = (math,),
         autowrap_functions: tuple[Callable[..., Any], ...] = (),
         param_shapes_constant: bool = False,
     ) -> None:
@@ -315,7 +315,7 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
+            autowrap_modules (Tuple[ModuleType, ...]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.
@@ -1177,11 +1177,11 @@ class _Patcher:
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        new_fn._fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None, new_fn))
             self.patches_made[-1].patch()
-        elif getattr(frame_dict[name], "__fx_already_patched", False):
+        elif getattr(frame_dict[name], "_fx_already_patched", False):
             return  # already patched, no need to do it again
         else:
             self.patches_made.append(
@@ -1195,9 +1195,9 @@ class _Patcher:
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        new_fn._fx_already_patched = deduplicate  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
-        if getattr(orig_fn, "__fx_already_patched", False):
+        if getattr(orig_fn, "_fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn, new_fn))
         self.patches_made[-1].patch()
@@ -1372,17 +1372,26 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
-    if currentframe is None:
-        raise AssertionError("inspect.currentframe() returned None")
-    f = currentframe.f_back
-    if f is None:
-        raise AssertionError("currentframe.f_back is None")
-    if f.f_code.co_name != "<module>":
-        raise NotImplementedError("wrap must be called at the top level of a module")
+    f = None
+    try:
+        if currentframe is None:
+            raise AssertionError("inspect.currentframe() returned None")
+        f = currentframe.f_back
+        if f is None:
+            raise AssertionError("currentframe.f_back is None")
+        if f.f_code.co_name != "<module>":
+            raise NotImplementedError(
+                "wrap must be called at the top level of a module"
+            )
 
-    # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
-    # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+        # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
+        # semantics would be slightly different, but would add support `from x import wrapped_function`
+        _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+    finally:
+        # Holding our own frame in a local makes a reference cycle that keeps the
+        # entire calling stack (and its tensors) alive until the next gc. That stack
+        # is deep when the module is first imported lazily from inside a running op.
+        del currentframe, f
     return fn_or_name
 
 

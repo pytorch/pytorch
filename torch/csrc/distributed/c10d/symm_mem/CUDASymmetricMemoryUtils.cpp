@@ -2,6 +2,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <c10/util/ScopeExit.h>
 #include <c10/util/error.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -12,12 +13,29 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
 namespace c10d::symmetric_memory {
+
+bool should_skip_cuda_cleanup(int device_idx) {
+  if (is_finalizing()) {
+    return true;
+  }
+  try {
+    c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(device_idx));
+    // VMM unmap/release do not wait for kernels using the allocation.
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    return false;
+  } catch (const c10::AcceleratorError& error) {
+    TORCH_WARN(
+        "SymmetricMemory: skipping cleanup after CUDA error: ",
+        error.what_without_backtrace());
+    return true;
+  }
+}
 
 bool device_has_multicast_support(int device_idx) {
   if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
@@ -276,7 +294,7 @@ std::vector<int> IpcChannel::all_gather_fds(
   fds[rank] = fd;
 
   int dst_rank = (rank + 1) % world_size;
-  for (int step = 1; step < world_size; ++step) {
+  for (const auto step : c10::irange(1, world_size)) {
     int src_rank = (rank + world_size - step) % world_size;
     send_fd(pids[dst_rank], fd);
     fd = recv_fd();
@@ -293,7 +311,7 @@ int IpcChannel::broadcast_fds(
   int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
-    for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
+    for (const auto dst_rank : c10::irange(world_size)) {
       if (dst_rank == rank) {
         continue;
       }
@@ -324,12 +342,40 @@ void map_block(
     int device_idx) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
-  auto dev_ptr = reinterpret_cast<CUdeviceptr*>(ptr);
+  *ptr = nullptr;
+  CUdeviceptr dev_ptr = 0;
+  bool reserved = false;
+  bool mapped = false;
+  auto rollback = c10::make_scope_exit([&]() noexcept {
+    CUresult unmap_result = CUDA_SUCCESS;
+    if (mapped) {
+      unmap_result = driver_api->cuMemUnmap_(dev_ptr, size);
+    }
+    CUresult free_result = CUDA_SUCCESS;
+    if (reserved && unmap_result == CUDA_SUCCESS) {
+      free_result = driver_api->cuMemAddressFree_(dev_ptr, size);
+    }
+    auto log_failure = [&](CUresult result, const char* operation) {
+      if (result != CUDA_SUCCESS) {
+        const char* error = nullptr;
+        if (driver_api->cuGetErrorString_(result, &error) != CUDA_SUCCESS) {
+          error = nullptr;
+        }
+        LOG(WARNING) << "SymmetricMemory: failed to " << operation << ": "
+                     << (error ? error : "unknown CUDA driver error") << " ("
+                     << static_cast<int>(result) << ")";
+      }
+    };
+    log_failure(unmap_result, "undo incomplete mapping");
+    log_failure(free_result, "undo address reservation");
+  });
   // Allocate virtual address space
   C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMemAddressReserve_(dev_ptr, size, 0ULL, 0, 0ULL));
+      driver_api->cuMemAddressReserve_(&dev_ptr, size, 0ULL, 0, 0ULL));
+  reserved = true;
   // Map the physical memory to the virtual address
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemMap_(*dev_ptr, size, 0, handle, 0ULL));
+  C10_CUDA_DRIVER_CHECK(driver_api->cuMemMap_(dev_ptr, size, 0, handle, 0ULL));
+  mapped = true;
 
   // Set access permissions
   CUmemAccessDesc desc;
@@ -337,7 +383,11 @@ void map_block(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = device_idx;
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
+  C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(dev_ptr, size, &desc, 1));
+  // Publish only a complete mapping; the input handle remains caller-owned.
+  // CUDA VMM represents device addresses as integer CUdeviceptr values.
+  *ptr = reinterpret_cast<void*>(dev_ptr); // NOLINT(performance-no-int-to-ptr)
+  rollback.release();
 #elif defined(USE_ROCM)
   C10_CUDA_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
   C10_CUDA_CHECK(hipMemMap(

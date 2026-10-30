@@ -48,6 +48,7 @@ from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -1191,6 +1192,34 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
             infer_schema(d, mutates_args=()), """(Tensor x) -> (Tensor[], Tensor)"""
         )
 
+        def d2(
+            x: list[Tensor],
+            y: Optional[list[Tensor]],
+            z: List[Tensor],
+            w: Optional[List[Tensor]],
+            q: Optional[Sequence[Tensor]],
+            r: list[Optional[Tensor]],
+            s: Optional[list[Optional[Tensor]]],
+        ) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args=()),
+            """(Tensor[] x, Tensor[]? y, Tensor[] z, Tensor[]? w, Tensor[]? q, Tensor?[] r, Tensor?[]? s) -> Tensor""",
+        )
+
+        self.assertExpectedInline(
+            infer_schema(d2, mutates_args={"y", "w", "s"}),
+            """(Tensor[] x, Tensor(a1!)[]? y, Tensor[] z, Tensor(a3!)[]? w, Tensor[]? q, Tensor?[] r, Tensor(a6!)?[]? s) -> Tensor""",
+        )
+
+        def d3(x: Optional[list[Tensor]] = None) -> Tensor:
+            return torch.empty([])
+
+        self.assertExpectedInline(
+            infer_schema(d3, mutates_args=()), """(Tensor[]? x=None) -> Tensor"""
+        )
+
         def e() -> Tensor:
             return torch.empty([])
 
@@ -2327,6 +2356,22 @@ Dynamic shape operator
             self.assertEqual(result.shape, x.shape)
             self.assertEqual(result.stride(), x.stride())
 
+    def test_register_fake_before_define(self):
+        qualname = f"{self.test_ns}::foo"
+        # An impl without a schema makes the op known to the dispatcher but not
+        # to torch.ops (e.g. a C++ TORCH_LIBRARY_IMPL whose def loads later).
+        self.lib().impl("foo", lambda x: x.sin(), "CPU")
+
+        @torch.library.register_fake(qualname, lib=self.lib())
+        def foo_impl(x):
+            return x.sin()
+
+        self.lib().define("foo(Tensor x) -> Tensor")
+        op = self.get_op(qualname)
+        with torch._subclasses.FakeTensorMode():
+            x = torch.randn(3)
+            self.assertEqual(op(x).shape, x.shape)
+
     def test_abstract_impl_on_existing_op_with_meta(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -2869,6 +2914,47 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
+
+    def test_torch_ops_warning_propagation(self):
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch.ops.aten.ger.out(x, y, out=out)
+
+    def test_dispatch_call_boxed_warning_propagation(self):
+        op = torch._C._dispatch_find_schema_or_throw("aten::ger", "out")
+        x = torch.ones(2)
+        y = torch.ones(2)
+        out = torch.empty(2, 2)
+        with self.assertWarnsRegex(UserWarning, "torch.ger is deprecated"):
+            torch._C._dispatch_call_boxed(op, x, y, out=out)
+
+    @scoped_load_inline
+    def test_torch_ops_out_of_range_raises_index_error(self, load_inline):
+        load_inline(
+            name="test_out_of_range_index_error",
+            cpp_sources="""
+#include <torch/extension.h>
+
+#include <stdexcept>
+
+torch::Tensor out_of_range_op(const torch::Tensor& x) {
+  throw std::out_of_range("index 5 is out of bounds");
+}
+
+TORCH_LIBRARY(_test_out_of_range_index_error, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.impl("foo", c10::DispatchKey::CPU, TORCH_FN(out_of_range_op));
+}
+""",
+            is_python_module=False,
+            verbose=True,
+        )
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(IndexError, "index 5 is out of bounds"):
+            torch.ops._test_out_of_range_index_error.foo.default(x)
 
     # Using a non-existent DSO is a quick way to trigger an OSError,
     # which can be used to not break BC.
@@ -4506,6 +4592,39 @@ class TestCustomOpAPI(TestCase):
                 continue
             self.assertGreater(after, prev)
 
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    def test_mutated_optional_list(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_optional_list", mutates_args={"y"}
+        )
+        def g(x: Tensor, y: Optional[List[Tensor]]) -> None:
+            if y is not None:
+                y[1].copy_(x + 1)
+            return None
+
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y)
+        )
+        g(x, y)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+        for prev, after in zip(initial_versions[1], new_versions[1]):
+            self.assertGreater(after, prev)
+        self.assertEqual(y[1], x + 1)
+
+        g(x, None)
+        new_versions = pytree.tree_map_only(torch.Tensor, lambda x: x._version, (x, y))
+        self.assertEqual(initial_versions[0], new_versions[0])
+
+        compiled_g = torch.compile(g, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3)
+        y = [torch.randn(3), torch.randn(3)]
+        compiled_g(x, y)
+        self.assertEqual(y[1], x + 1)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_mutated_optional_arg_default_none(self):
         @torch.library.custom_op(
@@ -5415,6 +5534,41 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.sin())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_multi_types_register_kernel_for_one(self):
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
+        )
+        def f(x: Tensor) -> Tensor:
+            return x + 1
+
+        @f.register_kernel("cpu")
+        def _(x):
+            return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(f(x), x + 2)
+        with f.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(f(x), x + 1)
+
+        # One function registered for several devices at once: each device
+        # must check whether its own kernel is enabled.
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x + 1
+
+        @g.register_kernel(("cpu", "cuda"))
+        def _(x):
+            return x + 2
+
+        self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(g(x), x + 1)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
         called_f1 = 0
@@ -5466,6 +5620,18 @@ Please use `add.register_fake` to add an fake impl.""",
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
+
+    def test_triton_op_function_is_the_users(self):
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = torch.library.triton_op("_torch_testing::triton_module", mutates_args=())(
+            f
+        )
+        # Not torch._library.triton's wrapper, so precompile imports this module.
+        self.assertEqual(op._init_fn.__module__, __name__)
+        self.assertIs(op._init_fn.__wrapped__, f)
+        self.assertEqual(op._init_fn.__qualname__, f.__qualname__)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
@@ -6575,6 +6741,13 @@ class TestOpProfiles(TestCase):
         )
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
+        unsupported_error, unsupported_message = expectedIfCppFakeTensor(
+            (RuntimeError, "mylib::foo2"),
+            (
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                "mylib.foo2.default",
+            ),
+        )
 
         op_profiles = self.get_sample_op_profile("mylib.foo2.default")
 
@@ -6592,8 +6765,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo2.default",
+                    unsupported_error,
+                    unsupported_message,
                 ),
                 fm,
             ):
@@ -6610,8 +6783,8 @@ class TestOpProfiles(TestCase):
 
             with (
                 self.assertRaisesRegex(
-                    torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo2.default",
+                    unsupported_error,
+                    unsupported_message,
                 ),
                 fm,
             ):

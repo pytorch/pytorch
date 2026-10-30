@@ -19,7 +19,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import try_import_ck_lib
+from torch._inductor.utils import run_and_get_code, try_import_ck_lib
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
@@ -90,11 +90,7 @@ class TestCKBackend(TestCase):
         (
             # CK float16 is covered by test_max_autotune_precompile_preselected
             # and test_max_autotune_addmm. Only CKTILE needs a float16 cell here.
-            subtest(
-                ("CK", torch.bfloat16),
-                name="standalone_ck",
-                decorators=[skipIfRocmVersionAtLeast([7, 14])],
-            ),
+            subtest(("CK", torch.bfloat16), name="standalone_ck"),
             subtest(("CKTILE", torch.float16), name="standalone_cktile_float16"),
             subtest(("CKTILE", torch.bfloat16), name="standalone_cktile_bfloat16"),
             subtest(("ATen,CK", torch.bfloat16), name="fallback"),
@@ -154,7 +150,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize("autotune_in_subproc", (True,))
@@ -204,7 +200,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
     def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
@@ -263,7 +258,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
@@ -338,11 +333,12 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
+    @skipIfRocmVersionAtLeast((10, 1))
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize(
@@ -490,7 +486,7 @@ class TestCKBackend(TestCase):
     )
     @parametrize(
         "max_autotune_conv_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATEN,CK"),
+        ("CK", "ATEN,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
@@ -528,10 +524,48 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    def test_max_autotune_conv_transpose2d_skips_forward_ck(self):
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+        x = torch.randn(1, 64, 32, 32, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+        w = torch.randn(64, 64, 3, 3, **tensor_options).to(
+            memory_format=torch.channels_last
+        )
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": "CK",
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv_transpose2d(x, w):
+                return torch.conv_transpose2d(x, w, stride=1, padding=1)
+
+            y_eager = torch.conv_transpose2d(x, w, stride=1, padding=1)
+            y_compiled, codes = run_and_get_code(conv_transpose2d, x, w)
+
+            self.assertFalse(any("async_compile.rocm" in c for c in codes))
+            torch.testing.assert_close(y_compiled, y_eager, atol=2e-4, rtol=2e-4)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_bmm(
