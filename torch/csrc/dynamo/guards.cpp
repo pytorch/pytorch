@@ -2040,6 +2040,106 @@ class LAMBDA_GUARD : public LeafGuard {
   py::function _guard_check_fn;
 };
 
+// Prefixes of CPython's private structs in Objects/odictobject.c, unchanged
+// from Python 3.11 through 3.15:
+// https://github.com/python/cpython/blob/v3.11.0/Objects/odictobject.c
+// The public OrderedDict iterator hashes each key. Walking the nodes directly
+// avoids invoking user hash/equality callbacks.
+struct OrderedDictNodePrefix {
+  PyObject* key;
+  Py_hash_t hash;
+  OrderedDictNodePrefix* next;
+};
+
+struct OrderedDictObjectPrefix {
+  PyDictObject dict;
+  OrderedDictNodePrefix* first;
+};
+
+// The getter resolves the mapping from frame locals after source guards pass.
+// Order records dense storage indices in linked order, independent of key IDs.
+// Install only in the root epilogue so dict-version shortcuts cannot skip it.
+class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
+ public:
+  ORDERED_DICT_ORDER_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::function get_value,
+      std::vector<Py_ssize_t> order,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _get_value(std::move(get_value)),
+        _order(std::move(order)) {
+    std::vector<bool> seen(_order.size(), false);
+    for (const auto i : c10::irange(_order.size())) {
+      const auto index = _order[i];
+      TORCH_CHECK_VALUE(
+          index >= 0 && static_cast<size_t>(index) < _order.size() &&
+              !seen[index],
+          "OrderedDict order must be a permutation of its storage positions");
+      seen[index] = true;
+      _storage_order &= static_cast<size_t>(index) == i;
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    THPObjectPtr mapping(PyObject_CallOneArg(_get_value.ptr(), value));
+    if (!mapping) {
+      PyErr_Clear();
+      return false;
+    }
+    if (!PyODict_Check(mapping.get())) {
+      return false;
+    }
+    std::vector<PyObject*> keys(_storage_order ? 0 : _order.size());
+    bool result;
+    // CPython 3.14.1+ protects OrderedDict mutations with this lock.
+    // Older free-threaded releases have upstream OrderedDict races.
+    // No Python callbacks run while the lock is held.
+    Py_BEGIN_CRITICAL_SECTION(mapping.get());
+    result = check_order(mapping.get(), keys);
+    Py_END_CRITICAL_SECTION();
+    return result;
+  }
+
+ private:
+  bool check_order(PyObject* value, std::vector<PyObject*>& keys) const {
+    if (PyDict_GET_SIZE(value) != static_cast<Py_ssize_t>(_order.size())) {
+      return false;
+    }
+    auto* node = reinterpret_cast<OrderedDictObjectPrefix*>(value)->first;
+    PyObject *key = nullptr, *item = nullptr;
+    Py_ssize_t pos = 0;
+    if (_storage_order) {
+      while (PyDict_Next(value, &pos, &key, &item)) {
+        if (node == nullptr || node->key != key) {
+          return false;
+        }
+        node = node->next;
+      }
+    } else {
+      size_t index = 0;
+      while (PyDict_Next(value, &pos, &key, &item)) {
+        keys[index++] = key;
+      }
+      for (const auto index : _order) {
+        if (node == nullptr || node->key != keys[index]) {
+          return false;
+        }
+        node = node->next;
+      }
+    }
+    return node == nullptr;
+  }
+
+  py::function _get_value;
+  std::vector<Py_ssize_t> _order;
+  bool _storage_order = true;
+};
+
 class TYPE_MATCH : public LeafGuard {
  public:
   // type_id = id(type(obj))
@@ -4785,9 +4885,8 @@ class RootGuardManager : public GuardManager {
   // on guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
 
-  // These guards are lambda guards, i.e., the guards that lack C++
-  // implementation. For simplicity, we add these guards at the root. They
-  // MUST be run after all other guard managers have finished to ensure that
+  // These guards use Python source lookups and are installed at the root.
+  // They MUST run after all other guard managers have finished to ensure that
   // the epilogue guards do not step on some nonexistent getattr or getitem.
   // NB - shared_ptr is used to share the epilogue guards with the cloned guard
   // manager.
@@ -7931,6 +8030,11 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LAMBDA_GUARD")
       .def(py::init<RootGuardManager*, py::function, py::list, py::object>())
       .def("__call__", &LAMBDA_GUARD::check);
+  py::class_<
+      ORDERED_DICT_ORDER_MATCH,
+      LeafGuard,
+      std::shared_ptr<ORDERED_DICT_ORDER_MATCH>>(
+      py_m, "ORDERED_DICT_ORDER_MATCH");
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -9070,6 +9174,21 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(lambda),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
+          })
+      .def(
+          "add_ordered_dict_order_guard",
+          [](RootGuardManager& self,
+             py::function get_value,
+             std::vector<Py_ssize_t> order,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_epilogue_lambda_guard(
+                std::make_unique<ORDERED_DICT_ORDER_MATCH>(
+                    &self,
+                    std::move(get_value),
+                    std::move(order),
+                    std::move(verbose_code_parts),
+                    std::move(user_stack)));
           });
 
   // Dict Guard Manager

@@ -8,7 +8,6 @@ import inspect
 import itertools
 import logging
 import operator
-import threading
 import types
 import typing
 from collections import defaultdict
@@ -21,22 +20,28 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
-from torch._C import _dispatch_keys, DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode, register_fake
-from torch._ops import HigherOrderOperator
-from torch._prims_common import (
-    clone_preserve_strides,
-    is_non_overlapping_and_dense_or_false,
+from torch._C import DispatchKey
+from torch._higher_order_ops.user_kernel_hop import (
+    functional_hop_dense,
+    functional_hop_fake,
+    functionalize_functional_hop,
+    functionalize_mutation_hop,
+    KernelSideTable,
+    register_user_kernel_hop_dispatch,
+    store_non_graphable_args,
+    trace_user_kernel_wrapper,
+    UserKernelHOPifier,
+    UserKernelWrapperHOP,
 )
-from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
-from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
+from torch._higher_order_ops.utils import register_fake
+
+# Re-exported: MTIA's cpu_dispatch / dtype_conversion dispatch modes and the APS memory
+# estimator import it from this module.
+from torch._prims_common import clone_preserve_strides  # noqa: F401
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
-from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
@@ -359,60 +364,9 @@ TMADescriptorMetadata = dict[
 # Kernel Side Table
 
 
-# We cannot put Triton Kernels into the FX graph as the graph nodes
-# do not support arbitrary functions.
-# Use a side table.
-# We use two dicts so that fetching both the kernel and id are O(1)
-class KernelSideTable:
-    id_to_kernel: dict[int, "TritonKernelType"] = {}
-    kernel_to_id: dict["TritonKernelType", int] = {}
-    constant_args: dict[int, dict[str, object]] = {}
-    lock = threading.Lock()
-
-    # Returns index on the table
-    def add_kernel(self, kernel: "TritonKernelType") -> int:
-        with self.lock:
-            if kernel in self.kernel_to_id:
-                return self.kernel_to_id[kernel]
-
-            idx = len(self.id_to_kernel)
-            self.id_to_kernel[idx] = kernel
-            self.kernel_to_id[kernel] = idx
-            return idx
-
-    # Returns the triton kernel at the given index
-    def get_kernel(self, idx: int) -> "TritonKernelType":
-        # No need to lock here as fetching from dict is atomic
-        if idx not in self.id_to_kernel:
-            raise AssertionError(f"Kernel index {idx} not found in id_to_kernel")
-        return self.id_to_kernel[idx]
-
-    # Not every constant arg can be added to the graph. Use this side table
-    # for constant args.
-    def add_constant_args(self, args: dict[str, object]) -> int:
-        with self.lock:
-            idx = len(self.constant_args)
-            self.constant_args[idx] = args
-            return idx
-
-    # Returns the constant args
-    def get_constant_args(self, idx: int) -> dict[str, object]:
-        # No need to lock here as fetching from dict is atomic
-        if idx not in self.constant_args:
-            raise AssertionError(
-                f"Constant args index {idx} not found in constant_args"
-            )
-        return self.constant_args[idx]
-
-    # Resets the table (only meant to be used in unit tests)
-    # This is only safe assuming single threaded execution
-    def reset_table(self) -> None:
-        self.id_to_kernel = {}
-        self.kernel_to_id = {}
-        self.constant_args = {}
-
-
-kernel_side_table = KernelSideTable()
+# The side table class is shared with the other user-kernel DSLs; each DSL owns an
+# instance, so their kernel indices never collide.
+kernel_side_table: "KernelSideTable[TritonKernelType]" = KernelSideTable()
 
 
 # Before Triton 3.2 (https://github.com/triton-lang/triton/pull/5083), Autotuner
@@ -1639,24 +1593,8 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
 # Triton Kernel Wrappers
 
 
-class _TritonKernelWrapper(HigherOrderOperator):
-    def _get_overloaded_args(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[Tensor, ...]:
-        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
-        for tensor_dict_name in ("kwargs", "tensor_bases"):
-            tensor_dict = kwargs.get(tensor_dict_name)
-            if isinstance(tensor_dict, dict):
-                overloaded_args.extend(
-                    arg
-                    for arg in tensor_dict.values()
-                    if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
-                )
-        return tuple(overloaded_args)
-
-
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(_TritonKernelWrapper):
+class TritonKernelWrapperMutation(UserKernelWrapperHOP):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1687,7 +1625,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(_TritonKernelWrapper):
+class TritonKernelWrapperFunctional(UserKernelWrapperHOP):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
@@ -1857,28 +1795,24 @@ def _(
     return None
 
 
-def trace_triton_kernel_wrapper(
-    proxy_mode: ProxyTorchDispatchMode,
-    func_overload: Callable[..., Any],
-    node_args: dict[str, Any],
-) -> dict[str, Any] | None:
-    with disable_proxy_modes_tracing():
-        out = func_overload(**node_args)
-
-    proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
-        node_args,
-    )
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func_overload,
-        (),
-        proxy_args,
-        name=func_overload.__name__ + "_proxy",
-    )
-
-    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
-    return ret
+def _triton_hop_kwargs(
+    kernel_idx: int,
+    constant_args_idx: int,
+    grid: list["TritonGridType"],
+    tma_descriptor_metadata: TMADescriptorMetadata,
+    launch_kwargs: tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """The Triton HOP arguments that the shared helpers pass through unchanged
+    (everything but kwargs, tensors_to_clone and tensor_bases)."""
+    hop_kwargs: dict[str, Any] = {
+        "kernel_idx": kernel_idx,
+        "constant_args_idx": constant_args_idx,
+        "grid": grid,
+        "tma_descriptor_metadata": tma_descriptor_metadata,
+    }
+    if launch_kwargs:
+        hop_kwargs["launch_kwargs"] = launch_kwargs
+    return hop_kwargs
 
 
 @triton_kernel_wrapper_mutation.py_impl(ProxyTorchDispatchMode)
@@ -1902,7 +1836,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    trace_triton_kernel_wrapper(
+    trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_mutation,
         node_args,
@@ -1941,83 +1875,23 @@ def triton_kernel_wrapper_mutation_functionalize(
     kwargs: dict[str, Any],
     launch_kwargs: tuple[str, ...] | None = None,
 ) -> None:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+    functionalize_mutation_hop(
+        ctx,
+        triton_kernel_wrapper_functional,
+        lambda unwrapped_kwargs: get_mutated_tensors(
+            kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+        ),
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
     )
-    # A mutated arg that is a view has to be cloned through its base, and the base is
-    # only a tracked value out here -- reading _base inside the functional impl yields
-    # an untracked tensor that the tracer would lift to a constant. See
-    # clone_preserve_strides for why cloning the view itself is not graph-safe.
-    tensor_bases = {}
-    for key in tensors_to_clone:
-        tensor = kwargs[key]
-        base = tensor._base if isinstance(tensor, Tensor) else None
-        if base is not None:
-            tensor_bases[key] = ctx.unwrap_tensors(base)
-    with ctx.redispatch_to_next():
-        functional_kwargs: dict[str, Any] = {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": unwrapped_kwargs,
-            "tensors_to_clone": tensors_to_clone,
-        }
-        if tensor_bases:
-            functional_kwargs["tensor_bases"] = tensor_bases
-        if launch_kwargs:
-            functional_kwargs["launch_kwargs"] = launch_kwargs
-        unwrapped_outputs = triton_kernel_wrapper_functional(**functional_kwargs)
-
-    if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
-        raise AssertionError(
-            f"Output keys {set(unwrapped_outputs.keys())} not subset of input keys {set(kwargs.keys())}"
-        )
-    for key, output_arg in unwrapped_outputs.items():
-        if not isinstance(output_arg, Tensor):
-            continue
-        input_arg = kwargs[key]
-        if not isinstance(input_arg, Tensor):
-            raise AssertionError(
-                f"Expected input_arg for key {key} to be a Tensor, got {type(input_arg)}"
-            )
-
-        ctx.replace(input_arg, output_arg)
-        # indicate that above replace is hidden from autograd
-        ctx.mark_mutation_hidden_from_autograd(input_arg)
-        ctx.commit_update(input_arg)
-        ctx.sync(input_arg)
     return None
-
-
-def _clone_mutated_arg(
-    key: str, val: Tensor, tensor_bases: dict[str, Tensor] | None
-) -> Tensor:
-    """Clone a mutated pointer arg.
-
-    clone_preserve_strides allocates storage_offset + span elements and reads them
-    out of val's storage. Whenever that is more than val's own numel -- a non-zero
-    storage_offset, or gaps between val's elements -- part of the read lies outside
-    val, which a backend that realizes val as a buffer sized to val cannot supply.
-    """
-    if is_non_overlapping_and_dense_or_false(val):
-        if guard_or_false(val.storage_offset() == 0):
-            # storage_offset + span is exactly val's numel, so nothing outside val
-            # is read and this stays the cheapest thing that works.
-            return clone_preserve_strides(val)
-        # clone() reproduces the strides of a dense tensor and lands it at offset 0,
-        # so the clone spans exactly val's own elements. That is all a triton.jit
-        # kernel needs: it only ever sees a data pointer plus the strides passed to it.
-        return val.clone()
-    # Gaps have to be materialized as well, so the storage val sits in gets copied.
-    return clone_preserve_strides(
-        val, base=tensor_bases.get(key) if tensor_bases else None
-    )
 
 
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -2032,29 +1906,16 @@ def triton_kernel_wrapper_functional_dense(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
-    kwargs = {
-        key: (
-            _clone_mutated_arg(key, val, tensor_bases)
-            if key in tensors_to_clone
-            else val
-        )
-        for key, val in kwargs.items()
-    }
-    mutation_kwargs: dict[str, Any] = {
-        "kernel_idx": kernel_idx,
-        "constant_args_idx": constant_args_idx,
-        "grid": grid,
-        "tma_descriptor_metadata": tma_descriptor_metadata,
-        "kwargs": kwargs,
-    }
-    if launch_kwargs:
-        mutation_kwargs["launch_kwargs"] = launch_kwargs
-    triton_kernel_wrapper_mutation(**mutation_kwargs)
-    return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
+    return functional_hop_dense(
+        triton_kernel_wrapper_mutation,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
 @register_fake(triton_kernel_wrapper_functional, skip_cache=True)
@@ -2069,15 +1930,9 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    # TODO(oulgen): For performance reasons, we want to ensure that these
-    # `clone_preserve_strides` calls are never executed at runtime
-    # (inductor should always optimize them away).
-    # Requires https://github.com/pytorch/pytorch/issues/109240
-    return {
-        key: _clone_mutated_arg(key, val, tensor_bases)
-        for key, val in kwargs.items()
-        if key in tensors_to_clone
-    }
+    return functional_hop_fake(
+        kwargs=kwargs, tensors_to_clone=tensors_to_clone, tensor_bases=tensor_bases
+    )
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
@@ -2106,13 +1961,13 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     if launch_kwargs:
         node_args["launch_kwargs"] = launch_kwargs
 
-    ret = trace_triton_kernel_wrapper(
+    ret = trace_user_kernel_wrapper(
         mode,
         triton_kernel_wrapper_functional,
         node_args,
     )
     if ret is None:
-        raise AssertionError("trace_triton_kernel_wrapper returned None")
+        raise AssertionError("trace_user_kernel_wrapper returned None")
     return ret
 
 
@@ -2128,54 +1983,29 @@ def triton_kernel_wrapper_functional_functionalize(
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
-    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
-    unwrapped_tensor_bases = ctx.unwrap_tensors(tensor_bases)  # type: ignore[arg-type]
-    with ctx.redispatch_to_next():
-        functional_kwargs: dict[str, Any] = {
-            "kernel_idx": kernel_idx,
-            "constant_args_idx": constant_args_idx,
-            "grid": grid,
-            "tma_descriptor_metadata": tma_descriptor_metadata,
-            "kwargs": unwrapped_kwargs,
-            "tensors_to_clone": tensors_to_clone,
-        }
-        if unwrapped_tensor_bases:
-            functional_kwargs["tensor_bases"] = unwrapped_tensor_bases
-        if launch_kwargs:
-            functional_kwargs["launch_kwargs"] = launch_kwargs
-        outputs = triton_kernel_wrapper_functional(**functional_kwargs)
-        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+    hop_kwargs = _triton_hop_kwargs(
+        kernel_idx, constant_args_idx, grid, tma_descriptor_metadata, launch_kwargs
+    )
+    return functionalize_functional_hop(
+        ctx,
+        triton_kernel_wrapper_functional,
+        hop_kwargs=hop_kwargs,
+        kwargs=kwargs,
+        tensors_to_clone=tensors_to_clone,
+        tensor_bases=tensor_bases,
+    )
 
 
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.ADInplaceOrView)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCPU)
-
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.ADInplaceOrView)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
-
-# Adds SAC support for triton ops
-redirect_to_mode(triton_kernel_wrapper_mutation, _CachingTorchDispatchMode)
-redirect_to_mode(triton_kernel_wrapper_mutation, _CachedTorchDispatchMode)
+register_user_kernel_hop_dispatch(
+    triton_kernel_wrapper_mutation, triton_kernel_wrapper_functional
+)
 
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
 
 
-class TritonHOPifier:
+class TritonHOPifier(UserKernelHOPifier):
     """Orchestrator for converting a user-defined triton kernel into a call
     to the triton_kernel_wrapper_mutation HOP.
 
@@ -2195,14 +2025,17 @@ class TritonHOPifier:
     TritonHOPifier is an abstract class that can be overridden by its subclasses.
     """
 
-    def raise_unsupported(self, msg: str) -> Never:
-        raise NotImplementedError("abstract method")
-
     def is_callable(self, maybe_callable: object) -> bool:
         raise NotImplementedError("abstract method")
 
-    def get_value(self, val: Any) -> Any:
-        raise NotImplementedError("abstract method")
+    @staticmethod
+    def get_kernel_source(
+        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
+    ) -> "Source | None":
+        kernel_source = getattr(variable, "kernel_source", None)
+        if kernel_source is None:
+            kernel_source = getattr(variable, "source", None)
+        return kernel_source
 
     def call_grid(  # type: ignore[no-untyped-def]
         self,
@@ -2378,15 +2211,6 @@ class TritonHOPifier:
                 self.raise_unsupported(
                     "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
                 )
-
-    @staticmethod
-    def get_kernel_source(
-        variable: "TritonKernelVariable | TraceableTritonKernelWrapper",
-    ) -> "Source | None":
-        kernel_source = getattr(variable, "kernel_source", None)
-        if kernel_source is None:
-            kernel_source = getattr(variable, "source", None)
-        return kernel_source
 
     def recreate_variable(
         self,
@@ -2927,18 +2751,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         Some args cannot be stored in the FX graph.
         Put them in the side table.
         """
-
-        def is_graphable(val: object) -> bool:
-            return isinstance(val, (fx.node.base_types, fx.Node))
-
-        non_graphable_args = {
-            k: v for k, v in combined_args.items() if not is_graphable(v)
-        }
-        graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
-
-        constant_args_idx = kernel_side_table.add_constant_args(non_graphable_args)
-
-        return graphable_args, constant_args_idx
+        return store_non_graphable_args(kernel_side_table, combined_args)
 
     def is_dynamic_backend_option(self, value: object) -> bool:
         # Backend options are compile-time values. In proxy tracing, a value can
