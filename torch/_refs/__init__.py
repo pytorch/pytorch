@@ -3694,7 +3694,13 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type in ["cpu", "mtia"]:
+    # layer_norm_cpu keeps mean/rstd in fp32 for a mixed-dtype call
+    # (param_scalar_type), which the check above only lets through as a bf16/fp16
+    # input with fp32 params.
+    cpu_mixed_type = input.device.type == "cpu" and builtins.any(
+        p is not None and p.dtype != input.dtype for p in (weight, bias)
+    )
+    if input.device.type in ["cpu", "mtia"] and not cpu_mixed_type:
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
