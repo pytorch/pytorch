@@ -306,6 +306,7 @@ class FunctionalTensor(torch.Tensor):
             raise AssertionError("x must not already be a functional tensor")
         # The only autograd metadata we care about on the FunctionalTensor is:
         # - requires_grad (so autograd runs)
+        # - grad_dtype (so tracing preserves the gradient receiver's precision)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
         x_functional = torch._to_functional_tensor(x)
@@ -320,8 +321,13 @@ class FunctionalTensor(torch.Tensor):
             raise AssertionError("functional_mode must not be None")
 
         with functional_mode:
+            # Mirroring may attach non-leaf history, so configure the receiver first.
+            if x.is_leaf:
+                x_functional.grad_dtype = x.grad_dtype
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
             out = FunctionalTensor(x_functional, functional_mode)
+            if x.is_leaf:
+                out.grad_dtype = x.grad_dtype
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
