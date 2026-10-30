@@ -2850,6 +2850,29 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @onlyAccelerator
+    @parametrize("width,kernel_count", [(32, 1), (512, 2)])
+    def test_wide_broadcast_realizes_expensive_producer(self, width, kernel_count):
+        def fn(x, logits, idx):
+            weight = torch.softmax(logits.float(), dim=-1).to(x.dtype).view(-1)[idx]
+            return x * weight.unsqueeze(-1)
+
+        device = GPU_TYPE
+        x = torch.randn((256, width), dtype=torch.bfloat16, device=device)
+        logits = torch.randn((64, 4), dtype=torch.bfloat16, device=device)
+        idx = torch.randperm(256, device=device)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
+                x, logits, idx
+            )
+
+        self.assertEqual(actual, fn(x, logits, idx))
+        self.assertEqual(metrics.generated_kernel_count, kernel_count)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyAccelerator
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
