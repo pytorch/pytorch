@@ -209,6 +209,18 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.backends.cuda.cudnn_sdp_python_enabled
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.enable_cudnn_sdp_python
+```
+
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.is_cudnn_sdp_python_available
+```
+
+```{eval-rst}
 .. autofunction:: torch.backends.cuda.is_flash_attention_available
 ```
 
