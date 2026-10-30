@@ -136,23 +136,19 @@ if not BATCH_SIZE_KNOWN_MODELS:
 
 try:
     from .huggingface_llm_models import (
-        DECODE_MODELS,
         HF_LLM_MODELS,
+        INFERENCE_MODE_MODELS,
         MIN_TRANSFORMERS_VERSION,
-        PREFILL_MODELS,
         TextGenerationBenchmark,
-        TextGenerationPrefillModel,
         TP_MODELS,
         WhisperBenchmark,
     )
 except ImportError:
     from huggingface_llm_models import (
-        DECODE_MODELS,
         HF_LLM_MODELS,
+        INFERENCE_MODE_MODELS,
         MIN_TRANSFORMERS_VERSION,
-        PREFILL_MODELS,
         TextGenerationBenchmark,
-        TextGenerationPrefillModel,
         TP_MODELS,
         WhisperBenchmark,
     )
@@ -441,15 +437,15 @@ class HuggingfaceRunner(BenchmarkRunner):
         mode = args.hf_inference_mode
         if args.tp_size < 1:
             raise ValueError(f"--tp-size must be positive, got {args.tp_size}")
-        if args.tp_size > 1 and mode == "generate":
+        if args.tp_size > 1 and mode not in ("prefill", "decode"):
             raise ValueError("--tp-size requires --hf-inference-mode=prefill or decode")
         if mode != "decode" and args.decode_length is not None:
             raise ValueError("--decode-length requires --hf-inference-mode=decode")
+        if mode in ("generate", "encode") and args.prompt_length is not None:
+            raise ValueError(
+                "--prompt-length requires --hf-inference-mode=prefill or decode"
+            )
         if mode == "generate":
-            if args.prompt_length is not None:
-                raise ValueError(
-                    "--prompt-length requires --hf-inference-mode=prefill or decode"
-                )
             return
         installed = importlib.metadata.version("transformers")
         if Version(installed) < Version(MIN_TRANSFORMERS_VERSION):
@@ -473,13 +469,18 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(f"--batch-size must be positive, got {args.batch_size}")
         if not args.inference:
             raise ValueError(f"--hf-inference-mode={mode} requires --inference")
-        supported = PREFILL_MODELS if mode == "prefill" else DECODE_MODELS
+        supported = INFERENCE_MODE_MODELS[mode]
         if args.tp_size > 1:
             supported = supported & TP_MODELS
         if args.only is not None and args.only not in supported:
             raise ValueError(
                 f"--hf-inference-mode={mode} does not support {args.only}; "
                 f"supported models: {', '.join(sorted(supported))}"
+            )
+        whisper = HF_LLM_MODELS.get(args.only) is WhisperBenchmark
+        if whisper and args.prompt_length is not None:
+            raise ValueError(
+                f"--prompt-length does not apply to {args.only}, whose prompt is audio"
             )
 
         unsupported = []
@@ -596,18 +597,23 @@ class HuggingfaceRunner(BenchmarkRunner):
             return self.prefill_forward, self.setup_prefill
         if self.args.hf_inference_mode == "decode":
             return self.decode_forward, self.setup_decode
+        if self.args.hf_inference_mode == "encode":
+            # One no-grad forward, as in prefill, without a cache to reset.
+            return self.prefill_forward, None
         if self.hf_llm:
             return self.generate, None
         return super().get_performance_workload()
 
     def use_model_forward_for_accuracy(self):
-        return self.args.hf_inference_mode in ("prefill", "decode")
+        return self.args.hf_inference_mode != "generate"
 
     def get_request_tokens(self, example_inputs):
         if self.args.hf_inference_mode == "prefill":
             return {"input_tokens_per_second": example_inputs["input_ids"].numel()}
         if self.args.hf_inference_mode == "decode":
             return {"output_tokens_per_second": example_inputs["decode_ids"].numel()}
+        if self.args.hf_inference_mode == "encode":
+            return {}
         return None
 
     def deepcopy_model(self, model):
@@ -625,7 +631,8 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def setup_decode(self, model, example_inputs):
         torch.compiler.cudagraph_mark_step_begin()
-        model.prepare_for_decode(example_inputs["input_ids"])
+        prompt = {k: v for k, v in example_inputs.items() if k != "decode_ids"}
+        model.prepare_for_decode(**prompt)
 
     def generate(self, model, example_inputs, collect_outputs=True):
         return model.generate(**example_inputs)
@@ -687,9 +694,18 @@ class HuggingfaceRunner(BenchmarkRunner):
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
             mode = self.args.hf_inference_mode
-            if mode in ("prefill", "decode"):
+            decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
+            if benchmark_cls is WhisperBenchmark:
+                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
+                    model_name,
+                    device,
+                    training=is_training,
+                    batch_size=batch_size,
+                    inference_mode=mode,
+                    decode_length=decode_length,
+                )
+            elif mode in ("prefill", "decode"):
                 prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
-                decode_length = self.args.decode_length or benchmark_cls.DECODE_LENGTH
                 tp_kwargs = {}
                 if self.args.tp_size > 1:
                     tp_kwargs = {"tp_size": self.args.tp_size, "dtype": torch.float32}
@@ -706,19 +722,18 @@ class HuggingfaceRunner(BenchmarkRunner):
                     decode_length=decode_length,
                     **tp_kwargs,
                 )
-                self.model_iter_fn = self.prefill if mode == "prefill" else self.decode
-            elif benchmark_cls is WhisperBenchmark:
-                model, example_inputs = WhisperBenchmark.get_model_and_inputs(
-                    model_name, device, training=is_training
-                )
             else:
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name, device
                 )
-            generation_model = (
-                model.model if isinstance(model, TextGenerationPrefillModel) else model
-            )
-            generation_model.generation_config.disable_compile = True
+            if mode == "generate":
+                model.generation_config.disable_compile = True
+            else:
+                self.model_iter_fn = {
+                    "prefill": self.prefill,
+                    "decode": self.decode,
+                    "encode": self.prefill_forward,
+                }[mode]
             # Training times forward and backward as for other models, not generate().
             self.hf_llm = not is_training
 
@@ -764,10 +779,8 @@ class HuggingfaceRunner(BenchmarkRunner):
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
-        if args.hf_inference_mode == "prefill":
-            model_names &= PREFILL_MODELS
-        elif args.hf_inference_mode == "decode":
-            model_names &= DECODE_MODELS
+        if args.hf_inference_mode != "generate":
+            model_names &= INFERENCE_MODE_MODELS[args.hf_inference_mode]
         if args.tp_size > 1:
             model_names &= TP_MODELS
         model_names = sorted(model_names)
