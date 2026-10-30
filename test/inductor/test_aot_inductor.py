@@ -177,6 +177,7 @@ if HAS_GPU:
     import triton  # @manual
     from triton import language as tl
 
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -193,6 +194,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
         create_tensor_descriptor_shim,
+        double_strided_kernel,
         masked_add_kernel_with_bool_tensor,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
@@ -10219,6 +10221,49 @@ class AOTInductorTestsTemplate:
                 expected_grids,
                 lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
+
+    @requires_gpu
+    @requires_autotune_at_compile_time
+    @common_utils.parametrize("offset", [0, 128])
+    def test_triton_mutated_strided_autotuning(self, offset):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                base = torch.empty((64, 256), device=x.device, dtype=x.dtype)
+                out = base[:, offset : offset + 128]
+                double_strided_kernel[(4, 4)](
+                    x,
+                    out,
+                    x.stride(0),
+                    out.stride(0),
+                    X_BLOCK_SIZE=32,
+                    Y_BLOCK_SIZE=16,
+                )
+                return out
+
+        x = torch.randn(64, 128, device=self.device)
+        original_run = CachingAutotuner.run
+        observed_calls = 0
+
+        def check_strides(autotuner, *args, **kwargs):
+            """Check the actual autotune tensors before launching the strided kernel."""
+            nonlocal observed_calls
+            if autotuner.fn.__name__ == double_strided_kernel.__name__:
+                observed_calls += 1
+                # Random fallback inputs must not satisfy this regression test.
+                self.assertEqual(args[0], x)
+                self.assertEqual(args[0].stride(0), args[2])
+                self.assertEqual(args[1].stride(0), args[3])
+            return original_run(autotuner, *args, **kwargs)
+
+        with (
+            config.patch("triton.autotune_with_sample_inputs", True),
+            patch.object(CachingAutotuner, "run", new=check_strides),
+        ):
+            self.check_model(Model(), (x,))
+        self.assertGreater(observed_calls, 0)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     @requires_autotune_at_compile_time
