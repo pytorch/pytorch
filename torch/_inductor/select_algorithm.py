@@ -1216,12 +1216,13 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True: registers the input's pointer arg in
-        host_tma_descriptor_args so the launcher replaces it with a
-        TensorDescriptor. Emits an alias so the template can use desc_name.
+        When HOST_SIDE_TMA is True and the input's sizes and strides are all
+        static: registers the input's pointer arg in host_tma_descriptor_args
+        so the launcher replaces it with a TensorDescriptor. Emits an alias so
+        the template can use desc_name.
 
-        When HOST_SIDE_TMA is False: emits device-side descriptor creation
-        using tl.make_tensor_descriptor().
+        Otherwise (HOST_SIDE_TMA False, or an input with a dynamic dim):
+        emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
             transposes a 2D tensor so the contiguous dim is last. If None,
@@ -1237,7 +1238,15 @@ class TritonTemplateKernel(TritonKernel):
         if dim_order is None:
             dim_order = list(range(ndim))
 
-        if self.meta.get("HOST_SIDE_TMA", False):
+        host_side = self.meta.get("HOST_SIDE_TMA", False)
+        if host_side and input_name is not None:
+            # The host launcher needs static dims, so a dynamic input falls back
+            # to a device-side descriptor.
+            host_side = all(
+                isinstance(e, (int, sympy.Integer))
+                for e in (*size, *self.get_stride_and_maybe_freeze_layout(node))
+            )
+        if host_side:
             if input_name is None:
                 raise NotImplementedError(
                     "host-side TMA descriptors for template outputs are not supported"
