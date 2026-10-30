@@ -1,4 +1,9 @@
 # Owner(s): ["module: inductor"]
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -362,20 +367,63 @@ def {{kernel_name}}_kernel():
         x = torch.randn(128, 4, device="cuda")
         y = torch.randn(128, 4, device="cuda")
         exported = torch.export.export(Model(), (x, y), strict=False)
-        with (
-            patch.dict(
-                lowerings,
-                {torch.ops.aten.add.Tensor: cutedsl_add_lowering},
-            ),
-            WritableTempFile(suffix=".pt2") as package_file,
+        for package_cpp_only in (False, True):
+            with (
+                self.subTest(package_cpp_only=package_cpp_only),
+                patch.dict(
+                    lowerings,
+                    {torch.ops.aten.add.Tensor: cutedsl_add_lowering},
+                ),
+                WritableTempFile(suffix=".pt2") as package_file,
+                tempfile.TemporaryDirectory() as relocated_dir,
+            ):
+                package_path = torch._inductor.aoti_compile_and_package(
+                    exported,
+                    package_path=package_file.name,
+                    inductor_configs={
+                        "aot_inductor.package_cpp_only": package_cpp_only,
+                    },
+                )
+                relocated_path = os.path.join(relocated_dir, "model.pt2")
+                shutil.copy2(package_path, relocated_path)
+                actual = load_package(relocated_path)(x, y)
+                torch.testing.assert_close(actual, x + y)
+
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        """
+import importlib.abc
+import sys
+
+import torch
+from torch._inductor.package import load_package
+
+class BlockCuteDSL(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if (
+            fullname == "cutlass"
+            or fullname.startswith("cutlass.")
+            or fullname == "nvidia.cutlass"
+            or fullname.startswith("nvidia.cutlass.")
         ):
-            package_path = torch._inductor.aoti_compile_and_package(
-                exported,
-                package_path=package_file.name,
-            )
-            actual = load_package(package_path)(x, y)
+            raise ImportError("CuteDSL must not be imported by an AOTI package")
+        return None
+
+sys.meta_path.insert(0, BlockCuteDSL())
+assert "cutlass" not in sys.modules
+torch.manual_seed(1234)
+x = torch.randn(128, 4, device="cuda")
+y = torch.randn(128, 4, device="cuda")
+actual = load_package(sys.argv[1])(x, y)
+torch.testing.assert_close(actual, x + y)
+""",
+                        relocated_path,
+                    ],
+                    check=True,
+                )
         self.assertTrue(selected, "AOTI test fell back instead of selecting CuteDSL")
-        torch.testing.assert_close(actual, x + y)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
