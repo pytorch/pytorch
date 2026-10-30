@@ -147,6 +147,30 @@ def _run_flydsl_backward(
     )
 
 
+{{kernel_name}}_aot_arg_names = (
+    "query", "key", "value", "attention_output", "logsumexp", "grad_output",
+    "grad_query", "grad_key", "grad_value", "kv_num_blocks", "kv_indices",
+    "full_kv_num_blocks", "full_kv_indices", "delta", "partial_kv_counts",
+    "partial_kv_indices", "full_kv_counts", "full_kv_indices_transposed",
+    "mask_buffer_0", "mask_buffer_1", "mask_buffer_2", "mask_buffer_3",
+    "grad_query_workspace",
+)
+{{kernel_name}}_aot_arg_sources = (
+    "query", "key", "value", "attention_output", "logsumexp", "grad_output",
+    "output", "grad_key", "grad_value", "kv_num_blocks", "kv_indices",
+    "full_kv_num_blocks", "full_kv_indices", "delta", "partial_kv_counts",
+    "partial_kv_indices", "full_kv_counts", "full_kv_indices_transposed",
+{% for index in range(4) %}
+{% if index < MASK_BUFFER_COUNT %}
+    "mask_buffer_{{index}}",
+{% else %}
+    "kv_num_blocks",
+{% endif %}
+{% endfor %}
+    "grad_query_workspace",
+)
+
+
 def {{kernel_name}}_precompile(
     precompile_shapes,
     precompile_strides,

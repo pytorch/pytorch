@@ -110,6 +110,15 @@ def _run_flydsl_forward(
     )
 
 
+{{kernel_name}}_aot_arg_sources = (
+{% for name in kernel_args %}
+    "{{name}}",
+{% endfor %}
+    "output",
+)
+{{kernel_name}}_aot_arg_names = {{kernel_name}}_aot_arg_sources
+
+
 def {{kernel_name}}_precompile(
     precompile_shapes,
     precompile_strides,
