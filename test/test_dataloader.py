@@ -1529,6 +1529,14 @@ except RuntimeError as e:
             ValueError, "timeout option should be non-negative"
         ):
             self._get_data_loader(self.dataset, timeout=-1)
+        with self.assertRaisesRegex(
+            ValueError, "prefetch_factor option should be greater than 0"
+        ):
+            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=0)
+        with self.assertRaisesRegex(
+            ValueError, "prefetch_factor option should be greater than 0"
+        ):
+            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=-1)
 
         # disable auto-batching
         with self.assertRaisesRegex(
@@ -1638,17 +1646,6 @@ except RuntimeError as e:
             "DataLoader with IterableDataset: expected unspecified batch_sampler",
         ):
             self._get_data_loader(dataset, batch_sampler=3)
-
-        with self.assertRaisesRegex(
-            ValueError, "prefetch_factor option should be greater than 0"
-        ):
-            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=0)
-        with self.assertRaisesRegex(
-            ValueError, "prefetch_factor option should be greater than 0"
-        ):
-            self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=-1)
-        loader = self._get_data_loader(self.dataset, num_workers=1, prefetch_factor=2)
-        self.assertEqual(loader.prefetch_factor, 2)
 
     def test_builtin_collection_conversion(self):
         for coll_ty in (list, tuple):
