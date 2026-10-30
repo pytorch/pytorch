@@ -1548,6 +1548,19 @@ class TritonOverrides(OpOverrides):
             return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
         return f"{x} - {y}"
 
+    @staticmethod
+    def mul(x, y):
+        if (
+            utils.is_strict_cuda_triton()
+            and get_dtype_handler().mul(x, y) == torch.float64
+        ):
+            x = TritonOverrides._cast_libdevice_arg(x, torch.float64)
+            y = TritonOverrides._cast_libdevice_arg(y, torch.float64)
+            # CUDA chooses the first NaN; fusion can commute the multiplication.
+            result = f"triton_helpers.eager_unary_nan({y}, {x} * {y})"
+            return f"triton_helpers.eager_unary_nan({x}, {result})"
+        return f"{x} * {y}"
+
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
         if isinstance(arg, torch._prims_common.Number):
