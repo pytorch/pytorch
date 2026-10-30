@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import dataclasses
 import functools
 import hashlib
 import json
@@ -1152,6 +1153,43 @@ class TestTritonHeuristics(TestCase):
                     else:
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_bwd_autotune_configs_gated_on_arch_name(self):
+        """gfx950 autotunes bf16/fp16 flex backward configs at num_stages 1 and 2.
+
+        fp32, and a target without its own list, keep the shared one.
+        """
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+
+        heuristic = ROCmConfigHeuristic()
+        shared = heuristic.flex_attn_bwd_autotune_configs
+
+        def configs_for(arch, dtype):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
+                    lambda: arch,
+                ),
+                config.patch(max_autotune=True),
+            ):
+                return heuristic.get_flex_attn_bwd_configs(128, dtype)
+
+        for dtype in (torch.bfloat16, torch.float16):
+            gfx950 = configs_for("gfx950", dtype)
+            for c in shared:
+                self.assertIn(c, gfx950, msg=dtype)
+                self.assertIn(dataclasses.replace(c, num_stages=2), gfx950, msg=dtype)
+
+        self.assertEqual(
+            configs_for("gfx950", torch.float32), configs_for("gfx000", torch.float32)
+        )
+        fallback = configs_for("gfx000", torch.float16)
+        self.assertEqual(fallback[: len(shared)], shared)
+        for arch in ("gfx942", "gfx1250"):
+            if arch not in heuristic.flex_bwd_autotune_configs_by_arch:
+                self.assertEqual(configs_for(arch, torch.float16), fallback, msg=arch)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize(

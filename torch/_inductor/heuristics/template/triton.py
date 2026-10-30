@@ -1908,6 +1908,23 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if BLOCK2 % BLOCK1 == 0
         ]
 
+        # Backward autotune lists measured per target and dtype, selected by exact
+        # match like the defaults above. For bf16 and fp16, gfx950 adds a
+        # num_stages=2 copy of every config, which wins on most shapes there, and
+        # keeps the num_stages=1 configs so no shape loses the config it picks today.
+        gfx950_bwd_autotune_configs = self.flex_attn_bwd_autotune_configs + [
+            dataclasses.replace(c, num_stages=2)
+            for c in self.flex_attn_bwd_autotune_configs
+        ]
+        self.flex_bwd_autotune_configs_by_arch: dict[
+            str, dict[torch.dtype, list[FlexBwDConfig]]
+        ] = {
+            "gfx950": {
+                torch.bfloat16: gfx950_bwd_autotune_configs,
+                torch.float16: gfx950_bwd_autotune_configs,
+            },
+        }
+
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
             ROCmFlexDecodeConfig(32, 1, 4, kpack=default_kpack),
             ROCmFlexDecodeConfig(64, 1, 4, kpack=default_kpack),
@@ -2227,7 +2244,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            flex_attn_bwd_configs += self.flex_bwd_autotune_configs_by_arch.get(
+                rocm_gfx_arch(), {}
+            ).get(dtype, self.flex_attn_bwd_autotune_configs)
 
         default_kpack = get_default_kpack()
         arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
