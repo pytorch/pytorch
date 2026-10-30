@@ -2698,6 +2698,24 @@ class AOTInductorTestsTemplate:
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
 
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                output = torch.zeros_like(x, dtype=torch.int32)
+                output[1:] = x[:-1]
+                return output
+
+        inputs = [
+            (torch.arange(size, dtype=torch.int64, device=self.device),)
+            for size in (2, 0, 1, 7, 35)
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            inputs,
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        )
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
