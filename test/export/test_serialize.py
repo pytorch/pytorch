@@ -2757,20 +2757,22 @@ class TestPredispatchSerialization(TestCase):
             torch.export.save(loaded_ep, io.BytesIO())
 
             # Load and run in a new process, where only torch is imported.
-            script = (
-                "import torch;"
-                f"ep = torch.export.load(r'{path}');"
-                "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
-                "print([t.tolist() for t in out])"
-            )
-            out = subprocess.check_output(
-                [sys.executable, "-c", script],
-                cwd=os.path.dirname(path),
-                text=True,
-            )
-        self.assertEqual(
-            out.strip().splitlines()[-1], str([t.tolist() for t in expected])
-        )
+            # Packaged fbcode test binaries cannot start a plain Python with torch.
+            if not IS_FBCODE:
+                script = (
+                    "import torch;"
+                    f"ep = torch.export.load(r'{path}');"
+                    "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
+                    "print([t.tolist() for t in out])"
+                )
+                out = subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    cwd=os.path.dirname(path),
+                    text=True,
+                )
+                self.assertEqual(
+                    out.strip().splitlines()[-1], str([t.tolist() for t in expected])
+                )
 
     def test_predispatch_flat_apply_non_torch_function_raises(self):
         from torch._export.wrappers import allow_in_pre_dispatch_graph
