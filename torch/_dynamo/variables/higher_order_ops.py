@@ -4527,20 +4527,21 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.NestedUserFunctionVariable
             ):
                 # Nested/closure context_fn defined inside the compiled frame.
-                # Reconstruct it as a real callable when the closure is constant;
-                # otherwise graph-break instead of InternalTorchDynamoError.
+                # Reconstruct it as a real callable when closure/defaults are
+                # constant; otherwise graph-break instead of InternalTorchDynamoError.
                 try:
                     context_fn = ctx.guard_as_python_constant()
                 except Unsupported as e:
                     unimplemented(
-                        gb_type="checkpoint context_fn nested function with non-constant closure",
+                        gb_type="checkpoint context_fn nested function with non-constant closure or defaults",
                         context=f"context_fn={ctx}",
                         explanation="checkpoint needs context_fn as a Python callable, "
-                        "but this nested function's closure cannot be resolved to "
-                        "Python constants at trace time.",
+                        "but this nested function's closure or defaults cannot be "
+                        "resolved to Python constants at trace time.",
                         hints=[
                             "Define context_fn at module scope, or pass a "
-                            "functools.partial / bound method whose closure is constant.",
+                            "functools.partial with constant arguments, or a method "
+                            "bound to an object created outside the compiled region.",
                         ],
                         from_exc=e,
                     )

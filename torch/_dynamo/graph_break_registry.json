@@ -6803,5 +6803,15 @@
         "Please open an issue."
       ]
     }
+  ],
+  "GB1136": [
+    {
+      "Gb_type": "checkpoint context_fn nested function with non-constant closure or defaults",
+      "Context": "context_fn={ctx}",
+      "Explanation": "checkpoint needs context_fn as a Python callable, but this nested function's closure or defaults cannot be resolved to Python constants at trace time.",
+      "Hints": [
+        "Define context_fn at module scope, or pass a functools.partial with constant arguments, or a method bound to an object created outside the compiled region."
+      ]
+    }
   ]
 }
