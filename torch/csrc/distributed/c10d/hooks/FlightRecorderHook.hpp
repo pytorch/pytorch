@@ -55,6 +55,22 @@
 // disk when the backend detects a timeout or an error, and is the single
 // trigger for a dump-on-failure: backends do not dump themselves, they only run
 // their abort hooks.
+//
+// A failure is seen only by the ranks with work in the failed collective, while
+// the rank that never issued it -- the usual culprit of a hang -- sees nothing.
+// So, like stock ProcessGroupNCCL, the first abort hook to fire in a process
+// also broadcasts a dump signal through the group's global store, and one
+// thread per process polls that store every TORCH_FR_COORD_CHECK_MILSEC and
+// dumps when any rank signaled since the poller started or the last rearm().
+// The thread is started by the first hook attached while none runs; it polls
+// that hook's global store, through the same client as other store users, and
+// dumps that hook's default backend. So every group is assumed to share one
+// root store, as groups created by init_process_group and new_group do.
+// The signal is a counter of the hook's own; stock's exception_dump key is left
+// alone (see kDumpSignalKey). Giving peers time to dump before the process
+// exits is up to the backend: nccl2's abortProcess, which runs only when error
+// handling tears the process down, waits TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC
+// before ::abort().
 
 #pragma once
 
@@ -100,6 +116,17 @@ class TORCH_API FlightRecorderHook
   // Detach from the process group. Idempotent.
   void remove();
 
+  // Lets this process dump and broadcast the dump signal again, for a backend
+  // that survives a failure: called once its communicator is reconfigured.
+  // Signals sent before this are ignored by this process's poller. Abort hooks
+  // of a backend that failed before this and has not been rearmed since stay
+  // ignored: they report the failure already handled. rearm() rearms every
+  // backend. Waits up to TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC for a broadcast
+  // this process has in flight, and reads the store: call without the GIL.
+  // The next dump overwrites the previous trace file.
+  static void rearm(const Backend& backend);
+  static void rearm();
+
  private:
   // The backend serving one device type of the group. A group can mix
   // backends ("cpu:gloo,cuda:nccl2"), so the recorder instance, the comm_lib
@@ -144,9 +171,11 @@ class TORCH_API FlightRecorderHook
   void retireCompleted(uint64_t completion_key, std::optional<float> duration);
   // The backend's own measurement, or nullopt if it cannot time collectives.
   std::optional<float> workDuration(const Work& work);
-  // Dumps the trace to disk, at most once per process. Deliberately takes no
-  // hook lock; see the definition.
+  // Dumps the trace to disk, at most once per arming (see rearm()).
+  // Deliberately takes no hook lock; see the definition.
   void onAbort();
+  // Null: every backend.
+  static void rearm(const Backend* backend);
 
   c10::intrusive_ptr<ProcessGroup> pg_;
   int64_t hook_id_;
@@ -155,6 +184,10 @@ class TORCH_API FlightRecorderHook
   // Whether attach() got an abort hook registered; false for backends that
   // have none (gloo), whose unregister call would throw just as loudly.
   bool abort_hook_registered_{false};
+  // The backend the abort hook is registered on, and the arming in which it
+  // last fired; see onAbort. failed_generation_ is guarded by the dump mutex.
+  const Backend* abort_backend_{nullptr};
+  std::optional<uint64_t> failed_generation_;
   // Whether the backend pushes completion. When false the post-hook retires the
   // entry at issue, since nothing else ever will. Asked of the default backend,
   // the one ProcessGroup routes hook registration to, so a mixed group whose
@@ -167,6 +200,11 @@ class TORCH_API FlightRecorderHook
   // Cap on inflight_, see onPre.
   size_t max_inflight_{0};
   std::shared_ptr<ProcessGroupStatus> pg_status_;
+  // The store every rank of the job shares, i.e. the group's store without
+  // its prefix; null if the group has none. Carries the dump signal.
+  c10::intrusive_ptr<Store> global_store_;
+  // Whether attach() took a reference on the dump signal poller.
+  bool polls_dump_signal_{false};
 
   // Sequencing and the op_id -> in-flight-op map. The mutex guards against
   // concurrent collectives from multiple threads (the hooks fire on the issuing
