@@ -2627,6 +2627,8 @@ class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
             "TORCH_NCCL_EXTRA_DUMP_ON_EXEC",
             "TORCH_DISTRIBUTED_DEBUG",
             "TORCH_CPP_LOG_LEVEL",
+            "TORCH_NCCL_ENABLE_TIMING",
+            "NCCL_ENABLE_TIMING",
         }
         child_env = {k: v for k, v in os.environ.items() if k not in scrubbed}
         child_env.update(env)
@@ -2646,18 +2648,30 @@ class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
             "TORCH_NCCL_NONBLOCKING_TIMEOUT=60 (nccl2 uses the PG timeout)", output
         )
         self.assertIn(
-            "TORCH_NCCL_DESYNC_DEBUG=1 (for timing use TORCH_NCCL_ENABLE_TIMING=1)",
+            "TORCH_NCCL_DESYNC_DEBUG=1 (for timing set TORCH_NCCL_ENABLE_TIMING=1)",
             output,
         )
         self.assertIn('Use backend "nccl-legacy"', output)
-        self.assertIn("otherwise unset them. At debug level DETAIL", output)
+        # The DETAIL note follows, without repeating the timing hint.
+        self.assertIn(
+            "otherwise unset them. At debug level DETAIL, nccl-legacy also enables "
+            "desync debug and timing; nccl2 does not (for desync debug use backend "
+            '"nccl-legacy").',
+            output,
+        )
+        self.assertEqual(output.count("TORCH_NCCL_ENABLE_TIMING=1"), 1, output)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_alias_and_malformed_value(self) -> None:
         output = self._run_child(
-            {"NCCL_DESYNC_DEBUG": "1", "TORCH_NCCL_PROPAGATE_ERROR": "bogus"}
+            {
+                "NCCL_DESYNC_DEBUG": "1",
+                "TORCH_NCCL_PROPAGATE_ERROR": "bogus",
+                "NCCL_ENABLE_TIMING": "1",
+                "TORCH_DISTRIBUTED_DEBUG": "DETAIL",
+            }
         )
         # The name actually set, and no getCvarBool deprecation warning naming
         # TORCH_NCCL_DESYNC_DEBUG.
@@ -2665,6 +2679,9 @@ class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
         self.assertIn("NCCL_DESYNC_DEBUG=1", output)
         # A malformed value is reported rather than failing construction.
         self.assertIn("TORCH_NCCL_PROPAGATE_ERROR=bogus", output)
+        # Timing is already on (via its alias): no timing hint anywhere.
+        self.assertIn('(for desync debug use backend "nccl-legacy").', output)
+        self.assertNotIn("for timing", output)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
@@ -2692,6 +2709,11 @@ class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
         self.assertNotIn(_IGNORED_ENV_WARNING, output)
         # DETAIL alone gets the note but no advice to unset anything.
         self.assertEqual(output.count("At debug level DETAIL"), 1, output)
+        self.assertIn(
+            'nccl2 does not (for desync debug use backend "nccl-legacy"; '
+            "for timing set TORCH_NCCL_ENABLE_TIMING=1).",
+            output,
+        )
         self.assertNotIn("otherwise unset them", output)
 
 

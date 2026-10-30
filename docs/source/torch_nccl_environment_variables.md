@@ -3,7 +3,7 @@
 
 These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Each entry below states which backends read it: **nccl-legacy only**, **All NCCL backends**, or the backends it applies to.
 
-`nccl` and `nccl-lazy` warn once per process, at first construction, when a **nccl-legacy only** variable is set to a non-default value they do not already behave as (any value, for numeric and path variables), and at debug level `DETAIL`, under which `nccl-legacy` also enables desync debugging and timing.
+`nccl` and `nccl-lazy` warn once per process, at first construction, when a **nccl-legacy only** variable is set to a non-default value they do not already behave as (any value, for numeric and path variables), except `TORCH_NCCL_EXTRA_DUMP_ON_EXEC` (`FlightRecorderHook` already dumps on detected failures), and at debug level `DETAIL`, under which `nccl-legacy` also enables desync debugging and timing.
 
 `nccl-legacy` records into the flight recorder natively and dumps it itself. For `nccl`, `nccl-lazy` and other backends without native support, `FlightRecorderHook` records and dumps the trace. The recorder reads the buffer size, C++ stack and dump file variables; the dump-on-failure variables are read by `nccl-legacy` or by `FlightRecorderHook`, as noted per entry. Where both are read, the `TORCH_FR_*` name takes precedence over its `TORCH_NCCL_*` alias.
 

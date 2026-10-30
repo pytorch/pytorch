@@ -137,12 +137,39 @@ void warnIgnoredLegacyEnvOnce() {
     // TORCH_NCCL_TEARDOWN_ON_TIMEOUT, because nccl2 tears down on timeout as
     // =1 requests and =0 only matters with TORCH_NCCL_RETHROW_CUDA_ERRORS=0,
     // which is reported; TORCH_NCCL_EXTRA_DUMP_ON_EXEC, because
-    // FlightRecorderHook already dumps on detected failures (only legacy's
-    // extra dumps on abort() and on destroying a group that was never shut
-    // down are lost); and
+    // FlightRecorderHook already dumps on detected failures (lost: legacy's
+    // extra dump and cross-rank dump signal on abort(), on destroying a group
+    // that was never shut down, and on watchdog exceptions not tied to a
+    // work); and
     // TORCH_NCCL_ABORT_IN_DESTROY_PG, which no backend reads.
     constexpr const char* kTimingHint =
-        "for timing use TORCH_NCCL_ENABLE_TIMING=1";
+        "for timing set TORCH_NCCL_ENABLE_TIMING=1";
+    // Parses like getCvarBool, but never throws.
+    auto parseBool = [](const std::string& val) -> std::optional<bool> {
+      auto lower = val;
+      std::transform(
+          lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+          });
+      if (lower == "y" || lower == "yes" || lower == "1" || lower == "t" ||
+          lower == "true") {
+        return true;
+      }
+      if (lower == "n" || lower == "no" || lower == "0" || lower == "f" ||
+          lower == "false") {
+        return false;
+      }
+      return std::nullopt;
+    };
+    // The timing hint is shown at most once, and not when timing is on (the
+    // first set name wins, as in getCvarBool).
+    bool timingHintNeeded = true;
+    for (const auto& name : ::c10d::TORCH_NCCL_ENABLE_TIMING) {
+      if (auto v = c10::utils::get_env(name.c_str()); v.has_value()) {
+        timingHintNeeded = parseBool(*v) != std::optional<bool>(true);
+        break;
+      }
+    }
     constexpr Knob kKnobs[] = {
         {"TORCH_NCCL_RETHROW_CUDA_ERRORS", true, nullptr, nullptr},
         {"TORCH_NCCL_PROPAGATE_ERROR", false, nullptr, nullptr},
@@ -169,23 +196,17 @@ void warnIgnoredLegacyEnvOnce() {
       if (!val.has_value() || val->empty()) {
         continue;
       }
-      if (knob.nccl2Value.has_value()) {
-        auto lower = *val;
-        std::transform(
-            lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
-              return static_cast<char>(std::tolower(c));
-            });
-        const bool isTrue = lower == "y" || lower == "yes" || lower == "1" ||
-            lower == "t" || lower == "true";
-        const bool isFalse = lower == "n" || lower == "no" || lower == "0" ||
-            lower == "f" || lower == "false";
-        if ((*knob.nccl2Value && isTrue) || (!*knob.nccl2Value && isFalse)) {
-          continue;
-        }
+      if (knob.nccl2Value.has_value() && parseBool(*val) == knob.nccl2Value) {
+        continue;
       }
       auto entry = c10::str(knob.name, "=", *val);
-      if (knob.hint != nullptr) {
-        entry = c10::str(entry, " (", knob.hint, ")");
+      const char* hint = knob.hint;
+      if (hint == kTimingHint) {
+        hint = timingHintNeeded ? hint : nullptr;
+        timingHintNeeded = false;
+      }
+      if (hint != nullptr) {
+        entry = c10::str(entry, " (", hint, ")");
       }
       ignored.push_back(std::move(entry));
     }
@@ -203,8 +224,9 @@ void warnIgnoredLegacyEnvOnce() {
           msg,
           msg.empty() ? "" : " ",
           "At debug level DETAIL, nccl-legacy also enables desync debug and "
-          "timing; nccl2 does not (",
-          kTimingHint,
+          "timing; nccl2 does not (for desync debug use backend "
+          "\"nccl-legacy\"",
+          timingHintNeeded ? c10::str("; ", kTimingHint) : "",
           ").");
     }
     if (msg.empty()) {
