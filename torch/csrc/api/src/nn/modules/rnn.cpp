@@ -429,8 +429,8 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     Tensor hx) {
-  bool hx_supplied = hx.defined();
-  if (!hx.defined()) {
+  const bool hx_supplied = hx.defined();
+  if (!hx_supplied) {
     int64_t num_directions = options_base.bidirectional() ? 2 : 1;
     hx = torch::zeros(
         {options_base.num_layers() * num_directions,
@@ -608,7 +608,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
   const bool hx_supplied = hx_opt.has_value();
   std::tuple<Tensor, Tensor> hx;
-  if (!hx_opt.has_value()) {
+  if (!hx_supplied) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
     int64_t real_hidden_size =
         options.proj_size() > 0 ? options.proj_size() : options.hidden_size();
@@ -719,8 +719,8 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     Tensor hx) {
-  bool hx_supplied = hx.defined();
-  if (!hx.defined()) {
+  const bool hx_supplied = hx.defined();
+  if (!hx_supplied) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
     hx = torch::zeros(
         {options.num_layers() * num_directions,
