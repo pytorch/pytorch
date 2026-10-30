@@ -157,6 +157,26 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
+    def test_user_generator_used_when_distribute_region_disabled(self):
+        device_mesh = self.build_device_mesh()
+        dtensor = torch.distributed.tensor.empty(
+            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+        dtensor.uniform_()  # lazily constructs the RNG tracker
+        random._rng_tracker.distribute_region_enabled = False
+
+        rng = torch.Generator(device=self.device_type).manual_seed(42)
+        state_before = rng.get_state()
+        dtensor.uniform_(generator=rng)
+
+        # No per-shard offsets without the tracker: every rank draws from seed 42.
+        ref_rng = torch.Generator(device=self.device_type).manual_seed(42)
+        expected = torch.empty_like(dtensor.to_local()).uniform_(generator=ref_rng)
+        self.assertEqual(dtensor.to_local(), expected)
+        self.assertNotEqual(rng.get_state(), state_before)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value.
         # The DTensor random ops will use the same generator as the default one on the device.
@@ -1132,21 +1152,19 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(1)
-    def test_user_generator_used_when_distribute_region_disabled(self):
+    def test_random_op_on_cpu_mesh_with_accelerator_tracker(self):
+        # A CPU-mesh DTensor was never offloaded, so an existing accelerator
+        # tracker must neither raise nor reset the CPU generator for it.
         mesh = self.build_device_mesh()
-        t = torch.empty(4, 4, device=self.device_type)
-        dtensor = distribute_tensor(t, mesh, [Replicate()])
-        dtensor.uniform_()  # lazily constructs the RNG tracker
-        random._rng_tracker.distribute_region_enabled = False
+        t = torch.empty(4, device=self.device_type)
+        distribute_tensor(t, mesh, [Replicate()]).uniform_()
+        self.assertIsNotNone(random._rng_tracker)
 
-        gen = torch.Generator(device=self.device_type).manual_seed(42)
-        state_before = gen.get_state()
-        dtensor.uniform_(generator=gen)
-
-        ref_gen = torch.Generator(device=self.device_type).manual_seed(42)
-        expected = torch.empty_like(t).uniform_(generator=ref_gen)
-        self.assertEqual(dtensor.to_local(), expected)
-        self.assertNotEqual(gen.get_state(), state_before)
+        cpu_mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        local = torch.empty(4, 4)
+        dtensor = DTensor.from_local(local, cpu_mesh, [Replicate()], run_check=False)
+        samples = [dtensor.normal_().to_local().clone() for _ in range(2)]
+        self.assertNotEqual(samples[0], samples[1])
 
 
 if __name__ == "__main__":

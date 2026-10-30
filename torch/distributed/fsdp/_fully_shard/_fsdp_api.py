@@ -244,6 +244,14 @@ class CPUOffloadPolicy(OffloadPolicy):
     Sharded gradients are copied device-to-host in backward, and the optimizer
     step runs on CPU with CPU optimizer states.
 
+    .. note:: DTensor random ops (e.g. ``reset_parameters()`` after
+        ``module.to_empty(device="cpu")``) raise on CPU-offloaded parameters,
+        since DTensor cannot coordinate CPU RNG across ranks. Either initialize
+        the parameters before calling ``fully_shard`` (with the same seed on
+        all ranks), or initialize each parameter's ``to_local()`` after seeding
+        each rank's CPU generator so that shards get different values and
+        replicas get the same values.
+
     Attributes:
         pin_memory (bool): Whether to pin sharded parameter and gradient
             memory. Pinning memory allows both more efficient H2D/D2H copies

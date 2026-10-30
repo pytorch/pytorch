@@ -418,6 +418,8 @@ class OpDispatcher:
                     random._rng_tracker
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
+                    # Meshes of other device types (e.g. a CPU side mesh) run locally.
+                    and first_spec.mesh.device_type == random._rng_tracker._device.type
                 ):
                     tracker_device_type = random._rng_tracker._device.type
                     if first_local_arg.device.type != tracker_device_type:
@@ -426,9 +428,10 @@ class OpDispatcher:
                             f"DTensor random op {op_call} does not support local tensors on "
                             f"{first_local_arg.device.type} when the DTensor RNG tracker is on "
                             f"{tracker_device_type}, since RNG cannot be coordinated across ranks. "
-                            f"Either run the op on {tracker_device_type} before offloading, or run "
-                            "it on DTensor.to_local() after seeding each rank's CPU generator so "
-                            "that shards get different values and replicas get the same values."
+                            "Either run the op before offloading (e.g. before fully_shard with "
+                            "CPUOffloadPolicy), or run it on DTensor.to_local() after seeding each "
+                            "rank's CPU generator so that shards get different values and replicas "
+                            "get the same values."
                         )
                     accelerator = torch.accelerator.current_accelerator()
                     if (
@@ -469,7 +472,8 @@ class OpDispatcher:
                                 **op_info.local_kwargs,
                             )
                 else:
-                    # No rng_tracker, meta tensor, or distribute_region disabled.
+                    # No rng_tracker, meta tensor, distribute_region disabled, or a
+                    # mesh on a different device type than the tracker.
                     # Nothing else will pass the generator along, so restore it.
                     if maybe_user_generator is not None:
                         op_info.local_kwargs["generator"] = maybe_user_generator
