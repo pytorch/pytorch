@@ -130,16 +130,18 @@ def _frozen_kernel_config() -> dict[str, object]:
 # override them.
 CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
 
+# Options under which a compile saves no cache entry. A DynamoTracer artifact
+# ships the cache entries each graph's compile saves, so a capture refuses them.
+UNCACHED_INDUCTOR_OPTIONS = ("freezing", "force_disable_caches", "fx_wrapper")
+
 
 def _check_capture_options(options: Mapping[str, object]) -> None:
-    uncached = [
-        k for k in ("freezing", "force_disable_caches", "fx_wrapper") if options.get(k)
-    ]
+    uncached = [k for k in UNCACHED_INDUCTOR_OPTIONS if options.get(k)]
     if uncached:
         raise PackageError(
-            f"a DynamoTracer capture cannot compile with {uncached} on: the "
-            "artifact ships each graph's compile from Inductor's caches, which "
-            "such a compile never files."
+            f"a DynamoTracer capture cannot compile with {uncached} on: such a "
+            "compile saves no cache entry, and the artifact is built from the "
+            "cache entries each graph's compile saves."
         )
     pinned = CAPTURE_INDUCTOR_PATCH.items()
     overridden = {k: v for k, v in pinned if options.get(k, v) != v}
