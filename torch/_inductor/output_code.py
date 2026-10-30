@@ -897,13 +897,6 @@ class CompiledFxGraph(OutputCode):
             counters["inductor"]["cudagraph_skips"] += 1
             BoxedBool.disable(cudagraphs)
 
-        # A graph compiled without CUDA graphs (an override_cudagraphs annotation)
-        # whose post-compile shares a cudagraphs box turned on, as a precompile load
-        # does for a forward and backward: not this graph's to wrap, nor to turn off
-        # for the other.
-        if cudagraphs and self.cudagraph_info is None:
-            cudagraphs = BoxedBool(False)
-
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.
@@ -916,6 +909,12 @@ class CompiledFxGraph(OutputCode):
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
+            elif self.cudagraph_info is None:
+                # Compiled without CUDA graphs (an override_cudagraphs annotation)
+                # but post-compiled with a cudagraphs box turned on, which a
+                # precompile load shares between a forward and its backward: not
+                # this graph's to wrap, nor to turn off for the other.
+                cudagraphs = BoxedBool(False)
             else:
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:

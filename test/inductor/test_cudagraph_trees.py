@@ -1473,6 +1473,26 @@ if HAS_CUDA_AND_TRITON:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        @torch._inductor.config.patch("graph_partition", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cache_hit_counts_a_cpu_device_skip(self):
+            # The compile-time reason is re-applied on a hit, which has no
+            # cudagraph_info either.
+            @torch.compile(mode="reduce-overhead")
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            for hits in range(2):
+                torch._dynamo.reset()
+                counters.clear()
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
         # Currently fx graph cache is turned off for specialize_float=False
         @torch._dynamo.config.patch("specialize_float", True)
         @requires_multigpu()
