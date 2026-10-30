@@ -1216,6 +1216,34 @@
       "Hints": []
     }
   ],
+  "GB4217": [
+    {
+      "Gb_type": "bytearray item assignment with a non-constant byte value",
+      "Context": "value: {raw_value}",
+      "Explanation": "Dynamo cannot validate a bytearray element that is not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "bytearray item assignment with a non-constant byte value",
+      "Context": "value: {value}",
+      "Explanation": "Dynamo cannot validate a bytearray element that is not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8148": [
+    {
+      "Gb_type": "bytearray slice assignment with non-constant elements",
+      "Context": "value: {value}",
+      "Explanation": "Dynamo cannot validate bytearray slice elements that are not known at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0073": [
     {
       "Gb_type": "Invoking an nn.Module inside a HigherOrderOperator",
@@ -5467,6 +5495,16 @@
       ]
     }
   ],
+  "GB0680": [
+    {
+      "Gb_type": "bytearray mutation from an unsupported buffer",
+      "Context": "value: {value}",
+      "Explanation": "Dynamo cannot read this object's buffer, which takes precedence over its iterator for bytearray mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3343": [
     {
       "Gb_type": "Cannot reconstruct P2POpVariable",
@@ -5527,6 +5565,16 @@
       "Gb_type": "nb_positive_impl not implemented",
       "Context": "{type(self).__name__} has nb_positive slot but no nb_positive_impl override",
       "Explanation": "The type {self.python_type_name()} has an nb_positive C slot but the corresponding VariableTracker doesn't implement nb_positive_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7883": [
+    {
+      "Gb_type": "bytearray mutation with an unobservable buffer export",
+      "Context": "bytearray: {self}",
+      "Explanation": "Dynamo cannot determine whether an input bytearray has an exported buffer, which can prevent resizing.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

@@ -1457,6 +1457,15 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(), range(5))
 
+    def test_range_slice_large_bounds(self):
+        def fn(x):
+            r = range(2 * sys.maxsize)[sys.maxsize + 1 : sys.maxsize + 2]
+            s = range(1 << 100)[:: 1 << 70]
+            return (r.start, r.stop, r.step, s.start, s.stop, s.step), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_range_index_raises(self):
         class IX:
             def __index__(self):
@@ -1486,6 +1495,67 @@ class TestRangeUserIndex(torch._dynamo.test_case.TestCase):
                 return "type_error"
 
         self.assertEqual(fn(), "type_error")
+
+
+@instantiate_parametrized_tests
+class TestSliceIndex(torch._dynamo.test_case.TestCase):
+    @parametrize("sequence", [[0, 1, 2], (0, 1, 2), bytearray(b"abc"), range(3)])
+    def test_index_order_and_large_bounds(self, sequence):
+        class Index:
+            def __init__(self, value, name, calls):
+                self.value = value
+                self.name = name
+                self.calls = calls
+
+            def __index__(self):
+                self.calls.append(self.name)
+                return self.value
+
+        def fn(seq, x):
+            calls = []
+            start = Index(-(1 << 100), "start", calls)
+            stop = Index(1 << 100, "stop", calls)
+            step = Index(1, "step", calls)
+            result = seq[start:stop:step]
+            return result, calls, x + 1
+
+        x = torch.ones(1)
+        expected = fn(sequence, x)
+        self.assertEqual(expected[1], ["step", "start", "stop"])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(sequence, x), expected
+        )
+
+    @parametrize(
+        "sequence", [[0, 1, 2], (0, 1, 2), "abc", b"abc", bytearray(b"abc"), range(3)]
+    )
+    def test_zero_step(self, sequence):
+        def fn(seq, x):
+            try:
+                seq[::0]
+            except ValueError:
+                return "caught", x + 1
+            return "ok", x + 1
+
+        x = torch.ones(1)
+        expected = fn(sequence, x)
+        self.assertEqual(expected[0], "caught")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(sequence, x), expected
+        )
+
+    @parametrize(
+        "sequence", [[0, 1, 2], (0, 1, 2), "abc", b"abc", bytearray(b"abc"), range(3)]
+    )
+    def test_large_bounds(self, sequence):
+        def fn(seq, x):
+            return seq[-(1 << 100) : 1 << 100 : 1 << 70], x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(sequence, x),
+            fn(sequence, x),
+        )
 
 
 @instantiate_parametrized_tests

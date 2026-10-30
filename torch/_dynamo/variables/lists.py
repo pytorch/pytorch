@@ -14,7 +14,9 @@ class that handles its unique behaviors while integrating with Dynamo's
 variable tracking system.
 """
 
+import array
 import collections
+import ctypes
 import operator
 import sys
 from typing import Any, Optional, TYPE_CHECKING
@@ -25,7 +27,7 @@ import torch.fx
 from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.utils._pytree import SequenceKey
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
@@ -36,6 +38,7 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -200,10 +203,6 @@ class BaseListVariable(VariableTracker):
                 )
         elif pyslice_check(arg):
             index = arg.as_index_slice(tx)
-            if index.step == 0:
-                raise_observed_exception(
-                    ValueError, tx, args=["slice step cannot be zero"]
-                )
             # Slicing a list/tuple gives a new local, not sourced from self.
             mutation_type = ValueMutationNew() if self.mutation_type else None
             return self._new_list(self.items[index], mutation_type=mutation_type)
@@ -2096,7 +2095,6 @@ class TupleVariable(BaseListVariable):
 
 class ByteArrayVariable(VariableTracker):
     # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-    # Missing slots: tp_as_sequence.sq_ass_item, tp_as_mapping.mp_ass_subscript
     _cpython_type = bytearray
     _index_not_found_msg = (
         "bytearray.index(x): x not in bytearray"
@@ -2127,6 +2125,38 @@ class ByteArrayVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.data)})"
 
+    def _set_data(
+        self,
+        tx: "InstructionTranslatorBase",
+        new_data: bytearray,
+        *,
+        may_resize: bool | None = None,
+    ) -> None:
+        """Swap in a new buffer, recording the mutation for replay.
+
+        may_resize marks stores that CPython runs through _canresize even when
+        the buffer keeps its length (empty extended slices). bytearray.join
+        checks that flag for its separator export; a plain length comparison
+        would miss those stores.
+        """
+        if may_resize is None:
+            may_resize = len(new_data) != len(self.data)
+        tx.output.side_effects.mutation(self)
+        # Replay writes back to the input; tracing must only replace our copy.
+        self.data = new_data
+
+    def _check_unobservable_export(self, tx: "InstructionTranslatorBase") -> None:
+        # An input may have a live buffer export that is absent from our copy.
+        # Replay runs outside the user's exception handler, so defer operations
+        # that can raise BufferError to eager execution.
+        if self.source is not None:
+            unimplemented(
+                gb_type="bytearray mutation with an unobservable buffer export",
+                context=f"bytearray: {self}",
+                explanation="Dynamo cannot determine whether an input bytearray has an exported buffer, which can prevent resizing.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2140,10 +2170,6 @@ class ByteArrayVariable(VariableTracker):
                 raise_observed_exception(IndexError, tx, args=list(e.args))
         elif pyslice_check(key):
             index = key.as_index_slice(tx)
-            if index.step == 0:
-                raise_observed_exception(
-                    ValueError, tx, args=["slice step cannot be zero"]
-                )
             return ByteArrayVariable(
                 bytearray(self.data[index]),
                 source=None,
@@ -2166,6 +2192,192 @@ class ByteArrayVariable(VariableTracker):
             return ConstantVariable.create(self.data[index])
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return super().mp_ass_subscript_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel).
+        if pyindex_check(maybe_get_python_type(key)):
+            # bytearray_ass_subscript runs PyNumber_AsSsize_t on the index, so
+            # an index that cannot fit keeps that IndexError instead of turning
+            # into a range error.
+            i = pynumber_as_ssize_t(tx, key).as_python_constant()
+            # Explicit unbound dispatch. The sequence slot converts the value
+            # before it normalizes a negative index, which is CPython's order.
+            return ByteArrayVariable.sq_ass_item_impl(
+                self, tx, ConstantVariable.create(i), value
+            )
+        elif pyslice_check(key):
+            index = key.as_index_slice(tx)
+            delete = value is None
+            src = None
+            if not delete:
+                value = value.realize()
+                reparse_slice = value is self or not isinstance(
+                    value, ByteArrayVariable
+                )
+                self._check_buffer_input(tx, value)
+                if isinstance(value, (ConstantVariable, ByteArrayVariable)):
+                    src = value.as_python_constant()
+                elif issubclass(maybe_get_python_type(value), (str, complex)) or (
+                    value.tp_as_number.nb_int
+                    or value.tp_as_number.nb_float
+                    or value.tp_as_number.nb_index
+                ):
+                    raise_type_error(
+                        tx,
+                        "can assign only bytes, buffers, or iterables of ints in range(0, 256)",
+                    )
+                elif vt_is_iterable(value):
+                    try:
+                        iterator = generic_getiter(tx, value)
+                    except ObservedTypeError:
+                        handle_observed_exception(tx)
+                        raise_type_error(
+                            tx,
+                            f"cannot convert '{value.python_type_name()}' object to bytearray",
+                        )
+                    src = self._unpack_byte_values(tx, iterator)
+                    if src is None:
+                        unimplemented(
+                            gb_type="bytearray slice assignment with non-constant elements",
+                            context=f"value: {value}",
+                            explanation="Dynamo cannot validate bytearray slice elements that are not known at trace time.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                else:
+                    raise_type_error(
+                        tx,
+                        f"cannot convert '{value.python_type_name()}' object to bytearray",
+                    )
+                if reparse_slice:
+                    # CPython converts the RHS to a bytearray, then re-enters
+                    # assignment with the original slice, including its callbacks.
+                    converted = bytearray()
+                    try:
+                        converted[:] = src
+                    except (TypeError, ValueError) as e:
+                        raise_observed_exception(type(e), tx, args=list(e.args))
+                    src = converted
+                    index = key.as_index_slice(tx)
+            step = index.step if index.step is not None else 1
+            # Run the store on a copy: CPython owns the grow/shrink logic and
+            # the extended-slice length check, and tracing must not write
+            # through to a sourced object.
+            new_data = bytearray(self.data)
+            try:
+                if delete:
+                    del new_data[index]
+                else:
+                    new_data[index] = src
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            may_resize = len(new_data) != len(self.data) or (step != 1 and not src)
+            if may_resize:
+                self._check_unobservable_export(tx)
+            self._set_data(tx, new_data, may_resize=may_resize)
+            return ConstantVariable.create(None)
+        else:
+            raise_type_error(
+                tx,
+                f"bytearray indices must be integers or slices, "
+                f"not {key.python_type_name()}",
+            )
+
+    def sq_ass_item_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # bytearray_setitem: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return super().sq_ass_item_impl(tx, key, value)
+        # value=None signals delete (CPython NULL sentinel). The mapping path
+        # forwards the raw index; PySequence_SetItem adjusts it before dispatch.
+        index = key.nb_index_impl(tx).as_python_constant()
+        # bytearray_setitem validates the byte value before it range-checks
+        # the index, so a bad value wins over a bad index.
+        byte = None
+        if value is not None:
+            raw_value = value
+            value = pynumber_index(tx, value)
+            if not value.is_python_constant():
+                unimplemented(
+                    gb_type="bytearray item assignment with a non-constant byte value",
+                    context=f"value: {raw_value}",
+                    explanation="Dynamo cannot validate a bytearray element that is not known at trace time.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            byte = value.as_python_constant()
+            if not 0 <= byte < 256:
+                raise_observed_exception(
+                    ValueError, tx, args=["byte must be in range(0, 256)"]
+                )
+        # CPython converts the value before normalizing the index, so a value
+        # whose __index__ mutates the buffer sees the updated length.
+        if index < 0:
+            index += len(self.data)
+        if not 0 <= index < len(self.data):
+            raise_observed_exception(
+                IndexError, tx, args=["bytearray index out of range"]
+            )
+        new_data = bytearray(self.data)
+        if byte is None:
+            self._check_unobservable_export(tx)
+            del new_data[index]
+        else:
+            new_data[index] = byte
+        self._set_data(tx, new_data, may_resize=byte is None)
+        return ConstantVariable.create(None)
+
+    @staticmethod
+    def _check_buffer_input(
+        tx: "InstructionTranslatorBase", value: VariableTracker
+    ) -> None:
+        if isinstance(value, (ConstantVariable, ByteArrayVariable)):
+            return
+        value_type = maybe_get_python_type(value)
+        if issubclass(
+            value_type, (bytes, bytearray, memoryview, array.array, ctypes.Array)
+        ) or hasattr(value_type, "__buffer__"):
+            unimplemented(
+                gb_type="bytearray mutation from an unsupported buffer",
+                context=f"value: {value}",
+                explanation="Dynamo cannot read this object's buffer, which takes precedence over its iterator for bytearray mutation.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    @staticmethod
+    def _unpack_byte_values(
+        tx: "InstructionTranslatorBase", iterator: VariableTracker
+    ) -> list[int] | None:
+        values = []
+        disable_ngb = config.patch(nested_graph_breaks=False)
+        # Convert one byte at a time so errors leave the iterator tail unread
+        # and __index__ can change what subsequent iteration sees.
+        while True:
+            try:
+                with disable_ngb:
+                    item = pyiter_next(tx, iterator)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                return values
+            item = pynumber_index(tx, item)
+            if not item.is_python_constant():
+                return None
+            byte = item.as_python_constant()
+            if not 0 <= byte < 256:
+                raise_observed_exception(
+                    ValueError, tx, args=["byte must be in range(0, 256)"]
+                )
+            values.append(byte)
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.data))
@@ -2985,21 +3197,25 @@ class SliceVariable(VariableTracker):
         return slice(*[guard_if_dyn(x) for x in self.items])
 
     def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
-        # PySlice_Unpack -> evaluate_slice_index: each non-None member is
-        # coerced through __index__ (nb_index), so user objects with an
-        # __index__ method are valid slice bounds.
-        # https://github.com/python/cpython/blob/62a6e898e01/Objects/sliceobject.c#L196-L242
-        members = []
-        for member in self.items:
+        # Convert through __index__ in step/start/stop order. Keep exact
+        # integers; the real sequence clamps them when the slice is applied.
+        members: list[int | None] = [None, None, None]
+        # PySlice_Unpack checks the step before invoking either bound.
+        for i in (2, 0, 1):
+            member = self.items[i]
             if isinstance(member, ConstantVariable) and member.value is None:
-                members.append(None)
                 continue
             if not pyindex_check(maybe_get_python_type(member)):
                 raise_type_error(
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(pynumber_index(tx, member).as_python_constant())
+            value = specialize_symnode(pynumber_index(tx, member)).as_python_constant()
+            if i == 2 and value == 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
+                )
+            members[i] = value
         return slice(*members)
 
     def is_hashable(self) -> bool:
