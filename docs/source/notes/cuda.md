@@ -1019,49 +1019,53 @@ with torch.cuda.use_mem_pool(pool):
 (cuda-pinned-host-memory-pools)=
 ## Pinned host memory pools
 
-{class}`torch.cuda.HostMemPool` is a pool of pinned host memory in the CUDA host caching
-allocator. Inside {class}`torch.cuda.use_host_mem_pool`, the current thread's pinned
-allocations, such as `torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs
-of `tensor.to("cpu", non_blocking=True)`, come from the pool:
+{class}`torch.cuda.use_mem_pool` also routes pinned host allocations, such as
+`torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs of
+`tensor.to("cpu", non_blocking=True)`. Pass `pinned=True` with a {class}`torch.cuda.MemPool`
+to route device and pinned allocations to one pool, or pass a {class}`torch.cuda.HostMemPool`,
+a pool of pinned host memory only:
 
 ```python
-pool = torch.cuda.HostMemPool()
-with torch.cuda.use_host_mem_pool(pool):
-    buf = torch.empty(1024, pin_memory=True)  # allocated from pool
+pool = torch.cuda.MemPool()
+with torch.cuda.use_mem_pool(pool, pinned=True):
+    x = torch.empty(1024, device="cuda")      # device memory from pool
+    buf = torch.empty(1024, pin_memory=True)  # pinned memory from pool
+
+host_pool = torch.cuda.HostMemPool()
+with torch.cuda.use_mem_pool(host_pool):
+    buf = torch.empty(1024, pin_memory=True)  # pinned memory from host_pool
 ```
 
-What a pool guarantees is cache isolation: a block freed by any thread returns to the pool it
-came from, and is handed out again only to threads inside that pool.
+What a pool guarantees is cache isolation: a pinned block freed by any thread returns to the
+pool it came from, and is handed out again only to threads inside that pool.
 
 Routing follows the thread:
 
 * Only the thread that entered the context routes to the pool; threads it starts do not.
-* Several threads can be inside one pool at the same time, and contexts nest: the innermost
-  one wins. Unlike `use_mem_pool`, entering a pool that is already in use is allowed.
-* Contexts must be exited in reverse order, on the thread that entered them; anything else
-  raises an error and changes nothing. When a thread exits inside a context, its routes are
-  ended.
-* During CUDA graph capture, allocations on the capturing stream go to the graph's pool, even
-  when the context is entered inside the capture, while allocations on other streams still go
-  to the HostMemPool. A graph never holds on to a HostMemPool, and a HostMemPool cannot be used
-  as the `pool` of a graph.
+* Contexts nest: the innermost one wins. Several threads can route pinned memory to one
+  HostMemPool at the same time.
+* Contexts that route pinned memory must be exited in reverse order, on the thread that
+  entered them; anything else raises an error and changes nothing. When a thread exits inside
+  a context, its pinned routes are ended.
+* CUDA graph capture follows the same rules for device and pinned memory: the newest of the
+  capture and the context takes the capturing stream. Entered inside a capture, the context
+  wins and the graph keeps the pool until it is reset. A HostMemPool, like a MemPool, can be the
+  `pool` of a graph. Pinned blocks that captured work used are reused only after that graph is
+  reset.
 * Use contexts from synchronous code, on threads you control. A context that stays open across
   an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
   pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
 * Pools are local to the process. Using them across `fork` is not supported.
 
-{meth}`torch.cuda.HostMemPool.use_count` is 1 for the pool object plus 1 for each open
-`use_host_mem_pool` context, on any thread.
+{meth}`torch.cuda.HostMemPool.use_count` is 1 for the pool object, plus 1 for each open context
+on any thread and each graph that keeps the pool.
 
 Creating a pool allocates nothing. While the pool is alive, emptying the host cache, which
 {class}`torch.cuda.graph` does on entry, leaves its cache alone. Deleting the pool frees its
-cached blocks at once, or when the last thread inside it exits the context, with the GIL
-released, since `cudaFreeHost` waits for the work already issued on the current device. Blocks
-that tensors or pending copies still use, and the whole cache if a CUDA graph capture is
-underway (where `cudaFreeHost` would invalidate the capture), are freed by a later
-{func}`torch.accelerator.empty_host_cache`. As with `empty_host_cache`, a capture that another
-thread begins while the pool is being freed is not waited for, so avoid deleting pools while
-other threads may start a capture.
+cached pinned blocks at once, with the GIL released, since `cudaFreeHost` waits for the work
+already issued on the current device. Blocks that tensors or pending copies still use, and the
+whole cache if a CUDA graph capture is underway, are freed by a later
+{func}`torch.accelerator.empty_host_cache`.
 
 ### One pool per NUMA node
 
@@ -1082,7 +1086,7 @@ pools = [torch.cuda.HostMemPool() for _ in cpus_of_node]
 
 def loader(node):
     os.sched_setaffinity(0, cpus_of_node[node])  # before entering the pool
-    with torch.cuda.use_host_mem_pool(pools[node]):
+    with torch.cuda.use_mem_pool(pools[node]):
         ...  # pinned buffers for the GPUs attached to this node
 
 threads = [threading.Thread(target=loader, args=(k,)) for k in range(len(pools))]
@@ -1101,9 +1105,8 @@ The allocator knows nothing about NUMA, so placement depends on the setup:
   the pages from a shared thread pool, which then decides where they go.
 * Blocks of a HostMemPool never come from the `pinned_reserve_segment_size_mb` segment, which
   the first allocating thread placed for the whole process.
-* Pinned allocations during graph capture go to the graph's pool and are placed like
-  default-pool allocations (by the capturing thread, or from the reserve segment), not by any
-  HostMemPool.
+* Pinned allocations that a graph's own pool takes during capture are placed like default-pool
+  allocations (by the capturing thread, or from the reserve segment).
 
 Stream-ordered host memory pools (`cudaMemPoolCreate` with `cudaMemLocationTypeHostNuma`,
 CUDA 12.8+) could back a HostMemPool with explicit placement in the future, and this API may

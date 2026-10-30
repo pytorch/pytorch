@@ -25,7 +25,11 @@ void THCPMemPool_init(PyObject* module) {
                 std::move(allocator), is_user_created, use_on_oom, no_split);
           }))
       .def_property_readonly("id", &::at::cuda::MemPool::id)
-      .def("use_count", &::at::cuda::MemPool::use_count);
+      .def("use_count", &::at::cuda::MemPool::use_count)
+      .def(
+          "_enable_pinned",
+          &::at::cuda::MemPool::enable_pinned,
+          py::call_guard<py::gil_scoped_release>());
   // Destroying a pool frees its cached blocks, and cudaFreeHost waits for the
   // GPU. Creating and querying it take allocator locks. Do not hold the GIL.
   shared_ptr_class_<::at::cuda::HostMemPool>(torch_C_m, "_HostMemPool")

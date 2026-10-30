@@ -381,10 +381,6 @@ Save after instantiation and before resetting or destroying the graph.
 ```
 
 ```{eval-rst}
-.. autoclass:: torch.cuda.use_host_mem_pool
-```
-
-```{eval-rst}
 .. currentmodule:: torch.cuda.nccl
 ```
 

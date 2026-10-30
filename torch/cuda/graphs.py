@@ -71,7 +71,7 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
     if isinstance(pool, torch.cuda.HostMemPool):
-        raise TypeError("A HostMemPool cannot be used as a graph capture pool")
+        return typing.cast("_POOL_HANDLE", pool.id)
     return typing.cast("_POOL_HANDLE", pool)
 
 

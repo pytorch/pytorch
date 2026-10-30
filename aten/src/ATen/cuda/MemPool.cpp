@@ -47,6 +47,13 @@ MemPool::~MemPool() {
   CUDACachingAllocator::setUseOnOOM(device_, id_, false);
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
+  if (routes_pinned_) {
+    try {
+      at::getHostAllocator(at::kCUDA)->release_pool(id_);
+    } catch (const std::exception& e) {
+      TORCH_WARN("Failed to release the pinned side of a MemPool: ", e.what());
+    }
+  }
 }
 
 MempoolId_t MemPool::id() {
@@ -59,6 +66,13 @@ int MemPool::use_count() {
 
 c10::DeviceIndex MemPool::device() {
   return device_;
+}
+
+void MemPool::enable_pinned() {
+  if (!routes_pinned_) {
+    at::getHostAllocator(at::kCUDA)->create_or_incref_host_mem_pool(id_);
+    routes_pinned_ = true;
+  }
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
