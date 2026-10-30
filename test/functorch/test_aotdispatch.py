@@ -36,6 +36,7 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -4959,7 +4960,6 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             m.impl("foo", autocast, "AutocastCPU")
             m.impl("foo", autocast, "AutocastCUDA")
             m.impl("foo", autocast, "AutocastXPU")
-            m.impl("foo", autocast, "AutocastPrivateUse1")
 
             foo = torch.ops.mylib.foo.default
 
@@ -4991,6 +4991,27 @@ class TestAOTAutogradDevice(_TestAOTAutogradBase):
             (grad,) = torch.autograd.grad(out, x)
             return out, grad
 
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_backward_pass_autocast_on(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.ones_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_off(self, device):
+        out, grad = self._compile_autocast(device, forward_autocast=True)
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.zeros_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_custom(self, device):
+        device_type = torch.device(device).type
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": device_type}]
+        ):
+            out, grad = self._compile_autocast(device, forward_autocast=False)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
 
     @onlyAccelerator
     def test_mem_leak_from_save_for_bw(self, device):
@@ -7290,7 +7311,6 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
-
     def test_quantize_activation_duplicate_nodes(self):
         """Test both quantize_activation_fw and quantize_activation_bw handle duplicate nodes correctly"""
         import torch.fx as fx
@@ -7525,7 +7545,6 @@ def forward(self, primals_1, tangents_1):
         node = graph.placeholder("dev")
         node.meta["val"] = torch.device("cuda:0")
         self.assertEqual(_size_of(node), 0)
-
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
@@ -8258,7 +8277,6 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
-
     def test_functionalized_rng_no_codegen(self):
         with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -8288,7 +8306,6 @@ def forward(self, primals_1, tangents_1):
             sentinel, SimpleNamespace(), runtime_metadata=mock_meta
         )
         self.assertIs(result, sentinel)
-
 
     # --- Backward prologue codegen tests ---
 
@@ -8561,7 +8578,6 @@ def forward(self, primals_1, tangents_1):
         ):
             torch.autograd.grad(loss, x, create_graph=True)
 
-
     # --- CompiledFunction.forward codegen tests ---
 
     def test_compiled_forward_codegen_emitted(self):
@@ -8648,7 +8664,6 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(ctx, args)", source)
 
-
     def test_compiled_forward_correctness(self):
         @torch.compile(backend="aot_eager")
         def f(x, y):
@@ -8701,7 +8716,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertNotIn("_rng_add_(_ctx_", source)
-
 
     def test_compiled_backward_elides_vc_check(self):
         with capture_codegen_source("compiled_function_backward") as captured:
@@ -8783,7 +8797,6 @@ def forward(self, primals_1, tangents_1):
         a, b, c = f(x)
         (a + b + c).sum().backward()
         self.assertEqual(x.grad, 2 + 2 * x + 1)
-
 
     def test_compiled_backward_dynamic_shapes(self):
         @torch.compile(backend="aot_eager", dynamic=True)
@@ -9012,7 +9025,6 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
-
     def test_backward_epilogue_create_graph(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -9022,7 +9034,6 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
-
 
     def test_backward_epilogue_subclass_and_tokens_codegen(self):
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -9992,7 +10003,6 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[0].base_idx, 1)
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
-
 
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
@@ -11513,7 +11523,6 @@ Expected a .* tangent but got a plain Tensor.""",
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
             def __init__(self):
@@ -11678,7 +11687,12 @@ Expected a .* tangent but got a plain Tensor.""",
         y.backward(grad)
         self.assertEqual(ref_x.grad, x.grad)
 
-    def _test_noncontig_nonmemformat_tangents(
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @parametrize("device", ["cuda", "cpu"])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
         B = 2
@@ -11743,7 +11757,6 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
-
     def _test_pack_hooks(
         self,
         fn,
@@ -11807,12 +11820,11 @@ Expected a .* tangent but got a plain Tensor.""",
             x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
             self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
 
-                # Disable testing of Subclasses for now
-                # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
-                # self._test_pack_hooks(
-                #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
-                # )
-
+            # Disable testing of Subclasses for now
+            # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+            # self._test_pack_hooks(
+            #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+            # )
 
     @torch._functorch.config.patch(donated_buffer=True)
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
@@ -12598,20 +12610,6 @@ class TestAOTAutogradDeviceWithCache(
     hw_classification = HardwareClassification.ACCELERATOR
 
 
-class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
-    _compile_autocast = TestAOTAutogradDevice._compile_autocast
-
-    def _test_backward_pass_autocast(
-        self, device, *, backward_autocast, forward_autocast, expected_grad
-    ):
-        with torch._functorch.config.patch(backward_pass_autocast=backward_autocast):
-            out, grad = self._compile_autocast(
-                device, forward_autocast=forward_autocast
-            )
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.full_like(grad, expected_grad))
-
-
 class _PartitioningHardwareTestBase(AOTTestCase):
     _make_effectful_op = TestPartitioning._make_effectful_op
     _make_wrapper_via_post_compile = TestPartitioning._make_wrapper_via_post_compile
@@ -12624,8 +12622,6 @@ class _PartitioningHardwareTestBase(AOTTestCase):
 
 
 class TestPartitioningCUDA(_PartitioningHardwareTestBase):
-    hw_classification = HardwareClassification.CUDA
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_autocast(self):
@@ -13087,7 +13083,6 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
         out = compiled(x, w)
         out.sum().backward()
 
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_min_cut_partitions_must_save_device_valued_node(self):
         """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
@@ -13134,9 +13129,6 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
 
 
 class _AOTModuleSimplifiedHardwareTestBase(AOTTestCase):
-    _test_noncontig_nonmemformat_tangents = (
-        TestAOTModuleSimplified._test_noncontig_nonmemformat_tangents
-    )
     _test_pack_hooks = TestAOTModuleSimplified._test_pack_hooks
 
 
@@ -13565,223 +13557,6 @@ class TestAOTModuleSimplifiedCUDA(_AOTModuleSimplifiedHardwareTestBase):
         )
 
 
-class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithDynamoAutocast(
-    _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithCacheAutocast(
-    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithDynamoAccelerator(
-    _AOTAutogradDynamoMixin, TestAOTAutogradAccelerator
-):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithCacheAccelerator(
-    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAccelerator
-):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTModuleSimplifiedNoncontiguousTangents(
-    _AOTModuleSimplifiedHardwareTestBase
-):
-    hw_classification = HardwareClassification.CPU
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @parametrize("dynamic_shapes", [True, False])
-    @parametrize("test_subclasses", [True, False])
-    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
-    def test_noncontig_nonmemformat_tangents(
-        self, dynamic_shapes, test_subclasses, device
-    ):
-        self._test_noncontig_nonmemformat_tangents(
-            dynamic_shapes, test_subclasses, device
-        )
-
-
-class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    @parametrize("dynamic_shapes", [True, False])
-    @parametrize("test_subclasses", [True, False])
-    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
-    def test_noncontig_nonmemformat_tangents(
-        self, dynamic_shapes, test_subclasses, device
-    ):
-        self._test_noncontig_nonmemformat_tangents(
-            dynamic_shapes, test_subclasses, device
-        )
-
-
 instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
@@ -13802,61 +13577,6 @@ instantiate_device_type_tests(
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradAutocast,
-    globals(),
-    only_for=("cpu",),
-)
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithDynamoAutocast,
-    globals(),
-    only_for=("cpu",),
-)
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithCacheAutocast,
-    globals(),
-    only_for=("cpu",),
-)
-
-
-instantiate_device_type_tests(
-    TestAOTModuleSimplifiedNoncontiguousTangents,
-    globals(),
-    only_for=("cpu",),
-)
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradAccelerator,
-    globals(),
-    allow_xpu=True,
-)
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithDynamoAccelerator,
-    globals(),
-    allow_xpu=True,
-)
-
-
-instantiate_device_type_tests(
-    TestAOTAutogradWithCacheAccelerator,
-    globals(),
-    allow_xpu=True,
-)
-
-
-instantiate_device_type_tests(
-    TestAOTModuleSimplifiedAccelerator,
-    globals(),
-)
 
 
 if __name__ == "__main__":
