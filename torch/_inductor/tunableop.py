@@ -468,6 +468,9 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         with _worker_lock:
             # Under the lock: two threads must not pin different filenames.
             filename = _resolve_and_pin_filename_locked(device)
+            if not filename and "no-file" not in _env_warned:
+                _env_warned.add("no-file")
+                log.warning("No TunableOp results file; nothing is persisted.")
             stamped = _StampedJob(job, device, filename, settings)
             worker = _get_worker_locked((device, filename))
             try:
