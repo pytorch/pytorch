@@ -2098,17 +2098,18 @@ class TestSparseCSR(TestCase):
 
         # TODO: enable on CPU once CSC results whose number of specified elements changes are fixed there
         if self.device_type == 'cuda':
-            # Test beta != 0 and sp(C) != sp(A @ B), where sp denotes a sparse pattern
-            # Here, m1 is lower-triangular, while m1 @ m2 is not
-            m1 = torch.randn(10, 10, device=device).to(dtype).tril()
-            m2 = torch.randn(10, 10, device=device).to(dtype)
-            _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+            for beta in (0, 2):
+                # Test sp(C) != sp(A @ B), where sp denotes a sparse pattern
+                # Here, m1 is lower-triangular, while m1 @ m2 is not
+                m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+                m2 = torch.randn(10, 10, device=device).to(dtype)
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
 
-            # Test beta != 0 and sp(C) == sp(A @ B), where sp denotes a sparse pattern
-            # Here, m1 is lower-triangular, so is m2, and so is (m1 @ m2)
-            m1 = torch.randn(10, 10, device=device).to(dtype).tril()
-            m2 = torch.randn(10, 10, device=device).to(dtype).tril()
-            _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
+                # Test sp(C) == sp(A @ B), where sp denotes a sparse pattern
+                # Here, m1 is lower-triangular, so is m2, and so is (m1 @ m2)
+                m1 = torch.randn(10, 10, device=device).to(dtype).tril()
+                m2 = torch.randn(10, 10, device=device).to(dtype).tril()
+                _test_addmm_addmv(self, torch.addmm, m1, m1, m2, beta=2, layout=layout, mode="all_sparse")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
