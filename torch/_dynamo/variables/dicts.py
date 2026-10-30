@@ -463,7 +463,11 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        if (
+            args[0].source is None
+            and args[0].is_python_constant()
+            and (constant := args[0].try_as_python_constant())[0]
+        ):
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -471,7 +475,7 @@ class ConstDictVariable(VariableTracker):
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=args[0].as_python_constant(),
+                        key=constant[1],
                     )
                 )
             )
