@@ -11,6 +11,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
 #include <algorithm>
+#include <mutex>
 #include <optional>
 
 #include <utility>
@@ -308,6 +309,58 @@ void TensorImpl::decref_pyobject() const noexcept {
 
 bool TensorImpl::try_incref_pyobject() const noexcept {
   return pyobj_slot_.try_incref();
+}
+
+// Guards ExtraMeta::fake_sym_memos_ of every tensor. Only the nonzero and
+// unique fake impls use these memos, so one lock is enough.
+static std::mutex& fake_sym_memo_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+void TensorImpl::set_fake_sym_memo(
+    const std::string& name,
+    c10::SymInt memo,
+    uint64_t epoch) {
+  // Read the version before touching the map: it throws if the version
+  // counter is disabled (e.g. after inference_tensor.data = tensor), which
+  // must not leave a partly recorded memo behind.
+  auto version = is_inference()
+      ? std::nullopt
+      : std::optional<uint32_t>(version_counter().current_version());
+  // The replaced memo may hold a Python SymNode, so destroy it after the lock
+  // is released.
+  c10::SymInt replaced;
+  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  auto& entry = get_extra_meta().fake_sym_memos_[name];
+  replaced = std::exchange(entry.value, std::move(memo));
+  entry.version = version;
+  entry.epoch = epoch;
+}
+
+std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
+    const std::string& name,
+    uint64_t epoch) {
+  // Like the replaced memo in set_fake_sym_memo, destroyed after unlocking.
+  c10::SymInt dropped;
+  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  if (!extra_meta_) {
+    return std::nullopt;
+  }
+  auto& memos = extra_meta_->fake_sym_memos_;
+  auto it = memos.find(name);
+  if (it == memos.end()) {
+    return std::nullopt;
+  }
+  const auto& entry = it->second;
+  bool mutated = entry.version.has_value() &&
+      *entry.version != version_counter().current_version();
+  if (mutated || entry.epoch != epoch) {
+    dropped = std::move(it->second.value);
+    memos.erase(it);
+    return std::nullopt;
+  }
+  return entry.value;
 }
 
 void TensorImpl::release_resources() {
