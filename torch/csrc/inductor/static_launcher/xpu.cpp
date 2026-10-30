@@ -304,6 +304,8 @@ sycl::kernel* loadKernel(
     uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
     int device_idx) {
+  // Launching with more SLM than the device has hangs the GPU; fail the way
+  // cuda.cpp does so autotune drops the config.
   const auto slmLimit = static_cast<uint32_t>(
       c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx))
           .get_info<sycl::info::device::local_mem_size>());
