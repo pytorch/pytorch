@@ -652,10 +652,12 @@ class TestOperatorsDevice(TestCase):
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-06)},
                 device_type="cuda",
             ),
+            # Increased on AVX, fail with 2.9e-5 abs, 7.7e-6 rel
             tol2(
                 "linalg.lstsq",
                 "grad_oriented",
                 {torch.float32: tol(atol=4e-05, rtol=5e-05)},
+                device_type="cpu",
             ),
             tol1(
                 "linalg.tensorsolve",
