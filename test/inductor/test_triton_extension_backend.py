@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
-    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, TRITON_HAS_CPU
 from torch.utils._triton import has_triton_package
@@ -111,7 +110,6 @@ class TritonExtensionBackendTestBase(BaseExtensionBackendTests):
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-@xfailIfS390X
 class TritonHeuristicsTestBase(TestCase):
     @classmethod
     def setUpClass(cls):
