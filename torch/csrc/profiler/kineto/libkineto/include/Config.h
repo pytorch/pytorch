@@ -83,6 +83,10 @@ class Config : public AbstractConfig {
     return rocprofPerThreadBufferEnabled_;
   }
 
+  [[nodiscard]] std::chrono::milliseconds rocprofDispatchRecordWait() const {
+    return rocprofDispatchRecordWait_;
+  }
+
   // Whether this trace may arm GPU tracing. A profiler registered without GPU
   // support never arms it, whatever this says.
   [[nodiscard]] bool gpuTracingEnabled() const {
@@ -334,6 +338,10 @@ class Config : public AbstractConfig {
   // Kept separate from perThreadBufferEnabled_ because existing configs already
   // set that key true, and reusing it would flip every ROCm run onto the path.
   bool rocprofPerThreadBufferEnabled_{false};
+
+  // Upper bound on how long stopping a ROCm trace waits for kernel dispatch
+  // records that are still in flight.
+  std::chrono::milliseconds rocprofDispatchRecordWait_{20};
 
   // Lets a client keep a trace that requested no device activity away from
   // the GPU tracer, which may be shared with other tools.

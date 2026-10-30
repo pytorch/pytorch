@@ -185,10 +185,6 @@ class BaseListVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self) -> Any:
-        if self.python_type() is SizeVariable:
-            raise AssertionError(
-                "SizeVariable should not use BaseListVariable.as_proxy"
-            )
         return self.python_type()(self._as_proxy())
 
     def getitem_const(
@@ -694,6 +690,8 @@ class BaseListVariable(VariableTracker):
         saved = list(self.items)
         self.items.clear()
 
+        from .builder import SourcelessBuilder
+
         class _TracedKey:
             # Compares through Dynamo so user-defined __lt__ (e.g. from
             # functools.cmp_to_key) is traced like CPython's timsort,
@@ -702,9 +700,9 @@ class BaseListVariable(VariableTracker):
                 self.key = key
 
             def __lt__(self, other: "_TracedKey") -> bool:
-                result = variables.BuiltinVariable(operator.lt).call_function(
-                    tx, [self.key, other.key], {}
-                )
+                result = SourcelessBuilder.create_internal_builtin(
+                    operator.lt
+                ).call_function(tx, [self.key, other.key], {})
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="sort with non-constant keys",
@@ -995,11 +993,10 @@ class RangeVariable(BaseListVariable):
         return r0.step() == r1.step()
 
     def range_count(self, x: VariableTracker) -> int:
-        # Based on CPython
-        # https://github.com/guilhermeleobas/cpython/blob/baefaa6cba1d69efd2f930cdc56bca682c54b139/Objects/rangeobject.c#L442-L486
-        x = x.as_python_constant()
-        if type(x) not in (bool, int, float):
-            return 0
+        # `count` and `sq_contains_impl` only send exact ints and bools here;
+        # other needles use equality-based iteration.
+        # range_contains_long: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c#L436-L480
+        x = specialize_symnode(x).as_python_constant()
 
         start, stop, step = self.start(), self.stop(), self.step()
 
@@ -1081,6 +1078,10 @@ class RangeVariable(BaseListVariable):
         else:
             return SourcelessBuilder.create(tx, not cmp)
 
+    def _specialize_bounds(self) -> "RangeVariable":
+        # Specialize symbolic bounds before using the guarded iterator path.
+        return RangeVariable([specialize_symnode(item) for item in self.items])
+
     def count(
         self,
         tx: "InstructionTranslatorBase",
@@ -1088,6 +1089,10 @@ class RangeVariable(BaseListVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder
+
+        # Only exact ints and bools use CPython's arithmetic fast path.
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            return self._specialize_bounds().list_count(tx, args, kwargs)
 
         return SourcelessBuilder.create(tx, self.range_count(*args))
 
@@ -1099,10 +1104,7 @@ class RangeVariable(BaseListVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c (range_index)
         if maybe_get_python_type(args[0]) not in (int, bool):
-            # Specialize symbolic bounds before using the guarded iterator path.
-            iterator = RangeVariable(
-                [specialize_symnode(item) for item in self.items]
-            ).tp_iter_impl(tx)
+            iterator = self._specialize_bounds().tp_iter_impl(tx)
             if isinstance(iterator, variables.misc.DelayGraphBreakVariable):
                 return iterator.call_function(tx, [], {})
             return tx.inline_user_function_return(
@@ -1311,7 +1313,7 @@ class ListVariable(BaseListVariable):
                 i += len(self.items)
             # Explicit unbound dispatch
             return ListVariable.sq_ass_item_impl(
-                self, tx, ConstantVariable.create(i), value
+                self, tx, VariableTracker.build(tx, i), value
             )
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
@@ -2144,11 +2146,7 @@ class ByteArrayVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            return ByteArrayVariable(
-                bytearray(self.data[index]),
-                source=None,
-                mutation_type=ValueMutationNew() if self.mutation_type else None,
-            )
+            return VariableTracker.build(tx, bytearray(self.data[index]))
         else:
             raise_type_error(
                 tx,
@@ -2194,7 +2192,7 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return ByteArrayVariable(new_data, mutation_type=ValueMutationNew())
+        return VariableTracker.build(tx, new_data)
 
     def sq_inplace_repeat_impl(
         self,
@@ -2239,10 +2237,7 @@ class ByteArrayVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # bytearray_concat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        return ByteArrayVariable(
-            self.data + self._concat_operand(tx, other),
-            mutation_type=ValueMutationNew(),
-        )
+        return VariableTracker.build(tx, self.data + self._concat_operand(tx, other))
 
     def sq_inplace_concat_impl(
         self,
@@ -2287,9 +2282,7 @@ class ByteArrayVariable(VariableTracker):
                 result = self.data % other.as_python_constant()
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-            return ByteArrayVariable(
-                bytearray(result), mutation_type=ValueMutationNew()
-            )
+            return VariableTracker.build(tx, bytearray(result))
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.operator.mod),
             [self, other],
@@ -2606,11 +2599,7 @@ class ByteArrayVariable(VariableTracker):
         # enforces arity before this handler runs, so args/kwargs are
         # always empty here (same no-arg pattern as list_copy).
         result = getattr(self.data, method_name)()
-        return ByteArrayVariable(
-            result,
-            source=None,
-            mutation_type=ValueMutationNew(),
-        )
+        return VariableTracker.build(tx, result)
 
     def bytearray_upper(
         self,
@@ -2914,7 +2903,7 @@ class SizeVariable(TupleVariable):
         #    4. left.sq_concat(right)
         #  Hence, to support tuple + size -> size, we need to implement nb_add
         if not pytuple_check(other):
-            return ConstantVariable(NotImplemented)
+            return ConstantVariable.create(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
         a, b = unpack_iterable(tx, self_), unpack_iterable(tx, other_)
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())

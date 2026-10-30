@@ -1089,11 +1089,43 @@ class TestProfiler(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "older PyTorch versions"):
                     config.__setstate__(old_state)
 
-    def test_with_modules_deprecated(self):
+    @parametrize("with_modules", [True, False])
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_deprecated(self, autograd_profiler, with_modules):
         # with_modules only collects data for TorchScript models and is on its
-        # way out: passing it must warn with FutureWarning and not error.
+        # way out: passing it with any value must warn with FutureWarning once, at
+        # the caller's line, and not error or warn again when profiling starts.
+        activities = [ProfilerActivity.CPU]
+        with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated") as cm:
+            if autograd_profiler:
+                prof = _profile(with_modules=with_modules)
+            else:
+                prof = profile(activities=activities, with_modules=with_modules)
+        self.assertEqual(cm.filename, __file__)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            with prof:
+                torch.ones(1)
+
+    def test_with_modules_deprecated_when_disabled(self):
+        # Callers that disable the profiler still break once with_modules is
+        # removed, so they must be warned too.
         with self.assertWarnsRegex(FutureWarning, "with_modules is deprecated"):
-            with profile(activities=[ProfilerActivity.CPU], with_modules=True):
+            _profile(enabled=False, with_modules=False)
+
+    @parametrize("autograd_profiler", [False, True])
+    def test_with_modules_omitted_does_not_warn(self, autograd_profiler):
+        # Both profilers warn on any with_modules value other than None, so
+        # both defaults must stay None. torch.profiler.profile also builds an
+        # autograd profiler when it starts; passing with_modules to that
+        # constructor would warn every user, even those who never pass it.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", "with_modules", FutureWarning)
+            if autograd_profiler:
+                prof = _profile()
+            else:
+                prof = profile(activities=[ProfilerActivity.CPU])
+            with prof:
                 torch.ones(1)
 
     @parametrize("api", ("load_nvprof", "parse_nvprof_trace"))
@@ -1313,6 +1345,29 @@ torch.ones(10) * 2
 """
         proc = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_left_running_at_exit_cuda(self):
+        # With GPU tracing still on at exit, BLAS libraries' static destructors
+        # make traced runtime calls after the main thread's thread_locals are
+        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
+        # per-thread tracer state faults instead of passing silently.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+p.start()
+x = torch.randn(64, 64, device="cuda")
+(x @ x).sum().item()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
@@ -4878,6 +4933,36 @@ class TestProfilerTraceCompression(TestCase):
             with opener(path, "rt", encoding="utf-8") as f:
                 trace = json.load(f)
             self.assertEqual(trace["compression_test"], value)
+
+    @parametrize("suffix", [".json.gz", ".json.zst"])
+    def test_export_keeps_kineto_sibling(self, suffix):
+        if suffix.endswith(".zst") and not (
+            try_import("pyzstd") or try_import("zstandard")
+        ):
+            self.skipTest("requires zstandard or pyzstd")
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+        kineto_export = prof.profiler.export_chrome_trace
+
+        def export_with_sibling(path, *args, **kwargs):
+            # Some Kineto builds write extra files next to the JSON.
+            kineto_export(path, *args, **kwargs)
+            with open(path.removesuffix(".json") + ".extra", "wb") as f:
+                f.write(b"extra")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            with patch.object(
+                prof.profiler, "export_chrome_trace", export_with_sibling
+            ):
+                prof.export_chrome_trace(path)
+            sibling = os.path.join(tmpdir, "trace.extra")
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue(os.path.exists(sibling))
+            with open(sibling, "rb") as f:
+                self.assertEqual(f.read(), b"extra")
+            # The uncompressed JSON stays in the temporary directory.
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "trace.json")))
 
     @parametrize("use_python_export", [False, True])
     def test_missing_zstd(self, use_python_export):

@@ -573,6 +573,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_DRIVER:
     case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
     case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
+    case libkineto::ActivityType::COLLECTIVE_COMM:
     case libkineto::ActivityType::OVERHEAD:
       return c10::DeviceType::CPU;
     default: {
