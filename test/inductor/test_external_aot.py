@@ -76,6 +76,20 @@ class TestExternalAOT(TestCase):
                 runtime_versions={"test-dsl": "1.0"},
             )
             artifact.validate_files()
+            second_object = root / "second.o"
+            second_header = root / "second.h"
+            second_object.write_bytes(b"object")
+            second_header.write_text("different header")
+            second_artifact = ExternalAOTArtifact.from_files(
+                spec=spec,
+                object_path=second_object,
+                header_path=second_header,
+                link_libraries=("libbackend.so",),
+                link_options=("-pthread",),
+                payload={"symbol": "kernel"},
+                runtime_versions={"test-dsl": "1.0"},
+            )
+            self.assertNotEqual(artifact.content_hash, second_artifact.content_hash)
 
             wrapper = SimpleNamespace(
                 additional_files=[],

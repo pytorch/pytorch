@@ -90,9 +90,25 @@ class ExternalAOTArtifact:
         header_path = Path(header_path)
         object_hash = hashlib.sha256(object_path.read_bytes()).hexdigest()
         header_hash = hashlib.sha256(header_path.read_bytes()).hexdigest()
+        artifact_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "spec": spec.to_dict(),
+                    "object_hash": object_hash,
+                    "header_hash": header_hash,
+                    "link_libraries": link_libraries,
+                    "link_options": link_options,
+                    "payload": payload,
+                    "runtime_versions": runtime_versions,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         sidecar_path = object_path.with_suffix(".json")
         sidecar = {
             "version": EXTERNAL_AOT_SIDECAR_VERSION,
+            "content_hash": artifact_hash,
             "kind": spec.kind,
             "spec": spec.to_dict(),
             "target": spec.target,
@@ -121,7 +137,7 @@ class ExternalAOTArtifact:
             object_path=str(object_path),
             header_path=str(header_path),
             sidecar_path=str(sidecar_path),
-            content_hash=object_hash,
+            content_hash=artifact_hash,
             target=spec.target,
             link_libraries=link_libraries,
             link_options=link_options,
