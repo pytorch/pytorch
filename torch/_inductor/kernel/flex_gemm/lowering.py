@@ -705,15 +705,18 @@ def flex_gemm_quack_configs(
     if mat1.get_dtype() is torch.float32:
         a_k_major = statically_known_equal(mat1.get_stride()[-1], 1)
         b_n_major = statically_known_equal(mat2.get_stride()[-1], 1)
-        # MN-major TF32 needs a 32-element SW128_32B atom per CTA. Two-CTA MMA
-        # halves B's N extent; smaller swizzles can silently produce zeros.
+        # Two-CTA MMA halves B's N extent per CTA. MN-major TF32 needs whole
+        # 32-element SW128_32B atoms per CTA; smaller swizzles can silently produce
+        # zeros. K-major TF32 aborts CuTeDSL compilation, killing the process
+        # (e.g. mid-autotune), when that extent exceeds one atom but is not whole
+        # atoms (found empirically on GB300: two-CTA tile_n 160 and 224).
         tf32_legal = []
         for c in legal:
             b_mn_major = not a_k_major if c.swap_ab else b_n_major
-            if c.device_capacity in (10, 11) and b_mn_major:
+            if c.device_capacity in (10, 11):
                 cta_m = cta_tile_shape_m(c.tile_m, c.cluster_m, c.device_capacity)
-                mma_ctas = c.tile_m // cta_m
-                if c.tile_n % (32 * mma_ctas):
+                cta_n = c.tile_n // (c.tile_m // cta_m)
+                if cta_n % 32 and (b_mn_major or cta_n > 32):
                     continue
             tf32_legal.append(c)
         legal = tuple(tf32_legal)
