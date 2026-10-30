@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -1661,6 +1662,39 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
         else:
             store.wait([key], timedelta(seconds=90))
 
+    def _load_dump(self, path):
+        # The dump comes from a watchdog or the dump signal poller, both in
+        # C++ threads that wake once a second; poll until the file is there
+        # and complete -- it reads back empty mid-write.
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            try:
+                with open(path, "rb") as f:
+                    return pickle.load(f)
+            except (OSError, EOFError, pickle.UnpicklingError):
+                time.sleep(0.5)
+        self.fail(f"no trace written to {path}")
+
+    def _read_dump_fifo(self, path):
+        # For a path made with os.mkfifo: open() returns once the dump writer
+        # opens it, and the read ends when the trace is complete, so there is
+        # nothing to poll. Without a dump, connect as the writer after a
+        # deadline so the read sees EOF and fails instead of hanging.
+        # Assumes one write per dump: callers set TORCH_INCLUDE_STACK_TRACE=0,
+        # since a slow first attempt with stack traces is retried without them
+        # and the abandoned writer would block on the FIFO.
+        timer = threading.Timer(
+            60, lambda: os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        )
+        timer.start()
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except EOFError:
+            self.fail(f"no trace written to {path}")
+        finally:
+            timer.cancel()
+
     def _abort_timed_out_group(self, pg) -> None:
         # Rank 0's communicator is aborted after its timeout. A graceful
         # destroy on the other ranks would wait for it forever at NCCL 2.31+'s
@@ -1703,6 +1737,13 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 
 
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # Rank 0's timeout would otherwise make rank 1 dump a trace, on the
+        # dump signal, to the default path at a time the test does not control.
+        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "0"
+        super()._init_pg(rank, world_size, rdvz_file)
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_timeout_without_process_abort(self) -> None:
@@ -1766,6 +1807,8 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        # See ProcessGroupNCCL2WatchdogNoTearDownTest.
+        os.environ["TORCH_FR_DUMP_ON_TIMEOUT"] = "0"
         super()._init_pg(rank, world_size, rdvz_file)
 
     @requires_nccl()
@@ -1802,6 +1845,9 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
             "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
             "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
         }
+        if self.rank != 0:
+            # Rank 0 checks frames; rank 1 reads a FIFO (see _read_dump_fifo).
+            env["TORCH_INCLUDE_STACK_TRACE"] = "0"
         with mock.patch.dict(os.environ, env):
             pg = self._new_subgroup(timeout=timedelta(seconds=5))
             self._check_all_reduce(pg)
@@ -1812,24 +1858,24 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
             dist.all_reduce(torch.ones(7), group=gloo_pg)
 
             path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+            # Healthy collectives must not have dumped anything, or the
+            # artifacts below would not be evidence of the timeout.
+            self.assertFalse(os.path.exists(path))
+            if self.rank != 0:
+                os.mkfifo(path)
+            # Rank 1's FIFO must exist before rank 0's timeout signals it.
+            store = dist.distributed_c10d._get_process_group_store(pg)
+            store.set(f"fifo_ready_{self.rank}", "1")
+            store.wait(
+                [f"fifo_ready_{r}" for r in range(self.world_size)],
+                timedelta(seconds=90),
+            )
+
             if self.rank == 0:
                 # Nobody else joins, so this can never complete and the
                 # watchdog trips on it.
                 dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
-                # Healthy collectives must not have dumped anything, or the
-                # artifact below would not be evidence of the timeout.
-                self.assertFalse(os.path.exists(path))
-                # The watchdog wakes once a second; poll until the file is
-                # there and complete -- it reads back empty mid-write.
-                dump = None
-                deadline = time.time() + 60
-                while dump is None and time.time() < deadline:
-                    try:
-                        with open(path, "rb") as f:
-                            dump = pickle.load(f)
-                    except (OSError, EOFError, pickle.UnpicklingError):
-                        time.sleep(0.5)
-                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                dump = self._load_dump(path)
                 self.assertIn("version", dump)
                 self.assertIn("pg_config", dump)
                 self.assertIn("pg_status", dump)
@@ -1872,17 +1918,21 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                     {e["profiling_name"].split(":")[0] for e in dump["entries"]},
                     {"nccl2"},
                 )
+            else:
+                # Rank 1 saw no failure -- it never issued the collective, the
+                # usual culprit of a real hang -- and dumps on rank 0's signal.
+                dump = self._read_dump_fifo(path)
+                sizes = [e["input_sizes"] for e in dump["entries"]]
+                self.assertIn([[4]], sizes)
+                self.assertNotIn([[1024]], sizes)
             self._wait_for_rank_zero(pg)
-            if self.rank != 0:
-                # A rank that saw no failure must not have written a trace.
-                self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(gloo_pg)
         self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
 
-# Its own class because the abort hook dumps at most once per process, and
+# Its own class because the abort hook dumps at most once until a rearm, and
 # MultiProcContinuousTest reuses the processes across a class's tests.
 class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
@@ -1911,19 +1961,96 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(
                     torch.ones(1024, device=self.device), group=pg, async_op=True
                 )
-                dump = None
-                deadline = time.time() + 60
-                while dump is None and time.time() < deadline:
-                    try:
-                        with open(path, "rb") as f:
-                            dump = pickle.load(f)
-                    except (OSError, EOFError, pickle.UnpicklingError):
-                        time.sleep(0.5)
-                self.assertIsNotNone(dump, msg=f"no trace written to {path}")
+                dump = self._load_dump(path)
                 hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
                 self.assertEqual(len(hung), 1)
                 self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
+            else:
+                # Rank 1 dumps on rank 0's signal. Wait for it while the
+                # temporary dump path is still set and exists.
+                self._load_dump(path)
             self._wait_for_rank_zero(pg)
+
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+
+# Its own class for the same reason as ProcessGroupNCCL2DumpTimeoutBoundTest.
+class ProcessGroupNCCL2DumpAfterReconfigureTest(_ProcessGroupNCCL2SubgroupTest):
+    def _dumped_input_sizes(self, path):
+        return [e["input_sizes"] for e in self._read_dump_fifo(path)["entries"]]
+
+    def _store_barrier(self, store, key) -> None:
+        store.set(f"{key}_{self.rank}", "1")
+        store.wait(
+            [f"{key}_{r}" for r in range(self.world_size)], timedelta(seconds=90)
+        )
+
+    def _reconfigure(self, pg, store, uuid) -> None:
+        store.set(f"handle_{uuid}_{self.rank}", dist._get_reconfigure_handle(pg))
+        handles = [
+            store.get(f"handle_{uuid}_{r}").decode() for r in range(self.world_size)
+        ]
+        dist._reconfigure(uuid, handles, group=pg, timeout=timedelta(seconds=30)).wait()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_flight_recorder_dumps_again_after_reconfigure(self) -> None:
+        # The abort hook dumps once per failure. nccl2's reconfigure() rearms
+        # it, so a failure after recovery dumps again, here and on the peer.
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        env = {
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+            "TORCH_FR_DUMP_TEMP_FILE": os.path.join(tempdir.name, "trace_"),
+            # See _read_dump_fifo.
+            "TORCH_INCLUDE_STACK_TRACE": "0",
+        }
+        path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
+        os.mkfifo(path)
+        with mock.patch.dict(os.environ, env):
+            opts = dist.ProcessGroupNCCL2.Options()
+            opts.enable_reconfigure = True
+            pg = dist.new_group(
+                backend="nccl2",
+                pg_options=opts,
+                use_local_synchronization=True,
+                timeout=timedelta(seconds=5),
+            )
+            store = dist.distributed_c10d._get_process_group_store(pg)
+            self._reconfigure(pg, store, 1)
+            self._check_all_reduce(pg)
+
+            for attempt in range(2):
+                if self.rank == 0:
+                    dist.set_timeout(timedelta(milliseconds=1), group=pg)
+                    work = dist.all_reduce(
+                        torch.ones(1024, device=self.device), group=pg, async_op=True
+                    )
+                    sizes = self._dumped_input_sizes(path)
+                    # The buffer survives reconfigure, so count: each dump
+                    # holds one more hung collective than the last.
+                    self.assertEqual(sizes.count([[1024]]), attempt + 1)
+                    del work
+                    dist.set_timeout(timedelta(seconds=5), group=pg)
+                else:
+                    # Dumps on rank 0's signal.
+                    sizes = self._dumped_input_sizes(path)
+                    self.assertNotIn([[1024]], sizes)
+                    # One healthy all_reduce per reconfigure, so a stale trace
+                    # fails this.
+                    self.assertEqual(sizes.count([[4]]), attempt + 1)
+                self._store_barrier(store, f"dumped_{attempt}")
+                if attempt == 0:
+                    self._reconfigure(pg, store, 2)
+                    self._check_all_reduce(pg)
 
         self._abort_timed_out_group(pg)
         self._check_all_reduce()

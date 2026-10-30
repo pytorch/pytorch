@@ -29,6 +29,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 
@@ -556,6 +557,9 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     nccl_comm_ = newComm;
   }
 
+  // The failure that led here has been dealt with; dump on the next one.
+  // Before initNcclResources() starts the watchdog that would detect it.
+  ::c10d::FlightRecorderHook::rearm(*this);
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
   TORCH_CHECK(

@@ -5524,6 +5524,7 @@ every backend of the group records natively.)")
           &::c10d::FlightRecorderHook::attach,
           py::arg("pg"),
           py::arg("global_ranks") = std::vector<uint64_t>{},
+          py::call_guard<py::gil_scoped_release>(),
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
@@ -5539,7 +5540,26 @@ fabricating 0..size-1, which would collide the dump files of a subgroup.)")
       .def(
           "remove",
           &::c10d::FlightRecorderHook::remove,
-          "Detach the hook from its process group.");
+          "Detach the hook from its process group.")
+      .def_static(
+          "_rearm",
+          [](const std::optional<c10::intrusive_ptr<::c10d::Backend>>&
+                 backend) {
+            if (backend && *backend) {
+              ::c10d::FlightRecorderHook::rearm(**backend);
+            } else {
+              ::c10d::FlightRecorderHook::rearm();
+            }
+          },
+          py::arg("backend") = std::nullopt,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Allow this process to dump and broadcast the dump signal again after a
+failure it survived. Backends that reconfigure (nccl2) call it themselves;
+dump signals sent before the call are ignored. With a backend, only that
+backend's abort hooks are rearmed: a backend that failed earlier and was not
+rearmed since keeps reporting the failure already handled. Without one, every
+backend is. The next dump overwrites the previous trace file.)");
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
       module,
