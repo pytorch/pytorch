@@ -219,6 +219,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             (3, 1, 32),
             (3, 129, 64),
             (3, 160, 160),
+            (2, 1024, 2048),
         ),
         name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
         + f"M{shape[-2]}_K{shape[-1]}",
@@ -228,7 +229,13 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
-            self.skipTest("3D MXFP8 coverage uses only bfloat16")
+            # Run one batched fp32 case to keep the test count down.
+            if (input_dtype, shape, swizzle_type) != (
+                torch.float32,
+                (2, 1024, 2048),
+                SwizzleType.SWIZZLE_32_4_4,
+            ):
+                self.skipTest("3D MXFP8 uses bf16, plus one fp32 case")
         swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
@@ -254,7 +261,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
         "shape",
-        ((32, 16), (64, 128), (160, 144), (2048, 2080), (1, 32, 128), (3, 160, 160)),
+        (
+            (32, 16),
+            (64, 128),
+            (160, 144),
+            (2048, 2080),
+            (1, 32, 128),
+            (3, 160, 160),
+            (2, 2048, 2080),
+        ),
         name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
         + f"M{shape[-2]}_K{shape[-1]}",
     )
@@ -263,7 +278,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         if len(shape) == 3 and input_dtype != torch.bfloat16:
-            self.skipTest("3D MXFP8 coverage uses only bfloat16")
+            # Run one batched fp32 case to keep the test count down.
+            if input_dtype != torch.float32 or shape != (2, 2048, 2080):
+                self.skipTest("3D MXFP8 uses bf16, plus one fp32 case")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, (-1, -2), False, True
@@ -300,7 +317,14 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
         "shape",
-        ((32, 32), (64, 128), (160, 160), (2048, 2080), (3, 160, 160)),
+        (
+            (32, 32),
+            (64, 128),
+            (160, 160),
+            (2048, 2080),
+            (3, 160, 160),
+            (2, 2048, 2080),
+        ),
         name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
         + f"M{shape[-2]}_K{shape[-1]}",
     )
