@@ -40,6 +40,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      load_cache_artifacts
      load_compiled_function
      save_cache_artifacts
+     export_python
      wrap_numpy
 ```
 
