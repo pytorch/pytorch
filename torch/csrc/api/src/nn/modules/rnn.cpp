@@ -429,6 +429,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     Tensor hx) {
+  bool hx_supplied = hx.defined();
   if (!hx.defined()) {
     int64_t num_directions = options_base.bidirectional() ? 2 : 1;
     hx = torch::zeros(
@@ -436,13 +437,14 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
          max_batch_size,
          options_base.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
-  } else {
-    // Each batch of the hidden state should match the input sequence that
-    // the user believes he/she is passing in.
-    hx = this->permute_hidden(hx, sorted_indices);
   }
 
+  // Each batch of the hidden state should match the input sequence that
+  // the user believes he/she is passing in.
   this->check_forward_args(input, hx, batch_sizes);
+  if (hx_supplied) {
+    hx = this->permute_hidden(hx, sorted_indices);
+  }
 
   std::tuple<Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
@@ -604,6 +606,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     std::optional<std::tuple<Tensor, Tensor>> hx_opt) {
+  const bool hx_supplied = hx_opt.has_value();
   std::tuple<Tensor, Tensor> hx;
   if (!hx_opt.has_value()) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
@@ -622,12 +625,14 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
     hx = std::make_tuple(std::move(h_zeros), std::move(c_zeros));
   } else {
     hx = hx_opt.value();
-    // Each batch of the hidden state should match the input sequence that
-    // the user believes he/she is passing in.
-    hx = this->permute_hidden(hx, sorted_indices);
   }
 
+  // Each batch of the hidden state should match the input sequence that
+  // the user believes he/she is passing in.
   this->check_forward_args(input, hx, batch_sizes);
+  if (hx_supplied) {
+    hx = this->permute_hidden(hx, sorted_indices);
+  }
   std::tuple<Tensor, Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
     result = torch::lstm(
@@ -714,6 +719,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     Tensor hx) {
+  bool hx_supplied = hx.defined();
   if (!hx.defined()) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
     hx = torch::zeros(
@@ -721,13 +727,14 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
          max_batch_size,
          options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
-  } else {
-    // Each batch of the hidden state should match the input sequence that
-    // the user believes he/she is passing in.
-    hx = this->permute_hidden(hx, sorted_indices);
   }
 
+  // Each batch of the hidden state should match the input sequence that
+  // the user believes he/she is passing in.
   this->check_forward_args(input, hx, batch_sizes);
+  if (hx_supplied) {
+    hx = this->permute_hidden(hx, sorted_indices);
+  }
   std::tuple<Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
     result = torch::gru(

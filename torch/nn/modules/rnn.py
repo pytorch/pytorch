@@ -730,6 +730,8 @@ class RNN(RNNBase):
 
         if hx is None:
             raise AssertionError("hx must not be None")
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
         if hx_supplied:
             hx = self.permute_hidden(hx, sorted_indices)
@@ -1147,10 +1149,10 @@ class LSTM(RNNBase):
                         raise RuntimeError(msg)
                     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
 
-        # Each batch of the hidden state should match the input sequence that
-        # the user believes he/she is passing in.
         if hx is None:
             raise AssertionError("hx must not be None")
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
         if hx_supplied:
             hx = self.permute_hidden(hx, sorted_indices)
@@ -1375,8 +1377,8 @@ class GRU(RNNBase):
         self._update_flat_weights()
 
         orig_input = input
-        # xxx: isinstance check needs to be in conditional for TorchScript to compile
         hx_supplied = hx is not None
+        # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
@@ -1425,10 +1427,10 @@ class GRU(RNNBase):
 
         if hx is None:
             raise AssertionError("hx must not be None")
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
         if hx_supplied:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
         if batch_sizes is None:
             # pyrefly: ignore [no-matching-overload]

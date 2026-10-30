@@ -577,6 +577,7 @@ class LSTM(RNNBase):
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
+        hx_supplied = hx is not None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
@@ -628,11 +629,11 @@ class LSTM(RNNBase):
                         raise RuntimeError(msg)
                     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
 
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
-
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
         if batch_sizes is None:
             result = _VF.lstm(
                 input,
@@ -749,6 +750,7 @@ class GRU(RNNBase):
         # as a @property? this might interfere with TorchScript, if we remove that
         # requirement in the future we should be able to do this
         orig_input = input
+        hx_supplied = hx is not None
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -787,12 +789,12 @@ class GRU(RNNBase):
                 dtype=input.dtype,
                 device=input.device,
             )
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
 
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
         if batch_sizes is None:
             result = _VF.gru(
                 input,

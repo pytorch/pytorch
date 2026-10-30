@@ -2761,7 +2761,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
-    @parametrize_test("packed", [False, True, "unsorted"])
+    @parametrize_test("input_kind", ["dense", "packed_sorted", "packed_unsorted"])
     @parametrize_test(
         "invalid_arg,error_type,error_regex",
         [
@@ -2775,13 +2775,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ("proj_size", RuntimeError, r"Expected hidden\[0\] size"),
         ],
     )
-    def test_lstm_forward_args_check(self, packed, invalid_arg, error_type, error_regex):
+    def test_lstm_forward_args_check(self, input_kind, invalid_arg, error_type, error_regex):
         feature_size = 5 if invalid_arg == "input_size" else 4
         dtype = torch.double if invalid_arg == "input_dtype" else torch.float
         input = torch.randn(5, 3, feature_size, dtype=dtype)
-        if packed:
-            enforce_sorted = packed != "unsorted"
-            lengths = [3, 5, 2] if packed == "unsorted" else [5, 3, 2]
+        if input_kind != "dense":
+            enforce_sorted = input_kind == "packed_sorted"
+            lengths = [5, 3, 2] if enforce_sorted else [3, 5, 2]
             input = rnn_utils.pack_padded_sequence(
                 input, lengths, enforce_sorted=enforce_sorted
             )
