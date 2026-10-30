@@ -43,14 +43,35 @@ def _call_custom_autograd_function_in_pre_dispatch(function_cls_name, *args, **k
     that is too much work because we need to schematize custom autograd functions. For now,
     we just hackily put it in the IR.
     """
-    # Parse module and class name
-    module_name, class_name = function_cls_name.rsplit(".", 1)
-
-    # Import the module and get the class
-    module = importlib.import_module(module_name)
-    function_cls = getattr(module, class_name)
-    if not hasattr(function_cls, "apply"):
-        raise AssertionError(
-            f"Expected function class {function_cls_name} to have 'apply' method"
-        )
+    function_cls = _import_custom_autograd_function(function_cls_name)
     return function_cls.apply(*args, **kwargs)
+
+
+def _import_object(qualified_name):
+    """
+    Import ``module.name`` by importing the module and reading one attribute
+    from it. The object must report the same qualified name, so names that
+    reach an object through an alias (such as ``torch.os.system``) fail.
+    """
+    module_name, _, name = qualified_name.rpartition(".")
+    obj = getattr(importlib.import_module(module_name), name)
+    if (
+        getattr(obj, "__module__", None) != module_name
+        or getattr(obj, "__qualname__", None) != name
+    ):
+        raise ImportError(f"{qualified_name} is not defined under that name")
+    return obj
+
+
+def _import_custom_autograd_function(function_cls_name):
+    """
+    Import the custom autograd function class that
+    _call_custom_autograd_function_in_pre_dispatch calls, by its string name.
+    """
+    function_cls = _import_object(function_cls_name)
+    if not (
+        isinstance(function_cls, type)
+        and issubclass(function_cls, torch.autograd.Function)
+    ):
+        raise TypeError(f"{function_cls_name} is not a torch.autograd.Function")
+    return function_cls

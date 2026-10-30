@@ -4,7 +4,6 @@ import copy
 import copyreg
 import dataclasses
 import heapq
-import importlib
 import inspect
 import io
 import json
@@ -12,7 +11,6 @@ import keyword
 import logging
 import math
 import operator
-import pkgutil
 import re
 import traceback
 import types
@@ -712,18 +710,47 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
     )
 
 
-def _import_torch_object(name: str) -> Any:
+def _import_flat_apply_func(name: str) -> Any:
     """
-    Import the object that a qualified name under torch refers to, or return
-    None. Only torch names are resolved so that load itself never imports
-    modules outside of torch.
+    Import a function that export passes to flat_apply, from its qualified
+    name. Only what export produces is accepted: tensor subclasses defined
+    under torch, and the helper that calls custom autograd functions. This
+    keeps load from calling anything else.
     """
-    if not name.startswith("torch."):
-        return None
+    func = None
+    if name.startswith("torch."):
+        try:
+            func = torch.export.custom_ops._import_object(name)
+        except (ImportError, AttributeError, ValueError) as e:
+            raise SerializeError(f"Could not import flat_apply function {name}") from e
+    if not (
+        func is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        or (isinstance(func, type) and issubclass(func, torch.Tensor))
+    ):
+        raise SerializeError(
+            f"{name} cannot be used as a flat_apply function: only tensor subclasses "
+            "and custom autograd functions under torch can be saved and loaded"
+        )
+    return func
+
+
+def _check_flat_apply_autograd_function(cls_name: object) -> None:
+    """
+    The custom autograd function helper gets its class by name and imports it
+    when the program runs. Check that the name imports an autograd function
+    and does not point into __main__, which is a different module in the
+    process that loads the program.
+    """
+    message = (
+        f"Autograd function {cls_name} used by flat_apply cannot be imported "
+        "by name, so the program could not run after loading"
+    )
+    if not isinstance(cls_name, str) or cls_name.startswith("__main__."):
+        raise SerializeError(message)
     try:
-        return pkgutil.resolve_name(name)
-    except (ImportError, AttributeError, ValueError):
-        return None
+        torch.export.custom_ops._import_custom_autograd_function(cls_name)
+    except (ImportError, AttributeError, TypeError, ValueError) as e:
+        raise SerializeError(message) from e
 
 
 @final
@@ -1309,30 +1336,16 @@ class GraphModuleSerializer(metaclass=Final):
         func_name = ".".join(
             getattr(constant_func, attr, "") for attr in ("__module__", "__qualname__")
         )
-        if _import_torch_object(func_name) is not constant_func:
+        if _import_flat_apply_func(func_name) is not constant_func:
             raise SerializeError(
-                f"Cannot serialize flat_apply node {node.name}: its function "
-                f"{func_name} cannot be imported from torch, so it could not be loaded back"
+                f"Cannot serialize flat_apply node {node.name}: {func_name} imports "
+                "a different object, so it could not be loaded back"
             )
         if (
             constant_func
             is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
         ):
-            # The autograd function class is passed by name and looked up the
-            # same way when the loaded program runs.
-            cls_name = flat_args[0]
-            module_name, _, class_name = str(cls_name).rpartition(".")
-            try:
-                found = module_name != "__main__" and hasattr(
-                    importlib.import_module(module_name), class_name
-                )
-            except (ImportError, ValueError):
-                found = False
-            if not found:
-                raise SerializeError(
-                    f"Cannot serialize flat_apply node {node.name}: autograd function "
-                    f"{cls_name} cannot be imported by name, so the loaded program could not run"
-                )
+            _check_flat_apply_autograd_function(flat_args[0])
         return [
             NamedArgument(
                 name="",
@@ -3214,12 +3227,7 @@ class GraphModuleDeserializer(metaclass=Final):
         """
         func_input, in_spec_input, *flat_inputs = serialized_node.inputs
         func_name = func_input.arg.as_operator
-        func = _import_torch_object(func_name)
-        if func is None:
-            raise SerializeError(
-                f"Could not import function {func_name} used by flat_apply node "
-                f"{serialized_node.name}"
-            )
+        func = _import_flat_apply_func(func_name)
         specs = {
             "func_spec": func_to_graphable(func)[1],
             "in_spec": treespec_loads(in_spec_input.arg.as_string),
@@ -3236,6 +3244,11 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.graph.create_node("get_attr", attr_name, name=attr_name)
             )
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
+        if (
+            func
+            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        ):
+            _check_flat_apply_autograd_function(args[0] if args else None)
         return (*spec_nodes, *args), kwargs
 
     def deserialize_input(self, inp: Argument) -> Any:

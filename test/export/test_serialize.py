@@ -41,6 +41,7 @@ from torch._export.serde.serialize import (
     GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
+    SerializedArtifact,
     SerializeError,
 )
 from torch._export.utils import wrap_method
@@ -2814,12 +2815,51 @@ class TestPredispatchSerialization(TestCase):
                 return Scale.apply(x) + 1
 
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "cannot be imported from torch"):
+        with self.assertRaisesRegex(SerializeError, "cannot be used as a flat_apply"):
             torch.export.save(ep, io.BytesIO())
 
         ep = export(Bar(), (torch.randn(4),), strict=False)
         with self.assertRaisesRegex(SerializeError, "cannot be imported by name"):
             torch.export.save(ep, io.BytesIO())
+
+    def test_predispatch_flat_apply_load_rejects_other_functions(self):
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexInVmap(torch.nn.Module):
+            def forward(self, x, indices):
+                with TransformGetItemToIndex():
+                    return torch.vmap(lambda i: x[i])(indices)
+
+        ep = export(
+            IndexInVmap(), (torch.arange(4), torch.tensor([3, 1])), strict=False
+        )
+        artifact = serialize(ep)
+        func_name = (
+            b'"torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch"'
+        )
+        cls_name = b'"torch._dynamo._trace_wrapped_higher_order_op.ModIndex"'
+        self.assertIn(func_name, artifact.exported_program)
+        self.assertIn(cls_name, artifact.exported_program)
+        deserialize(artifact)
+
+        for old, new in [
+            (func_name, b'"os.system"'),
+            (func_name, b'"torch.os.system"'),
+            (func_name, b'"torch.builtins.exec"'),
+            (func_name, b'"torch.does_not_exist.f"'),
+            (cls_name, b'"os.system"'),
+            (cls_name, b'"torch.os.system"'),
+        ]:
+            payload = artifact.exported_program.replace(old, new)
+            with self.assertRaises(SerializeError, msg=new):
+                deserialize(
+                    SerializedArtifact(
+                        payload,
+                        artifact.state_dict,
+                        artifact.constants,
+                        artifact.example_inputs,
+                    )
+                )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
