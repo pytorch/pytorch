@@ -2105,18 +2105,14 @@ test_libtorch_agnostic_targetting() {
     popd
 
     # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
+    create_venv_over_image venv_pytorch_2_9
     # shellcheck disable=SC1091
     . venv_pytorch_2_9/bin/activate
 
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
+    # Clear PYTHONPATH so it can't put the development PyTorch ahead of the venv's
+    echo "Clearing PYTHONPATH..."
     unset PYTHONPATH
-
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
+    python -m pip --version
 
     echo "Installing PyTorch 2.9..."
 
@@ -2135,7 +2131,7 @@ test_libtorch_agnostic_targetting() {
         echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
     fi
 
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
+    if python -m pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
         echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
     else
         echo "  FAILED to install PyTorch 2.9.0 from release channel"
@@ -2145,17 +2141,14 @@ test_libtorch_agnostic_targetting() {
         return 1
     fi
 
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
+    assert_venv_torch
+    INSTALLED_VERSION=$(cd / && python -c "import torch; print(torch.__version__)")
     echo "  Installed version: $INSTALLED_VERSION"
-
-    # Install test dependencies
-    echo "Installing test dependencies..."
-    pip install expecttest numpy unittest-xml-reporting
 
     # Install the pre-built wheel
     echo ""
     echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
+    python -m pip install "$WHEEL_FILE"
     echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
 
     # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
@@ -2327,7 +2320,7 @@ EOF
 
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  python -m venv venv
+  create_venv_over_image venv
   # shellcheck disable=SC1091
   . venv/bin/activate
 
@@ -2335,7 +2328,7 @@ EOF
   git reset --hard "${SHA_TO_COMPARE}"
   git submodule sync && git submodule update --init --recursive
   echo "::group::Installing Torch From Base Commit"
-  pip3 install -r requirements.txt
+  python -m pip install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   python -m build --wheel --no-isolation --outdir "base_dist"
@@ -2343,7 +2336,8 @@ EOF
   echo "::endgroup::"
 
   pushd test/forward_backward_compatibility
-  pip show torch
+  assert_venv_torch
+  python -m pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
