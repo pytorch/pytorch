@@ -64,12 +64,12 @@ from ..source import (
 )
 from ..utils import (
     check_positional,
-    check_unspec_or_constant_args,
     identity,
     istype,
     no_keywords,
     proxy_args_kwargs,
     raise_args_mismatch,
+    try_constant_args,
     unpack_iterable,
 )
 from .base import (
@@ -1484,8 +1484,9 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            if self.obj.is_python_constant():
-                val = getattr(self.obj.as_python_constant(), self.name)
+            is_constant, value = self.obj.try_as_python_constant()
+            if is_constant:
+                val = getattr(value, self.name)
                 resolved = VariableTracker.build(tx, val)
             else:
                 unimplemented(
@@ -1655,14 +1656,15 @@ class TypingVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # e.g., List[int] → typing.List[int]
-        if not key.is_python_constant():
+        is_constant, value = key.try_as_python_constant()
+        if not is_constant:
             unimplemented(
                 gb_type="non-constant typing subscript",
                 context=f"TypingVariable[{key}]",
                 explanation=f"Cannot subscript typing construct {self.value} with a non-constant key.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        new_typing = cast(Any, self.value)[key.as_python_constant()]
+        new_typing = cast(Any, self.value)[value]
         return TypingVariable(new_typing)
 
     def tp_richcompare_impl(
@@ -1702,9 +1704,9 @@ class TypingVariable(VariableTracker):
     ) -> VariableTracker:
         # GenericAlias types (e.g. Callable[[int], bool]) support __or__ for
         # type unions (e.g. Callable[[int], bool] | None).
-        if not other.is_python_constant():
+        is_constant, other_val = other.try_as_python_constant()
+        if not is_constant:
             return VariableTracker.build(tx, NotImplemented)
-        other_val = other.as_python_constant()
         # pyrefly: ignore[bad-argument-count]
         result = type(self.value).__or__(self.value, other_val)
         if result is NotImplemented:
@@ -1925,15 +1927,16 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            if self.can_constant_fold_through(func) and (
-                check_unspec_or_constant_args(args, kwargs)
+            if (
+                self.can_constant_fold_through(func)
+                and (constants := try_constant_args(args, kwargs))[0]
             ):
                 # constant fold
                 return VariableTracker.build(
                     tx,
                     self.as_python_constant()(
-                        *[x.as_python_constant() for x in args],
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                        *constants[1],
+                        **constants[2],
                     ),
                 )
 
@@ -2029,15 +2032,10 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if all(
-            x.is_python_constant()
-            for x in itertools.chain(sym_args, sym_kwargs.values())
-        ):
+        all_constant, values, kwvalues = try_constant_args(sym_args, sym_kwargs)
+        if all_constant:
             try:
-                result = format_string.format(
-                    *[v.as_python_constant() for v in sym_args],
-                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
-                )
+                result = format_string.format(*values, **kwvalues)
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)

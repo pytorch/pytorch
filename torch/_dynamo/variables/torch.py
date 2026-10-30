@@ -94,6 +94,7 @@ from ..utils import (
     no_positional,
     product,
     proxy_args_kwargs,
+    try_constant_args,
     unpack_iterable,
     unwrap_if_wrapper,
 )
@@ -393,14 +394,14 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
             _check_for_gradient_edge(item, f"{arg_name}[{i}]")
     elif isinstance(var, ConstDictVariable):
         for hash_key, item in var.items.items():
-            if not hash_key.vt.is_python_constant():
+            is_constant, key_repr = hash_key.vt.try_as_python_constant()
+            if not is_constant:
                 unimplemented(
                     gb_type="autograd.grad with non-constant dict key",
                     context=f"non-constant key in {arg_name}",
                     explanation="autograd.grad/backward dict inputs must have constant keys.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            key_repr = hash_key.vt.as_python_constant()
             _check_for_gradient_edge(item, f"{arg_name}[{key_repr!r}]")
 
 
@@ -2226,11 +2227,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     return ConstantVariable.create(normalized)
 
                 for item in size.items:
-                    if item.is_python_constant():
+                    is_constant, value = item.try_as_python_constant()
+                    if is_constant:
                         # Mixed symbolic/concrete sizes cannot be materialized
                         # below, so validate each concrete item through the C
                         # binding before taking the symbolic fallback.
-                        items.append(normalize_concrete_item(item.as_python_constant()))
+                        items.append(normalize_concrete_item(value))
                     elif isinstance(item, TensorVariable):
                         if (
                             item.dtype is None
@@ -2326,7 +2328,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             condition: VariableTracker,
             message: VariableTracker,
         ) -> VariableTracker | None:
-            if (condition.is_python_constant() and condition.as_python_constant()) or (
+            if (
+                (constant := condition.try_as_python_constant())[0] and constant[1]
+            ) or (
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
@@ -2385,13 +2389,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ) -> VariableTracker:
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # CustomClassObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, CustomClassObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value: list[Any] = []
                 if len(args) == 0 and len(kwargs) == 0:
                     # get_rank() or get_world_size() with no args (uses default group)
                     pass
                 elif len(args) == 1 and len(kwargs) == 0:
                     # group or group name
+                    is_constant, group = args[0].try_as_python_constant()
                     if not (
-                        args[0].is_python_constant()
+                        is_constant
                         or (
                             isinstance(args[0], CustomClassObjectVariable)
                             and args[  # pyrefly: ignore[missing-attribute]
@@ -2403,16 +2416,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         raise AssertionError(
                             f"Expected group arg to be a python constant or ProcessGroup, got {args[0]}"
                         )
+                    args_as_value = [group if is_constant else get_arg_value(args[0])]
                 elif len(args) == 2 and len(kwargs) == 0:
                     # ranks + tag
                     if not isinstance(args[0], ListVariable):
                         raise AssertionError(
                             f"Expected first arg to be a ListVariable (ranks), got {type(args[0])}"
                         )
-                    if not args[1].is_python_constant():
+                    is_constant, tag = args[1].try_as_python_constant()
+                    if not is_constant:
                         raise AssertionError(
                             "Expected second arg (tag) to be a python constant"
                         )
+                    args_as_value = [get_arg_value(args[0]), tag]
                 elif len(args) == 0 and len(kwargs) > 0:
                     # All keyword arguments (e.g., get_world_size(group=...))
                     pass
@@ -2422,14 +2438,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"function {self.value}"
                     )
 
-                def get_arg_value(arg: VariableTracker) -> Any:
-                    # CustomClassObjectVariable for ProcessGroup doesn't support
-                    # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, CustomClassObjectVariable):
-                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
-                    return arg.as_python_constant()
-
-                args_as_value = [get_arg_value(arg) for arg in args]
                 kwargs_as_value = {k: get_arg_value(v) for k, v in kwargs.items()}
                 invocation_result = self.value(*args_as_value, **kwargs_as_value)
 
@@ -2618,8 +2626,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif expr.is_python_constant():
-                val = expr.as_python_constant()
+            elif (constant := expr.try_as_python_constant())[0]:
+                val = constant[1]
             else:
                 unimplemented(
                     gb_type="torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
@@ -2683,8 +2691,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker | None:
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif expr.is_python_constant():
-                val = expr.as_python_constant()
+            elif (constant := expr.try_as_python_constant())[0]:
+                val = constant[1]
             else:
                 return None
 
@@ -3066,8 +3074,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             for arg in args:
                 if isinstance(arg, TensorVariable):
                     real_args.append(arg.as_proxy().node.meta["example_value"])
-                elif arg.is_python_constant():
-                    real_args.append(arg.as_python_constant())
+                elif (constant := arg.try_as_python_constant())[0]:
+                    real_args.append(constant[1])
                 else:
                     unimplemented(
                         gb_type="elementwise_dtypes unsupported arg type",
@@ -3143,10 +3151,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     message_graph_arg = tx.output.register_static_attr_and_return_proxy(
                         "_check_message", message_eager
                     )
-                case _ if message_vt.is_python_constant():
+                case _ if (constant := message_vt.try_as_python_constant())[0]:
                     # Mirror eager torch._check, which accepts any constant and
                     # stringifies it; None means "use the default message".
-                    message_eager = message_vt.as_python_constant()
+                    message_eager = constant[1]
                     if message_eager is not None:
                         message_graph_arg = str(message_eager)
                 case _:
@@ -3162,8 +3170,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
 
-            if predicate_vt.is_python_constant():
-                if predicate_vt.as_python_constant():
+            is_constant, predicate = predicate_vt.try_as_python_constant()
+            if is_constant:
+                if predicate:
                     return ConstantVariable.create(None)
                 msg = (
                     str(message_eager() if callable(message_eager) else message_eager)
@@ -3339,10 +3348,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             val_vt = args[1]
             val = val_vt.as_python_constant()
 
-            if x_vt.is_python_constant():
-                torch._dynamo.decorators.override_optimization_hint(
-                    x_vt.as_python_constant(), val
-                )
+            is_constant, value = x_vt.try_as_python_constant()
+            if is_constant:
+                torch._dynamo.decorators.override_optimization_hint(value, val)
                 return ConstantVariable.create(None)
 
             if isinstance(x_vt, SymNodeVariable):
@@ -3801,8 +3809,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     ],
                 )
 
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        if (
+            self.can_constant_fold_through()
+            and (constants := try_constant_args(args, kwargs))[0]
         ):
             # constant fold functions need to be guarded.
             if self.value in constant_fold_functions_need_guards:
@@ -3817,8 +3826,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return VariableTracker.build(
                     tx,
                     self.as_python_constant()(
-                        *[x.as_python_constant() for x in args],
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                        *constants[1],
+                        **constants[2],
                     ),
                 )
             except (OverflowError, TypeError, ValueError) as exc:
@@ -4475,11 +4484,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         def handle_ntuple(value: VariableTracker) -> VariableTracker:
             if vt_is_iterable(value):
                 return variables.TupleVariable(unpack_iterable(tx, value))
-            elif value.is_python_constant():
+            elif (constant := value.try_as_python_constant())[0]:
                 # constant prop through it
                 return VariableTracker.build(
                     tx,
-                    torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
+                    torch.nn.modules.utils._ntuple(count)(constant[1]),
                 )
             else:
                 unimplemented(
@@ -4745,13 +4754,14 @@ class DispatchKeySetVariable(BaseTorchVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        if not check_unspec_or_constant_args(args, kwargs):
+        all_constant, values, kwvalues = try_constant_args(args, kwargs)
+        if not all_constant:
             return None
         return VariableTracker.build(
             tx,
             self.value.has(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
+                *values,
+                **kwvalues,
             ),
         )
 

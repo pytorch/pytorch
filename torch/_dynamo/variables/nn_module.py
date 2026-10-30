@@ -69,6 +69,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     set_example_value,
+    try_constant_args,
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
@@ -733,10 +734,8 @@ class NNModuleVariable(VariableTracker):
         )
         # pyrefly: ignore[missing-attribute]
         if type(module).__getitem__ not in builtin_supported:
-            if not (
-                key.is_python_constant()
-                and isinstance(key.as_python_constant(), (str, int))
-            ):
+            is_constant, value = key.try_as_python_constant()
+            if not (is_constant and isinstance(value, (str, int))):
                 unimplemented(
                     gb_type="Invalid or non-const argument in nn.Module __getitem__",
                     context=f"mp_subscript_impl: {self} {key}",
@@ -791,8 +790,8 @@ class NNModuleVariable(VariableTracker):
         key_value = 0
         if isinstance(key, SymNodeVariable):
             key_value = key.evaluate_expr(tx.output)
-        elif key.is_python_constant():
-            key_value = key.as_python_constant()
+        elif (constant := key.try_as_python_constant())[0]:
+            key_value = constant[1]
         else:
             unimplemented(
                 gb_type="Unsupported key type for nn.Module.__getitem__",
@@ -845,21 +844,6 @@ class NNModuleVariable(VariableTracker):
             ),
         )
 
-    def _assert_all_args_kwargs_const(
-        self, tx: "InstructionTranslatorBase", name: str, args: Any, kwargs: Any
-    ) -> None:
-        if not all(
-            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-        ):
-            module = tx.output.get_submodule(self.module_key)
-            unimplemented(
-                gb_type="non-const argument in nn.Module method",
-                context=f"call_method: {self} {name} {args} {kwargs}",
-                explanation="Dynamo does not support calling "
-                f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
-                hints=[],
-            )
-
     def _get_kwargs(
         self,
         tx: "InstructionTranslatorBase",
@@ -868,13 +852,19 @@ class NNModuleVariable(VariableTracker):
         kwargs: Any,
         *names: str,
     ) -> dict[str, Any]:
-        self._assert_all_args_kwargs_const(tx, name, args, kwargs)
+        all_constant, values, kwvalues = try_constant_args(args, kwargs)
+        if not all_constant:
+            module = tx.output.get_submodule(self.module_key)
+            unimplemented(
+                gb_type="non-const argument in nn.Module method",
+                context=f"call_method: {self} {name} {args} {kwargs}",
+                explanation="Dynamo does not support calling "
+                f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
+                hints=[],
+            )
         module = tx.output.get_submodule(self.module_key)
         fn = getattr(module, name)
-        bound_args = inspect.signature(fn).bind(
-            *([x.as_python_constant() for x in args]),
-            **{k: v.as_python_constant() for k, v in kwargs.items()},
-        )
+        bound_args = inspect.signature(fn).bind(*values, **kwvalues)
         bound_args.apply_defaults()
         bound_args = bound_args.arguments
         return {k: bound_args[k] for k in names}
@@ -940,7 +930,8 @@ class NNModuleVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         module = tx.output.get_submodule(self.module_key)
-        if not args[1].is_python_constant():
+        is_constant, index = args[1].try_as_python_constant()
+        if not is_constant:
             raise_type_error(
                 tx,
                 f"``nn.Module`` {module}'s call method _get_item_by_idx requires a constant index argument",
@@ -950,7 +941,7 @@ class NNModuleVariable(VariableTracker):
                 tx,
                 f"``nn.Module`` {module}'s call method _get_item_by_idx requires a tuple as first argument",
             )
-        mod_var = args[0].items[args[1].as_python_constant()]
+        mod_var = args[0].items[index]
         if isinstance(mod_var, UnspecializedNNModuleVariable):
             return mod_var
         key = mod_var.module_key
@@ -1171,9 +1162,10 @@ class NNModuleVariable(VariableTracker):
         module = tx.output.get_submodule(self.module_key)
         if not isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict)):
             return None
-        if not item.is_python_constant():
+        is_constant, value = item.try_as_python_constant()
+        if not is_constant:
             return None
-        return VariableTracker.build(tx, item.as_python_constant() in module)
+        return VariableTracker.build(tx, value in module)
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker

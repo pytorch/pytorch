@@ -3,6 +3,7 @@
 import collections
 import contextlib
 import dis
+import enum
 import unittest
 
 import torch
@@ -18,6 +19,9 @@ from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+_FROZEN_NUMBERS = frozenset({1, 2, 3})
 
 
 def _filter_instructions(instructions, opname):
@@ -760,6 +764,93 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         result = opt(torch.ones(4), cfg)
         self.assertEqual(result, torch.ones(4) + 1)
+
+    def test_return_python_enum_constant(self):
+        class Choice(enum.Enum):
+            A = 7
+
+        def fn(x):
+            member = Choice(7)
+            return x + 1, member, member
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x)
+        second = compiled(-x)
+        self.assertEqual(first, fn(x))
+        self.assertEqual(second, fn(-x))
+        self.assertIs(first[1], Choice.A)
+        self.assertIs(first[1], first[2])
+        self.assertIs(second[1], first[1])
+        self.assertIs(second[1], second[2])
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("constructor_name", [False, True])
+    def test_return_derived_frozenset(self, constructor_name):
+        if constructor_name:
+
+            def fn(x):
+                frozenset
+                result = _FROZEN_NUMBERS.difference({2})
+                return x + 1, result, result
+
+            self.assertIn("frozenset", fn.__code__.co_names)
+        else:
+
+            def fn(x):
+                result = _FROZEN_NUMBERS.difference({2})
+                return x + 1, result, result
+
+            self.assertNotIn("frozenset", fn.__code__.co_names)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x)
+        second = compiled(-x)
+        self.assertEqual(first, fn(x))
+        self.assertEqual(second, fn(-x))
+        self.assertIs(type(first[1]), frozenset)
+        self.assertIs(first[1], first[2])
+        self.assertIs(second[1], first[1])
+        self.assertIs(second[1], second[2])
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("num_items", [5, 6])
+    def test_return_colliding_frozenset_preserves_iteration(self, num_items):
+        def fn(x, items):
+            result = frozenset(items).difference(())
+            return x + 1, result, result
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        items = tuple(range(0, num_items * 8, 8))
+        first = compiled(x, items)
+        second = compiled(-x, items)
+        eager_first = fn(x, items)
+        eager_second = fn(-x, items)
+        self.assertEqual(first, eager_first)
+        self.assertEqual(second, eager_second)
+        self.assertIs(type(first[1]), frozenset)
+        self.assertIs(first[1], first[2])
+        self.assertIs(second[1], second[2])
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+        self.assertEqual(tuple(first[1]), tuple(eager_first[1]))
+        self.assertEqual(tuple(second[1]), tuple(eager_second[1]))
+
+    def test_compile_frozenset_with_fake_id_declines(self):
+        def fn(x):
+            obj = [1, 2, 3]
+            return x + 1, frozenset((id(obj),))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
 
     def test_call_once_guard_allows_super_delegation(self):
         """_add_call_once_guard must key on (id(self), id(original_method))

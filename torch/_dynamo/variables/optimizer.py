@@ -231,8 +231,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Get python values equivalent to the variable tracker args"""
 
         def map_arg(arg: Any) -> Any:
-            if isinstance(arg, VariableTracker) and arg.is_python_constant():
-                return arg.as_python_constant()
+            if (
+                isinstance(arg, VariableTracker)
+                and (constant := arg.try_as_python_constant())[0]
+            ):
+                return constant[1]
             elif isinstance(arg, ListVariable) and not arg.items:
                 # pyrefly: ignore [implicit-any]
                 return []

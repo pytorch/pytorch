@@ -1571,8 +1571,9 @@ def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
 
 
 def _item_debug_repr(vt: VariableTracker) -> str:
-    if vt.is_python_constant():
-        return repr(vt.as_python_constant())
+    is_constant, value = vt.try_as_python_constant()
+    if is_constant:
+        return repr(value)
     return vt.debug_repr()
 
 
@@ -3154,14 +3155,34 @@ def guard_if_dyn(arg: Any) -> Any:
 
     arg = specialize_symnode(arg)
 
-    if isinstance(arg, VariableTracker) and arg.is_python_constant():
-        return arg.as_python_constant()
+    if isinstance(arg, VariableTracker):
+        is_constant, value = arg.try_as_python_constant()
+        if is_constant:
+            return value
 
     return arg
 
 
 def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
+
+
+def try_constant_args(
+    args: Iterable[VariableTracker], kwargs: Mapping[str, VariableTracker]
+) -> tuple[bool, list[Any], dict[str, Any]]:
+    constant_args: list[Any] = []
+    constant_kwargs: dict[str, Any] = {}
+    for arg in args:
+        is_constant, value = arg.try_as_python_constant()
+        if not is_constant:
+            return False, [], {}
+        constant_args.append(value)
+    for key, arg in kwargs.items():
+        is_constant, value = arg.try_as_python_constant()
+        if not is_constant:
+            return False, [], {}
+        constant_kwargs[key] = value
+    return True, constant_args, constant_kwargs
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
@@ -3534,13 +3555,12 @@ def iter_contains(
     # valid when every element is a constant too; a non-constant element earlier
     # in the sequence has an __eq__ that must be honored in order (it may match,
     # or raise), so fall through to the per-element richcompare loop otherwise.
-    if search.is_python_constant() and all(x.is_python_constant() for x in items):
-        search_val = search.as_python_constant()
-        found_const = any(
-            x.as_python_constant() is search_val or x.as_python_constant() == search_val
-            for x in items
-        )
-        return ConstantVariable.create(found_const)
+    is_constant, search_val = search.try_as_python_constant()
+    if is_constant:
+        all_constant, values, _ = try_constant_args(items, {})
+        if all_constant:
+            found_const = any(x is search_val or x == search_val for x in values)
+            return ConstantVariable.create(found_const)
     found: VariableTracker | None = None
     for x in items:
         check = generic_richcompare_bool(tx, x, search, "__eq__")

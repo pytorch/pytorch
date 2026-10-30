@@ -2578,12 +2578,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             name == "__reduce_ex__"
             and len(args) == 1
             and not kwargs
-            and self.is_python_constant()
+            and (constant := self.try_as_python_constant())[0]
         ):
             protocol = args[0].as_python_constant()
-            return VariableTracker.build(
-                tx, self.as_python_constant().__reduce_ex__(protocol)
-            )
+            return VariableTracker.build(tx, constant[1].__reduce_ex__(protocol))
 
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",

@@ -75,7 +75,6 @@ from ..source import (
 )
 from ..utils import (
     base_exception_methods,
-    check_constant_args,
     check_positional,
     cmp_name_to_op_mapping,
     defaultdict_methods,
@@ -101,6 +100,7 @@ from ..utils import (
     set_methods,
     tensortype_to_dtype,
     tracked_repr,
+    try_constant_args,
     tuple_methods,
     unpack_iterable,
     unpatched_nn_module_getattr,
@@ -1327,8 +1327,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         )
         from .tensor import CurrentDeviceVariable
 
-        constant_args = check_constant_args(args, kwargs)
-
         if isinstance(self.value, type) and type_disallows_instantiation(self.value):
             raise_type_error(tx, f"cannot create '{self.value.__name__}' instances")
 
@@ -1365,13 +1363,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # device.__new__, which Dynamo skips.
                 return CurrentDeviceVariable(device_arg.value)
 
-        if self.can_constant_fold_through() and constant_args:
+        if (
+            self.can_constant_fold_through()
+            and (constants := try_constant_args(args, kwargs))[0]
+        ):
+            _, native_args, native_kwargs = constants
             # constant fold
             return VariableTracker.build(
                 tx,
                 self.as_python_constant()(  # type: ignore[operator]
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    *native_args,
+                    **native_kwargs,
                 ),
             )
         elif self.value is torch.nn.CrossEntropyLoss:
@@ -1531,9 +1533,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # compiling rank's, so it must not be captured.
                 variable_cls._get_device_index_fn(args[0].value, optional=True)
                 return CurrentDeviceContextVariable(args[0].value.type, self.value)
-            if not args[0].is_python_constant():
+            is_constant, arg = args[0].try_as_python_constant()
+            if not is_constant:
                 raise_type_error(tx, f"{name} requires a constant argument")
-            arg = args[0].as_python_constant()
             if _coor_enabled():
                 # The artifact runs on every rank, so an explicit index -- even the
                 # compiling rank's own -- names a GPU that is wrong on other ranks.
@@ -1749,13 +1751,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if issubclass(self.value, torch.Stream):
                 from .lists import TupleVariable
 
+                device_constant: tuple[bool, Any] = (False, None)
                 if _coor_enabled():
                     # As with device contexts, an explicit index names a GPU that
                     # is wrong on every other rank.
                     device_arg = args[0] if args else kwargs.get("device")
                     index = None
-                    if device_arg is not None and device_arg.is_python_constant():
-                        dev = device_arg.as_python_constant()
+                    if (
+                        device_arg is not None
+                        and (device_constant := device_arg.try_as_python_constant())[0]
+                    ):
+                        dev = device_constant[1]
                         dev = torch.device(dev) if isinstance(dev, str) else dev
                         index = dev.index if isinstance(dev, torch.device) else dev
                     if index is not None or "device_index" in kwargs:
@@ -1772,13 +1778,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 example_args: list[Any] = [
                     arg.value
                     if isinstance(arg, CurrentDeviceVariable)
+                    else device_constant[1]
+                    if i == 0 and device_constant[0]
                     else arg.as_python_constant()
-                    for arg in args
+                    for i, arg in enumerate(args)
                 ]
                 example_kwargs: dict[str, Any] = {
                     key: (
                         value.value
                         if isinstance(value, CurrentDeviceVariable)
+                        else device_constant[1]
+                        if not args and key == "device" and device_constant[0]
                         else value.as_python_constant()
                     )
                     for key, value in kwargs.items()
@@ -1801,9 +1811,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         _coor_device_index_is_current,
                     )
 
-                    device_arg = args[0] if args else kwargs.get("device")
                     device_value = (
-                        None if device_arg is None else device_arg.as_python_constant()
+                        example_args[0]
+                        if example_args
+                        else example_kwargs.get("device")
                     )
                     uses_current_device = device_value is None or (
                         isinstance(device_value, (str, torch.device))
@@ -1884,8 +1895,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif self.value is random.Random:
-            if len(args) == 1 and args[0].is_python_constant():
-                seed = args[0].as_python_constant()
+            if len(args) == 1 and (constant := args[0].try_as_python_constant())[0]:
+                seed = constant[1]
             else:
                 seed = None
             random_object = random.Random(seed)
@@ -2015,6 +2026,9 @@ def call_random_fn(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
     replay_fn: RandomCallOnSource | None = None,
+    *,
+    native_args: list[Any] | None = None,
+    native_kwargs: dict[str, Any] | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
@@ -2024,8 +2038,14 @@ def call_random_fn(
         if isinstance(random_var, variables.RandomVariable):
             return random_var.call_method(tx, fn.__name__, args, kwargs)
 
-    args = [x.as_python_constant() for x in args]
-    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    args = (
+        [x.as_python_constant() for x in args] if native_args is None else native_args
+    )
+    kwargs = (
+        {k: v.as_python_constant() for k, v in kwargs.items()}
+        if native_kwargs is None
+        else native_kwargs
+    )
     random_call_index = len(tx.output.random_calls)
     # NB: it is probably not important for the example_value to be exactly correct,
     # we just need the right type
@@ -3329,12 +3349,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
+        *,
+        name_value: Any = NO_SUCH_SUBOBJ,
     ) -> VariableTracker:
         from ..side_effects import SideEffects
 
         name_str = ""
         try:
-            name_str = name.as_python_constant()
+            name_str = (
+                name.as_python_constant()
+                if name_value is NO_SUCH_SUBOBJ
+                else name_value
+            )
         except NotImplementedError:
             unimplemented(
                 gb_type="non-const setattr name on user-defined object",
@@ -3560,10 +3586,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         if (
             self.is_supported_random()
-            and all(k.is_python_constant() for k in args)
-            and all(v.is_python_constant() for v in kwargs.values())
+            and (constants := try_constant_args(args, kwargs))[0]
         ):
-            return call_random_fn(tx, self.value, args, kwargs)  # type: ignore[arg-type]
+            return call_random_fn(
+                tx,
+                cast(Callable[..., Any], self.value),
+                args,
+                kwargs,
+                native_args=constants[1],
+                native_kwargs=constants[2],
+            )
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
@@ -4315,7 +4347,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             f"not '{result_type.__name__}'"
                         ],
                     )
-                if not result.is_python_constant():
+                is_constant, value = result.try_as_python_constant()
+                if not is_constant:
                     unimplemented(
                         gb_type="Non-constant __hash__ return",
                         context=f"hash_impl {self}",
@@ -4329,7 +4362,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Normalize int subclasses to a plain int (mirrors CPython's
                 # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
                 # `ConstantVariable` only holds plain literal types.
-                return int(result.as_python_constant()), False
+                return int(value), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:
@@ -5909,6 +5942,8 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
+        *,
+        name_value: Any = NO_SUCH_SUBOBJ,
     ) -> VariableTracker:
         """Override to handle property setters on MutableMapping subclasses.
 
@@ -5938,7 +5973,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
                 fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
                 return fset_vt.call_function(tx, [self, value], {})
 
-        return super().method_setattr_standard(tx, name, value)
+        return super().method_setattr_standard(tx, name, value, name_value=name_value)
 
     def _get(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
         # `.get` backed by the stdlib Mapping/dict implementation resolves to a

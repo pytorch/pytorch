@@ -62,7 +62,12 @@ from ..exc import (
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
-from ..utils import proxy_args_kwargs, set_example_value, unpack_iterable
+from ..utils import (
+    proxy_args_kwargs,
+    set_example_value,
+    try_constant_args,
+    unpack_iterable,
+)
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -179,8 +184,8 @@ def check_meta_consistency_vt(
             return var.proxy.node.meta["example_value"]
         elif isinstance(var, SymNodeVariable):
             return var.sym_num
-        elif var.is_python_constant():
-            return var.as_python_constant()
+        elif (constant := var.try_as_python_constant())[0]:
+            return constant[1]
         else:
             unimplemented(
                 gb_type="cannot unwrap variable for check_meta_consistency",
@@ -813,8 +818,8 @@ def _call_while_loop(
         ) -> VariableTracker:
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
-                carry.is_python_constant()
-                and isinstance(carry.as_python_constant(), int)
+                (constant := carry.try_as_python_constant())[0]
+                and isinstance(constant[1], int)
             ) or isinstance(carry, SymNodeVariable):
                 example_value = _create_unbacked_symint(
                     tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
@@ -916,9 +921,9 @@ def _call_while_loop(
                     *graph_break_hints.USER_ERROR,
                 ],
             )
-    elif cond_r.is_python_constant():
+    elif (constant := cond_r.try_as_python_constant())[0]:
         # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
-        pred = cond_r.as_python_constant()
+        pred = constant[1]
         if pred:
             unimplemented(
                 gb_type="torch.while_loop: infinite loop detected",
@@ -1218,7 +1223,8 @@ def validate_args_and_maybe_create_graph_inputs(
                 args.append(a)
                 continue
 
-            if a.is_python_constant():
+            is_constant, value = a.try_as_python_constant()
+            if is_constant:
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
@@ -1228,9 +1234,7 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else f"const_unused_{sub_args_names[idx]}"
                 )
-                tracer.create_graph_input(
-                    arg_name, a.python_type(), a.as_python_constant()
-                )
+                tracer.create_graph_input(arg_name, a.python_type(), value)
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
@@ -2565,9 +2569,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             for ret in unpack_iterable(tx, ret_val):
-                if ret.is_python_constant() and not isinstance(
-                    ret.as_python_constant(), int
-                ):
+                is_constant, value = ret.try_as_python_constant()
+                if is_constant and not isinstance(value, int):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
@@ -2790,8 +2793,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if ret.is_python_constant():
-                    const = ret.as_python_constant()
+                is_constant, const = ret.try_as_python_constant()
+                if is_constant:
                     # Python floats in branch outputs are blocked upstream by
                     # validate_subgraph_output_types (shared HOP gate); we
                     # mirror the whitelist here to keep the error specific to
@@ -2920,8 +2923,8 @@ def validate_subgraph_output_types(
             if (
                 (isinstance(out, SymNodeVariable) and out.python_type() in (int, bool))
                 or (
-                    out.is_python_constant()
-                    and isinstance(out.as_python_constant(), (int, bool))
+                    (constant := out.try_as_python_constant())[0]
+                    and isinstance(constant[1], (int, bool))
                 )
                 or isinstance(out, CustomClassObjectVariable)
             ):
@@ -4007,7 +4010,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         grad_enabled, fn_var, *rest_args = args
 
-        if not grad_enabled.is_python_constant():
+        is_constant, enabled = grad_enabled.try_as_python_constant()
+        if not is_constant:
             unimplemented(
                 gb_type="wrap_with_set_grad_enabled: non-constant grad_enabled",
                 context=str(grad_enabled),
@@ -4019,7 +4023,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         _check_supported_callable_arg(tx, fn_var, "enable_grad_fn")
 
-        with torch.set_grad_enabled(grad_enabled.as_python_constant()):
+        with torch.set_grad_enabled(enabled):
             if self._HOP_NAME is None:
                 raise AssertionError("_HOP_NAME must be set")
             (
@@ -4057,7 +4061,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         proxy_args = tuple(
             [
-                grad_enabled.as_python_constant(),
+                enabled,
                 body_node,
             ]
             + [operand.as_proxy() for operand in rest_args]
@@ -4102,24 +4106,21 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
 
-        for arg in [device_type, dtype, enabled, cache_enabled]:
-            if not arg.is_python_constant():
-                unimplemented(
-                    gb_type="wrap_with_autocast: expected constant arg",
-                    context=str(args),
-                    explanation="wrap_with_autocast expects device_type, dtype, enabled, "
-                    "and cache_enabled arguments to be constants.",
-                    hints=[
-                        *graph_break_hints.DYNAMO_BUG,
-                    ],
-                )
+        all_constant, python_constants, _ = try_constant_args(
+            [device_type, dtype, enabled, cache_enabled], {}
+        )
+        if not all_constant:
+            unimplemented(
+                gb_type="wrap_with_autocast: expected constant arg",
+                context=str(args),
+                explanation="wrap_with_autocast expects device_type, dtype, enabled, "
+                "and cache_enabled arguments to be constants.",
+                hints=[
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
 
         _check_supported_callable_arg(tx, fn_var, "autocast")
-
-        python_constants = [
-            arg.as_python_constant()
-            for arg in [device_type, dtype, enabled, cache_enabled]
-        ]
 
         with torch.autocast(*python_constants):
             if self._HOP_NAME is None:
@@ -4925,7 +4926,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         mask_fn = block_mask.items[-1]
-        if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
+        if (constant := mask_fn.try_as_python_constant())[0] and constant[1] is None:
             mask_fn = VariableTracker.build(
                 tx,
                 torch.nn.attention.flex_attention.noop_mask,
@@ -5163,7 +5164,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, score_mod, "score_mod"
         )
         mask_fn = block_mask.items[-1]  # type: ignore[attr-defined]
-        if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
+        if (constant := mask_fn.try_as_python_constant())[0] and constant[1] is None:
             mask_fn = VariableTracker.build(
                 tx,
                 torch.nn.attention.flex_attention.noop_mask,

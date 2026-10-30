@@ -337,7 +337,7 @@ class SideEffects:
             self.deferred_attr_mutations = saved
 
     def snapshot_attr_mutation(
-        self, item: VariableTracker, name: str, value: VariableTracker
+        self, item: VariableTracker, name: str, current: Any
     ) -> bool:
         """Record an attribute mutation for deferred validation.
 
@@ -347,11 +347,6 @@ class SideEffects:
         check_allowed_side_effect.
         """
         key = (id(item), name)
-        if not value.is_python_constant():
-            raise AssertionError(
-                "value must be a python constant (guaranteed by caller store_attr)"
-            )
-        current = value.as_python_constant()
         if key in self.deferred_attr_mutations:
             original = self.deferred_attr_mutations[key][0]
         else:
@@ -363,9 +358,9 @@ class SideEffects:
                 original_vt = item.tp_getattro_impl(tx, name)  # type: ignore[arg-type]
             except NotImplementedError:
                 return False
-            if not original_vt.is_python_constant():
+            is_constant, original = original_vt.try_as_python_constant()
+            if not is_constant:
                 return False
-            original = original_vt.as_python_constant()
         self.deferred_attr_mutations[key] = (original, current)
         return True
 
@@ -560,9 +555,9 @@ class SideEffects:
             and not isinstance(item, AutogradFunctionContextVariable)
             and not self.should_allow_side_effects_in_hop()
             and not self.should_allow_externally_visible_side_effects_in_subtracer()
-            and value.is_python_constant()
+            and (constant := value.try_as_python_constant())[0]
         ):
-            deferred = self.snapshot_attr_mutation(item, name, value)
+            deferred = self.snapshot_attr_mutation(item, name, constant[1])
         if not deferred:
             self.check_allowed_side_effect(item)
         if item not in self.store_attr_mutations:

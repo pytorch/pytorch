@@ -80,8 +80,6 @@ from ..source import (
     TypeSource,
 )
 from ..utils import (
-    check_constant_args,
-    check_unspec_or_constant_args,
     FrameState,
     identity,
     is_function,
@@ -90,6 +88,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    try_constant_args,
     unpack_iterable,
 )
 from .base import (
@@ -1215,11 +1214,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _extract_tree_map_only_types(
         self, selector: VariableTracker
     ) -> tuple[type, ...] | None:
-        if not selector.is_python_constant():
-            return None
-        try:
-            raw_value = selector.as_python_constant()
-        except NotImplementedError:
+        is_constant, raw_value = selector.try_as_python_constant()
+        if not is_constant:
             return None
 
         flattened = self._flatten_type_spec(raw_value)
@@ -2744,24 +2740,19 @@ class SkipFunctionVariable(VariableTracker):
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
-        if self.value in (importlib.util.find_spec, importlib.metadata.version) and all(
-            a.is_python_constant() for a in args
+        if (
+            self.value in (importlib.util.find_spec, importlib.metadata.version)
+            and (constants := try_constant_args(args, {}))[0]
         ):
             fn = cast(Callable[..., Any], self.value)
-            return VariableTracker.build(
-                tx, fn(*(a.as_python_constant() for a in args))
-            )
+            return VariableTracker.build(tx, fn(*constants[1]))
 
         if (
             self.value in RE_CONSTANT_FOLD_FNS
-            and all(a.is_python_constant() for a in args)
-            and all(v.is_python_constant() for v in kwargs.values())
+            and (constants := try_constant_args(args, kwargs))[0]
         ):
             fold_fn = cast(Callable[..., Any], self.value)
-            result = fold_fn(
-                *(a.as_python_constant() for a in args),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+            result = fold_fn(*constants[1], **constants[2])
             return VariableTracker.build(tx, result)
 
         def unimplemented_direct_disable_call(api_name: str) -> Never:
@@ -3478,8 +3469,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     )
 
                 op_var = item.tp_getattro_impl(tx, "op")
-                if op_var.is_python_constant():
-                    op = op_var.as_python_constant()
+                is_constant, op = op_var.try_as_python_constant()
+                if is_constant:
                     if op not in (dist.isend, dist.irecv):
                         raise torch._dynamo.exc.InternalTorchDynamoError(
                             f"unexpected P2POp op {op}"
@@ -3559,13 +3550,10 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        constant_args = check_constant_args(args, kwargs)
+        constant_args, values, kwvalues = try_constant_args(args, kwargs)
         if constant_args:
             try:
-                value = self.fn(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
+                value = self.fn(*values, **kwvalues)
             except TypeError as exc:
                 raise_observed_exception(
                     type(exc),
@@ -3776,11 +3764,11 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
+        if (
+            self.can_constant_fold_through()
+            and (constants := try_constant_args(args, kwargs))[0]
         ):
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            _, const_args, const_kwargs = constants
             try:
                 # use the original function which is faster than the polyfill
                 result = self.fn(*const_args, **const_kwargs)
@@ -3794,31 +3782,29 @@ class PolyfilledFunctionVariable(VariableTracker):
             and len(args) == 1
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
-            and all(
-                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
-                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
-                for x in args[0].items
-            )
         ):
-            return variables.SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    torch.sym_sum,
-                    (tuple(a.as_proxy() for a in args[0].items),),
-                    {},
-                ),
-                sym_num=torch.sym_sum(
-                    [
-                        (
-                            x.as_python_constant()
-                            if x.is_python_constant()
-                            else x.sym_num  # type: ignore[attr-defined]
-                        )
-                        for x in args[0].items
-                    ]
-                ),
-            )
+            values = []
+            for x in args[0].items:
+                is_constant, value = x.try_as_python_constant()
+                if is_constant and isinstance(value, int):
+                    values.append(value)
+                elif (
+                    isinstance(x, variables.SymNodeVariable) and x.python_type() is int
+                ):
+                    values.append(x.sym_num)
+                else:
+                    break
+            else:
+                return variables.SymNodeVariable.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        torch.sym_sum,
+                        (tuple(a.as_proxy() for a in args[0].items),),
+                        {},
+                    ),
+                    sym_num=torch.sym_sum(values),
+                )
 
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
         return tx.inline_user_function_return(
@@ -4065,15 +4051,17 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # Combine args and kwargs and pass as a dict so that if user defined triton
         # kernel uses variables as 'grid' or 'kernel', it does not conflict with
         # parameters of the wrapper function
-        constant_args = {
-            k: v.as_python_constant()
-            for k, v in combined_args.items()
-            if isinstance(v, VariableTracker) and v.is_python_constant()
-        }
+        constant_args = {}
+        for k, v in combined_args.items():
+            if (
+                isinstance(v, VariableTracker)
+                and (constant := v.try_as_python_constant())[0]
+            ):
+                constant_args[k] = constant[1]
         non_constant_args = {
-            k: v
-            for k, v in combined_args_vt.items()
-            if not (isinstance(v, VariableTracker) and v.is_python_constant())
+            key_vt: v
+            for (k, v), key_vt in zip(combined_args.items(), combined_args_vt)
+            if k not in constant_args
         }
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
@@ -4085,8 +4073,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         for k in launch_kwargs:
             if k in kernel_arg_names:
                 continue
-            v = combined_args[k]
-            if not (isinstance(v, VariableTracker) and v.is_python_constant()):
+            if k not in constant_args:
                 non_const_options.append(k)
         if non_const_options:
             self.raise_unsupported(

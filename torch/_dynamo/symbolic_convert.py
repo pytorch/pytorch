@@ -884,8 +884,9 @@ def generic_jump(
         ):
             error_msg: VariableTracker = self.pop()
             # Skip over things like `assert True`
-            if value.is_python_constant():
-                if bool(value.as_python_constant()):
+            is_constant, constant = value.try_as_python_constant()
+            if is_constant:
+                if bool(constant):
                     return self.jump(inst)
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
@@ -957,13 +958,14 @@ def generic_jump(
             self.jump(inst)
             return
 
-        if value.is_python_constant():
+        is_constant, constant = value.try_as_python_constant()
+        if is_constant:
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.
             if isinstance(value, ConstDictVariable) and value.source:
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            if truth_fn(value.as_python_constant()):
+            if truth_fn(constant):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -978,8 +980,9 @@ def generic_jump(
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             result = generic_is_true(self, value)  # type: ignore[arg-type]
-            if result.is_python_constant():
-                if truth_fn(result.as_python_constant()):
+            is_constant, constant = result.try_as_python_constant()
+            if is_constant:
+                if truth_fn(constant):
                     if push:
                         self.push(value)
                     self.jump(inst)
@@ -3470,9 +3473,9 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance(argnames, TupleVariable) to be true"
             )
-        if not argnames.is_python_constant():
+        is_constant, argnames = argnames.try_as_python_constant()
+        if not is_constant:
             raise AssertionError("expected argnames.is_python_constant() to be true")
-        argnames = argnames.as_python_constant()
         args, kwargs_list = args[: -len(argnames)], args[-len(argnames) :]
         kwargs = dict(zip(argnames, kwargs_list))
         if len(kwargs) != len(argnames):
@@ -3521,7 +3524,8 @@ class InstructionTranslatorBase(
         try:
             result = generic_getattr(self, obj, attr)
         except Unsupported:
-            if not obj.is_python_constant():
+            is_constant, constant = obj.try_as_python_constant()
+            if not is_constant:
                 raise
             # An eager getattr would run a user-defined __get__ at trace time
             # and bake its result into the graph.
@@ -3533,9 +3537,7 @@ class InstructionTranslatorBase(
             ):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+            result = VariableTracker.build(self, getattr(constant, attr), source=source)
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -4577,11 +4579,10 @@ class InstructionTranslatorBase(
         # are replayed in the epilogue.
         # Skip when __format__ is overridden since format(obj, "") may
         # differ from str(obj) in that case.
-        if (
-            (flags & 0x03) == 0
-            and fmt_spec.is_python_constant()
-            and fmt_spec.as_python_constant() == ""
-        ):
+        constant: tuple[bool, Any] = (
+            fmt_spec.try_as_python_constant() if (flags & 0x03) == 0 else (False, None)
+        )
+        if constant[0] and constant[1] == "":
             realized = value.realize()
             try:
                 py_type = realized.python_type()
@@ -4598,9 +4599,8 @@ class InstructionTranslatorBase(
                     if self.output.should_exit:
                         raise
 
-        fmt_var = VariableTracker.build(
-            self, "{:" + fmt_spec.as_python_constant() + "}"
-        )
+        spec = constant[1] if constant[0] else fmt_spec.as_python_constant()
+        fmt_var = VariableTracker.build(self, "{:" + spec + "}")
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
@@ -4739,8 +4739,9 @@ class InstructionTranslatorBase(
 
     def GET_LEN(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        if tos.is_python_constant():
-            self.push(VariableTracker.build(self, len(tos.as_python_constant())))
+        is_constant, constant = tos.try_as_python_constant()
+        if is_constant:
+            self.push(VariableTracker.build(self, len(constant)))
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
@@ -4898,11 +4899,11 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected isinstance(kw_names, TupleVariable) to be true"
                 )
-            if not kw_names.is_python_constant():
+            is_constant, kw_names = kw_names.try_as_python_constant()
+            if not is_constant:
                 raise AssertionError(
                     "expected kw_names.is_python_constant() to be true"
                 )
-            kw_names = kw_names.as_python_constant()
         else:
             kw_names = self.kw_names.as_python_constant() if self.kw_names else ()
 

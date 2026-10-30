@@ -54,6 +54,7 @@ from ..utils import (
     set_example_value,
     specialize_symnode,
     tracked_repr,
+    try_constant_args,
     unpack_and_apply_fn,
     unpack_iterable,
 )
@@ -414,8 +415,9 @@ class BaseListVariable(VariableTracker):
             # CPython uses PyObject_RichCompareBool per element, which has
             # an identity shortcut before the full do_richcompare dispatch.
             eq_result = generic_richcompare_bool(tx, a, b, "__eq__")
-            if eq_result.is_python_constant():
-                if not eq_result.as_python_constant():
+            is_constant, equal = eq_result.try_as_python_constant()
+            if is_constant:
+                if not equal:
                     if cmp_op in (operator.eq, operator.ne):
                         return ConstantVariable.create(cmp_op is operator.ne)
                     return generic_richcompare(tx, a, b, op)
@@ -705,7 +707,8 @@ class BaseListVariable(VariableTracker):
                 result = variables.BuiltinVariable(operator.lt).call_function(
                     tx, [self.key, other.key], {}
                 )
-                if not result.is_python_constant():
+                is_constant, value = result.try_as_python_constant()
+                if not is_constant:
                     unimplemented(
                         gb_type="sort with non-constant keys",
                         context=str(self.key),
@@ -721,7 +724,7 @@ class BaseListVariable(VariableTracker):
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                return bool(result.as_python_constant())
+                return bool(value)
 
         try:
             if key_fn_var.is_constant_none():
@@ -729,10 +732,11 @@ class BaseListVariable(VariableTracker):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
 
-            if all(k.is_python_constant() for k in keys):
+            all_constant, key_values, _ = try_constant_args(keys, {})
+            if all_constant:
                 order = sorted(
                     range(len(saved)),
-                    key=lambda i: keys[i].as_python_constant(),
+                    key=lambda i: key_values[i],
                     reverse=reverse,
                 )
             else:
@@ -781,11 +785,8 @@ class RangeVariable(BaseListVariable):
             raise AssertionError
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
-            return (
-                ConstantVariable.create(int(x.as_python_constant()))
-                if x.is_python_constant()
-                else x
-            )
+            is_constant, value = x.try_as_python_constant()
+            return ConstantVariable.create(int(value)) if is_constant else x
 
         # cast each argument to an integer
         start = maybe_as_int(start)
@@ -826,10 +827,10 @@ class RangeVariable(BaseListVariable):
         # ref: range_bool in https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L740-L744
         return ConstantVariable.create(self.range_length() != 0)
 
-    def range_length(self) -> int:
-        lo = self.start()
-        hi = self.stop()
-        step = self.step()
+    def range_length(self, *, bounds: tuple[int, int, int] | None = None) -> int:
+        lo, hi, step = (
+            bounds if bounds is not None else (self.start(), self.stop(), self.step())
+        )
 
         if step == 0:
             raise AssertionError("step must not be zero")
@@ -1031,13 +1032,15 @@ class RangeVariable(BaseListVariable):
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/rangeobject.c#L896-L927
-        if not all(var.is_python_constant() for var in self.items):
+        all_constant, bounds, _ = try_constant_args(self.items, {})
+        if not all_constant:
             # Can't represent a `range_iterator` without well defined bounds
             return variables.misc.DelayGraphBreakVariable(
                 msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
             )
+        start, stop, step = bounds
         return RangeIteratorVariable(
-            self.start(), self.stop(), self.step(), self.range_length()
+            start, stop, step, self.range_length(bounds=(start, stop, step))
         )
 
     def sq_item_impl(
@@ -1515,13 +1518,13 @@ class DequeVariable(BaseListVariable):
     ) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        if not maxlen.is_python_constant():
+        is_constant, maxlen_val = maxlen.try_as_python_constant()
+        if not is_constant:
             raise AssertionError(
                 f"maxlen must be a constant, got: {maxlen.debug_repr()}"
             )
         self.maxlen = maxlen
         items = list(items)
-        maxlen_val = self.maxlen.as_python_constant()
         if maxlen_val is not None:
             # maxlen == 0 must empty the deque; items[-0:] would keep everything.
             items = items[-maxlen_val:] if maxlen_val != 0 else items[:0]
@@ -2171,8 +2174,8 @@ class ByteArrayVariable(VariableTracker):
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        if item.is_python_constant():
-            search = item.as_python_constant()
+        is_constant, search = item.try_as_python_constant()
+        if is_constant:
             try:
                 return ConstantVariable.create(search in self.data)
             except (TypeError, ValueError) as e:
@@ -2219,8 +2222,8 @@ class ByteArrayVariable(VariableTracker):
     ) -> bytearray:
         if isinstance(other, ByteArrayVariable):
             return other.data
-        if other.is_python_constant():
-            const = other.as_python_constant()
+        is_constant, const = other.try_as_python_constant()
+        if is_constant:
             if isinstance(const, (bytes, bytearray)):
                 return bytearray(const)
         raise_type_error(
@@ -2274,9 +2277,10 @@ class ByteArrayVariable(VariableTracker):
         # bytearray_mod: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         if reverse:
             return ConstantVariable.create(NotImplemented)
-        if other.is_python_constant():
+        is_constant, value = other.try_as_python_constant()
+        if is_constant:
             try:
-                result = self.data % other.as_python_constant()
+                result = self.data % value
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return ByteArrayVariable(
@@ -2299,10 +2303,11 @@ class ByteArrayVariable(VariableTracker):
                 f"{type(self).__name__}; every construction site should set "
                 "mutation_type."
             )
-        if not other.is_python_constant():
+        is_constant, value = other.try_as_python_constant()
+        if not is_constant:
             return ConstantVariable.create(NotImplemented)
         try:
-            result = self.data % other.as_python_constant()
+            result = self.data % value
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         tx.output.side_effects.mutation(self)
@@ -2442,8 +2447,9 @@ class SizeVariable(TupleVariable):
 
         int_items: list[int] = []
         for item in self.items:
-            if item.is_python_constant():
-                int_items.append(item.as_python_constant())
+            is_constant, value = item.try_as_python_constant()
+            if is_constant:
+                int_items.append(value)
                 continue
             if isinstance(item, TensorVariable):
                 proxy = getattr(item, "proxy", None)
@@ -2553,8 +2559,9 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if v.is_python_constant():
-                const_result *= v.as_python_constant()
+            is_constant, value = v.try_as_python_constant()
+            if is_constant:
+                const_result *= value
             else:
                 if not isinstance(v, SymNodeVariable):
                     raise AssertionError(

@@ -466,7 +466,7 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        if args[0].source is None and (constant := args[0].try_as_python_constant())[0]:
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -474,7 +474,7 @@ class ConstDictVariable(VariableTracker):
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=args[0].as_python_constant(),
+                        key=constant[1],
                     )
                 )
             )
@@ -919,8 +919,11 @@ class OrderedDictVariable(ConstDictVariable):
         last = True
         if len(args) == 2 and args[0].is_python_constant():
             last = args[1].as_python_constant()
-        if "last" in kwargs and kwargs["last"].is_python_constant():
-            last = kwargs["last"].as_python_constant()
+        if (
+            "last" in kwargs
+            and (constant := kwargs["last"].try_as_python_constant())[0]
+        ):
+            last = constant[1]
 
         self.items.move_to_end(HashableTracker(args[0]), last=last)
         return ConstantVariable.create(None)
@@ -937,10 +940,13 @@ class OrderedDictVariable(ConstDictVariable):
             )
 
         last = True
-        if len(args) == 1 and args[0].is_python_constant():
-            last = args[0].as_python_constant()
-        if "last" in kwargs and kwargs["last"].is_python_constant():
-            last = kwargs["last"].as_python_constant()
+        if len(args) == 1 and (constant := args[0].try_as_python_constant())[0]:
+            last = constant[1]
+        if (
+            "last" in kwargs
+            and (constant := kwargs["last"].try_as_python_constant())[0]
+        ):
+            last = constant[1]
 
         k, v = self.items.popitem(last=last)
         self.should_reconstruct_all = True
