@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from torch.types import Device
 
-from ._utils import _get_device_index, _lazy_call
+from ._utils import _get_device_index, _get_optional_device_index, _lazy_call
 
 
 def initial_seed(device: Device = None, /) -> int:
@@ -58,7 +58,7 @@ def get_rng_state_all() -> list[Tensor]:
     return [get_rng_state(i) for i in range(torch.accelerator.device_count())]
 
 
-def set_rng_state(new_state: Tensor, device: _device_t = None) -> None:
+def set_rng_state(new_state: Tensor, device: Device = None, /) -> None:
     r"""Set the RNG state of the default :class:`torch.Generator` for the current :ref:`accelerator<accelerators>` on the given device.
 
     Args:
@@ -74,7 +74,7 @@ def set_rng_state(new_state: Tensor, device: _device_t = None) -> None:
         with torch._C._DisableFuncTorch():
             new_state = new_state.clone(memory_format=torch.contiguous_format)
 
-    device_index = _get_device_index(device) if device is not None else None
+    device_index = _get_optional_device_index(device)
 
     def cb() -> None:
         idx = (
