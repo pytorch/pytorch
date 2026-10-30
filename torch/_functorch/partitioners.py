@@ -3947,7 +3947,9 @@ def _sync_decision_cross_ranks(
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(pg.size())]
         with no_dispatch(), unset_fake_temporarily():
-            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
+            torch.distributed.all_gather_object(
+                all_inputs, inputs, group=pg, weights_only=True
+            )
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3964,7 +3966,7 @@ def _sync_decision_cross_ranks(
             objects = [[canonical[x] for x in saved_values]]
             saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
             torch.distributed.all_gather_object(
-                saved_ops_names_all_ranks, objects[0], group=pg
+                saved_ops_names_all_ranks, objects[0], group=pg, weights_only=True
             )
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
