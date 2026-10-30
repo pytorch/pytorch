@@ -1967,15 +1967,15 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
     The other symmetric-memory tests export NCCL_CUMEM_ENABLE and
     NCCL_WIN_ENABLE before a process group exists, so the rejection path is
-    never taken. These spawn workers without them.
+    never taken. These spawn workers with both set to 0.
     """
 
     def setUp(self) -> None:
         super().setUp()
         patch_env(self, TORCH_DIST_USE_NCCL2="1")
-        # The capability snapshot has to be taken with these absent.
-        for name in ("NCCL_CUMEM_ENABLE", "NCCL_WIN_ENABLE"):
-            os.environ.pop(name, None)
+        # RCCL auto-enables cuMem on gfx1250 when NCCL_CUMEM_ENABLE is unset, so
+        # set both to 0 to get the disabled state.
+        patch_env(self, NCCL_CUMEM_ENABLE="0", NCCL_WIN_ENABLE="0")
         self._spawn_processes()
 
     @property
