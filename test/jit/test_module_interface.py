@@ -1,8 +1,11 @@
 # Owner(s): ["oncall: jit"]
 # ruff: noqa: F841
 
+import gc
+import io
 import os
 import sys
+import weakref
 from typing import Any, List
 
 import torch
@@ -37,6 +40,44 @@ class NewModule(nn.Module):
 
 
 class TestModuleInterface(JitTestCase):
+    def test_interface_schema_outlives_module_wrapper(self):
+        @torch.jit.interface
+        class SchemaInterface(nn.Module):
+            def forward(self, x: Tensor) -> Tensor:
+                pass
+
+        make_global(SchemaInterface)
+
+        class SchemaConsumer(nn.Module):
+            def forward(self, peer: SchemaInterface, x: Tensor) -> Tensor:
+                return peer.forward(x)
+
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(SchemaConsumer()), buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        module_wrapper_ref = weakref.ref(loaded)
+        iface = loaded._c._get_method("forward").schema.arguments[1].type
+        qualified_name = torch._jit_internal._qualified_name(SchemaInterface)
+        self.assertIsNot(
+            iface, torch.jit._state._python_cu.get_interface(qualified_name)
+        )
+        self.assertIsNone(iface.getMethod("missing"))
+        names = iface.getMethodNames()
+        self.assertEqual(names, ["forward"])
+        schema = iface.getMethod("forward")
+        self.assertIsInstance(schema, torch.FunctionSchema)
+        expected_self = str(iface)
+        del iface
+        del loaded
+        gc.collect()
+        self.assertIsNone(module_wrapper_ref())
+        self.assertEqual(names, ["forward"])
+        self.assertEqual(schema.name, "forward")
+        self.assertEqual([arg.name for arg in schema.arguments], ["self", "x"])
+        self.assertEqual(str(schema.arguments[0].type), expected_self)
+        self.assertEqual(str(schema.returns[0].type), "Tensor")
+
     def test_not_submodule_interface_call(self):
         @torch.jit.interface
         class ModuleInterface(nn.Module):
