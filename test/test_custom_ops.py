@@ -5552,6 +5552,22 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
+        # One function registered for several devices at once: each device
+        # must check whether its own kernel is enabled.
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x + 1
+
+        @g.register_kernel(("cpu", "cuda"))
+        def _(x):
+            return x + 2
+
+        self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(g(x), x + 1)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
@@ -5604,6 +5620,18 @@ Please use `add.register_fake` to add an fake impl.""",
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
+
+    def test_triton_op_function_is_the_users(self):
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = torch.library.triton_op("_torch_testing::triton_module", mutates_args=())(
+            f
+        )
+        # Not torch._library.triton's wrapper, so precompile imports this module.
+        self.assertEqual(op._init_fn.__module__, __name__)
+        self.assertIs(op._init_fn.__wrapped__, f)
+        self.assertEqual(op._init_fn.__qualname__, f.__qualname__)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):
