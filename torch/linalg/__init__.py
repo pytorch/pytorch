@@ -1782,7 +1782,23 @@ The choice of a driver is a trade-off between accuracy and speed.
 
 - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
 
-By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
+By default (:attr:`driver`\ `= None`), CUDA selects `'gesvdj'` when both matrix
+dimensions are at most 32, the input is a single matrix (batch size 1), or a
+batched non-square input is requested with :attr:`full_matrices`\ `= True`
+(because `'gesvda'` only fills the leading singular vectors). Otherwise, for
+batched inputs with a larger dimension it selects `'gesvda'` to avoid a large
+per-matrix `'gesvdj'` performance cliff. Note that a stack of matrices and the
+same matrices passed one-by-one can therefore use different drivers. If
+`'gesvda'` fails to converge, or a batch looks ill-conditioned
+(``S_min / S_max`` below a multiple of ``sqrt(eps)``), that batch is recomputed
+with `'gesvd'`.
+
+.. note:: When `'gesvda'` is used, cuSOLVER still needs temporary `U` and `V`
+          buffers even if only singular values are requested
+          (:func:`torch.linalg.svdvals`, or the internal `compute_uv=False` path).
+          For large batched shapes this can use noticeable extra device memory
+          (on the order of the input plus an ``n x n`` factor per batch). Prefer
+          an explicit ``driver`` if that matters more than the speedup.
 
 Differences with `numpy.linalg.svd`:
 

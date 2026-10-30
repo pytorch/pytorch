@@ -3066,6 +3066,89 @@ class TestLinalg(TestCase):
                 self.assertEqual(S_s, S)
 
     @skipCPUIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    @parametrize(
+        "batch,n",
+        [((1,), 32), ((1,), 33), ((8,), 32), ((8,), 33)],
+        name_fn=lambda batch, n: f"b{'_'.join(map(str, batch))}_n{n}",
+    )
+    def test_svd_default_driver_square_around_32(self, device, dtype, batch, n):
+        # Batched SVD with n > 32 used to loop gesvdj per matrix (perf cliff).
+        # See #200486.
+        A = make_tensor(batch + (n, n), dtype=dtype, device=device)
+        atol = 1e-5 if dtype in (torch.float32, torch.complex64) else 1e-12
+        rtol = 1e-4 if dtype in (torch.float32, torch.complex64) else 1e-7
+        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+        self.assertEqual((U * S.to(dtype).unsqueeze(-2)) @ Vh, A, atol=atol, rtol=rtol)
+        U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+        self.assertEqual(S_f, S)
+        eye_u = torch.eye(n, dtype=dtype, device=device).expand(*batch, n, n)
+        self.assertEqual(U_f.mH @ U_f, eye_u, atol=atol, rtol=rtol)
+        self.assertEqual(Vh_f @ Vh_f.mH, eye_u, atol=atol, rtol=rtol)
+        self.assertEqual(torch.linalg.svdvals(A), S)
+
+    @skipCPUIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    @parametrize("shape", [(4, 64, 40), (4, 40, 64)], name_fn=lambda s: "x".join(map(str, s)))
+    def test_svd_default_driver_nonsquare_full_matrices(self, device, dtype, shape):
+        # gesvda only fills rank leading vectors; default must not leave garbage
+        # in the full U/V basis for non-square full_matrices=True.
+        A = make_tensor(shape, dtype=dtype, device=device)
+        k = min(shape[-2], shape[-1])
+        atol = 1e-5 if dtype in (torch.float32, torch.complex64) else 1e-12
+        rtol = 1e-4 if dtype in (torch.float32, torch.complex64) else 1e-7
+        U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+        eye_u = torch.eye(shape[-2], dtype=dtype, device=device).expand(
+            shape[0], shape[-2], shape[-2]
+        )
+        eye_v = torch.eye(shape[-1], dtype=dtype, device=device).expand(
+            shape[0], shape[-1], shape[-1]
+        )
+        self.assertEqual(U_f.mH @ U_f, eye_u, atol=atol, rtol=rtol)
+        self.assertEqual(Vh_f @ Vh_f.mH, eye_v, atol=atol, rtol=rtol)
+        self.assertEqual(
+            (U_f[..., :k] * S_f.to(dtype).unsqueeze(-2)) @ Vh_f[..., :k, :],
+            A,
+            atol=atol,
+            rtol=rtol,
+        )
+
+    @skipCPUIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64)
+    def test_svd_default_driver_ill_conditioned_batch(self, device, dtype):
+        # Controlled spectrum where gesvda alone loses accuracy on small S;
+        # default driver=None should match gesvd after the ill-conditioning
+        # recompute. See review on #200503 / #200486.
+        torch.manual_seed(0)
+        n, batch = 40, 6
+        U, _ = torch.linalg.qr(torch.randn(batch, n, n, device=device, dtype=dtype))
+        V, _ = torch.linalg.qr(torch.randn(batch, n, n, device=device, dtype=dtype))
+        # Stay below the CUDA gesvda ill-conditioning cutoff
+        # (2 * sqrt(eps) for float32, 32 * sqrt(eps) for float64).
+        s_end = -4 if dtype == torch.float32 else -10
+        s = torch.logspace(0, s_end, n, device=device, dtype=dtype)
+        A = (U * s.unsqueeze(-2)) @ V.mH
+        S_default = torch.linalg.svdvals(A)
+        S_gesvd = torch.linalg.svdvals(A, driver="gesvd")
+        rel = (S_default - S_gesvd).abs() / S_gesvd.clamp_min(torch.finfo(dtype).tiny)
+        rel_tol = 1e-3 if dtype == torch.float32 else 1e-10
+        self.assertTrue(
+            bool(rel.max() < rel_tol),
+            f"max rel err {rel.max().item()} vs gesvd",
+        )
+        # Without the default ill-conditioning fallback, gesvda is worse.
+        if dtype == torch.float32:
+            S_gesvda = torch.linalg.svdvals(A, driver="gesvda")
+            rel_a = (S_gesvda - S_gesvd).abs() / S_gesvd.clamp_min(torch.finfo(dtype).tiny)
+            self.assertGreater(rel_a.max().item(), rel.max().item())
+
+    @skipCPUIfNoLapack
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
