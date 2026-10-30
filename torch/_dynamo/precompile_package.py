@@ -139,9 +139,9 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
     uncached = [k for k in UNCACHED_INDUCTOR_OPTIONS if options.get(k)]
     if uncached:
         raise PackageError(
-            f"a DynamoTracer capture cannot compile with {uncached} on: the "
-            "artifact ships each graph's compile from Inductor's caches, which "
-            "such a compile never files."
+            f"a DynamoTracer capture cannot compile with {uncached} on: such a "
+            "compile saves no cache entry, and the artifact is built from the "
+            "cache entries each graph's compile saves."
         )
     pinned = CAPTURE_INDUCTOR_PATCH.items()
     overridden = {k: v for k, v in pinned if options.get(k, v) != v}

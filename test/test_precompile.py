@@ -4991,7 +4991,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, f"{reason}.*or drop triton"):
             self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
         for key in ("freezing", "force_disable_caches", "fx_wrapper"):
-            with self.assertRaisesRegex(PrecompileError, f"'{key}'.*never files"):
+            with self.assertRaisesRegex(PrecompileError, f"'{key}'.*no cache entry"):
                 self._capture(single, options={key: True})
         remote = {"bundled_autotune_remote_cache": True}
         with self.assertRaisesRegex(PrecompileError, "remote autotune cache miss"):
