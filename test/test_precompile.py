@@ -4725,6 +4725,10 @@ def scaled(x):
     return (x * 7.25).relu()
 
 
+def scaled_backward(x):
+    (x * 7.25).relu().sum().backward()
+
+
 def reads_unregistered(model, x):
     return model(x).sum(dim=0) * unregistered.SCALE
 
@@ -4936,15 +4940,16 @@ class TestPrecompileDynamoCapture(TestCase):
         with self._capture(self.mod.scaled) as cap:
             cap(x)
         with open(self.artifact) as f:
-            src = f.read()
-        self.assertIn("GRAPH_SOURCES[", src)
-        self.assertIn("7.25", src)
+            head, marker, code = f.read().partition("GRAPH_SOURCES = {}")
+        # Past the readable summary only the graph code is text: the rest is blobs.
+        self.assertIn("GRAPH_SOURCES[", code)
+        self.assertIn("7.25", code)
         # The code moved out of _BACKENDS, so the unedited artifact runs it from the
         # text and still serves its precompiled kernels.
         with no_compilation():
             self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
         with open(self.artifact, "w") as f:
-            f.write(src.replace("7.25", "3.5"))
+            f.write(head + marker + code.replace("7.25", "3.5"))
         with self.assertRaisesRegex(PrecompileError, "cache_path=None"):
             load(self.artifact, self.cache)
         # This process serves the captured version; the edited one is another version
@@ -4959,6 +4964,31 @@ class TestPrecompileDynamoCapture(TestCase):
             "from torch.compiler.precompile import load; x = torch.ones(8); "
             f"out = load({self.artifact!r}, None)(x); "
             "torch.testing.assert_close(out, (x * 3.5).relu()); print('served')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
+
+    def test_an_edited_backward_graph_runs(self):
+        x = torch.randn(8, requires_grad=True)
+        with self._capture(self.mod.scaled_backward) as cap:
+            cap(x)
+        with open(self.artifact) as f:
+            src = f.read()
+        start = src.index('.bw\'] = r"""')
+        end = src.index('"""', start + len('.bw\'] = r"""'))
+        self.assertIn("7.25", src[start:end])
+        with open(self.artifact, "w") as f:
+            f.write(src[:start] + src[start:end].replace("7.25", "3.5") + src[end:])
+        script = (
+            f"import sys, torch; sys.path.insert(0, {self.dir!r}); "
+            f"import {self.module_name}; "
+            "from torch.compiler.precompile import load; "
+            "x = torch.randn(8, requires_grad=True); "
+            f"load({self.artifact!r}, None)(x); "
+            "torch.testing.assert_close(x.grad, 3.5 * (x > 0).float()); print('served')"
         )
         out = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
