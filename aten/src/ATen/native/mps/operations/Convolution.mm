@@ -906,92 +906,106 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       bias_shape_key = "nobias";
     }
 
-    std::string key = fmt::format("mps_convolution:{}:{}:{}:{}:{}:{}:{}:{}",
-                                  getArrayRefString(stride),
-                                  getArrayRefString(dilation),
-                                  getArrayRefString(padding),
-                                  groups,
-                                  is_cl_input,
-                                  mps::getTensorsStringKey({input_t, weight_t}),
-                                  bias_defined,
-                                  bias_shape_key);
-
-    auto inputShape = mps::getMPSShape(input_t, input_suggested_layout);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      // 2D only past this point (3D returned above); depthwise conv2d is
-      // expressed via the graph's 3D depthwise op with a dummy depth dim
-      bool isDepthwiseConv =
-          (groups > 1 && weight_t.size(1) == 1) && input_t.dim() >= 4 && weight_t.dim() >= 4 && !is_channels_last;
-
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input_t), inputShape);
-      auto weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
-      MPSGraphTensor* outputTensor = nil;
-      if (isDepthwiseConv) {
-        auto depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
-        fill_depthwise_conv_desc(
-            depthWiseConv3dDescriptor_, stride[1], stride[0], dilation[1], dilation[0], padding[1], padding[0]);
-
-        MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
-                                                                dimension:-3
-                                                            withDimension:-4
-                                                                     name:nil];
-        outputTensor = [mpsGraph depthwiseConvolution3DWithSourceTensor:inputTensor
-                                                          weightsTensor:weightTransposeTensor
-                                                             descriptor:depthWiseConv3dDescriptor_
-                                                                   name:nil];
-      } else {
-        MPSGraphConvolution2DOpDescriptor* conv2dDescriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-        fill_conv_desc(conv2dDescriptor_,
-                       stride[1],
-                       stride[0],
-                       dilation[1],
-                       dilation[0],
-                       padding[1],
-                       padding[0],
-                       input_suggested_layout,
-                       false,
-                       groups);
-
-        outputTensor = [mpsGraph convolution2DWithSourceTensor:inputTensor
-                                                 weightsTensor:weightTensor
-                                                    descriptor:conv2dDescriptor_
-                                                          name:nil];
-      }
-
-      MPSGraphTensor* biasTensor = nil;
-      if (bias_defined) {
-        biasTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()));
-        outputTensor = [mpsGraph additionWithPrimaryTensor:outputTensor secondaryTensor:biasTensor name:nil];
-      }
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->biasTensor_ = biasTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
     const auto input_for_graph = materialize_for_conv(input_t, input_suggested_layout);
-    auto inputPlaceholder = make_conv_placeholder(cachedGraph->inputTensor_, input_for_graph, input_suggested_layout);
-    auto outputPlaceholder = make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
-    // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
-    auto weightsPlaceholder =
-        Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
-    auto biasPlaceholder = Placeholder();
-    // Reshape the bias to be broadcastable with output of conv2d or conv3d
-    if (bias_defined) {
-      const int64_t C = bias_shape[0];
-      const auto bias_view =
-          input_suggested_layout == kChannelsLast ? std::vector<int64_t>{1, 1, 1, C} : std::vector<int64_t>{1, C, 1, 1};
-      biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view(bias_view));
-    }
+    // MPSGraph's convolution silently leaves outputs unwritten once the batch
+    // reaches 2^16 (kernel 3 stride 1 already fails at exactly 65536, stride 2
+    // at 65537; see https://github.com/pytorch/pytorch/issues/200935), so feed
+    // it in batch slices below that limit.
+    constexpr int64_t kMPSGraphConvMaxBatch = 65535;
+    const int64_t batch = input_t.size(0);
+    for (int64_t b0 = 0; b0 < batch; b0 += kMPSGraphConvMaxBatch) {
+      const auto slice_len = std::min(kMPSGraphConvMaxBatch, batch - b0);
+      const auto input_slice = b0 == 0 && slice_len == batch
+          ? input_for_graph
+          : input_for_graph.narrow(0, b0, slice_len);
+      const auto output_slice = b0 == 0 && slice_len == batch ? output_t : output_t.narrow(0, b0, slice_len);
 
-    auto feeds = [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[weightsPlaceholder.getMPSGraphTensor()] = weightsPlaceholder.getMPSGraphTensorData();
-    if (bias_defined) {
-      feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
-    }
+      std::string key = fmt::format("mps_convolution:{}:{}:{}:{}:{}:{}:{}:{}",
+                                    getArrayRefString(stride),
+                                    getArrayRefString(dilation),
+                                    getArrayRefString(padding),
+                                    groups,
+                                    is_cl_input,
+                                    mps::getTensorsStringKey({input_slice, weight_t}),
+                                    bias_defined,
+                                    bias_shape_key);
 
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+      auto inputShape = mps::getMPSShape(input_slice, input_suggested_layout);
+      auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+        // 2D only past this point (3D returned above); depthwise conv2d is
+        // expressed via the graph's 3D depthwise op with a dummy depth dim
+        bool isDepthwiseConv =
+            (groups > 1 && weight_t.size(1) == 1) && input_t.dim() >= 4 && weight_t.dim() >= 4 && !is_channels_last;
+
+        auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input_t), inputShape);
+        auto weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
+        MPSGraphTensor* outputTensor = nil;
+        if (isDepthwiseConv) {
+          auto depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
+          fill_depthwise_conv_desc(
+              depthWiseConv3dDescriptor_, stride[1], stride[0], dilation[1], dilation[0], padding[1], padding[0]);
+
+          MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor
+                                                                  dimension:-3
+                                                              withDimension:-4
+                                                                       name:nil];
+          outputTensor = [mpsGraph depthwiseConvolution3DWithSourceTensor:inputTensor
+                                                            weightsTensor:weightTransposeTensor
+                                                               descriptor:depthWiseConv3dDescriptor_
+                                                                     name:nil];
+        } else {
+          MPSGraphConvolution2DOpDescriptor* conv2dDescriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
+          fill_conv_desc(conv2dDescriptor_,
+                         stride[1],
+                         stride[0],
+                         dilation[1],
+                         dilation[0],
+                         padding[1],
+                         padding[0],
+                         input_suggested_layout,
+                         false,
+                         groups);
+
+          outputTensor = [mpsGraph convolution2DWithSourceTensor:inputTensor
+                                                   weightsTensor:weightTensor
+                                                      descriptor:conv2dDescriptor_
+                                                            name:nil];
+        }
+
+        MPSGraphTensor* biasTensor = nil;
+        if (bias_defined) {
+          biasTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()));
+          outputTensor = [mpsGraph additionWithPrimaryTensor:outputTensor secondaryTensor:biasTensor name:nil];
+        }
+        newCachedGraph->inputTensor_ = inputTensor;
+        newCachedGraph->weightTensor_ = weightTensor;
+        newCachedGraph->biasTensor_ = biasTensor;
+        newCachedGraph->outputTensor_ = outputTensor;
+      });
+
+      auto inputPlaceholder = make_conv_placeholder(cachedGraph->inputTensor_, input_slice, input_suggested_layout);
+      auto outputPlaceholder = make_conv_placeholder(cachedGraph->outputTensor_, output_slice, input_suggested_layout);
+      // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
+      auto weightsPlaceholder =
+          Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
+      auto biasPlaceholder = Placeholder();
+      // Reshape the bias to be broadcastable with output of conv2d or conv3d
+      if (bias_defined) {
+        const int64_t C = bias_shape[0];
+        const auto bias_view =
+            input_suggested_layout == kChannelsLast ? std::vector<int64_t>{1, 1, 1, C} : std::vector<int64_t>{1, C, 1, 1};
+        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt->view(bias_view));
+      }
+
+      auto feeds = [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];
+      feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+      feeds[weightsPlaceholder.getMPSGraphTensor()] = weightsPlaceholder.getMPSGraphTensorData();
+      if (bias_defined) {
+        feeds[biasPlaceholder.getMPSGraphTensor()] = biasPlaceholder.getMPSGraphTensorData();
+      }
+
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+    }
   }
 
   return output_t;
