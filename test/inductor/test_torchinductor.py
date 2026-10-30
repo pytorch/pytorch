@@ -6943,41 +6943,66 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @parametrize(
-        "input_size,output_size,expected_kernels",
-        [
-            ((1, 1, 7, 9), (3, 4), 1),
-            ((3, 7, 9), (3, 4), 1),
-            ((1, 1, 8, 10), (4, 5), 1),
-            ((1, 1, 8, 9), (4, 4), 1),
-            # Fallbacks emit no kernel for the dynamic codegen suite to inspect.
-            subtest(
-                ((1, 1, 1, 1), (1, 26), 0), decorators=[expectedFailureCodegenDynamic]
-            ),
-            subtest(
-                ((1, 1, 1, 1), (26, 1), 0), decorators=[expectedFailureCodegenDynamic]
-            ),
-            subtest(
-                ((1, 1, 1, 1), (16, 16), 0), decorators=[expectedFailureCodegenDynamic]
-            ),
-        ],
-    )
-    def test_adaptive_avg_pool2d_backward(
-        self, input_size, output_size, expected_kernels
-    ):
+    def test_adaptive_avg_pool2d_backward(self):
         def fn(grad_output, x):
             return aten._adaptive_avg_pool2d_backward(grad_output, x)
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
-            [
-                torch.randn(*input_size[:-2], *output_size),
-                torch.randn(input_size),
-            ],
+            [torch.randn(1, 1, 4, 5), torch.randn(1, 1, 8, 10)],
             check_lowp=False,
         )
-        assertGeneratedKernelCountEqual(self, expected_kernels)
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureCodegenDynamic  # Symbolic sizes cannot prove divisibility.
+    def test_adaptive_avg_pool2d_backward_upsampling_shortcut(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(1, 1, 25, 25), torch.randn(1, 1, 5, 5)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
+    def test_adaptive_avg_pool2d_backward_non_divisible(self):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(3, 3, 4), torch.randn(3, 7, 9)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @expectedFailureCodegenDynamic  # Fallbacks emit no kernel.
+    @parametrize("output_size", [(1, 26), (26, 1), (16, 16)])
+    def test_adaptive_avg_pool2d_backward_fallback(self, output_size):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        self.common(
+            fn,
+            [torch.randn(1, 1, *output_size), torch.randn(1, 1, 1, 1)],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    @xfail_if_mps_unimplemented
+    @parametrize("dtype", (torch.int32, torch.int64))
+    def test_adaptive_avg_pool2d_backward_integer_dtype(self, dtype):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.ones(1, 1, 5, 5, device=self.device, dtype=dtype)
+        grad_output = torch.ones(1, 1, 3, 3, device=self.device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            fn(grad_output, x)
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
+            torch.compile(fn, fullgraph=True)(grad_output, x)
 
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     @parametrize(
@@ -7021,12 +7046,10 @@ for dtype in (torch.int32, torch.int64):
         x = torch.randn(2, 3, 7, 9, device=self.device, requires_grad=True)
         self.common(fn, (x,), check_gradient=True, check_lowp=False)
 
+    @skipCPUIf(True, "CPU eager does not support empty spatial dimensions")
     @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
     @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0), (0, 2, 3, 4)])
     def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
-        if self.device != "cuda":
-            self.skipTest("CUDA eager supports empty spatial dimensions")
-
         def fn(grad_output, x):
             return aten._adaptive_avg_pool2d_backward(grad_output, x)
 

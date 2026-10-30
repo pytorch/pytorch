@@ -6556,6 +6556,11 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     if len(x.get_size()) not in (3, 4):
         raise AssertionError("expected: len(x.get_size()) in (3, 4)")
 
+    if not x.get_dtype().is_floating_point:
+        grad_output = ir.ExternKernel.require_stride1(grad_output)
+        x = ir.ExternKernel.require_stride1(x)
+        return fallback_adaptive_avg_pool2d_backward(grad_output, x)
+
     grad_output.realize_hint()
 
     *_, height, width = x.get_size()
