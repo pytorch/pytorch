@@ -1,6 +1,8 @@
 # Owner(s): ["module: distributions"]
 
+import copy
 import io
+import pickle
 from numbers import Number
 
 import pytest
@@ -641,6 +643,52 @@ def test_save_load_transform():
         other = torch.load(stream)
     if not torch.allclose(log_prob, other.log_prob(x)):
         raise AssertionError("Loaded distribution log_prob does not match original")
+
+
+def test_pickle_inverse_transform():
+    # https://github.com/pytorch/pytorch/issues/191197
+    # _InverseTransform stores the wrapped transform in _inv, which the
+    # inherited Transform.__getstate__ used to drop as if it were a cache.
+    transform = SigmoidTransform()
+    x = torch.linspace(0.1, 0.9, 5)
+    loaded = pickle.loads(pickle.dumps(transform.inv))
+    if not torch.allclose(loaded(x), transform.inv(x)):
+        raise AssertionError("Unpickled inverse transform computes wrong values")
+    if loaded.inv.inv is not loaded:
+        raise AssertionError("t.inv.inv is t does not hold after unpickling")
+
+    compose = ComposeTransform([ExpTransform(), AffineTransform(1.0, 2.0)])
+    y = torch.linspace(3.0, 9.0, 5)
+    loaded_inv = pickle.loads(pickle.dumps(compose.inv))
+    if not torch.allclose(loaded_inv(y), compose.inv(y)):
+        raise AssertionError("Unpickled inverse compose computes wrong values")
+    if loaded_inv.inv.inv is not loaded_inv:
+        raise AssertionError("t.inv.inv is t does not hold for unpickled compose")
+
+
+def test_save_load_transformed_distribution_with_inverse_transform():
+    dist = TransformedDistribution(Normal(0, 1), [SigmoidTransform().inv])
+    x = torch.linspace(-2.0, 2.0, 10)
+    log_prob = dist.log_prob(x)
+    stream = io.BytesIO()
+    torch.save(dist, stream)
+    stream.seek(0)
+    with torch.serialization.safe_globals(
+        [TransformedDistribution, SigmoidTransform, _InverseTransform, Normal]
+    ):
+        other = torch.load(stream)
+    if not torch.allclose(log_prob, other.log_prob(x)):
+        raise AssertionError("Loaded distribution log_prob does not match original")
+
+
+def test_deepcopy_inverse_transform():
+    transform = ExpTransform()
+    x = torch.linspace(0.5, 2.0, 5)
+    copied = copy.deepcopy(transform.inv)
+    if not torch.allclose(copied(x), transform.inv(x)):
+        raise AssertionError("Deepcopied inverse transform computes wrong values")
+    if copied.inv.inv is not copied:
+        raise AssertionError("t.inv.inv is t does not hold after deepcopy")
 
 
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
