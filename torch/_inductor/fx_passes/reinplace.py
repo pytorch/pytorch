@@ -1040,7 +1040,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node.kwargs["tensors_to_clone"],
                 node.kwargs["kwargs"],
                 kernel_name,
-                ReInplaceTrigger[user_kernel_hop.reinplace_trigger],
+                user_kernel_hop.reinplace_trigger,
             )
 
             kwargs = dict(node.kwargs)
