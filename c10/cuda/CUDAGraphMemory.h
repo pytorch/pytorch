@@ -12,6 +12,10 @@ namespace c10::cuda::CUDAGraphMemory {
 struct CaptureRegistration {
   CaptureId_t capture_id{};
   std::optional<CaptureId_t> parent_capture_id;
+  // Conditional captures only: the new child primary stream and the parent
+  // stream on which its conditional node was inserted.
+  cudaStream_t primary_stream{};
+  cudaStream_t parent_dependency_stream{};
 };
 
 // Notify the active allocator of capture lifecycle changes. End returns the

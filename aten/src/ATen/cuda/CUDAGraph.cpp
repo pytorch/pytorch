@@ -629,6 +629,7 @@ void CUDAGraph::begin_capture_to_conditional_node(
 #endif
   TORCH_CHECK(status == cudaStreamCaptureStatusActive);
 
+  CUDAStream parent_dependency_stream = getCurrentCUDAStream();
   CaptureId_t parent_capture_id = conditional_graph_capture_ids_.empty()
       ? capture_id_
       : conditional_graph_capture_ids_.top();
@@ -700,7 +701,10 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   c10::cuda::CUDAGraphMemory::markCaptureBegin(
       capture_dev_,
       c10::cuda::CUDAGraphMemory::CaptureRegistration{
-          conditional_graph_capture_ids_.top(), parent_capture_id});
+          conditional_graph_capture_ids_.top(),
+          parent_capture_id,
+          child_stream.stream(),
+          parent_dependency_stream.stream()});
 
   conditional_node_streams_.emplace(child_stream);
 

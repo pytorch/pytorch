@@ -30,8 +30,16 @@ void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
 
   capture_tree_.emplace(
       registration.capture_id,
-      CaptureTreeNode{registration.parent_capture_id, root_capture_id});
+      CaptureTreeNode{
+          registration.parent_capture_id,
+          root_capture_id,
+          registration.primary_stream});
   ++active_captures_;
+  if (registration.parent_capture_id.has_value()) {
+    reuse_stream_aliases_.emplace(
+        registration.primary_stream,
+        reuseStream(registration.parent_dependency_stream));
+  }
 }
 
 size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
@@ -54,6 +62,7 @@ size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
     }
     parent_it->second.invalid_capture_free_count +=
         ended_capture.invalid_capture_free_count;
+    reuse_stream_aliases_.erase(ended_capture.primary_stream);
     capture_tree_.erase(capture_it);
     TORCH_INTERNAL_ASSERT(
         active_captures_ > 0, "captureEnd called with no active capture");
@@ -81,6 +90,11 @@ AllocationContext CaptureTracker::allocationContext(
   }
   context.tracked_capture_id = info.id;
   return context;
+}
+
+cudaStream_t CaptureTracker::reuseStream(cudaStream_t stream) const {
+  auto it = reuse_stream_aliases_.find(stream);
+  return it == reuse_stream_aliases_.end() ? stream : it->second;
 }
 
 void CaptureTracker::recordAllocation(
@@ -145,6 +159,7 @@ int CaptureTracker::eraseCaptureTree(CaptureId_t root_capture_id) {
     if (it->second.root_capture_id == root_capture_id) {
       ++erased_active_captures;
       capture_ids.insert(it->first);
+      reuse_stream_aliases_.erase(it->second.primary_stream);
       it = capture_tree_.erase(it);
     } else {
       ++it;
