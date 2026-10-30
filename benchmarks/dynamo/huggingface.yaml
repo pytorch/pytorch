@@ -24,6 +24,8 @@ skip:
       - openai/whisper-tiny
       - Qwen/Qwen3-0.6B
       - Qwen/Qwen3.5-0.8B
+      - Qwen/Qwen2.5-0.5B-Instruct
+      - google/gemma-3-1b-it
       - mistralai/Mistral-7B-Instruct-v0.3
       - openai/gpt-oss-20b
 
@@ -71,6 +73,8 @@ batch_size:
     openai/whisper-tiny: 8
     Qwen/Qwen3-0.6B: 8
     Qwen/Qwen3.5-0.8B: 8
+    Qwen/Qwen2.5-0.5B-Instruct: 8
+    google/gemma-3-1b-it: 8
     mistralai/Mistral-7B-Instruct-v0.3: 8
     openai/gpt-oss-20b: 8
 
