@@ -10520,12 +10520,12 @@ class TestHostMemPool(TestCase):
             return torch.empty(1000, pin_memory=True)
 
         with self._record_host_segments():
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 self.assertEqual(hp.use_count(), 2)
                 tensors = [alloc()]
-                with torch.cuda.use_host_mem_pool(other):
+                with torch.cuda.use_mem_pool(other):
                     tensors.append(alloc())
-                    with torch.cuda.use_host_mem_pool(hp):
+                    with torch.cuda.use_mem_pool(hp):
                         self.assertEqual(hp.use_count(), 3)
                         self.assertEqual(other.use_count(), 2)
                         tensors.append(alloc())
@@ -10544,9 +10544,9 @@ class TestHostMemPool(TestCase):
     def test_exit_order_is_per_context(self):
         p = torch.cuda.HostMemPool()
         q = torch.cuda.HostMemPool()
-        a = torch.cuda.use_host_mem_pool(p)
-        b = torch.cuda.use_host_mem_pool(q)
-        c = torch.cuda.use_host_mem_pool(p)
+        a = torch.cuda.use_mem_pool(p)
+        b = torch.cuda.use_mem_pool(q)
+        c = torch.cuda.use_mem_pool(p)
         for ctx in (a, b, c):
             ctx.__enter__()
         # c, the innermost context, uses the same pool as a, yet a cannot exit.
@@ -10575,7 +10575,7 @@ class TestHostMemPool(TestCase):
         ):
             # Start the bystander thread before entering the pool.
             bystander.submit(lambda: None).result(timeout=60)
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 tensors["bystander"] = bystander.submit(alloc).result(timeout=60)
                 tensors["routed"] = alloc()
                 tensors["d2h"] = torch.ones(1000, device="cuda").to(
@@ -10597,7 +10597,7 @@ class TestHostMemPool(TestCase):
         barrier = threading.Barrier(num_threads, timeout=60)
 
         def worker(i):
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 t = torch.empty(1000 * (i + 1), pin_memory=True)
                 barrier.wait()
                 use_count = hp.use_count()
@@ -10619,7 +10619,7 @@ class TestHostMemPool(TestCase):
         first_ptr = results[0][0].data_ptr()
         ptrs = {t.data_ptr() for t, _ in results}
         del t, results, futures
-        with torch.cuda.use_host_mem_pool(hp):
+        with torch.cuda.use_mem_pool(hp):
             again = torch.empty(1000, pin_memory=True)
         outside = torch.empty(1000, pin_memory=True)
         self.assertEqual(again.data_ptr(), first_ptr)
@@ -10628,31 +10628,26 @@ class TestHostMemPool(TestCase):
     def test_exception_ends_route(self):
         hp = torch.cuda.HostMemPool()
         with self.assertRaisesRegex(ValueError, "boom"):
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 raise ValueError("boom")
         self.assertEqual(hp.use_count(), 1)
         with self.assertRaisesRegex(RuntimeError, "not the innermost"):
             torch._C._host_endAllocateCurrentThreadToPool(hp.id)
 
     def test_wrong_pool_type(self):
-        with self.assertRaisesRegex(TypeError, "use use_host_mem_pool"):
-            with torch.cuda.use_mem_pool(torch.cuda.HostMemPool()):
-                pass
-        with self.assertRaisesRegex(TypeError, "expects a HostMemPool"):
-            with torch.cuda.use_host_mem_pool(torch.cuda.graph_pool_handle()):
-                pass
-        with self.assertRaisesRegex(TypeError, "cannot be used as a graph"):
-            torch.cuda.graph(torch.cuda.CUDAGraph(), pool=torch.cuda.HostMemPool())
+        hp = torch.cuda.HostMemPool()
+        with self.assertRaisesRegex(ValueError, "no device memory"):
+            torch.cuda.use_mem_pool(hp, pinned=False)
+        with self.assertRaisesRegex(ValueError, "device does not apply"):
+            torch.cuda.use_mem_pool(hp, device=0)
 
-    # Pool blocks carry events from non_blocking copies; allocate() processes
-    # them itself, since the background thread serves only the default pool.
     @parametrize("use_background_threads", [True, False])
     def test_pending_copy_delays_reuse(self, use_background_threads):
         hp = torch.cuda.HostMemPool()
         gpu = torch.zeros(1000, device="cuda")
         with (
             caching_host_allocator_use_background_threads(use_background_threads),
-            torch.cuda.use_host_mem_pool(hp),
+            torch.cuda.use_mem_pool(hp),
         ):
             buf = torch.ones(1000).pin_memory()
             ptr = buf.data_ptr()
@@ -10672,7 +10667,7 @@ class TestHostMemPool(TestCase):
             baseline = self._allocations()
             hp = torch.cuda.HostMemPool()
             gpu = torch.zeros(1000, device="cuda")
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 live = torch.empty(1000, pin_memory=True)
                 copied = torch.ones(1000).pin_memory()
                 cached = [
@@ -10703,7 +10698,7 @@ class TestHostMemPool(TestCase):
         hp = torch.cuda.HostMemPool()
 
         def scope():
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 yield
 
         # The scope is entered on a thread that exits before the scope ends.
@@ -10718,7 +10713,7 @@ class TestHostMemPool(TestCase):
             time.sleep(0.01)
         self.assertEqual(hp.use_count(), 1)
         # Ending the scope on this thread leaves this thread's own route alone.
-        with torch.cuda.use_host_mem_pool(hp):
+        with torch.cuda.use_mem_pool(hp):
             with self.assertRaisesRegex(RuntimeError, "thread that entered them"):
                 gen.close()
             self.assertEqual(hp.use_count(), 2)
@@ -10731,7 +10726,7 @@ size = 16 << 20
 first = torch.empty(1000, pin_memory=True)  # the start of the reserve segment
 start = first.data_ptr()
 pool = torch.cuda.HostMemPool()
-with torch.cuda.use_host_mem_pool(pool):
+with torch.cuda.use_mem_pool(pool):
     in_pool = torch.empty(1000, pin_memory=True)
 default = torch.empty(1000, pin_memory=True)
 print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < start + size)
@@ -10745,47 +10740,41 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory snapshot not supported")
-    def test_capture_takes_precedence(self):
+    def test_innermost_scope_wins(self):
+        # The same rule as use_mem_pool: the newest of the capture and the
+        # thread's pool context takes the capturing stream.
         hp = torch.cuda.HostMemPool()
         side_stream = torch.cuda.Stream()
         with self._record_host_segments():
-            with torch.cuda.use_host_mem_pool(hp):
+            with torch.cuda.use_mem_pool(hp):
                 cached = torch.empty(1000, pin_memory=True)
                 cached_ptr = cached.data_ptr()
                 del cached
-                allocations = self._allocations()
                 g = torch.cuda.CUDAGraph()
-                # torch.cuda.graph empties the host cache on entry, which leaves
-                # the cache of a live pool alone.
+                # Capture begun inside the context: the capture wins.
                 with torch.cuda.graph(g, capture_error_mode="thread_local"):
                     captured = torch.empty(1000, pin_memory=True)
-                    # Allocations on other streams still go to the thread's pool.
                     with torch.cuda.stream(side_stream):
                         side = torch.empty(1000, pin_memory=True)
-                self.assertEqual(side.data_ptr(), cached_ptr)
-                self.assertEqual(self._pool_of(side), hp.id)
-                del side
-                self.assertEqual(self._allocations(), allocations + 1)
-                routed = torch.empty(1000, pin_memory=True)
-                self.assertEqual(routed.data_ptr(), cached_ptr)
             self.assertEqual(self._pool_of(captured), g.pool())
-            self.assertEqual(self._pool_of(routed), hp.id)
-            del routed
+            self.assertEqual(self._pool_of(side), hp.id)
+            self.assertEqual(side.data_ptr(), cached_ptr)
+            del side
 
-            # The same when the pool is entered inside the capture.
+            # Context entered inside the capture: the context wins, and the
+            # graph keeps the pool, as with use_mem_pool.
             g2 = torch.cuda.CUDAGraph()
             with torch.cuda.graph(g2, capture_error_mode="thread_local"):
-                with torch.cuda.use_host_mem_pool(hp):
+                with torch.cuda.use_mem_pool(hp):
                     captured2 = torch.empty(1000, pin_memory=True)
-                    with torch.cuda.stream(side_stream):
-                        side = torch.empty(1000, pin_memory=True)
-            self.assertEqual(side.data_ptr(), cached_ptr)
-            self.assertEqual(self._pool_of(side), hp.id)
-            self.assertEqual(self._pool_of(captured2), g2.pool())
-
-        # The graphs did not retain the pool: deleting it frees its block.
+            self.assertEqual(self._pool_of(captured2), hp.id)
+            self.assertEqual(captured2.data_ptr(), cached_ptr)
+        self.assertEqual(hp.use_count(), 2)  # the pool object and g2
         allocations = self._allocations()
-        del side, hp
+        del captured2, hp
+        self.assertEqual(self._allocations(), allocations)
+        g2.reset()
+        torch.accelerator.empty_host_cache()
         self.assertEqual(self._allocations(), allocations - 1)
 
     @unittest.skipIf(
@@ -10793,7 +10782,7 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
     )
     def test_del_during_capture_defers_free(self):
         hp = torch.cuda.HostMemPool()
-        with torch.cuda.use_host_mem_pool(hp):
+        with torch.cuda.use_mem_pool(hp):
             torch.empty(1000, pin_memory=True)
         allocations = self._allocations()
         x = torch.zeros(1, device="cuda")
@@ -10811,27 +10800,116 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "private device pools not supported")
-    def test_not_a_graph_pool(self):
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory snapshot not supported")
+    def test_graph_pool_can_be_host_mem_pool(self):
         hp = torch.cuda.HostMemPool()
         g = torch.cuda.CUDAGraph()
+        with self._record_host_segments():
+            with torch.cuda.graph(g, pool=hp, capture_error_mode="thread_local"):
+                t = torch.empty(1000, pin_memory=True)
+            self.assertEqual(self._pool_of(t), hp.id)
+        self.assertEqual(hp.use_count(), 2)  # the pool object and g
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "MemPool and memory snapshot not supported")
+    def test_mem_pool_routes_pinned(self):
+        # use_mem_pool(pool, pinned=True) puts device and pinned memory in one
+        # pool id, in both orders of capture and context.
+        mp = torch.cuda.MemPool()
+        with self._record_host_segments():
+            with torch.cuda.use_mem_pool(mp, pinned=True):
+                eager = torch.empty(1000, pin_memory=True)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, capture_error_mode="thread_local"):
+                with torch.cuda.use_mem_pool(mp, pinned=True):
+                    captured = torch.empty(1000, pin_memory=True)
+            self.assertEqual(self._pool_of(eager), mp.id)
+            self.assertEqual(self._pool_of(captured), mp.id)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_capture_used_block_freed_after_reset(self):
+        gpu = torch.zeros(1000, device="cuda")
+        baseline = self._allocations()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, capture_error_mode="thread_local"):
+            used = torch.ones(1000).pin_memory()
+            gpu.copy_(used, non_blocking=True)
+        g.replay()
+        torch.cuda.synchronize()
+        del used
+        g.reset()
+        torch.accelerator.empty_host_cache()
+        self.assertEqual(self._allocations(), baseline)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_shared_pool_keeps_capture_blocks_until_last_reset(self):
+        handle = torch.cuda.graph_pool_handle()
+        gpus = [torch.zeros(1000, device="cuda") for _ in range(3)]
+        baseline = self._allocations()
+        graphs = [torch.cuda.CUDAGraph() for _ in range(3)]
+        for g, gpu, value in zip(graphs[:2], gpus, (1.0, 2.0)):
+            with torch.cuda.graph(g, pool=handle, capture_error_mode="thread_local"):
+                used = torch.full((1000,), value).pin_memory()
+                gpu.copy_(used, non_blocking=True)
+            del used
+        graphs[0].reset()
+        # A new capture into the pool must not take the block graphs[1] reads.
+        with torch.cuda.graph(graphs[2], pool=handle, capture_error_mode="thread_local"):
+            bufs = [torch.full((1000,), 9.0).pin_memory() for _ in range(2)]
+            gpus[2].copy_(bufs[0], non_blocking=True)
+        del bufs
+        graphs[1].replay()
+        torch.cuda.synchronize()
+        self.assertEqual(gpus[1], torch.full_like(gpus[1], 2.0))
+        graphs[1].reset()
+        graphs[2].reset()
+        torch.accelerator.empty_host_cache()
+        self.assertEqual(self._allocations(), baseline)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_loader_thread_during_global_capture(self):
+        # A thread inside a pool queries events and allocates while another
+        # thread captures in the default (global) mode.
+        hp = torch.cuda.HostMemPool()
+        gpu = torch.empty(1000, device="cuda")
+        loader_stream = torch.cuda.Stream()
+        started, finished = threading.Event(), threading.Event()
+        errors = []
+
+        def loader():
+            started.wait()
+            try:
+                with torch.cuda.use_mem_pool(hp):
+                    buf = torch.ones(1000).pin_memory()
+                    with torch.cuda.stream(loader_stream):
+                        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+                        gpu.copy_(buf, non_blocking=True)
+                    del buf
+                    torch.empty(64 << 20, dtype=torch.uint8, pin_memory=True)
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+            finished.set()
+
+        thread = threading.Thread(target=loader)
+        thread.start()
         x = torch.zeros(1, device="cuda")
-        with torch.cuda.stream(torch.cuda.Stream()):
-            with self.assertRaisesRegex(RuntimeError, "belongs to a HostMemPool"):
-                g.capture_begin(pool=hp.id)
-            # The rejected call left the graph as it was.
-            g.capture_begin()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
             x.add_(1)
-            g.capture_end()
+            started.set()
+            finished.wait(timeout=60)
+        thread.join()
+        self.assertEqual(errors, [])
         g.replay()
         self.assertEqual(x.item(), 1)
-        self.assertEqual(hp.use_count(), 1)
-
-        # It also left no device allocator route to the pool.
-        device = torch.cuda.current_device()
-        torch._C._cuda_beginAllocateCurrentThreadToPool(device, hp.id)
-        torch._C._cuda_endAllocateToPool(device, hp.id)
-        torch._C._cuda_releasePool(device, hp.id)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

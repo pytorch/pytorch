@@ -54,6 +54,9 @@ struct HostBlock {
   // The HostBlockPool of owning_pool_, also fixed at construction. A pool is
   // erased only once it has no blocks, so it outlives the block.
   void* owning_block_pool_{nullptr};
+  // Graph whose capture allocated this block, if a stream used it during that
+  // capture. The block is not reused until that graph releases its pool.
+  c10::MempoolId_t capture_owner_{0, 0};
   bool was_allocated_during_stream_capture_;
   std::shared_ptr<c10::GatheredContext> context_when_allocated_;
 };
@@ -345,6 +348,16 @@ struct CachingHostAllocatorImpl {
     CachingHostAllocatorImpl* owner;
     c10::MempoolId_t id;
     BlockPool* pool;
+    uint64_t seq; // order of entry among all scopes; the newest scope wins
+  };
+
+  // A capture's routing scope. `first`/`second` keep the old pair spelling.
+  struct CaptureScope {
+    CaptureScope(c10::MempoolId_t id, std::function<bool(c10::Stream)> filter, uint64_t s)
+        : first(id), second(std::move(filter)), seq(s) {}
+    c10::MempoolId_t first;
+    std::function<bool(c10::Stream)> second;
+    uint64_t seq;
   };
 
   virtual ~CachingHostAllocatorImpl() {
@@ -365,7 +378,7 @@ struct CachingHostAllocatorImpl {
     auto context = maybeGatherContext(
         c10::CachingDeviceAllocator::RecordContext::STATE);
 
-    auto&& [mempool_id, pool, host_mem_pool] =
+    auto&& [mempool_id, pool, host_mem_pool, capture_owner] =
         get_allocation_pool_for_current_stream();
 
     // If we are using background threads, we can process events in the
@@ -393,6 +406,8 @@ struct CachingHostAllocatorImpl {
     auto* block = get_free_block(roundSize, pool);
     if (block) {
       block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
+      block->capture_owner_ = block->was_allocated_during_stream_capture_
+          ? capture_owner : c10::MempoolId_t{0, 0};
       block->requested_size_.store(size, std::memory_order_relaxed);
       if (record_history_.load(std::memory_order_relaxed)) [[unlikely]] {
         // getSegments can read context_when_allocated_ concurrently; hold the
@@ -463,6 +478,8 @@ struct CachingHostAllocatorImpl {
     block->owning_pool_ = mempool_id;
     block->owning_block_pool_ = &pool;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
+    block->capture_owner_ = block->was_allocated_during_stream_capture_
+        ? capture_owner : c10::MempoolId_t{0, 0};
     block->context_when_allocated_ = std::move(context);
     add_allocated_block(block, pool);
 
@@ -1055,11 +1072,6 @@ struct CachingHostAllocatorImpl {
       c10::MempoolId_t pool_id,
       std::function<bool(c10::Stream)> filter) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
-    auto it = graph_pools_.find(pool_id);
-    TORCH_CHECK(
-        it == graph_pools_.end() || !it->second->is_host_mem_pool,
-        "Pool (", pool_id.first, ", ", pool_id.second,
-        ") belongs to a HostMemPool and cannot be used as a graph capture pool");
     create_or_incref_pool_under_lock(pool_id);
     for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
          ++it2) {
@@ -1067,7 +1079,9 @@ struct CachingHostAllocatorImpl {
           it2->first != pool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
-    captures_underway_.emplace_back(pool_id, std::move(filter));
+    captures_underway_.emplace_back(
+        pool_id, std::move(filter),
+        next_scope_seq_.fetch_add(1, std::memory_order_relaxed));
     captures_underway_empty_.store(false, std::memory_order_relaxed);
     active_routes_.fetch_add(1, std::memory_order_relaxed);
   }
@@ -1103,10 +1117,34 @@ struct CachingHostAllocatorImpl {
       TORCH_INTERNAL_ASSERT(pp != nullptr);
       auto uc = --(pp->use_count);
       TORCH_INTERNAL_ASSERT(uc >= 0);
-      if (uc == 0 && pp->route_count == 0) {
-        make_freeable_under_lock(*pp, detached);
+      if (uc == 0) {
+        reclaim_capture_blocks_under_lock(pool_id, detached);
+        if (pp->route_count == 0) {
+          make_freeable_under_lock(*pp, detached);
+        }
       }
     });
+  }
+
+  // Takes a reference on an existing pool for a graph that uses it during
+  // capture, as the device allocator does for use_mem_pool. False if absent.
+  bool retain_pool(c10::MempoolId_t pool_id) {
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    auto it = graph_pools_.find(pool_id);
+    if (it == graph_pools_.end()) {
+      return false;
+    }
+    it->second->use_count++;
+    return true;
+  }
+
+  // Makes pool_id routable by threads, for a device MemPool that also routes
+  // pinned allocations. Creates the pool, or adopts one that a capture made.
+  void create_or_incref_host_mem_pool(c10::MempoolId_t pool_id) {
+    TORCH_CHECK(pool_id != c10::MempoolId_t({0, 0}), "(0, 0) is the default pool");
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    create_or_incref_pool_under_lock(pool_id);
+    graph_pools_.at(pool_id)->is_host_mem_pool = true;
   }
 
   void create_pool(c10::MempoolId_t pool_id) {
@@ -1135,7 +1173,9 @@ struct CachingHostAllocatorImpl {
       (void)thread_routes_cleanup_; // registers the cleanup at thread exit
       thread_routes_ = new std::vector<ThreadRoute>();
     }
-    thread_routes_->push_back({this, pool_id, &pp.blocks});
+    thread_routes_->push_back(
+        {this, pool_id, &pp.blocks,
+         next_scope_seq_.fetch_add(1, std::memory_order_relaxed)});
     ++pp.route_count;
     active_routes_.fetch_add(1, std::memory_order_relaxed);
   }
@@ -1174,37 +1214,74 @@ struct CachingHostAllocatorImpl {
   }
 
  private:
-  // Stream capture routes take precedence over the thread's own routes. The
-  // bool is true for a thread route, that is, for a host mem pool.
-  std::tuple<c10::MempoolId_t, BlockPool&, bool> get_allocation_pool_for_current_stream() {
+  // The newest scope that matches wins, as in the device allocator: a capture
+  // begun inside a thread route takes the capturing stream, and a route begun
+  // inside a capture takes it back. Returns (pool id, pool, is a thread route,
+  // id of the capture that matches the current stream or (0, 0)).
+  std::tuple<c10::MempoolId_t, BlockPool&, bool, c10::MempoolId_t>
+  get_allocation_pool_for_current_stream() {
+    constexpr c10::MempoolId_t kNone{0, 0};
     if (active_routes_.load(std::memory_order_relaxed) == 0) [[likely]] {
-      return {c10::MempoolId_t{0, 0}, default_pool_, false};
+      return {kNone, default_pool_, false, kNone};
     }
-
+    ThreadRoute* r = innermost_route();
     if (!captures_underway_empty_.load(std::memory_order_relaxed)) {
       std::shared_lock<std::shared_mutex> lg(instance_mutex_);
       S stream = get_current_stream();
-      for (auto& entry : captures_underway_) {
-        if (entry.second(stream)) {
-          auto it = graph_pools_.find(entry.first);
-          TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
-          auto id = entry.first;
-          if (!stream_is_capturing(stream)) [[unlikely]] {
-            TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
-                            id.first, ",", id.second,
-                            ") but the current stream is not capturing. Private "
-                            "pools have been tested only during graph capture. "
-                            "See https://github.com/pytorch/pytorch/pull/167507#discussion_r2561698011");
-          }
-          return {id, it->second->blocks, false};
+      for (auto it = captures_underway_.rbegin(); it != captures_underway_.rend(); ++it) {
+        if (!it->second(stream)) {
+          continue;
         }
+        auto id = it->first;
+        if (r != nullptr && r->seq > it->seq) {
+          return {r->id, *r->pool, true, id};
+        }
+        auto pit = graph_pools_.find(id);
+        TORCH_INTERNAL_ASSERT(pit != graph_pools_.end());
+        if (!stream_is_capturing(stream)) [[unlikely]] {
+          TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
+                          id.first, ",", id.second,
+                          ") but the current stream is not capturing.");
+        }
+        return {id, pit->second->blocks, false, id};
       }
     }
-
-    if (auto* r = innermost_route()) {
-      return {r->id, *r->pool, true};
+    if (r != nullptr) {
+      return {r->id, *r->pool, true, kNone};
     }
-    return {c10::MempoolId_t{0, 0}, default_pool_, false};
+    return {kNone, default_pool_, false, kNone};
+  }
+
+  // Makes the blocks that captures into `graph_id` kept out of reuse available
+  // again, once the last graph sharing that pool releases it. Blocks still in
+  // use follow the normal free path from now on. instance_mutex_ must be held.
+  void reclaim_capture_blocks_under_lock(c10::MempoolId_t graph_id, std::vector<B*>& detached) {
+    std::vector<std::pair<B*, BlockPool*>> ready;
+    {
+      auto scan = [&](BlockPool& pool) {
+        std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+        for (auto* block : pool.blocks_) {
+          std::lock_guard<std::mutex> g(block->mutex_);
+          if (block->capture_owner_ != graph_id) {
+            continue;
+          }
+          block->capture_owner_ = {0, 0};
+          block->was_allocated_during_stream_capture_ = false;
+          if (!block->allocated_.load(std::memory_order_relaxed) &&
+              block->event_count_ > 0) {
+            block->event_count_ = 0;
+            ready.emplace_back(block, &pool);
+          }
+        }
+      };
+      scan(default_pool_);
+      for (auto& [_, pp] : graph_pools_) {
+        scan(pp->blocks);
+      }
+    }
+    for (auto& [block, pool] : ready) {
+      maybe_cache_block(block, *pool, nullptr, detached);
+    }
   }
 
   // The calling thread's innermost route to this allocator, or null.
@@ -1591,7 +1668,10 @@ private:
 
   // Track active capture contexts requesting allocations to specific pools
   std::vector<
-      std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
+      CaptureScope> captures_underway_;
+
+  // Entry order of capture scopes and thread routes (see CaptureScope::seq).
+  std::atomic<uint64_t> next_scope_seq_{1};
 
   // corresponds to c10::MempoolId_t{0,0}
   BlockPool default_pool_;
@@ -1694,6 +1774,16 @@ struct TORCH_API HostAllocator : public at::Allocator {
     return false;
   }
 
+  // A graph that routes to pool_id during capture takes a reference on it.
+  virtual bool retain_pool(c10::MempoolId_t /*pool_id*/) {
+    return false;
+  }
+
+  // Lets threads route to pool_id (a device MemPool with pinned routing).
+  virtual void create_or_incref_host_mem_pool(c10::MempoolId_t /*pool_id*/) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_or_incref_host_mem_pool");
+  }
+
   virtual void record_history(
       bool /*enabled*/,
       c10::CachingDeviceAllocator::CreateContextFn /*context_recorder*/,
@@ -1794,6 +1884,14 @@ struct CachingHostAllocatorInterface : public HostAllocator {
 
   bool is_host_mem_pool(c10::MempoolId_t pool_id) override {
     return impl_->is_host_mem_pool(pool_id);
+  }
+
+  bool retain_pool(c10::MempoolId_t pool_id) override {
+    return impl_->retain_pool(pool_id);
+  }
+
+  void create_or_incref_host_mem_pool(c10::MempoolId_t pool_id) override {
+    impl_->create_or_incref_host_mem_pool(pool_id);
   }
 
   void record_history(
