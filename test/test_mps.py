@@ -12754,16 +12754,13 @@ class TestSDPA(TestCaseMPS):
         tol = 0.02 if dtype == torch.float32 else 0.05
         self._run_prefill_test(q, k, v, is_causal=is_causal, tol=tol)
 
-    def test_dropout_raises_not_implemented(self):
+    def test_dropout_ignored_without_grad(self):
         q = torch.randn(1, 2, 4, 8, device="mps")
-        # shouldn't raise
-        y_no_drop = F.scaled_dot_product_attention(q, q, q, dropout_p=0.0)
-        y_no_drop = F.scaled_dot_product_attention(q, q, q)
-        # should raise
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"scaled_dot_product_attention for MPS does not support dropout."):
-            F.scaled_dot_product_attention(q, q, q, dropout_p=0.2)
+        y_ref = F.scaled_dot_product_attention(q, q, q)
+        self.assertEqual(F.scaled_dot_product_attention(q, q, q, dropout_p=0.2), y_ref)
+        q.requires_grad_()
+        with torch.no_grad():
+            self.assertEqual(F.scaled_dot_product_attention(q, q, q, dropout_p=0.2), y_ref)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize("head_dim", [64, 128])

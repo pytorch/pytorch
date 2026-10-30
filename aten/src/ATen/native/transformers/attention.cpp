@@ -899,7 +899,7 @@ Tensor scaled_dot_product_attention(
             key,
             value,
             attn_mask,
-            dropout_p,
+            0.0,
             is_causal,
             std::nullopt, /*dropout_mask*/
             scale,
