@@ -765,7 +765,7 @@ def _unique(
         raise DynamicOutputShapeException(func)
 
     memo_name = "unique_consecutive_memo" if unique_consecutive else "unique_memo"
-    nnz = maybe_get_sym_memo(arg, memo_name, fake_mode)
+    nnz = maybe_get_sym_memo(arg, memo_name)
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -797,7 +797,7 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            maybe_set_sym_memo(arg, memo_name, nnz, fake_mode)
+            maybe_set_sym_memo(arg, memo_name, nnz)
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -1444,7 +1444,7 @@ def nonzero(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := maybe_get_sym_memo(arg, "nonzero_memo", fake_mode)) is None:
+    if (nnz := maybe_get_sym_memo(arg, "nonzero_memo")) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -1482,7 +1482,7 @@ def nonzero(
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        maybe_set_sym_memo(arg, "nonzero_memo", nnz, fake_mode)
+        maybe_set_sym_memo(arg, "nonzero_memo", nnz)
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
