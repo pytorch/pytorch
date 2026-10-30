@@ -615,6 +615,13 @@ class BaseTorchVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
     def nb_or_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -654,13 +661,6 @@ class BaseTorchVariable(VariableTracker):
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -4964,13 +4964,6 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> "DispatchKeySetVariable":
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def has(
         self,
