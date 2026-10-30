@@ -23,6 +23,10 @@ class TestCase(DynamoTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._inductor_test_stack = contextlib.ExitStack()
+        # A cleanup rather than tearDown, which does not run when setUp raises
+        # (e.g. skipTest). A leaked fresh_cache() otherwise exits whenever the
+        # garbage collector finalizes it.
+        self.addCleanup(self._inductor_test_stack.close)
         self._inductor_test_stack.enter_context(
             functorch_config.patch(
                 {
@@ -44,7 +48,3 @@ class TestCase(DynamoTestCase):
             and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
         ):
             self._inductor_test_stack.enter_context(fresh_cache())
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        self._inductor_test_stack.close()
