@@ -1426,15 +1426,17 @@ def local_scalar_dense(
 
 @register_op_impl(torch.ops.aten.nonzero_numpy.default)
 def nonzero_numpy(
-    fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
-) -> list[FakeTensor]:
+    fake_mode: FakeTensorMode, func: OpOverload, arg: torch.Tensor
+) -> list[torch.Tensor]:
     # Match eager, which returns a 1-tuple for a 0-dim input like numpy does.
     nonzero_arg = arg.unsqueeze(0) if arg.dim() == 0 else arg
     return torch.ops.aten.nonzero.default(nonzero_arg).unbind(1)
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
-def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> FakeTensor:
+def nonzero(
+    fake_mode: FakeTensorMode, func: OpOverload, arg: torch.Tensor
+) -> torch.Tensor:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
