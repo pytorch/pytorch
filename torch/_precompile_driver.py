@@ -1016,8 +1016,7 @@ def _build_installed_forward():
         ) from _e
 
     # A serve-time compile traces as the capture's calls did: Dynamo reads
-    # triton.cudagraphs while tracing (it specializes floats under it). Built once,
-    # off the per-call path.
+    # triton.cudagraphs while tracing (it specializes floats under it).
     apply_cudagraph_config = torch._inductor.config._make_closure_patcher(
         **CUDAGRAPH_CONFIG
     )

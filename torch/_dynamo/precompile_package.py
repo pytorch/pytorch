@@ -1712,6 +1712,8 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
+        # Whether a graph compiled under torch._dynamo.override_cudagraphs.
+        self.overrides_cudagraphs = False
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1728,6 +1730,9 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
+        context = torch._guards.TracingContext.try_get()
+        if context is not None and context.cudagraph_annotation is not None:
+            self.overrides_cudagraphs = True
 
     def add_graph_break_op(
         self,
@@ -2340,6 +2345,14 @@ class PrecompileSession(Generic[_P, _R]):
         )
         backends = self._collect_backends()
         package = self._package
+        if package.overrides_cudagraphs:
+            raise PackageError(
+                "a DynamoTracer capture cannot serve torch._dynamo.override_cudagraphs: "
+                "the artifact records the capture's CUDA graph config "
+                "(CUDAGRAPH_CONFIG), not each graph's, so a graph the override kept "
+                "out of CUDA graphs would fail to load and one it turned on would be "
+                "served without one."
+            )
         # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
         # on those of any compiled frame, and a graph's ops on the graph's devices.
         op_devices: dict[tuple[str, str], set[str]] = {

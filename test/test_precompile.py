@@ -6472,6 +6472,11 @@ def overrides_the_forward(model, x):
         return step(model, x)
 
 
+def turns_cudagraphs_on(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=True):
+        return step(model, x)
+
+
 def bumps_a_buffer(model, x):
     model.calls.add_(1)
     return model(x).sin()
@@ -6529,7 +6534,8 @@ for node in nodes:
     nodes.extend(child for children in node.children.values() for child in children)
 recorded = len(nodes)
 skips = torch._dynamo.utils.counters["inductor"]["cudagraph_skips"]
-print("restored", restored, "bumps", bumps, "skips", skips, end=" ")
+compiles = torch._dynamo.utils.counters["frames"]["ok"]
+print("restored", restored, "bumps", bumps, "skips", skips, "compiles", compiles, end=" ")
 print("recorded", recorded, "captured", captured)
 """
 
@@ -6606,8 +6612,10 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         served = out.stdout.splitlines()[-1].split()
         served = dict(zip(served[::2], map(int, served[1::2])))
-        # The serve-time config patch is reverted after each call.
+        # The serve-time config patch is reverted after each call, and the calls
+        # compile in the loading process only when they may.
         self.assertEqual(served["restored"], 1)
+        self.assertEqual(served["compiles"] > 0, serve_time)
         self.assertEqual(served["bumps"], bumps)
         if skips is not None:
             self.assertEqual(served["skips"], skips)
@@ -6667,7 +6675,10 @@ class TestPrecompileCudagraphs(TestCase):
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad(), torch._inductor.config.patch({"triton.cudagraphs": True}):
             expected = fn(self.model, miss)
-        self._serve_in_fresh_process(expected, x=miss, serve_time=True)
+        served = self._serve_in_fresh_process(
+            expected, x=miss, serve_time=True, skips=0
+        )
+        self.assertGreater(served[0], 0)
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         options = {"triton.cudagraphs": True}
@@ -6692,20 +6703,14 @@ class TestPrecompileCudagraphs(TestCase):
         recorded, _ = self._serve_in_fresh_process(y, expected_grad=grad)
         self.assertEqual(recorded, 1)
 
-    @parametrize("graph", ["forward", "backward"])
-    def test_a_graph_an_override_kept_out_of_cudagraphs_serves_without_one(self, graph):
-        # The override compiles the graph without CUDA graphs, though
-        # CUDAGRAPH_CONFIG turns them on for the rest.
-        fn = getattr(self.mod, f"overrides_the_{graph}")
-        options = {"triton.cudagraphs": True}
-        y, _ = self._capture_step(fn, grad=True, options=options)
-        self.model.zero_grad(set_to_none=True)
-        fn(self.model, self.x).sum().backward()
-        grad = self.model.lin.weight.grad.clone()
-        # A forward kept out keeps its backward out too, and each is a logged skip.
-        skips = 1 if graph == "backward" else 2
-        served = self._serve_in_fresh_process(y, expected_grad=grad, skips=skips)
-        self.assertEqual(served[0], 1 if graph == "backward" else 0)
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    def test_a_capture_overriding_cudagraphs_is_refused(self, fn):
+        # Turning CUDA graphs on matters under a capture whose own flag is off.
+        on = None if fn == "turns_cudagraphs_on" else {"triton.cudagraphs": True}
+        with self.assertRaisesRegex(PrecompileError, "override_cudagraphs"):
+            self._capture_step(getattr(self.mod, fn), grad=True, options=on)
 
     def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
         config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}

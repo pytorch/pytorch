@@ -4111,7 +4111,9 @@ def capture(
     between iterations; a graph Inductor cannot capture (CPU tensors, mutated
     inputs, ...) runs without one and logs a cudagraph skip; and a frame served
     eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph. A
-    :class:`DynamoTracer` capture refuses ``freezing`` and
+    capture whose graphs compile under :func:`torch._dynamo.override_cudagraphs`
+    is refused: the artifact records the capture's CUDA graph config, not each
+    graph's. A :class:`DynamoTracer` capture refuses ``freezing`` and
     ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
     for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does not
     cache, and ``bundled_autotune_remote_cache`` on, which the capture turns
@@ -4299,17 +4301,14 @@ def load(
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
 
-    The graphs a :class:`DynamoTracer` artifact ships run as CUDA graphs
-    exactly when its capture's did (``CUDAGRAPH_CONFIG``), whatever the loading
-    process's ``torch._inductor.config.triton.cudagraphs``,
-    ``triton.cudagraph_trees`` and ``graph_partition`` say; the rest of the
-    CUDA graph config is the loading process's. The record is the capture's, not
-    each graph's: a graph :func:`torch._dynamo.override_cudagraphs` kept out of
-    CUDA graphs runs without one, but one it turned on while the capture's
-    ``triton.cudagraphs`` was off is served without one. A serve-time compile
-    (``allow_serve_time_compiles``) takes the capture's ``mode`` or
-    ``options`` and ``CUDAGRAPH_CONFIG`` over the loading process's config, so
-    it compiles CUDA graphs exactly when the captured graphs do.
+    The graphs a :class:`DynamoTracer` artifact ships are wrapped in CUDA graphs
+    by its capture's ``triton.cudagraphs``, ``triton.cudagraph_trees`` and
+    ``graph_partition`` (``CUDAGRAPH_CONFIG``), whatever the loading process's
+    ``torch._inductor.config`` says, unless the loading process sets
+    ``cudagraph_policy``, which wraps them again; the rest of the CUDA graph
+    config is the loading process's. A serve-time compile
+    (``allow_serve_time_compiles``) takes the capture's ``mode`` or ``options``
+    and ``CUDAGRAPH_CONFIG`` over the loading process's config.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
