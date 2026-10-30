@@ -1110,22 +1110,6 @@ Tensor prod_backward(
   }
 }
 
-template <typename solve_f>
-static Tensor generic_solve_jvp(
-    solve_f solve,
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
-  auto dA_contrib =
-      is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
-  // In general,
-  // dX = solve(A, dB - dA_contrib), but this behavior is different for
-  // lu_solve. For refer to lu_solve_jvp for more details on this.
-  return solve(A, dB, dA_contrib);
-}
-
 Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   // Trivial case
   if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
@@ -4952,15 +4936,17 @@ Tensor triangular_solve_jvp(
     const bool upper,
     const bool transpose,
     const bool unitriangular) {
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return std::get<0>(at::triangular_solve(
-            dB - dA_contrib, A, upper, transpose, unitriangular));
-      },
-      X,
-      A,
-      dA,
-      dB);
+  at::NoTF32Guard disable_tf32;
+  // Keep only the part of dA the op reads (strict when unitriangular)
+  auto dA_read = upper ? dA.triu(static_cast<int>(unitriangular))
+                       : dA.tril(-static_cast<int>(unitriangular));
+  if (transpose) {
+    dA_read = dA_read.mT();
+  }
+  // Unlike linalg.solve, triangular_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
+  return std::get<0>(at::triangular_solve(
+      dB - dA_read.matmul(X), A, upper, transpose, unitriangular));
 }
 
 Tensor linalg_solve_triangular_forward_AD(
@@ -5075,14 +5061,9 @@ Tensor cholesky_solve_jvp(
   at::NoTF32Guard disable_tf32;
   auto dK = upper ? dU.mH().matmul(U) : dU.matmul(U.mH());
   auto dA = dK + dK.mH();
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::cholesky_solve(dB - dA_contrib, A, upper);
-      },
-      X,
-      /*A=*/U,
-      dA,
-      dB);
+  // Unlike linalg.solve, cholesky_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
+  return at::cholesky_solve(dB - dA.matmul(X), U, upper);
 }
 
 Tensor fft_c2r_backward(
@@ -5523,9 +5504,8 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
   Tensor dgamma;
 
   std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
-  for (int i = 0;
-       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
-       ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(
+           std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0))) {
     rstd_view_shape.push_back(1);
   }
   Tensor rstd_broadcast = rstd.view(rstd_view_shape);
@@ -6203,7 +6183,7 @@ Tensor householder_product_jvp(
         /*left=*/true);
   };
 
-  auto H_plus = prod.detach().clone();
+  auto H_plus = prod.clone();
   IntArrayRef batch_vector_shape(V.sizes().data(), V.dim() - 1);
   auto H_minus =
       at::diag_embed(at::ones({1}, V.options()).expand(batch_vector_shape));
@@ -6692,21 +6672,6 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   return std::make_tuple(
       A_requires_grad ? std::move(gA_) : Tensor{},
       B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
-}
-
-Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  return generic_solve_jvp(
-      [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::linalg_solve(A, dB - dA_contrib);
-      },
-      X,
-      A,
-      dA,
-      dB);
 }
 
 Tensor lu_unpack_backward(
@@ -7960,7 +7925,7 @@ mkldnn_rnn_layer_differentiable_backward(
       seq_length);
   std::vector<std::tuple<Tensor, Tensor>> layer_states(seq_length + 1);
   layer_states[0] = std::make_tuple(hx_, cx_tmp);
-  for (int64_t seq = 1; seq < seq_length + 1; seq++) {
+  for (const auto seq : c10::irange(1, seq_length + 1)) {
     auto hx = hx_prev;
     auto cx = cx_prev;
     auto x_index = reverse ? seq_length - seq : seq - 1;
@@ -8392,15 +8357,19 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
   const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
+  const bool has_ggI = ggI.defined() && !ggI._is_zerotensor();
+  // Forward AD passes an undefined grad_output and requests only output 0.
+  TORCH_INTERNAL_ASSERT(
+      !(output_mask[1] || output_mask[2]) || grad_output.defined());
 
   // ggI -> d_grad_output: gather ggI at grid positions = grid_sampler_2d(ggI,
   // grid)
-  if (output_mask[0] && ggI.defined()) {
+  if (output_mask[0] && has_ggI) {
     d_grad_output = at::grid_sampler_2d(
         ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
   // ggI -> d_grid: same structure as grad_grid but with ggI as "input"
-  if (output_mask[2] && ggI.defined()) {
+  if (output_mask[2] && has_ggI) {
     d_grid = std::get<1>(at::grid_sampler_2d_backward(
         grad_output,
         ggI,
@@ -8412,7 +8381,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   }
   // d_input from ggI is 0: grad_input has no dependence on input.
   // For nearest, grad_grid = 0, so all ggGrid contributions vanish.
-  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
+  if (!ggGrid.defined() || ggGrid._is_zerotensor() ||
+      interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
   auto H = input.size(2), W = input.size(3);
@@ -8454,8 +8424,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
       auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
-      auto contrib = sum_dx * ggG_x.unsqueeze(1);
-      contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
+      // Out of place because vmap may batch only the tangent contribution.
+      auto contrib =
+          (sum_dx * ggG_x.unsqueeze(1)).addcmul(sum_dy, ggG_y.unsqueeze(1));
       d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                               : std::move(contrib);
     }
@@ -8561,8 +8532,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I_all, B_dx);
       auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
-      auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
-      contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
+      // Out of place because vmap may batch only the tangent contribution.
+      auto contrib = (sum_dx * ggG_x_bc.unsqueeze(1))
+                         .addcmul(sum_dy, ggG_y_bc.unsqueeze(1));
       d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                               : std::move(contrib);
     }
@@ -8634,6 +8606,28 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
 
+Tensor grid_sampler_2d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto result_t = std::get<0>(grid_sampler_2d_double_backward(
+      input_t,
+      grid_t,
+      Tensor(),
+      input_p,
+      grid_p,
+      interpolation_mode,
+      padding_mode,
+      align_corners,
+      {true, false, false}));
+  return result_t.defined() ? result_t : at::zeros_like(result);
+}
+
 std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     const Tensor& ggI,
     const Tensor& ggGrid,
@@ -8648,12 +8642,16 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   const auto interpolation =
       static_cast<GridSamplerInterpolation>(interpolation_mode);
   const auto padding_mode_enum = static_cast<GridSamplerPadding>(padding_mode);
+  const bool has_ggI = ggI.defined() && !ggI._is_zerotensor();
+  // Forward AD passes an undefined grad_output and requests only output 0.
+  TORCH_INTERNAL_ASSERT(
+      !(output_mask[1] || output_mask[2]) || grad_output.defined());
 
-  if (output_mask[0] && ggI.defined()) {
+  if (output_mask[0] && has_ggI) {
     d_grad_output = at::grid_sampler_3d(
         ggI, grid, interpolation_mode, padding_mode, align_corners);
   }
-  if (output_mask[2] && ggI.defined()) {
+  if (output_mask[2] && has_ggI) {
     d_grid = std::get<1>(at::grid_sampler_3d_backward(
         grad_output,
         ggI,
@@ -8663,7 +8661,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         align_corners,
         {false, true}));
   }
-  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
+  if (!ggGrid.defined() || ggGrid._is_zerotensor() ||
+      interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
 
@@ -8678,7 +8677,10 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     const auto acc = at::toOpMathType(grid.scalar_type());
     const auto grid_acc = grid.to(acc);
     const auto ggGrid_acc = ggGrid.to(acc);
-    const auto grad_output_acc = grad_output.to(acc);
+    Tensor grad_output_acc;
+    if (output_mask[1] || output_mask[2]) {
+      grad_output_acc = grad_output.to(acc);
+    }
     auto raw = [&](int64_t axis, double scale) {
       auto coord = (grid_acc.select(-1, axis) + 1) * scale;
       return align_corners ? coord : coord - 0.5;
@@ -8766,11 +8768,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         }
 
         if (output_mask[0]) {
-          auto contrib = gs_accum_sumprod_k(taps, B_dx) * ggG_x.unsqueeze(1);
-          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dy), ggG_y.unsqueeze(1));
-          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dz), ggG_z.unsqueeze(1));
-          // out of place: vmap refuses an in-place accumulation whose
-          // destination is not batched while the chunk's contribution is
+          auto contrib =
+              (gs_accum_sumprod_k(taps, B_dx) * ggG_x.unsqueeze(1))
+                  .addcmul(gs_accum_sumprod_k(taps, B_dy), ggG_y.unsqueeze(1))
+                  .addcmul(gs_accum_sumprod_k(taps, B_dz), ggG_z.unsqueeze(1));
+          // Out of place because vmap may batch only the tangent contribution.
           d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
                                                   : std::move(contrib);
         }
@@ -8834,7 +8836,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     }
 
     if (d_grad_output.defined()) {
-      d_grad_output = d_grad_output.to(grad_output.scalar_type());
+      d_grad_output = d_grad_output.to(input.scalar_type());
     }
     if (d_input.defined()) {
       d_input = d_input.to(input.scalar_type());
@@ -8923,9 +8925,9 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
     auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
     auto sum_dz = gs_accum_sumprod_k(I, dw_dz);
-    auto d_gO = sum_dx * ggG_x.unsqueeze(1);
-    d_gO.addcmul_(sum_dy, ggG_y.unsqueeze(1));
-    d_gO.addcmul_(sum_dz, ggG_z.unsqueeze(1));
+    auto d_gO = (sum_dx * ggG_x.unsqueeze(1))
+                    .addcmul(sum_dy, ggG_y.unsqueeze(1))
+                    .addcmul(sum_dz, ggG_z.unsqueeze(1));
     d_grad_output =
         d_grad_output.defined() ? d_grad_output + d_gO : std::move(d_gO);
   }
@@ -8995,6 +8997,28 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
+}
+
+Tensor grid_sampler_3d_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& grid_p,
+    const Tensor& grid_t,
+    const Tensor& result,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto result_t = std::get<0>(grid_sampler_3d_double_backward(
+      input_t,
+      grid_t,
+      Tensor(),
+      input_p,
+      grid_p,
+      interpolation_mode,
+      padding_mode,
+      align_corners,
+      {true, false, false}));
+  return result_t.defined() ? result_t : at::zeros_like(result);
 }
 
 } // namespace torch::autograd::generated::details

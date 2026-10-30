@@ -3,10 +3,13 @@
 
 import collections
 import enum
+import sys
+import types
 import typing
 import unittest
 
 import torch
+import torch._dynamo.testing
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -25,12 +28,38 @@ class _OpaqueReprDescriptorObject:
     __repr__ = str.upper
 
 
+class _Slotted:
+    __slots__ = ("a",)
+
+    class Nested:
+        __slots__ = ("b",)
+
+
 class _SetSubclass(set):
     pass
 
 
 class _FrozenSetSubclass(frozenset):
     pass
+
+
+class _ListSubclass(list):
+    pass
+
+
+class _DictSubclass(dict):
+    pass
+
+
+class _CustomReprDict(dict):
+    def __repr__(self):
+        return "custom repr"
+
+    def __str__(self):
+        return "custom str"
+
+
+_global_dict = {"a": 1}
 
 
 @instantiate_parametrized_tests
@@ -102,6 +131,7 @@ class TpReprTests(TestCase):
         self.assertEqual(fn(x, obj), compiled(x, obj))
 
     def test_user_defined_default_object_repr(self):
+        # object_repr's address is a placeholder under Dynamo.
         class Plain:
             pass
 
@@ -111,7 +141,9 @@ class TpReprTests(TestCase):
         obj = Plain()
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x, obj), compiled(x, obj))
+        self.assertEqual(
+            compiled(x, obj), f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        )
 
     def test_object_dunder_repr_on_plain_instance(self):
         class Plain:
@@ -295,6 +327,139 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager")
         self.assertEqual(compiled(x), repr({"x": x}))
 
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_mappingproxy_repr_and_str(self, stringify):
+        d = {"descriptor": object.__dict__["__class__"]}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            return x + 1, stringify(proxy)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        d["descriptor"] = type.__dict__["__dict__"]
+        self.assertEqual(compiled(x), fn(x))
+
+        proxy = types.MappingProxyType(collections.OrderedDict(a=1))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_mappingproxy_after_dict_mutation(self):
+        d = {"a": 1}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            d["b"] = 2
+            return x + 1, repr(proxy)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        got = compiled(x)
+        del d["b"]
+        self.assertEqual(got, fn(x))
+
+    def test_mappingproxy_cyclic_repr(self):
+        def fn(x):
+            d = {}
+            proxy = types.MappingProxyType(d)
+            d["proxy"] = proxy
+            return x + 1, repr(proxy), repr(d)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_class_dict_repr_after_class_rename(self):
+        class C:
+            pass
+
+        def fn(x):
+            return x + 1, repr(C.__dict__)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), fn(x))
+        C.__name__ = "D"
+        self.assertEqual(compiled(x), fn(x))
+        # 3.15 shares one __dict__/__weakref__ descriptor across types, so the
+        # repr no longer names the class and the rename does not recompile.
+        expected_frames = 1 if sys.version_info >= (3, 15) else 2
+        self.assertEqual(cnt.frame_count, expected_frames)
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    @parametrize(
+        "make_mapping",
+        (
+            lambda: collections.OrderedDict(a=1),
+            lambda: collections.defaultdict(int, a=1),
+            lambda: _CustomReprDict(a=1),
+            lambda: types.MappingProxyType({"a": 1}),
+        ),
+        name_fn=lambda fn: type(fn()).__name__,
+    )
+    def test_mappingproxy_of_mapping_subclass(self, stringify, make_mapping):
+        proxy = types.MappingProxyType(make_mapping())
+
+        def fn(x):
+            return x + 1, stringify(proxy)
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    @parametrize(
+        "captured", (False, True), name_fn=lambda c: "captured" if c else "attr"
+    )
+    def test_class_dict_after_class_setattr(self, stringify, captured):
+        class C:
+            y = 1
+
+        proxy = C.__dict__
+
+        def fn(x):
+            C.z = 3
+            return x + 1, stringify(proxy if captured else C.__dict__)
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager")(x)
+        del C.z
+        self.assertEqual(got, fn(x))
+
+    def test_mappingproxy_of_global_dict_passed_as_input(self):
+        def fn(x, proxy):
+            return x + 1, _global_dict["a"], repr(proxy)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        proxy = types.MappingProxyType(_global_dict)
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(cnt.frame_count, 1)
+
+        other = types.MappingProxyType({"a": 5})
+        self.assertEqual(compiled(x, other), fn(x, other))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_dict_keys_mapping_repr(self, stringify):
+        def fn(x, keys):
+            return x + 1, stringify(keys.mapping)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x, {"a": 1}.keys()), fn(x, {"a": 1}.keys()))
+        self.assertEqual(compiled(x, {"a": 1}.keys()), fn(x, {"a": 1}.keys()))
+        self.assertEqual(cnt.frame_count, 1)
+
+        for keys in ({"a": 2}.keys(), collections.defaultdict(int, a=2).keys()):
+            self.assertEqual(compiled(x, keys), fn(x, keys))
+
     def test_nn_module_repr(self):
         mod = torch.nn.Sequential(torch.nn.ReLU(), torch.nn.Linear(4, 4))
 
@@ -440,6 +605,45 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
+    @parametrize(
+        "container_type",
+        (_ListSubclass, _DictSubclass, collections.deque, collections.OrderedDict),
+        name_fn=lambda t: t.__name__.lstrip("_"),
+    )
+    def test_self_ref_container_subclass_repr(self, container_type):
+        # Each container's tp_repr writes its own cycle placeholder, so a
+        # subclass reprs like its base ("[[...]]", not "[...]").
+        def fn(x):
+            c = container_type()
+            if isinstance(c, dict):
+                c["k"] = c
+            else:
+                c.append(c)
+            return x + 1, repr(c)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+    def test_self_ref_userlist_repr(self):
+        def fn():
+            l = collections.UserList([1, 2])
+            l.append(l)
+            return repr(l)
+
+        # fullgraph=True: a graph break would run repr() eagerly and hide a wrong result.
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    def test_self_ref_userdict_repr(self):
+        def fn():
+            d = collections.UserDict()
+            d["self"] = d
+            return repr(d)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     def test_mutual_ref_repr(self):
         def fn():
             a = [1]
@@ -506,6 +710,59 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         _, is_digit = compiled(torch.randn(4))
         self.assertTrue(is_digit)
+
+    def test_object_repr_placeholder_address(self):
+        # Sourced and compile-time objects both get the placeholder address,
+        # so a new instance neither recompiles nor graph breaks.
+        class Plain:
+            pass
+
+        def fn(x, obj):
+            return x + 1, repr(obj), str(obj), repr(Plain())
+
+        expected = f"<{__name__}.{Plain.__qualname__} object at 0x...>"
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        for obj in (Plain(), Plain()):
+            self.assertEqual(compiled(x, obj)[1:], (expected,) * 3)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_object_str_uses_tp_repr(self):
+        class ReprOnly:
+            def __repr__(self):
+                return "ReprOnly!"
+
+        def fn(x, obj):
+            return x + 1, str(obj)
+
+        obj = ReprOnly()
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, obj)[1], compiled(x, obj)[1])
+
+    @parametrize(
+        "descr",
+        [
+            dict.__dict__["fromkeys"],
+            collections.deque.append,
+            int.__add__,
+            type(len).__dict__["__name__"],
+            type.__dict__["__dictoffset__"],
+            _Slotted.a,
+            _Slotted.Nested.b,
+            _OpaqueReprDescriptorObject.__dict__["__dict__"],
+            _OpaqueReprDescriptorObject.__dict__["__weakref__"],
+        ],
+        name_fn=lambda d: f"{type(d).__name__}_{d.__name__}",
+    )
+    def test_descriptor_repr(self, descr):
+        def fn(x):
+            return x + 1, repr(descr)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
 
 
 if __name__ == "__main__":

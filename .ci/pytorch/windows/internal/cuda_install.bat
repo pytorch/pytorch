@@ -64,8 +64,8 @@ set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
 goto cuda_download
 
 :cuda132
-set CUDA_INSTALL_VERSION=13.2.1
-set CUDA_INSTALL_EXE=cuda_13.2.1_windows.exe
+set CUDA_INSTALL_VERSION=13.2.2
+set CUDA_INSTALL_EXE=cuda_13.2.2_windows.exe
 set "ARGS="
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
 goto cuda_download
@@ -77,7 +77,7 @@ set "ARGS="
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.26.0.51_cuda13-archive
 goto cuda_download
 
-:: Common download logic for CUDA toolkit, cuDNN, and ZLIB
+:: Common download logic for CUDA toolkit and cuDNN
 :cuda_download
 set CUDNN_LIB_FOLDER=lib
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
@@ -93,8 +93,6 @@ if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
     if errorlevel 1 exit /b 1
     set "CUDNN_SETUP_FILE=%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
 )
-
-call :install_zlib
 
 goto cuda_common
 
@@ -249,8 +247,6 @@ if exist "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" (
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
-call :install_zlib
-
 echo Cleaning temp files
 rd /s /q "%SRC_DIR%\temp_build" || ver > nul
 
@@ -262,12 +258,4 @@ set "CUDA_PATH=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_S
 set "CUDA_PATH_V%CUDA_VER_MAJOR%_%CUDA_VER_MINOR%=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%"
 set "NVTOOLSEXT_PATH=%ProgramFiles%\NVIDIA Corporation\NvToolsExt"
 
-goto :eof
-
-@REM cuDNN 8.3+ requires zlib to be installed on the path
-:install_zlib
-echo Installing ZLIB dlls
-curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%SRC_DIR%\temp_build\zlib123dllx64.zip"
-7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
-xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
 goto :eof
