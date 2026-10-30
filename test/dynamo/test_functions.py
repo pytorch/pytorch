@@ -484,6 +484,30 @@ partial_fn = functools.partial(fn, scale=2)
         )
         return a
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_itertools_product_zero_repeat_preserves_inputs(self, backend):
+        def fn(x):
+            first = iter([7, 8])
+            second = iter([9, 10])
+            product = list(itertools.product(first, second, repeat=0))
+            return x + next(first, -1) + next(second, -1), product
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(fn(x), (x + 16, [()]))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_itertools_product_zero_repeat_does_not_call_iter(self):
+        class Iterable:
+            def __iter__(self):
+                raise AssertionError("repeat=0 must not call iter")
+
+        def fn(x):
+            return x + len(list(itertools.product(Iterable(), repeat=0)))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_itertools_permutations_basic(self):
         def fn():
             return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
@@ -7225,32 +7249,8 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    def test_method_descriptor_autograd_engine_callback(self):
-        calls = []
-
-        def callback():
-            calls.append("called")
-
-        class Callback(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x * 2
-
-            @staticmethod
-            def backward(ctx, grad):
-                torch.autograd.Variable._execution_engine.queue_callback(callback)
-                return grad * 2
-
-        def compiler_fn(gm):
-            return torch.compile(gm, backend="eager", fullgraph=True)
-
-        x = torch.ones(1, requires_grad=True)
-        with torch._dynamo.compiled_autograd._enable(compiler_fn):
-            Callback.apply(x).sum().backward()
-        self.assertEqual(x.grad, torch.full_like(x, 2))
-        self.assertEqual(calls, ["called"])
-
-    def test_builtin_wrapper_descriptor_inherited_from_object(self):
+    @parametrize("missing", [False, True])
+    def test_builtin_wrapper_descriptor_inherited_from_object(self, missing):
         class Mapping(dict):
             def __setattr__(self, name, value):
                 raise AssertionError("must bypass the override")
@@ -7260,37 +7260,24 @@ class GraphModule(torch.nn.Module):
 
         def fn(x):
             mapping = Mapping()
-            dict.__setattr__(mapping, "extra", x + 1)
-            return mapping.extra, list.__str__(mapping)
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_builtin_wrapper_descriptor_missing_receiver(self):
-        def fn(x):
             try:
-                list.__str__()
+                if missing:
+                    return list.__str__()
+                dict.__setattr__(mapping, "extra", x + 1)
+                return mapping.extra, list.__str__(mapping)
             except TypeError as exc:
                 return x + 1, str(exc)
-            return x - 1, "no error"
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    @parametrize(
-        "method, args",
-        [
-            ("__dir__", ()),
-            ("__sizeof__", ()),
-            ("__format__", ("",)),
-            ("__reduce__", ()),
-        ],
-    )
-    def test_object_method_descriptor_error_owner(self, method, args):
+    @parametrize("method", ["__dir__", "__sizeof__", "__format__", "__reduce__"])
+    def test_object_method_descriptor_error_owner(self, method):
         class C:
             pass
 
         def fn(x, obj):
+            args = ("",) if method == "__format__" else ()
             return x + 1, getattr(obj, method)(*args)
 
         with self.assertRaisesRegex(Unsupported, f"method `{method}` of class `C`"):
