@@ -1940,23 +1940,6 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
-        # Whether, and how, a bundled AOTAutograd entry wraps its graph in CUDA
-        # graphs is decided again when it is post-compiled at load. The artifact
-        # records the capture's choice, and the capture's calls compile under it.
-        # graph_partition is in it because post-compile picks the wrapper for a
-        # partitioned graph by it, while the graph was partitioned at compile.
-        self._cudagraph_config: dict[str, bool] = {}
-        if self._backend_name == "inductor":
-            from torch._inductor import config as inductor_config
-
-            self._cudagraph_config = {
-                "triton.cudagraphs": inductor_config.triton.cudagraphs,
-                "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
-                "graph_partition": inductor_config.graph_partition,
-            }
-            if not isinstance(backend, str):
-                config = self._cudagraph_config
-                config.update((k, v) for k, v in backend.config.items() if k in config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2078,7 +2061,6 @@ class PrecompileSession(Generic[_P, _R]):
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
-                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2391,7 +2373,6 @@ class PrecompileSession(Generic[_P, _R]):
             summary,
             self._backend_name,
             self._fn,
-            self._cudagraph_config,
             inductor_options=options,
             **sections,
         )
