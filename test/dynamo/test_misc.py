@@ -2314,6 +2314,57 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(3)
         self.assertEqual(opt(x), fn(x))
 
+    @parametrize(
+        "make",
+        [
+            subtest(range, name="range"),
+            subtest(
+                lambda n: types.MappingProxyType(dict.fromkeys(range(n))),
+                name="mappingproxy",
+            ),
+            subtest(lambda n: dict.fromkeys(range(n)).keys(), name="dict_keys"),
+        ],
+    )
+    @parametrize(
+        "branch_fn",
+        [
+            subtest(lambda d: 1 if d else 0, name="if"),
+            subtest(lambda d: 1 if operator.truth(d) else 0, name="operator_truth"),
+        ],
+    )
+    def test_branch_on_non_constant_truthiness(self, make, branch_fn):
+        def fn(x, d):
+            return x + branch_fn(d)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        for n in (1, 0):
+            self.assertEqual(opt(x, make(n)), fn(x, make(n)))
+
+    @parametrize(
+        "not_fn",
+        [
+            subtest(lambda d: not d, name="not"),
+            subtest(operator.not_, name="operator_not"),
+        ],
+    )
+    def test_not_on_user_defined_symbolic_len(self, not_fn):
+        class MyLen:
+            def __init__(self, n):
+                self.n = n
+
+            def __len__(self):
+                return self.n
+
+        def fn(x, d):
+            return x + int(not_fn(d)), 0 if not_fn(d) else 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        # The recompile makes `n` symbolic, so `bool(d)` is a SymBool.
+        for n in (0, 1, 0, 2):
+            self.assertEqual(opt(x, MyLen(n)), fn(x, MyLen(n)))
+
     def test_int_base_out_of_range_value_error(self):
         class MyIndexable:
             def __index__(self):
@@ -13336,7 +13387,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @unittest.skipIf(
         IS_S390X,
-        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and needs investigation",
+        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and python 3.12",
     )
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")

@@ -174,7 +174,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (Py_ssize_t i = 0; i < num_classes; i++) {
+  for (const auto i : c10::irange(num_classes)) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
