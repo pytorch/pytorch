@@ -1703,7 +1703,21 @@ op_db: list[OpInfo] = [
         supports_out=True,
         sample_inputs_func=sample_inputs_linalg_lstsq,
         error_inputs_func=error_inputs_lstsq,
-        decorators=[skipCPUIfNoLapack],
+        decorators=[
+            skipCPUIfNoLapack,
+            # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=5e-05, rtol=1e-05),
+                        torch.complex64: tol(atol=5e-05, rtol=1e-05),
+                    }
+                ),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
@@ -1758,7 +1772,21 @@ op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCPUIfNoLapack],
+        decorators=[
+            skipCPUIfNoLapack,
+            # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=5e-05, rtol=1e-05),
+                        torch.complex64: tol(atol=5e-05, rtol=1e-05),
+                    }
+                ),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cpu",
+            ),
+        ],
         skips=(
             # tests do not work with passing lambda for op
             DecorateInfo(

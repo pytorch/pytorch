@@ -496,6 +496,19 @@ class TestOperatorsDevice(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "linalg.lstsq",
+                # abs 1.1e-05 / rel 1.2e-05 on x86 with AVX512
+                {torch.float32: tol(atol=4e-05, rtol=5e-05)},
+                device_type="cpu",
+            ),
+            tol2(
+                # variant of the above
+                "linalg.lstsq",
+                "grad_oriented",
+                {torch.float32: tol(atol=4e-05, rtol=5e-05)},
+                device_type="cpu",
+            ),
+            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
@@ -638,6 +651,13 @@ class TestOperatorsDevice(TestCase):
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=1e-04, rtol=1.3e-06)},
                 device_type="cuda",
+            ),
+            # Increased on AVX, fail with 2.9e-5 abs, 7.7e-6 rel
+            tol2(
+                "linalg.lstsq",
+                "grad_oriented",
+                {torch.float32: tol(atol=4e-05, rtol=5e-05)},
+                device_type="cpu",
             ),
             tol1(
                 "linalg.tensorsolve",
