@@ -3736,6 +3736,10 @@ def end_graph(output_file):
 
 
 class DebugAutotuner(CachingAutotuner):
+    """The autotuner under profile_bandwidth. It launches kernels as CachingAutotuner
+    does. A kernel that profile_bandwidth_regex selects is also timed once, before
+    its first launch, and every call reports that timing to collected_calls."""
+
     def __init__(
         self,
         *args,
@@ -3748,33 +3752,31 @@ class DebugAutotuner(CachingAutotuner):
         self.with_profiler = with_profiler
         self.with_bandwidth_info = with_bandwidth_info
         super().__init__(*args, **kwargs)
+        # Set before the first launch: whether the kernel's name has been checked
+        # against the regex, and its timing if the regex selects it.
+        self.bandwidth_checked = False
         self.cached = None
 
     def run(self, *args, stream, **kwargs):
         if not self.with_bandwidth_info:
-            super().run(*args, stream=stream, **kwargs, benchmark_run=True)
-            return
-        kernel_name = self._kernel_name()
-        if not re.match(self.regex_filter, kernel_name):
-            return
-        if len(self.launchers) != 1:
-            if len(self.launchers) == 0:
-                start_time = time.time_ns()
-                self.precompile()
-                self.precompile_time_taken_ns = time.time_ns() - start_time
-            if len(self.launchers) > 1:
-                self.autotune_to_one_config(*args, **kwargs)
-        (launcher,) = self.launchers
+            return super().run(*args, stream=stream, **kwargs, benchmark_run=True)
+        result = super().run(*args, stream=stream, **kwargs)
+        if self.cached is not None:
+            collected_calls.append(self.cached)
+        return result
 
-        if launcher.store_cubin:
-            if self.device_props.type == "cpu":
-                self.save_cpu_kernel(launcher)
-            else:
-                self.save_gpu_kernel(stream, launcher)
-
-        if self.cached is None:
-            self.cached = self._measure_bandwidth(launcher, kernel_name, *args)
-        collected_calls.append(self.cached)
+    def _pre_launch(self, launcher, *args, stream, **kwargs):
+        # See CachingAutotuner._pre_launch for when run calls this.
+        # A pre_autotune plugin may launch before tuning has settled on one launcher.
+        settled = len(self.launchers) == 1
+        if self.with_bandwidth_info and settled and not self.bandwidth_checked:
+            self.bandwidth_checked = True
+            kernel_name = self._kernel_name()
+            if re.match(self.regex_filter, kernel_name):
+                self.cached = self._measure_bandwidth(
+                    launcher, kernel_name, *args, **kwargs
+                )
+        super()._pre_launch(launcher, *args, stream=stream, **kwargs)
 
     def _kernel_name(self) -> str:
         possible_names = _find_names(self)
@@ -3787,6 +3789,9 @@ class DebugAutotuner(CachingAutotuner):
 
     def _measure_bandwidth(self, launcher, kernel_name, *args, **kwargs):
         ms = self.bench(launcher, *args, with_profiler=self.with_profiler, **kwargs)
+        # bench zeroes the reset_to_zero args and launches into them. Zero them again
+        # for the real launch, as benchmark_all_configs does after autotuning.
+        self.reset_to_zero_args(*args, **kwargs)
         num_in_out_ptrs = len(
             [
                 arg_name

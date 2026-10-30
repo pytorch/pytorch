@@ -527,6 +527,7 @@ class TestKernelConfigs(TestCase):
         profiled = failure == "load_profiled"
         cfg = {"autotune_local_cache": cached, "max_autotune": True}
         result, code = _code_for(fn, x, profile_bandwidth=profiled, **cfg)
+        self.assertEqual(result, fn(x), atol=1e-3, rtol=1e-3)
         (kernel,) = _kernels(code)
         row = re.search(rf"^    '{kernel}': (.*),$", code, re.MULTILINE)
         tuned_row = ast.literal_eval(row[1])
