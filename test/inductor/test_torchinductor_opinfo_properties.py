@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI200_ARCH,
+    MI350_ARCH,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
@@ -557,7 +558,6 @@ EAGER_EQUIV_XFAILS = {
     "inductor_numerics": {
         "remainder": {ALL},
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -623,7 +623,6 @@ ROCM_EAGER_EQUIV_XFAILS = {
     },
     "inductor_numerics": {
         "sigmoid": {fp32},
-        "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
         "log_softmax": {fp32},
     },
@@ -804,6 +803,23 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     else:
         xfail_dicts = XFAIL_DICTS
     xfails = set(xfail_dicts.get(test_type, {}).get(backend, {}).get(op_name, set()))
+    if (
+        device_type == "cuda"
+        and torch.version.hip is not None
+        and backend == "inductor_default"
+        and dtype == torch.float32
+        and (op_name, test_type)
+        in {("log1p", "batch_invariance"), ("tan", "unary_numerical")}
+        and isRocmArchAnyOf(MI350_ARCH)
+    ):
+        import triton
+
+        # On MI350, these checks pass without implicit FMA. Triton #12479
+        # requires opt-in to honor Inductor's enable_fp_fusion setting.
+        if not triton.knobs.language.fp_fusion_enabled(
+            not torch._inductor.config.emulate_precision_casts
+        ):
+            xfails.discard(torch.float32)
     # fbcode's Triton fork + cuBLAS/GPU stack differ from OSS CI, so some combos
     # fail the compiled-vs-eager numerics only in fbcode. Gate on IS_FBCODE (CUDA
     # only) so OSS does not hit spurious XPASS on these.

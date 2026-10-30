@@ -1448,9 +1448,23 @@ class PointwiseStrictNumericsTest(TestCase):
     @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
-        )
+        xfail = POINTWISE_XFAIL
+        if (
+            torch.version.hip is None
+            and _op_id(op) in ("sub", "rsub")
+            and dtype in (torch.float32, torch.float16, torch.bfloat16)
+        ):
+            # Explicit FMA for alpha subtraction makes sub and rsub match eager.
+            # Keep the global ledger entries so all three dtypes are collected.
+            xfail = xfail - {(_op_id(op), _dtype_label(dtype))}
+        if IS_SM89 and dtype == torch.bfloat16 and _op_id(op) == "abs":
+            import triton
+
+            # Triton #11478 uses scalar abs.bf16 with its NVIDIA vectorizer
+            # on SM89, matching eager's NaN canonicalization.
+            if not getattr(triton.knobs.nvidia, "use_slp_vectorizer", True):
+                xfail = xfail - {("abs", "bfloat16")}
+        self._assert_ledger(mismatches, op, dtype, "forward", xfail, "POINTWISE_XFAIL")
 
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):

@@ -19950,6 +19950,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             compiled = torch.compile(fn, backend="inductor")(a, b)
 
     @requires_gpu_and_triton
+    @parametrize("alpha", [1.5, -1.5])
+    def test_sub_alpha_fma(self, alpha):
+        # Separate multiply/subtract rounding loses precision under cancellation.
+        # Eager CUDA uses an FMA even when implicit Triton fusion is disabled.
+        a = torch.full([256], alpha, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.full([256], 1 + 2**-23, device=GPU_TYPE, dtype=torch.float32)
+
+        def fn(a, b):
+            return torch.sub(a, b, alpha=alpha)
+
+        actual, (code,) = run_and_get_code(torch.compile(fn), a, b)
+        self.assertIn("tl.fma", code)
+        torch.testing.assert_close(actual, fn(a, b), atol=0, rtol=0)
+
+    @requires_gpu_and_triton
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_triton_fp_fusion(self):
         def fn(a, b):

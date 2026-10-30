@@ -429,7 +429,8 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
         device_type = (
             acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
         )
-        device = f"{device_type}:{dist.get_rank()}"
+        # CPU has no per-rank device index; cpu:1 fails debug device validation.
+        device = "cpu" if device_type == "cpu" else f"{device_type}:{dist.get_rank()}"
         model_to_save = MyShardedModel3(src_spec).to(device)
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
