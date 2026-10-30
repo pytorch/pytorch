@@ -20,8 +20,9 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._prims_common import clone_preserve_strides
+from torch._prims_common import clone_preserve_strides, compute_required_storage_length
 from torch.fx.experimental.proxy_tensor import (
+    _build_proxy_for_sym_expr,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -335,8 +336,17 @@ def read_view_information_from_args(
 # re-inplacing views.
 
 
+_ViewMetadata = tuple[
+    Tensor,
+    Sequence[int | torch.SymInt],
+    Sequence[int | torch.SymInt],
+    int | torch.SymInt,
+]
+_TensorBases = dict[str, _ViewMetadata | list[_ViewMetadata | None] | None]
+
+
 class AutoFunctionalized(HigherOrderOperator):
-    """auto_functionalized(_mutable_op, **kwargs)
+    """auto_functionalized(_mutable_op, _tensor_bases=None, /, **kwargs)
 
     This HOP runs a "functional" version of _mutable_op.
 
@@ -344,6 +354,17 @@ class AutoFunctionalized(HigherOrderOperator):
     _mutable_op's operator schema, clones those kwargs, runs
     `out = _mutable_op(**kwargs)` with the cloned values, and then returns the
     operator output concatenated with the cloned values that were mutated.
+
+    ``_tensor_bases`` optionally maps mutable argument names to
+    ``(base, size, stride, storage_offset)`` metadata, or a list of such entries
+    for a Tensor[] argument. Missing or None entries use the original
+    storage-cloning path. The base's required storage extent must cover the
+    view, and its dtype and conjugate/negative bits must match the view.
+    Automatic metadata capture excludes element-size-changing views and bases
+    whose coverage cannot be established. Size, stride, and offset describe
+    the original view, including symbolic dimensions, before a backend can
+    compact its layout. Arguments are cloned independently, as in V1 without
+    metadata; this protocol does not add support for overlapping mutations.
 
     We have some restrictions on `_mutable_op`.
     See `can_auto_functionalize` for the restrictions. We can likely lift
@@ -358,14 +379,18 @@ class AutoFunctionalized(HigherOrderOperator):
 
     def __call__(
         self,
-        /,
         _mutable_op: OpOverload,
+        _tensor_bases: _TensorBases | None = None,
+        /,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
         if not can_auto_functionalize(_mutable_op):
             raise AssertionError(f"Cannot auto-functionalize op {_mutable_op}")
         if not isinstance(kwargs, dict):
             raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
+        if _tensor_bases:
+            # pyrefly: ignore [missing-attribute]
+            return super().__call__(_mutable_op, _tensor_bases, **kwargs)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
@@ -375,6 +400,8 @@ auto_functionalized.__module__ = "torch.ops.higher_order"
 
 auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
+auto_functionalized.fallthrough(DispatchKey.Conjugate)
+auto_functionalized.fallthrough(DispatchKey.Negative)
 
 
 _MutableOpType = OpOverload | HigherOrderOperator
@@ -540,6 +567,44 @@ def do_auto_functionalize(
         else:
             normalized_kwargs[arg.name] = arg.default_value
 
+    def get_view_metadata(tensor) -> _ViewMetadata | None:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        base = get_base(tensor)
+        if base is None:
+            return None
+        # Keep the existing clone path for element-size-changing views. Tracking
+        # their storage can change complex scatter allocation alignment.
+        if base.element_size() != tensor.element_size():
+            return None
+        extent = compute_required_storage_length(
+            base.size(), base.stride(), base.storage_offset()
+        )
+        view_extent = compute_required_storage_length(
+            tensor.size(), tensor.stride(), tensor.storage_offset()
+        )
+        # A graph input can expose more storage than its logical base spans.
+        # Keep the original storage clone when that base cannot cover the view.
+        if not guard_or_false(view_extent <= extent):
+            return None
+        base = ctx.unwrap_tensors(base)
+        with ctx.redispatch_to_next():
+            if base.dtype != tensor.dtype:
+                base = torch.as_strided(base, (extent,), (1,), 0).view(tensor.dtype)
+            if base.is_conj() != tensor.is_conj():
+                base = base.conj()
+            if base.is_neg() != tensor.is_neg():
+                base = torch._neg_view(base)
+        return base, tensor.size(), tensor.stride(), tensor.storage_offset()
+
+    mutable_args_names, _ = get_mutable_args(op)
+    tensor_bases: _TensorBases = {}
+    for name in mutable_args_names:
+        # Capture tracked bases and view geometry before a backend changes layouts.
+        bases = pytree.tree_map_only(Tensor, get_view_metadata, normalized_kwargs[name])
+        if pytree.tree_any_only(Tensor, lambda _: True, bases):
+            tensor_bases[name] = bases
+
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
@@ -550,11 +615,9 @@ def do_auto_functionalize(
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
             op,
+            tensor_bases,
             **unwrapped_kwargs,  # type: ignore[arg-type]
         )
-
-    # List of the name of args that get mutated (according to the schema)
-    mutable_args_names, _ = get_mutable_args(op)
 
     unwrapped_actual_out: Any | tuple[Any] = unwrapped_outs[: -len(mutable_args_names)]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
@@ -962,11 +1025,20 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
+    _tensor_bases: _TensorBases | None = None,
     _only_clone_these_tensors: tuple[str, ...] | None = None,
+    /,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
+
+    def clone_arg(tensor, view_metadata):
+        if view_metadata is None:
+            return clone_preserve_strides(tensor)
+        base, size, stride, storage_offset = view_metadata
+        view = torch.as_strided(base, size, stride, storage_offset)
+        return clone_preserve_strides(view, base=base)
 
     _mutable_args_names, _ = get_mutable_args(_mutable_op)
     for name in _mutable_args_names:
@@ -976,13 +1048,15 @@ def auto_functionalized_dense(
         ):
             new_kwargs[name] = kwargs[name]
         else:
+            base = _tensor_bases.get(name) if _tensor_bases else None
             new_kwargs[name] = (
-                [clone_preserve_strides(x) for x in kwargs[name]]
+                [
+                    clone_arg(x, base[i] if base else None)
+                    for i, x in enumerate(kwargs[name])
+                ]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
                 else (
-                    clone_preserve_strides(kwargs[name])
-                    if kwargs[name] is not None
-                    else None
+                    clone_arg(kwargs[name], base) if kwargs[name] is not None else None
                 )
             )
         result.append(new_kwargs[name])
@@ -997,11 +1071,11 @@ def auto_functionalized_dense(
 @register_fake(auto_functionalized, skip_cache=True)
 def auto_functionalized_fake(
     _mutable_op: OpOverload,
+    _tensor_bases: _TensorBases | None = None,
+    /,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    result = auto_functionalized_dense(
-        _mutable_op, _only_clone_these_tensors=None, **kwargs
-    )
+    result = auto_functionalized_dense(_mutable_op, _tensor_bases, **kwargs)
     return result
 
 
@@ -1009,16 +1083,29 @@ def auto_functionalized_fake(
 def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
+    _tensor_bases: _TensorBases | None = None,
+    /,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
-        out = auto_functionalized(_mutable_op, **kwargs)
+        out = auto_functionalized(_mutable_op, _tensor_bases, **kwargs)
 
+    def unwrap_metadata(value):
+        # Metadata queries on an intermediate can change after layout optimization.
+        # Reconstruct symbolic geometry from inputs instead of querying the view.
+        if isinstance(value, torch.SymInt):
+            rebuilt = _build_proxy_for_sym_expr(mode.tracer, value.node.expr)
+            if rebuilt is not None:
+                value = rebuilt
+        return mode.tracer.unwrap_proxy(value)
+
+    args = (_mutable_op, _tensor_bases) if _tensor_bases else (_mutable_op,)
+    proxy_args = pytree.tree_map(unwrap_metadata, args)
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized,
-        (_mutable_op,),
+        proxy_args,
         proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
@@ -1026,10 +1113,11 @@ def auto_functionalized_proxy(
 
 
 @auto_functionalized.py_functionalize_impl
-def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+def auto_functionalized_func(ctx, _mutable_op, _tensor_bases=None, /, **kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    unwrapped_bases = ctx.unwrap_tensors(_tensor_bases)
     with ctx.redispatch_to_next():
-        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+        result = auto_functionalized(_mutable_op, unwrapped_bases, **unwrapped_kwargs)
     return ctx.wrap_tensors(result)
 
 

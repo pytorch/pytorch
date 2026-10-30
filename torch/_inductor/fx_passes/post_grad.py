@@ -2072,13 +2072,31 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            if len(args) != 1:
-                raise AssertionError(f"expected 1 arg, got {len(args)}")
+            if len(args) not in (1, 2):
+                raise AssertionError(f"expected 1 or 2 args, got {len(args)}")
             mode = args[0]
-            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
+            tensor_bases = args[1] if len(args) == 2 else None
+            return auto_functionalized_dense(
+                mode, tensor_bases, only_clone_these_tensors, **kwargs
+            )
+
+        def trace_decomp(fn, inputs):
+            from torch._inductor.pattern_matcher import fwd_only
+
+            gm = fwd_only(fn, inputs, run_functional_passes=False)
+            # Base extent checks can leave unused symbolic metadata queries.
+            # Remove those before matching eager and Inductor metadata graphs.
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            return gm
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        match.replace_by_example(
+            decomp,
+            flat_args,
+            trace_fn=trace_decomp if len(args) == 2 else None,
+            run_functional_passes=False,
+        )
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),

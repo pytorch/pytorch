@@ -1,8 +1,10 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import gc
 import pickle
 import unittest
+import weakref
 from contextlib import nullcontext
 
 import torch
@@ -20,7 +22,9 @@ from torch.fx.passes.reinplace import reinplace
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -2337,6 +2341,102 @@ def forward(self, arg0_1):
 class TestCrossRefFunctionalization(TestFunctionalization):
     hw_classification = HardwareClassification.GENERIC
     crossref = True
+
+
+@instantiate_parametrized_tests
+class TestFunctionalTensorMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("use_default_mode", [False, True])
+    @parametrize("export_v2", [False, True])
+    @parametrize("inductor_v2", [False, True])
+    def test_inference_storage_lifetime(self, use_default_mode, export_v2, inductor_v2):
+        tensor_refs = []
+        storage_refs = []
+
+        def f(x):
+            y = x + 1
+            for tensor in (x, y):
+                tensor_refs.append(weakref.ref(tensor))
+                storage_refs.append(
+                    StorageWeakRef(
+                        torch._from_functional_tensor(tensor.elem).untyped_storage()
+                    )
+                )
+            return y
+
+        mode = FunctionalTensorMode()
+        functionalized = (
+            dispatch_functionalize(f)
+            if use_default_mode
+            else dispatch_functionalize(f, mode)
+        )
+        with (
+            torch.inference_mode(),
+            torch._export.config.patch(
+                enable_auto_functionalized_v2_for_export=export_v2
+            ),
+            torch._inductor.config.patch(enable_auto_functionalized_v2=inductor_v2),
+        ):
+            for _ in range(3):
+                output = functionalized(torch.ones(8))
+                del output
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in tensor_refs))
+        self.assertTrue(all(ref.expired() for ref in storage_refs))
+        self.assertEqual(len(mode._storage_to_base), 0)
+
+    def test_inference_view_keeps_base_alive(self):
+        mode = FunctionalTensorMode()
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        with torch.inference_mode(), disable_above:
+            value = torch.ones(8)
+            with mode:
+                base = FunctionalTensor.to_functional(value)
+                base_ref = weakref.ref(base)
+                with mode:
+                    view = base[1:]
+                self.assertIs(view._inference_mode_base, base)
+                del base
+            gc.collect()
+            self.assertIsNotNone(base_ref())
+            with mode:
+                later_view = view[1:]
+                self.assertIs(later_view._inference_mode_base, base_ref())
+                del view
+            gc.collect()
+            self.assertIs(later_view._inference_mode_base, base_ref())
+            del later_view
+            gc.collect()
+            self.assertIsNone(base_ref())
+            self.assertEqual(len(mode._storage_to_base), 0)
+
+    def test_inference_view_after_wrapper_dies(self):
+        mode = FunctionalTensorMode()
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        with torch.inference_mode(), disable_above:
+            with mode:
+                view = torch.ones(8)[1:]
+                elem = view.elem
+                base_ref = weakref.ref(view._inference_mode_base)
+                del view
+            gc.collect()
+            self.assertIsNone(base_ref())
+            self.assertEqual(len(mode._storage_to_base), 0)
+            with mode:
+                wrapped = FunctionalTensor(elem, mode)
+                later_view = wrapped[1:]
+                self.assertIs(later_view._inference_mode_base, wrapped)
+                del wrapped
+            gc.collect()
+            self.assertIsNotNone(later_view._inference_mode_base)
+            del later_view
+            gc.collect()
+            self.assertEqual(len(mode._storage_to_base), 0)
 
 
 class TestViewMetaSerialization(TestCase):
