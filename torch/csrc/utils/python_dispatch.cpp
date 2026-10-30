@@ -511,7 +511,7 @@ static PyObject* pyobject_dispatch_vectorcall(
   // Dispatcher::callBoxed); let it handle the call while anything listens.
   // This check doesn't sample callbacks: callBoxed does, and sampling here too
   // would record a call with probability p^2 instead of p.
-  if (C10_UNLIKELY(at::hasCallbacks())) {
+  if (C10_UNLIKELY(at::hasCallbacksForScope(at::RecordScope::FUNCTION))) {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }

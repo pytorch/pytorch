@@ -134,6 +134,11 @@ class CacheEntry {
   StepCallbacks getActiveCallbacks();
   std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty();
 
+  // Whether any callback could run for this scope, without sampling.
+  bool hasCallbacks() const {
+    return !callbacks_.empty();
+  }
+
   // Full rebuild. (E.g. during registration)
   void update(const std::vector<RecordFunctionCallback>& callbacks);
 
@@ -172,10 +177,18 @@ class LocalCallbackManager {
   LocalCallbackManager();
 
  public:
+  ~LocalCallbackManager();
+  LocalCallbackManager(const LocalCallbackManager&) = delete;
+  LocalCallbackManager& operator=(const LocalCallbackManager&) = delete;
+  LocalCallbackManager(LocalCallbackManager&&) = delete;
+  LocalCallbackManager& operator=(LocalCallbackManager&&) = delete;
+
+ public:
   const RecordFunctionTLS& getTLS() const;
   StepCallbacks getActiveCallbacks(const RecordScope scope);
   std::optional<StepCallbacks> getActiveCallbacksUnlessEmpty(
       const RecordScope scope);
+  bool hasCallbacks(const RecordScope scope);
 
   void setTLS(const RecordFunctionTLS& tls);
   void seed(uint32_t seed);
@@ -186,6 +199,10 @@ class LocalCallbackManager {
 
  private:
   void rebuildActiveCallbacksIfNeeded();
+
+  // Keeps detail::num_callback_sources counting this thread while it has
+  // thread-local callbacks.
+  void updateCallbackSourceCount();
 
   void rebuild_all(const GlobalCallbackManager::snapshot_t& global_snapshot);
 
@@ -204,6 +221,7 @@ class LocalCallbackManager {
   size_t global_version_{GlobalCallbackManager::NoVersion};
   std::array<CacheEntry, NumRecordScopes> active_callbacks_;
   std::mt19937 generator_;
+  bool counted_as_callback_source_{false};
 };
 
 // ============================================================================
@@ -229,6 +247,7 @@ CallbackHandle GlobalCallbackManager::addCallback(RecordFunctionCallback cb) {
   ++version_;
   auto handle = next_unique_callback_handle();
   global_callbacks_.emplace_back(cb, handle);
+  ++detail::num_callback_sources;
   return handle;
 }
 
@@ -251,6 +270,7 @@ void GlobalCallbackManager::removeCallback(CallbackHandle handle) {
   std::lock_guard<std::mutex> guard(update_mutex_);
   if (extractCallback(global_callbacks_, handle).has_value()) {
     ++version_;
+    --detail::num_callback_sources;
   } else {
     LOG(WARNING) << "Requested callback is not found";
   }
@@ -259,6 +279,8 @@ void GlobalCallbackManager::removeCallback(CallbackHandle handle) {
 void GlobalCallbackManager::clearCallbacks() {
   std::lock_guard<std::mutex> guard(update_mutex_);
   ++version_;
+  detail::num_callback_sources -=
+      static_cast<int64_t>(global_callbacks_.size());
   global_callbacks_.clear();
 }
 
@@ -383,6 +405,20 @@ LocalCallbackManager::LocalCallbackManager() {
   rebuild_all(GlobalCallbackManager::get().getSnapshot());
 }
 
+LocalCallbackManager::~LocalCallbackManager() {
+  if (counted_as_callback_source_) {
+    --detail::num_callback_sources;
+  }
+}
+
+void LocalCallbackManager::updateCallbackSourceCount() {
+  const bool has_callbacks = !registered_callbacks_.sorted_tls_callbacks_.empty();
+  if (has_callbacks != counted_as_callback_source_) {
+    counted_as_callback_source_ = has_callbacks;
+    detail::num_callback_sources += has_callbacks ? 1 : -1;
+  }
+}
+
 const RecordFunctionTLS& LocalCallbackManager::getTLS() const {
   return registered_callbacks_;
 }
@@ -407,8 +443,14 @@ std::optional<StepCallbacks> LocalCallbackManager::
       .getActiveCallbacksUnlessEmpty();
 }
 
+bool LocalCallbackManager::hasCallbacks(const RecordScope scope) {
+  rebuildActiveCallbacksIfNeeded();
+  return active_callbacks_[static_cast<size_t>(scope)].hasCallbacks();
+}
+
 void LocalCallbackManager::setTLS(const RecordFunctionTLS& tls) {
   registered_callbacks_ = tls;
+  updateCallbackSourceCount();
   rebuild_all(GlobalCallbackManager::get().getSnapshot());
 }
 
@@ -421,6 +463,7 @@ CallbackHandle LocalCallbackManager::addCallback(
   auto handle = next_unique_callback_handle();
   auto& callbacks = registered_callbacks_.sorted_tls_callbacks_;
   callbacks.emplace_back(callback, handle);
+  updateCallbackSourceCount();
   rebuild_callback_scopes(
       GlobalCallbackManager::get().getSnapshot(), callbacks.back().callback_);
   return handle;
@@ -443,6 +486,7 @@ bool LocalCallbackManager::removeCallback(CallbackHandle handle) {
   auto& callbacks = registered_callbacks_.sorted_tls_callbacks_;
   auto callback = extractCallback(callbacks, handle);
   if (callback.has_value()) {
+    updateCallbackSourceCount();
     rebuild_callback_scopes(
         GlobalCallbackManager::get().getSnapshot(), *callback);
   }
@@ -451,6 +495,7 @@ bool LocalCallbackManager::removeCallback(CallbackHandle handle) {
 
 void LocalCallbackManager::clearCallbacks() {
   registered_callbacks_.sorted_tls_callbacks_.clear();
+  updateCallbackSourceCount();
   rebuild_all(GlobalCallbackManager::get().getSnapshot());
 }
 
@@ -628,9 +673,17 @@ StepCallbacks getStepCallbacks(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacks(scope);
 }
 
-std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(RecordScope scope) {
+namespace detail {
+std::atomic<int64_t> num_callback_sources{0};
+
+std::optional<StepCallbacks> getStepCallbacksUnlessEmptySlow(RecordScope scope) {
   return LocalCallbackManager::get().getActiveCallbacksUnlessEmpty(scope);
 }
+
+bool hasCallbacksForScopeSlow(RecordScope scope) {
+  return LocalCallbackManager::get().hasCallbacks(scope);
+}
+} // namespace detail
 
 const RecordFunctionTLS& get_record_function_tls_() {
   return LocalCallbackManager::get().getTLS();
