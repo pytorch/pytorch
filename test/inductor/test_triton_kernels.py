@@ -332,6 +332,8 @@ class KernelTests(_KernelTestsBase):
 
 @requires_triton()
 class KernelTestsArgReductionSemantics(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @inductor_config.patch(strict_signed_zero=True)
     def test_dim_max_min_reuse_argreduce_value(self, device):
         dtypes = [torch.float32, torch.float16]
@@ -907,6 +909,8 @@ def forward(self, x_1, output_1):
 
 @requires_triton()
 class KernelTestsFloatingPointRewrites(_KernelTestsBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self, device):
         def fn(x):
             a = x * x
@@ -6228,6 +6232,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
 @requires_triton()
 class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_wrap_triton_triton_interpret_eager(self, device):
         script = """
 import os
@@ -7283,6 +7289,8 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 @requires_triton()
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
