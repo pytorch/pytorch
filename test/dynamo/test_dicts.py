@@ -1518,6 +1518,35 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), (9, 9, 6, [("a", 9)]))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_ordered_dict_subclass_override_forwards_keywords(self):
+        class PopOverride(OrderedDict):
+            def pop(self, key, default=None):
+                return "pop", super().pop(key, default=default)
+
+        class SetdefaultOverride(OrderedDict):
+            def setdefault(self, key, default=None):
+                return "setdefault", super().setdefault(key, default=default)
+
+        class UnboundPopOverride(OrderedDict):
+            def pop(self, key, default=None):
+                return "unbound", OrderedDict.pop(self, key, default=default)
+
+        def fn():
+            pop = PopOverride(a=1)
+            setdefault = SetdefaultOverride(a=1)
+            unbound = UnboundPopOverride(a=1)
+            return (
+                pop.pop("a", default=0),
+                pop.pop("missing", default=0),
+                setdefault.setdefault("a", default=0),
+                setdefault.setdefault("b", default=0),
+                unbound.pop("missing", default=0),
+                list(pop.items()),
+                list(setdefault.items()),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     @parametrize("cls", [dict, _DictSubclass], name_fn=lambda c: c.__name__)
     @parametrize("method", ["pop", "setdefault"])
     def test_dict_keyword_arguments_rejected(self, method, cls):

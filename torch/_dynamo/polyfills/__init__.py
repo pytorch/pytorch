@@ -544,15 +544,16 @@ _odict_missing = object()
 
 
 # OrderedDict.pop/setdefault are Argument Clinic methods that accept key= and
-# default= by keyword, unlike dict's.
+# default= by keyword, unlike dict's. Calls are unbound so a subclass override
+# forwarding its keywords to super() is not re-entered.
 def odict_pop(d: Any, /, key: Any, default: Any = _odict_missing) -> Any:
     if default is _odict_missing:
-        return d.pop(key)
-    return d.pop(key, default)
+        return OrderedDict.pop(d, key)
+    return OrderedDict.pop(d, key, default)
 
 
 def odict_setdefault(d: Any, /, key: Any, default: Any = None) -> Any:
-    return d.setdefault(key, default)
+    return OrderedDict.setdefault(d, key, default)
 
 
 def foreach_map_fn(*args: Any) -> Any:
