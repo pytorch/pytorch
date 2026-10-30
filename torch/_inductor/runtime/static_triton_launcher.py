@@ -60,10 +60,12 @@ def make_host_tma_expander():
     ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
     descriptor position.
 
-    On a cache hit (same base address) it returns the previously-encoded
-    CUtensorMap, skipping both the TensorDescriptor construction/validation and
-    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
-    contents), so reuse is safe whenever the address/shape/strides match.
+    On a cache hit (same base address, shape and strides) it returns the
+    previously-encoded CUtensorMap, skipping both the TensorDescriptor
+    construction/validation and cuTensorMapEncodeTiled. The descriptor only
+    encodes addressing (not buffer contents), so reuse is safe whenever the
+    address/shape/strides match; shape and strides can change between launches
+    when they are dynamic sizes read at launch.
 
     `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
     and keeps the (possibly cloned) result alive across the launch, since the
@@ -75,15 +77,15 @@ def make_host_tma_expander():
     def expand_host_tma_descriptor(
         cache, pos, tensor, cacheable, shape, strides, block, meta
     ):
-        data_ptr = tensor.data_ptr()
+        key = (tensor.data_ptr(), shape, strides)
         if cacheable:
             cached = cache.get(pos)
-            if cached is not None and cached[0] == data_ptr:
+            if cached is not None and cached[0] == key:
                 return cached[1]
         desc = TensorDescriptor(tensor, shape, strides, block)
         expanded = tuple(make_tensordesc_arg(desc, meta))
         if cacheable:
-            cache[pos] = (data_ptr, expanded)
+            cache[pos] = (key, expanded)
         return expanded
 
     return expand_host_tma_descriptor
