@@ -5,7 +5,10 @@ import contextlib
 import csv
 import functools
 import importlib.metadata
+import itertools
+import json
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -16,22 +19,28 @@ from unittest import mock
 from packaging.version import Version
 
 import torch
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
+from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_SLOW,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Skips before setUp spawns workers. The inductor_huggingface_tp job runs these.
+launches_processes = unittest.skipIf(
+    not TEST_WITH_SLOW, "launches processes; set PYTORCH_TEST_WITH_SLOW=1"
+)
 # Bind the namespace package explicitly: some CI images install pysbd, whose wheel
 # ships a regular top-level `benchmarks` package that would shadow the repo's.
 sys.modules["benchmarks"] = types.ModuleType("benchmarks")
@@ -44,7 +53,100 @@ requires_distributed = unittest.skipIf(
 )
 
 
+def _require_transformers():
+    try:
+        version = importlib.metadata.version("transformers")
+    except importlib.metadata.PackageNotFoundError:
+        raise unittest.SkipTest("requires transformers") from None
+    try:
+        with mock.patch(
+            "subprocess.check_call",
+            side_effect=unittest.SkipTest("requires compatible transformers"),
+        ):
+            from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
+    except ImportError:
+        raise unittest.SkipTest("requires compatible transformers") from None
+    if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
+        raise unittest.SkipTest(f"requires transformers >= {MIN_TRANSFORMERS_VERSION}")
+
+
+def _import_huggingface():
+    from transformers import AutoConfig
+
+    with (
+        mock.patch.object(AutoConfig, "from_pretrained", return_value=None),
+        mock.patch(
+            "subprocess.check_call",
+            side_effect=AssertionError("unexpected install"),
+        ),
+    ):
+        from benchmarks.dynamo import huggingface
+
+    return huggingface
+
+
+def _tiny_causal_lm(model_type, **config_overrides):
+    import transformers
+
+    model_cls = getattr(transformers, model_type + "ForCausalLM")
+    config_name = "Qwen3_5Text" if model_type == "Qwen3_5" else model_type
+    config_cls = getattr(transformers, config_name + "Config")
+    config_kwargs = {
+        "vocab_size": 32,
+        "hidden_size": 16,
+        "intermediate_size": 32,
+        "num_hidden_layers": 3 if model_type == "Qwen3_5" else 2,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 1,
+        "max_position_embeddings": 4096,
+    }
+    if model_type != "Llama":
+        config_kwargs["head_dim"] = 8
+    if model_type == "Gemma2":
+        config_kwargs["sliding_window"] = 8
+    if model_type == "Qwen3_5":
+        config_kwargs.update(
+            layer_types=["linear_attention", "linear_attention", "full_attention"],
+            linear_num_key_heads=1,
+            linear_num_value_heads=2,
+            linear_key_head_dim=8,
+            linear_value_head_dim=8,
+        )
+    config_kwargs.update(config_overrides)
+    return model_cls(config_cls(**config_kwargs))
+
+
 class BenchmarkRunnerTests(TestCase):
+    def test_non_tp_json_preserves_metadata(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(common, "current_name", "model"),
+            mock.patch.object(common, "current_device", "cuda"),
+            mock.patch.object(common, "current_batch_size", 32),
+            mock.patch.object(common, "current_dtype", "float32"),
+            mock.patch.object(common, "current_quantization", ""),
+            mock.patch.object(
+                common, "current_settings", {"batch_size": None, "tp_size": 1}
+            ),
+        ):
+            filename = os.path.join(tmp, "torchbench.csv")
+            common.output_json(
+                filename,
+                ["dev", "name", "batch_size", "speedup"],
+                ["cuda", "model", 32, 1.5],
+            )
+            with open(os.path.join(tmp, "torchbench.json")) as f:
+                (record,) = [json.loads(line) for line in f]
+        self.assertEqual(
+            record["benchmark"]["extra_info"],
+            {"device": "cuda", "quantization": "", "batch_size": None},
+        )
+        self.assertEqual(record["benchmark"]["dtype"], "float32")
+        self.assertEqual(record["model"]["name"], "model")
+        self.assertEqual(
+            record["metric"], {"name": "speedup", "benchmark_values": [1.5]}
+        )
+
     def test_timed_excludes_external_setup(self):
         clock = [0.0]
         queued = [0.0]
@@ -170,12 +272,98 @@ class BenchmarkRunnerTests(TestCase):
             "--hf-inference-mode=decode",
             "--prompt-length=8",
             "--decode-length=8",
+            "--tp-size=2",
         ),
     )
     def test_prefill_options_require_huggingface(self, flag):
         args = common.parse_args(["--performance", "--inference", flag])
         with self.assertRaisesRegex(ValueError, "require the huggingface suite"):
             common.BenchmarkRunner().validate_args(args)
+
+    @skipIfTorchDynamo("speedup_experiment calls set_stance")
+    def test_tp_speedup_row_accounting(self):
+        args = common.parse_args(
+            [
+                "--performance",
+                "--inference",
+                "--backend=eager",
+                "--hf-inference-mode=prefill",
+                "--tp-size=2",
+                "--prompt-length=3",
+                "--iterations-per-run=4",
+                "--repeat=1",
+            ]
+        )
+        args.rank = 0
+        group = object()
+        setup = mock.Mock()
+        model = torch.nn.Identity()
+        inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
+        with (
+            mock.patch.object(common, "current_batch_size", 2),
+            mock.patch.object(common, "output_filename", "results.csv"),
+            mock.patch.object(
+                common, "timed", side_effect=[(4.0, None), (2.0, None)]
+            ) as timed,
+            mock.patch.object(torch._dynamo, "run", side_effect=lambda fn: fn),
+            mock.patch.object(common, "write_outputs") as write,
+            mock.patch("torch._dynamo.utils.compile_times", return_value=([], [])),
+            mock.patch.object(common, "output_signpost"),
+        ):
+            common.speedup_experiment(
+                args,
+                mock.Mock(),
+                model,
+                inputs,
+                hf_llm=True,
+                setup_fn=setup,
+                request_tokens={"input_tokens_per_second": 6},
+                tp_group=group,
+                compilation_latency=1.0,
+                compression_ratio=1.0,
+                eager_peak_mem=2.0,
+                dynamo_peak_mem=1.5,
+                eager_peak_mem_per_rank=[1.0, 2.0],
+                dynamo_peak_mem_per_rank=[1.5, 1.25],
+            )
+        _, headers, values = write.call_args_list[0].args
+        row = dict(zip(headers, values))
+        identity = headers[3:7]
+        self.assertEqual(identity, list(common.TP_IDENTITY_HEADERS))
+        self.assertEqual([row[header] for header in identity], ["prefill", 2, 3, 0])
+        self.assertEqual(row["abs_latency"], 2000.0)
+        self.assertEqual(row["eager_latency"], 4000.0)
+        # Logical tokens only: 4 requests of 2 x 3 tokens, not multiplied by TP size.
+        self.assertEqual(row["input_tokens_per_second"], 12.0)
+        self.assertEqual(row["eager_peak_mem"], 2.0)
+        self.assertEqual(row["eager_peak_mem_per_rank"], "1.000;2.000")
+        self.assertEqual(row["dynamo_peak_mem_per_rank"], "1.500;1.250")
+        for call in timed.call_args_list:
+            self.assertIs(call.kwargs["group"], group)
+            self.assertIs(call.kwargs["setup_fn"], setup)
+
+    @requires_distributed
+    @skipIfTorchDynamo("parse_args is slow to trace")
+    @parametrize(
+        "env, extra, message",
+        [
+            ({"WORLD_SIZE": "4"}, (), "must equal WORLD_SIZE=4"),
+            ({"LOCAL_WORLD_SIZE": "1"}, (), "single node"),
+            ({}, ("--only=",), "require --only"),
+        ],
+    )
+    def test_tensor_parallel_entry_validation(self, env, extra, message):
+        args = common.parse_args(
+            ["--performance", "--inference", "--tp-size=2", "--only=model", *extra]
+        )
+        env = {"RANK": "0", "LOCAL_RANK": "0", "WORLD_SIZE": "2", **env}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(torch.distributed, "init_process_group") as init,
+            self.assertRaisesRegex(ValueError, message),
+        ):
+            common.tensor_parallel_entry(None, None, args)
+        init.assert_not_called()
 
     @requires_distributed
     def test_diffusion_fsdp_policy_imports_current_model_class(self):
@@ -277,32 +465,8 @@ class TestHuggingFaceLLMPerformance(TestCase):
 class HuggingFacePrefillTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        try:
-            version = importlib.metadata.version("transformers")
-        except importlib.metadata.PackageNotFoundError:
-            raise unittest.SkipTest("requires transformers") from None
-        try:
-            with mock.patch(
-                "subprocess.check_call",
-                side_effect=unittest.SkipTest("requires compatible transformers"),
-            ):
-                from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
-        except ImportError:
-            raise unittest.SkipTest("requires compatible transformers") from None
-        if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
-            raise unittest.SkipTest(f"requires transformers >= {MIN_TRANSFORMERS_VERSION}")
-        from transformers import AutoConfig
-
-        with (
-            mock.patch.object(AutoConfig, "from_pretrained", return_value=None),
-            mock.patch(
-                "subprocess.check_call",
-                side_effect=AssertionError("unexpected install"),
-            ),
-        ):
-            from benchmarks.dynamo import huggingface
-
-        self.huggingface = huggingface
+        _require_transformers()
+        self.huggingface = _import_huggingface()
 
     def _runner_args(self, *extra, mode="prefill"):
         return common.parse_args(
@@ -317,36 +481,9 @@ class HuggingFacePrefillTestCase(TestCase):
         )
 
     def _make_model(self, model_type, device, dtype=torch.float32):
-        import transformers
-
         from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
 
-        model_cls = getattr(transformers, model_type + "ForCausalLM")
-        config_name = "Qwen3_5Text" if model_type == "Qwen3_5" else model_type
-        config_cls = getattr(transformers, config_name + "Config")
-        config_kwargs = {
-            "vocab_size": 32,
-            "hidden_size": 16,
-            "intermediate_size": 32,
-            "num_hidden_layers": 3 if model_type == "Qwen3_5" else 2,
-            "num_attention_heads": 2,
-            "num_key_value_heads": 1,
-            "max_position_embeddings": 4096,
-        }
-        if model_type != "Llama":
-            config_kwargs["head_dim"] = 8
-        if model_type == "Gemma2":
-            config_kwargs["sliding_window"] = 8
-        if model_type == "Qwen3_5":
-            config_kwargs.update(
-                layer_types=["linear_attention", "linear_attention", "full_attention"],
-                linear_num_key_heads=1,
-                linear_num_value_heads=2,
-                linear_key_head_dim=8,
-                linear_value_head_dim=8,
-            )
-        config = config_cls(**config_kwargs)
-        model = model_cls(config).eval().to(device=device, dtype=dtype)
+        model = _tiny_causal_lm(model_type).eval().to(device=device, dtype=dtype)
         return TextGenerationPrefillModel(model, 2, 4, 11).eval()
 
     def _decode_inputs(self, device):
@@ -508,6 +645,49 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             )
         self.assertEqual(inputs["decode_ids"].shape, (2, 5))
 
+    @parametrize(
+        "failing_run, mismatch, status",
+        [
+            (2, None, "eager_1st_run_fail"),
+            (3, None, "eager_2nd_run_fail"),
+            (None, 0, "eager_two_runs_differ"),
+            (4, None, "fail_to_run"),
+            (None, 1, "fail_accuracy"),
+        ],
+    )
+    def test_non_tp_accuracy_failure_status(self, failing_run, mismatch, status):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args()
+        runner.args.performance, runner.args.accuracy = False, True
+        runner.hf_llm = True
+        runner.model_iter_fn = runner.prefill
+        model = self._make_model("Llama", "cpu")
+        inputs = {"input_ids": torch.randint(0, 32, (2, 4))}
+        # Runs: fp64 reference, two eager runs, compiled run. Comparisons: the two
+        # eager runs, then compiled against eager.
+        run_n_iterations, same = runner.run_n_iterations, common.same
+        runs, comparisons = itertools.count(1), itertools.count()
+
+        def run(*args, **kwargs):
+            if next(runs) == failing_run:
+                raise RuntimeError("injected failure")
+            return run_n_iterations(*args, **kwargs)
+
+        def compare(*args, **kwargs):
+            return next(comparisons) != mismatch and same(*args, **kwargs)
+
+        with (
+            mock.patch.object(runner, "run_n_iterations", run),
+            mock.patch.object(common, "same", compare),
+            mock.patch.object(common, "current_name", "tiny"),
+            mock.patch.object(common, "current_device", "cpu"),
+            mock.patch.object(common, "write_outputs"),
+            mock.patch.object(common, "output_signpost", return_value=0),
+        ):
+            optimize = functools.partial(torch.compile, backend="eager", fullgraph=True)
+            result = runner.check_accuracy("tiny", model, inputs, optimize, None, None)
+        self.assertEqual(result, status)
+
     def test_prompt_must_fit_generation_context(self):
         runner = self.huggingface.HuggingfaceRunner()
         args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=2096")
@@ -587,6 +767,134 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             rtol=1e-3,
             atol=0,
         )
+
+
+class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
+    def setUp(self):
+        super().setUp()
+        # Validate as on a machine without an accelerator, where -dcpu TP is allowed.
+        patcher = mock.patch.object(
+            torch.accelerator, "current_accelerator", return_value=None
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _tp_args(self, *extra, mode="decode"):
+        return self._runner_args(
+            "--tp-size=2", "--float32", "--disable-cudagraphs", *extra, mode=mode
+        )
+
+    @parametrize(
+        "extra, message",
+        [
+            ("--tp-size=0", "--tp-size must be positive"),
+            ("--multiprocess", "does not support --multiprocess"),
+            ("--device-index=0", "does not support --device-index"),
+            ("--warm-start-latency", "does not support --warm-start-latency"),
+            ("--minify", "does not support --minify"),
+            ("--ddp", "does not support --ddp"),
+        ],
+    )
+    def test_invalid_tp_options(self, extra, message):
+        runner = self.huggingface.HuggingfaceRunner()
+        with self.assertRaisesRegex(ValueError, message):
+            runner.validate_args(self._tp_args(extra))
+
+    def test_tp_requires_prefill_or_decode(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        with self.assertRaisesRegex(ValueError, "requires --hf-inference-mode"):
+            runner.validate_args(self._tp_args(mode="generate"))
+
+    def test_tp_requires_dtype_and_disabled_cudagraphs(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--tp-size=2", "--float32")
+        with self.assertRaisesRegex(ValueError, "requires --disable-cudagraphs"):
+            runner.validate_args(args)
+        args = self._runner_args("--tp-size=2", "--disable-cudagraphs")
+        with self.assertRaisesRegex(ValueError, "--bfloat16, --float16, or --float32"):
+            runner.validate_args(args)
+        args = self._tp_args("--backend=cudagraphs")
+        with self.assertRaisesRegex(ValueError, "a backend other than cudagraphs"):
+            runner.validate_args(args)
+
+    @parametrize("mode", ("reduce-overhead", "max-autotune"))
+    def test_tp_rejects_cudagraph_compile_modes(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args("--inductor")
+        args.backend = None
+        args.devices = ["cuda"]
+        args.inductor_compile_mode = mode
+        args.inductor_config = ["triton.cudagraphs=False"]
+        with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
+            runner.validate_args(args)
+        args.inductor_compile_mode = "max-autotune-no-cudagraphs"
+        runner.validate_args(args)
+
+    @parametrize("use_inductor_flag", (False, True))
+    @parametrize("enabled", ("True", "1"))
+    def test_tp_rejects_cudagraph_config(self, use_inductor_flag, enabled):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args()
+        args.devices = ["cuda"]
+        args.backend = None if use_inductor_flag else "inductor"
+        args.inductor = use_inductor_flag
+        override = f"triton.cudagraphs={enabled}"
+        args.inductor_config = ["triton.cudagraphs=False", override]
+        with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
+            runner.validate_args(args)
+        args.inductor_config.append("triton.cudagraphs=False")
+        runner.validate_args(args)
+
+    def test_cpu_tp_requires_no_accelerator(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        cuda = torch.device("cuda")
+        with (
+            mock.patch.object(
+                torch.accelerator, "current_accelerator", return_value=cuda
+            ),
+            self.assertRaisesRegex(ValueError, "requires a machine without an accel"),
+        ):
+            runner.validate_args(self._tp_args())
+
+    @parametrize("use_inductor_flag", (False, True))
+    def test_inductor_tp_requires_cuda(self, use_inductor_flag):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args()
+        args.backend = None if use_inductor_flag else "inductor"
+        args.inductor = use_inductor_flag
+        with self.assertRaisesRegex(ValueError, "Inductor TP requires CUDA/NCCL"):
+            runner.validate_args(args)
+        args.devices = []
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=False),
+            self.assertRaisesRegex(ValueError, "Inductor TP requires CUDA/NCCL"),
+        ):
+            runner.validate_args(args)
+        args.devices = ["cuda"]
+        runner.validate_args(args)
+
+    @parametrize("mode", ("prefill", "decode"))
+    def test_tp_resolves_result_identity(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args(mode=mode)
+        runner.validate_args(args)
+        expected = [mode, 2, 1000, 128 if mode == "decode" else 0]
+        self.assertEqual(common.tensor_parallel_identity(args)[1], expected)
+
+    def test_tp_requires_divisible_heads(self):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
+        config = types.SimpleNamespace(num_attention_heads=8, num_key_value_heads=2)
+        config.get_text_config = lambda decoder: config
+        with (
+            mock.patch.object(llm.AutoConfig, "from_pretrained", return_value=config),
+            mock.patch.object(llm.AutoModelForCausalLM, "from_pretrained") as load,
+            self.assertRaisesRegex(
+                ValueError, "must divide .* 8 attention heads and 2 KV"
+            ),
+        ):
+            llm.load_tensor_parallel_model("Qwen/Qwen3.5-0.8B", torch.bfloat16, 4)
+        load.assert_not_called()
 
 
 class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
@@ -774,9 +1082,407 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before)
 
 
+def _tp_device():
+    """Device for two-rank TP tests: Hugging Face shards onto the accelerator, if any."""
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        return "cpu"
+    if accelerator.type == "cuda" and torch.cuda.device_count() >= 2:
+        return "cuda"
+    return None
+
+
+@skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
+@requires_distributed
+@launches_processes
+class TestTensorParallelHarness(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def _init_gloo(self):
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            "gloo", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+    def test_timed_takes_slowest_rank_per_request(self):
+        self._init_gloo()
+        durations = iter([[1.0, 5.0], [4.0, 2.0]][self.rank])
+        clock = [0.0]
+
+        def forward(model, inputs, collect_outputs=False):
+            clock[0] += next(durations)
+
+        barrier = torch.distributed.barrier
+        with (
+            mock.patch.object(common, "synchronize"),
+            mock.patch.object(common, "reset_rng_state"),
+            mock.patch.object(common.time, "perf_counter", new=lambda: clock[0]),
+            mock.patch.object(
+                torch.distributed, "barrier", side_effect=barrier
+            ) as barriers,
+        ):
+            elapsed = common.timed(
+                None,
+                forward,
+                (),
+                times=2,
+                setup_fn=lambda model, inputs: None,
+                group=torch.distributed.group.WORLD,
+            )
+        # max(1, 4) + max(5, 2), rather than either rank's own total.
+        self.assertEqual(elapsed, 9.0)
+        self.assertEqual(barriers.call_count, 2)
+
+    def test_agree_on_status_takes_first_failure_in_rank_order(self):
+        self._init_gloo()
+        runner = common.BenchmarkRunner()
+        runner.args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
+        statuses = ["pass", "fail_accuracy"]
+        self.assertEqual(runner.agree_on_status(statuses[self.rank]), "fail_accuracy")
+        self.assertEqual(runner.agree_on_status("pass"), "pass")
+
+
+# Divisible by a TP size of 2, with tied embeddings like the benchmarked checkpoints.
+TP_CONFIG = {
+    "hidden_size": 32,
+    "intermediate_size": 64,
+    "num_attention_heads": 4,
+    "num_key_value_heads": 2,
+    "tie_word_embeddings": True,
+}
+TP_QWEN3_5_CONFIG = {"linear_num_key_heads": 2, "linear_num_value_heads": 4}
+
+
+@skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
+@requires_distributed
+@launches_processes
+class TestHuggingFaceTensorParallel(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        _require_transformers()
+        if _tp_device() != self.device_type:
+            raise unittest.SkipTest("requires no accelerator or two CUDA devices")
+        if "backend_inductor" in self._testMethodName and self.device_type != "cuda":
+            raise unittest.SkipTest("Inductor TP requires CUDA/NCCL")
+        self._spawn_processes()
+
+    def _init_process_group(self, device):
+        device = torch.device(device).type
+        # Hugging Face picks each rank's shard device from LOCAL_RANK.
+        os.environ["LOCAL_RANK"] = str(self.rank)
+        if device == "cuda":
+            torch.cuda.set_device(self.rank)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            "nccl" if device == "cuda" else "gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return device
+
+    @contextlib.contextmanager
+    def _checkpoint(self, model_type):
+        path = f"{self.file_name}_{model_type}"
+        if self.rank == 0:
+            torch.manual_seed(0)
+            overrides = dict(TP_CONFIG)
+            if model_type == "Qwen3_5":
+                overrides.update(TP_QWEN3_5_CONFIG)
+            _tiny_causal_lm(model_type, **overrides).save_pretrained(path)
+        torch.distributed.barrier()
+        try:
+            yield path
+        finally:
+            torch.distributed.barrier()
+            if self.rank == 0:
+                shutil.rmtree(path)
+
+    def _load(self, path, device, mode):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
+        tokenizer = types.SimpleNamespace(vocab_size=32, eos_token_id=2)
+        with mock.patch.object(
+            llm.AutoTokenizer, "from_pretrained", return_value=tokenizer
+        ):
+            return llm.TextGenerationBenchmark.get_model_and_inputs(
+                path,
+                device,
+                batch_size=2,
+                prompt_length=4,
+                inference_mode=mode,
+                decode_length=3,
+                dtype=torch.float32,
+                tp_size=2,
+            )
+
+    @contextlib.contextmanager
+    def _count_eager_collectives(self):
+        counts = collections.Counter()
+
+        def counted(name):
+            collective = getattr(torch.distributed, name)
+
+            def wrapper(*args, **kwargs):
+                counts[name] += 1
+                return collective(*args, **kwargs)
+
+            return mock.patch.object(torch.distributed, name, wrapper)
+
+        with counted("all_reduce"), counted("all_gather"):
+            yield counts
+
+    def _check_sharding(self, model, reference):
+        layer_types = getattr(model.model.config, "layer_types", None) or [
+            "full_attention"
+        ]
+        full_attention = layer_types.index("full_attention")
+        sharded = [
+            (f"layers.{full_attention}.self_attn.q_proj.weight", 0),
+            (f"layers.{full_attention}.self_attn.k_proj.weight", 0),
+            (f"layers.{full_attention}.self_attn.o_proj.weight", 1),
+            ("layers.0.mlp.down_proj.weight", 1),
+        ]
+        if "linear_attention" in layer_types:
+            linear = layer_types.index("linear_attention")
+            sharded.append((f"layers.{linear}.linear_attn.in_proj_qkv.weight", 0))
+        local = model.model.model.get_parameter
+        full = reference.model.model.get_parameter
+        for name, dim in sharded:
+            expected = list(full(name).shape)
+            expected[dim] //= 2
+            self.assertEqual(list(local(name).shape), expected, msg=name)
+        # Each rank holds a different shard, so this is not replicated execution.
+        weight = local(sharded[0][0])
+        shards = [torch.empty_like(weight) for _ in range(2)]
+        torch.distributed.all_gather(shards, weight.contiguous())
+        self.assertNotEqual(shards[0], shards[1])
+
+    def _check_cache_shapes(self, model):
+        config = model.model.config
+        for layer, is_linear in zip(model.cache.layers, model.cache.is_linear):
+            if is_linear:
+                # The linear-attention projections gather their outputs, so the
+                # recurrent state keeps every head.
+                key_dim = config.linear_num_key_heads * config.linear_key_head_dim
+                value_dim = config.linear_num_value_heads * config.linear_value_head_dim
+                conv_shape = (2, 2 * key_dim + value_dim, config.linear_conv_kernel_dim)
+                self.assertEqual(layer.conv_states[0].shape, conv_shape)
+                self.assertEqual(layer.recurrent_states[0].shape, (2, 4, 8, 8))
+            else:
+                # One of two KV heads per rank, not divided by the TP size twice.
+                self.assertEqual(layer.keys.shape, (2, 1, model.cache_capacity, 8))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("model_type", ("Llama", "Qwen3", "Qwen3_5"))
+    def test_tp_matches_unsharded_reference(self, device, model_type, backend):
+        from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
+        from transformers import AutoModelForCausalLM
+
+        device = self._init_process_group(device)
+        runner = _import_huggingface().HuggingfaceRunner()
+        tolerance = {"atol": 1e-5, "rtol": 1e-4}
+        with self._checkpoint(model_type) as path:
+            # Rank-dependent seeds: the loader must broadcast rank 0's request.
+            torch.manual_seed(self.rank)
+            model, inputs = self._load(path, device, "decode")
+            for tensor in inputs.values():
+                gathered = [torch.empty_like(tensor) for _ in range(2)]
+                torch.distributed.all_gather(gathered, tensor)
+                self.assertEqual(gathered[0], gathered[1])
+            reference_model = AutoModelForCausalLM.from_pretrained(
+                path, dtype=torch.float32
+            )
+            reference = TextGenerationPrefillModel(
+                reference_model.to(device).eval(), 2, 4, model.cache_capacity
+            )
+        self._check_sharding(model, reference)
+
+        prompt = {"input_ids": inputs["input_ids"]}
+        with self._count_eager_collectives() as counts:
+            prefill = runner.prefill(model, prompt)
+        self.assertGreater(counts["all_reduce"], 0)
+        self.assertEqual(prefill, runner.prefill(reference, prompt), **tolerance)
+        self.assertEqual(int(model.cache.get_seq_length()), 4)
+        self._check_cache_shapes(model)
+        self.assertEqual(runner.prefill(model, prompt), prefill)
+        changed = {"input_ids": (prompt["input_ids"] + 1) % 32}
+        changed_prefill = runner.prefill(model, changed)
+        self.assertNotEqual(changed_prefill, prefill)
+        self.assertEqual(
+            changed_prefill, runner.prefill(reference, changed), **tolerance
+        )
+
+        decode = runner.decode(model, inputs)
+        self.assertEqual(int(model.cache.get_seq_length()), 4 + 3)
+        full_ids = torch.cat([inputs["input_ids"], inputs["decode_ids"]], dim=1)
+        with torch.no_grad():
+            expected = reference.model(full_ids, use_cache=False, logits_to_keep=1)
+        self.assertEqual(decode, expected.logits[:, -1, :], **tolerance)
+        self.assertEqual(runner.decode(model, inputs), decode)
+
+        for mode, mode_inputs, eager_result in (
+            ("prefill", prompt, prefill),
+            ("decode", inputs, decode),
+        ):
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend(backend)
+            compiled = model.copy_sharing_weights()
+            compiled.forward = torch.compile(
+                compiled.forward, backend=counter, fullgraph=True
+            )
+            request = getattr(runner, mode)
+            self.assertEqual(request(compiled, mode_inputs), eager_result, **tolerance)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                self.assertEqual(
+                    request(compiled, mode_inputs), eager_result, **tolerance
+                )
+                changed_inputs = {
+                    key: (value + 1) % 32 for key, value in mode_inputs.items()
+                }
+                self.assertEqual(
+                    request(compiled, changed_inputs),
+                    request(model, changed_inputs),
+                    **tolerance,
+                )
+            self.assertEqual(counter.frame_count, 1)
+            (graph,) = counter.graphs
+            self.assertIn("_c10d_functional.all_reduce", graph.code)
+            # The compiled copy has its own cache and leaves the eager model's alone.
+            self.assertIsNot(compiled.cache, model.cache)
+
+    def test_tp_accuracy_outcomes_agree(self, device):
+        device = self._init_process_group(device)
+        runner = _import_huggingface().HuggingfaceRunner()
+        runner.args = common.parse_args(
+            [
+                f"-d{device}",
+                "--accuracy",
+                "--inference",
+                "--float32",
+                "--backend=eager",
+                "--hf-inference-mode=prefill",
+                "--tp-size=2",
+                "--disable-cudagraphs",
+            ]
+        )
+        runner.hf_llm = True
+        runner.model_iter_fn = runner.prefill
+        with self._checkpoint("Llama") as path:
+            model, inputs = self._load(path, device, "prefill")
+        weight = model.model.model.layers[0].self_attn.q_proj.weight
+        original_weight = weight.detach().clone()
+
+        def check_accuracy():
+            with (
+                mock.patch.object(common, "current_name", "tiny"),
+                mock.patch.object(common, "current_device", device),
+                mock.patch.object(common, "write_outputs"),
+                mock.patch.object(common, "output_signpost", return_value=0),
+            ):
+                return runner.check_accuracy(
+                    "tiny",
+                    model,
+                    inputs,
+                    functools.partial(torch.compile, backend="eager", fullgraph=True),
+                    None,
+                    None,
+                )
+
+        self.assertEqual(check_accuracy(), "pass")
+        # The fp64 reference cast the shared shards; check_accuracy casts them back.
+        self.assertEqual(weight.dtype, torch.float32)
+        self.assertEqual(weight, original_weight, atol=0, rtol=0)
+
+        # Only rank 1 sees an accuracy mismatch, yet both ranks report it.
+        same = common.same
+        comparisons = iter(range(100))
+
+        def mismatch_on_rank_1(*args, **kwargs):
+            is_compiled_comparison = next(comparisons) == 1
+            if self.rank == 1 and is_compiled_comparison:
+                return False
+            return same(*args, **kwargs)
+
+        with mock.patch.object(common, "same", mismatch_on_rank_1):
+            self.assertEqual(check_accuracy(), "fail_accuracy")
+
+
+@skipIfTorchDynamo("checks benchmark result files")
+class TestTensorParallelResults(TestCase):
+    @parametrize("mode", ("prefill", "decode"))
+    def test_tp_json_result_identity_and_metrics(self, mode):
+        args = common.parse_args(
+            [
+                "--performance",
+                "--inference",
+                "--float32",
+                "--tp-size=2",
+                f"--hf-inference-mode={mode}",
+            ]
+        )
+        metrics = {
+            "speedup": 1.5,
+            "abs_latency": 2.0,
+            "eager_peak_mem_per_rank": "1.000;2.000",
+            "dynamo_peak_mem_per_rank": "0.500;1.500",
+        }
+        decode_length = 128 if mode == "decode" else 0
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(vars(common)),
+        ):
+            common.set_current_metadata(args)
+            common.current_name = "Qwen/Qwen3-0.6B"
+            common.current_device = "cuda"
+            common.current_batch_size = 4
+            filename = os.path.join(tmp, "results.csv")
+            identity = ["cuda", common.current_name, 4, mode, 2, 1000, decode_length]
+            common.output_json(
+                filename,
+                ["dev", "name", "batch_size", *common.TP_IDENTITY_HEADERS, *metrics],
+                [*identity, *metrics.values()],
+            )
+            with open(os.path.join(tmp, "results.json")) as f:
+                records = [json.loads(line) for line in f]
+        names = [record["metric"]["name"] for record in records]
+        self.assertEqual(names, list(metrics))
+        for record in records:
+            self.assertEqual(record["model"]["name"], "Qwen/Qwen3-0.6B")
+            self.assertEqual(record["benchmark"]["dtype"], "float32")
+            info = record["benchmark"]["extra_info"]
+            self.assertEqual(info["device"], "cuda")
+            self.assertEqual(info["batch_size"], 4)
+            self.assertEqual(info["phase"], mode)
+            self.assertEqual(info["tp_size"], 2)
+            self.assertEqual(info["prompt_length"], 1000)
+            self.assertEqual(info["decode_length"], decode_length)
+            metric = record["metric"]
+            value = metrics[metric["name"]]
+            expected = {"benchmark_values": [value]}
+            if isinstance(value, str):
+                expected = {"extra_info": expected}
+            self.assertEqual(metric, {"name": metric["name"], **expected})
+
+
 instantiate_parametrized_tests(BenchmarkRunnerTests)
 instantiate_parametrized_tests(TestHuggingFaceLLMPerformance)
 instantiate_parametrized_tests(TestHuggingFacePrefill)
+instantiate_parametrized_tests(TestHuggingFaceTensorParallelOptions)
+instantiate_device_type_tests(
+    TestHuggingFaceTensorParallel, globals(), only_for=("cpu", "cuda")
+)
+instantiate_parametrized_tests(TestTensorParallelResults)
 instantiate_device_type_tests(
     TestHuggingFacePrefillDevice, globals(), only_for=("cpu", "cuda")
 )
