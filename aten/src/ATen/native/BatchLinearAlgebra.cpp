@@ -2862,6 +2862,11 @@ void linalg_eig_make_complex_eigenvectors(const Tensor& complex_vectors, const T
 DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
+  // The MPS impl only operates on complex inputs
+  if (input.is_mps() && input.scalar_type() == c10::kFloat) {
+    return linalg_eig_out_info(input.to(toComplexType(input.scalar_type())), values, vectors, infos, compute_eigenvectors);
+  }
+
   auto options = input.options();
 
   // These internal asserts make explicit the assumptions in the implementation
