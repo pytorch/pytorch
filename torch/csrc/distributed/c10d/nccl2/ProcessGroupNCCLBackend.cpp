@@ -140,6 +140,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   setGroupUid(options_c10d_->group_name);
   // Binding a device creates the comm before Python's _set_group_desc.
   setGroupDesc(options_c10d_->group_desc);
+  ::c10d::getGlobalRankStartAndStride(
+      options_c10d_->global_ranks_in_group,
+      global_rank_start_,
+      global_rank_stride_);
 
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
@@ -647,7 +651,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
       /*profiling_title=*/"all_gather");
   work->setOutputs(outputList);
   auto rows = staging.view({getSize(), input.numel()});
-  work->wait();
+  work->waitUntraced();
   for (int r = 0; r < getSize(); ++r) {
     outputList.at(r).copy_(rows[r].view_as(outputList.at(r)));
   }
