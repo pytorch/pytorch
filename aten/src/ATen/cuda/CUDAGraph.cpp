@@ -135,6 +135,9 @@ void CUDAGraph::retain_pool(MempoolId_t pool) {
   }
   c10::cuda::CUDACachingAllocator::createOrIncrefPool(capture_dev_, pool);
   record_retained_pool(pool);
+  if (at::getHostAllocator(at::kCUDA)->retain_pool(pool)) {
+    retained_host_mempool_ids_.push_back(pool);
+  }
 }
 
 template <>
@@ -158,12 +161,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   TORCH_CHECK(!has_graph_exec_ && !has_graph_ && !allocated_pool_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, call reset() or create a new instance.");
-  // The host allocator rejects this too, but only after the device allocator
-  // has been routed to the pool, so check before any state changes.
-  TORCH_CHECK(
-      !at::getHostAllocator(at::kCUDA)->is_host_mem_pool(pool),
-      "Pool (", pool.first, ", ", pool.second,
-      ") belongs to a HostMemPool and cannot be used as a graph capture pool");
 
   capture_mode_ = capture_mode;
 
@@ -498,6 +495,10 @@ void CUDAGraph::reset() {
       c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, pool);
     }
     retained_mempool_ids_.clear();
+    for (const auto& pool : retained_host_mempool_ids_) {
+      at::getHostAllocator(at::kCUDA)->release_pool(pool);
+    }
+    retained_host_mempool_ids_.clear();
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
     allocated_pool_ = false;
