@@ -11144,8 +11144,10 @@ class TestLinalgCudaOnly(TestCase):
                 print(result[0])
             """
         )
-        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, so keep it out of the child.
-        env = os.environ.copy()
+        # DISABLE_ADDMM_CUDA_LT overrides the preferred backend, and PYTORCH_TUNABLEOP_*
+        # override the tunable setters below (and can preload results), so keep them
+        # out of the child.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTORCH_TUNABLEOP_")}
         env.pop("DISABLE_ADDMM_CUDA_LT", None)
         # TunableOp writes its results file into the cwd at exit.
         cmd = [sys.executable, "-c", script]
