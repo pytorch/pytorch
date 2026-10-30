@@ -202,9 +202,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
+        # _get_autocast_states layout is [enabled, dtype] * N + [cache].
         prior_autocast_dtypes = {
-            device_type: torch.get_autocast_dtype(device_type)
-            for device_type in torch._C._autocast_supported_devices()
+            device_type: prior_autocast_states[2 * i + 1]
+            for i, device_type in enumerate(torch._C._autocast_supported_devices())
         }
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
@@ -225,44 +226,48 @@ def run_functionalized_fw_and_collect_metadata(
         # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
         # which includes the keys tracking autocast enabled state (not dtype), so
         # the comparison has to run before the guard restores those keys.
+        # Compare after disable_autocast_cache exits so a full-list compare does not
+        # false-positive on the temporary cache=False forced by that context manager.
+        # Autocast dtypes are independent TLS and are restored in finally on every exit.
         with disable_above:
-            with mode, suppress_pending, disable_autocast_cache():
-                # precondition: The passed in function already handles unflattening inputs + flattening outputs
-                flat_f_args = pytree.tree_map(_to_fun, flat_args)
-                flat_f_args_descs = flat_args_descs
-                flat_f_outs = f(*flat_f_args)
+            try:
+                with mode, suppress_pending, disable_autocast_cache():
+                    # precondition: The passed in function already handles unflattening inputs + flattening outputs
+                    flat_f_args = pytree.tree_map(_to_fun, flat_args)
+                    flat_f_args_descs = flat_args_descs
+                    flat_f_outs = f(*flat_f_args)
 
-                # Assert that f does NOT have an AOTOutputs in it, easy mistake to
-                # make!  You need to drop the second output before calling this
-                # function
-                if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
-                    raise AssertionError(
-                        f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
-                        "function with without_output_descs before passing it here?"
-                    )
+                    # Assert that f does NOT have an AOTOutputs in it, easy mistake to
+                    # make!  You need to drop the second output before calling this
+                    # function
+                    if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
+                        raise AssertionError(
+                            f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                            "function with without_output_descs before passing it here?"
+                        )
 
-                # NB: this is just to setup the input descriptors, we will
-                # recreate these descriptors (with the same convention!) when we
-                # actually do the trace
-                flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
+                    # NB: this is just to setup the input descriptors, we will
+                    # recreate these descriptors (with the same convention!) when we
+                    # actually do the trace
+                    flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
 
-                # We didn't do any tracing, so we don't need to process the
-                # unbacked symbols, they will just disappear into the ether.
-                # Also, prevent memoization from applying.
-                if fake_mode:
-                    fake_mode.epoch += 1
-                    fake_mode.reset_nt_tensor_id_counter()
+                    # We didn't do any tracing, so we don't need to process the
+                    # unbacked symbols, they will just disappear into the ether.
+                    # Also, prevent memoization from applying.
+                    if fake_mode:
+                        fake_mode.epoch += 1
+                        fake_mode.reset_nt_tensor_id_counter()
 
-                current_autocast_states = _get_autocast_states()
-                if current_autocast_states[:-1] != prior_autocast_states[:-1]:
-                    for device_type, dtype in prior_autocast_dtypes.items():
-                        torch.set_autocast_dtype(device_type, dtype)
+                if _get_autocast_states() != prior_autocast_states:
                     raise RuntimeError(
                         "AOTAutograd does not support tracing graphs that mutate the autocast state. "
                         "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
                         "which will unwind all of their mutations to autocast state before the graph exits. "
                         "If you encounter this error while using torch.compile, please file a bug."
                     )
+            finally:
+                for device_type, dtype in prior_autocast_dtypes.items():
+                    torch.set_autocast_dtype(device_type, dtype)
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
