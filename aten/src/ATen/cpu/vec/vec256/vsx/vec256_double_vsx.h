@@ -320,6 +320,7 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE cos() const {
     return {Sleef_cosd2_u10(_vec0), Sleef_cosd2_u10(_vec1)};
   }
+  // See the comment above sinh() for why cosh uses the scalar fallback.
   Vectorized<double> C10_ALWAYS_INLINE cosh() const {
     return map(std::cosh);
   }

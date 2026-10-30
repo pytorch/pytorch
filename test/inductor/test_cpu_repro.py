@@ -1370,8 +1370,32 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 torch._dynamo.reset()
                 _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
+                expected = torch.tensor(
+                    [math.cosh(v) for v in vals], dtype=dtype
+                ).repeat(3, 6)
+                torch.testing.assert_close(
+                    torch.cosh(_x),
+                    expected,
+                    rtol=1e-5 if dtype == torch.float32 else 1e-12,
+                    atol=0,
+                )
                 self.assertFalse(torch.cosh(_x).isinf().any())
                 self.common(fn, (_x,))
+                if dtype == torch.float64:
+                    self.assertTrue(
+                        torch.isfinite(
+                            torch.cosh(torch.full((32,), 710.47, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
+                    self.assertTrue(
+                        torch.isinf(
+                            torch.cosh(torch.full((32,), 710.48, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
 
     @requires_vectorization
     def test_sinh_near_overflow(self):
@@ -1388,8 +1412,32 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 torch._dynamo.reset()
                 _x = torch.tensor(vals, dtype=dtype).repeat(3, 6)
+                expected = torch.tensor(
+                    [math.sinh(v) for v in vals], dtype=dtype
+                ).repeat(3, 6)
+                torch.testing.assert_close(
+                    torch.sinh(_x),
+                    expected,
+                    rtol=1e-5 if dtype == torch.float32 else 1e-12,
+                    atol=0,
+                )
                 self.assertFalse(torch.sinh(_x).isinf().any())
                 self.common(fn, (_x,))
+                if dtype == torch.float64:
+                    self.assertTrue(
+                        torch.isfinite(
+                            torch.sinh(torch.full((32,), 710.47, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
+                    self.assertTrue(
+                        torch.isinf(
+                            torch.sinh(torch.full((32,), 710.48, dtype=dtype))
+                        )
+                        .all()
+                        .item()
+                    )
 
     @requires_vectorization
     def test_acosh_near_overflow(self):
