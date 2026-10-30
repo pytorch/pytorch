@@ -284,7 +284,14 @@ def _sctype_from_numpy_arg(arg: object) -> type[generic] | None:
         return None
     # np.float32 / np.bool_ / etc.
     if isinstance(arg, type) and issubclass(arg, np.generic):
-        return sctype_from_string(arg.__name__)
+        try:
+            numpy_dtype = np.dtype(arg)
+        except (TypeError, ValueError):
+            return None
+        # np.dtype(np.floating) returns float64, a strict subclass of the abstract class.
+        if numpy_dtype.type is not arg and issubclass(numpy_dtype.type, arg):
+            return None
+        return sctype_from_string(numpy_dtype.name)
     # np.dtype("float32")
     if isinstance(arg, np.dtype):
         return sctype_from_string(arg.name)

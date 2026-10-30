@@ -59,11 +59,9 @@ class TestConvertDType(TestCase):
         x = tnp.arange(4)
         y = x.astype(tnp.float32)
         z = x.astype(numpy.float32)
-        if y.dtype != z.dtype:
-            raise AssertionError(f"Expected matching dtypes, got {y.dtype} vs {z.dtype}")
+        self.assertEqual(z.dtype, y.dtype)
         empty = tnp.empty((1, 1), dtype=numpy.float32)
-        if empty.dtype != tnp.float32:
-            raise AssertionError(f"Expected float32, got {empty.dtype}")
+        self.assertEqual(empty.dtype, tnp.float32)
 
     def test_non_numpy_dtype_name_lookalike_raises(self):
         class float32:
@@ -77,6 +75,22 @@ class TestConvertDType(TestCase):
 
         with self.assertRaises(TypeError):
             tnp.dtype(_Lookalike())
+
+    def test_dtype_eq_numpy(self):
+        self.assertEqual(tnp.dtype("float32"), numpy.float32)
+        self.assertEqual(tnp.dtype("float32"), numpy.dtype("float32"))
+        self.assertNotEqual(tnp.dtype("float32"), numpy.float64)
+        self.assertNotEqual(tnp.dtype("float32"), numpy.zeros(3))
+
+    def test_numpy_abstract_scalar_raises(self):
+        with self.assertRaises(TypeError):
+            tnp.dtype(numpy.floating)
+        with self.assertRaises(TypeError):
+            tnp.dtype(numpy.integer)
+
+    def test_numpy_c_scalar_alias_matches_canonical_name(self):
+        for scalar in (numpy.uintc, numpy.intc, numpy.uintp, numpy.intp):
+            self.assertEqual(tnp.dtype(scalar), tnp.dtype(numpy.dtype(scalar).name))
 
 
 if __name__ == "__main__":
