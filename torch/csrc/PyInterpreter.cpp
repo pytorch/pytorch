@@ -1431,7 +1431,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
     // fake fallback (the meta factory ops it runs are otherwise plain). With
     // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
     // describer then reads the source's fake device, which Fake exclusion no
-    // longer hides (see Note [C++ fake in_kernel_invocation]). from_real_tensor
+    // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
     // must only query the source's metadata and build outputs with an explicit
     // meta device.
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(

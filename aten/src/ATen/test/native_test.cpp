@@ -289,7 +289,7 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
 }
 
-TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
+TEST(TestNative, InKernelInvocationReportsMetaDevice) {
   auto t = at::empty({2}, at::device(at::kMeta));
   at::set_and_normalize_fake_device(
       t.unsafeGetTensorImpl(), c10::Device(c10::kCPU));
@@ -300,7 +300,7 @@ TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
   }
   {
-    c10::impl::FakeInKernelInvocationGuard in_kernel;
+    c10::impl::InKernelInvocationGuard in_kernel;
     EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
     at::ThreadLocalState state;
     std::thread worker([&] {
@@ -315,7 +315,7 @@ TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
 
   EXPECT_THROW(
       {
-        c10::impl::FakeInKernelInvocationGuard in_kernel;
+        c10::impl::InKernelInvocationGuard in_kernel;
         TORCH_CHECK(false, "meta kernel failed");
       },
       c10::Error);

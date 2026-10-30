@@ -28,14 +28,14 @@ void FakeTensorModeTLS::reset_state() {
   tls_set_dispatch_key_included(DispatchKey::Fake, false);
 }
 
-static thread_local bool fakeInKernelInvocation = false;
+static thread_local bool inKernelInvocation = false;
 
 bool FakeTensorModeTLS::in_kernel_invocation() {
-  return fakeInKernelInvocation;
+  return inKernelInvocation;
 }
 
 void FakeTensorModeTLS::set_in_kernel_invocation(bool value) {
-  fakeInKernelInvocation = value;
+  inKernelInvocation = value;
 }
 
 } // namespace c10::impl
