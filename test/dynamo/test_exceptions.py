@@ -1816,7 +1816,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             return x + 1, lines
 
         x = torch.randn(4)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         for f in (
             simple,
             in_finally,
@@ -1825,7 +1824,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             with_noop,
             with_exit_fails,
         ):
-            self.assertEqual(fn(x, f), opt_fn(x, f))
+            with self.subTest(f=f.__name__):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x, f), opt_fn(x, f))
 
     @torch._dynamo.config.patch(run_gc_after_compile=False)
     def test_exception_traceback_frame_no_tx_cycle(self):
@@ -1851,15 +1853,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 callee_txs.append(weakref.ref(tx))
 
         gc.collect()
-        gc.disable()
-        try:
+        with disable_gc():
             with mock.patch.object(InstructionTranslatorBase, "__init__", init):
                 result = torch.compile(fn, backend="eager", fullgraph=True)(
                     torch.ones(2)
                 )
             alive = sum(ref() is not None for ref in callee_txs)
-        finally:
-            gc.enable()
         self.assertEqual(result[1], fn(torch.ones(2))[1])
         self.assertGreater(len(callee_txs), 0)
         self.assertEqual(alive, 0)
