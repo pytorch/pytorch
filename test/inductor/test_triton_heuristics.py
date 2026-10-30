@@ -928,57 +928,78 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
     @parametrize(
-        "hip_version, tlx_options, waves_per_eu, expected_kwargs",
+        "hip_version, tlx_options, hip_options, expected_kwargs",
         [
             (
                 "7.2",
-                ("matrix_instr_nonkdim", "waves_per_eu", "kpack", "test_extra_option"),
-                0,
-                {
-                    "matrix_instr_nonkdim": 16,
-                    "waves_per_eu": 0,
-                    "kpack": 1,
-                    "test_extra_option": 7,
-                },
+                (),
+                {"matrix_instr_nonkdim": 16, "waves_per_eu": 2, "kpack": 2},
+                {"matrix_instr_nonkdim": 16, "waves_per_eu": 2, "kpack": 2},
             ),
             (
                 "7.2",
                 (),
-                0,
+                {"matrix_instr_nonkdim": 0, "waves_per_eu": 0, "kpack": 1},
+                {"matrix_instr_nonkdim": 0, "waves_per_eu": 0, "kpack": 1},
+            ),
+            ("7.2", (), {}, {}),
+            (
+                "7.2",
+                (),
+                {"matrix_instr_nonkdim": 16},
+                {"matrix_instr_nonkdim": 16},
+            ),
+            (
+                "7.2",
+                ("tlx_hip_option",),
                 {
                     "matrix_instr_nonkdim": 16,
                     "waves_per_eu": 0,
                     "kpack": 1,
+                    "tlx_hip_option": 3,
                 },
-            ),
-            (
-                "7.2",
-                (),
-                2,
                 {
                     "matrix_instr_nonkdim": 16,
-                    "waves_per_eu": 2,
+                    "waves_per_eu": 0,
                     "kpack": 1,
+                    "tlx_hip_option": 3,
                 },
             ),
             (
                 None,
-                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
-                0,
+                ("tlx_hip_option",),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                    "tlx_hip_option": 3,
+                },
                 {},
             ),
         ],
     )
-    def test_template_function_preserves_hip_options(
-        self, hip_version, tlx_options, waves_per_eu, expected_kwargs
+    def test_template_function_hip_compile_options(
+        self, hip_version, tlx_options, hip_options, expected_kwargs
     ):
+        device_props = DeviceProperties(
+            type="hip" if hip_version else "cuda",
+            index=0,
+            multi_processor_count=80,
+            cc="gfx950" if hip_version else 80,
+            warp_size=64 if hip_version else 32,
+        )
         triton_meta = {
-            "device": MagicMock(),
-            "matrix_instr_nonkdim": 16,
-            "waves_per_eu": waves_per_eu,
-            "kpack": 1,
-            "test_extra_option": 7,
+            "device": device_props,
+            "signature": {
+                "in_ptr": "*fp32",
+                "out_ptr": "*fp32",
+                "numel": "i32",
+                "BLOCK_SIZE": "constexpr",
+            },
+            "constants": {"BLOCK_SIZE": 64},
+            **hip_options,
         }
+        original_meta = {**triton_meta, "constants": dict(triton_meta["constants"])}
 
         def capture_configs(_size_hints, configs, **_kwargs):
             return configs
@@ -990,6 +1011,10 @@ class TestTritonHeuristics(TestCase):
                 return_value=tlx_options,
             ),
             patch(
+                "torch._inductor.utils.tlx_only_cuda_options",
+                return_value=(),
+            ),
+            patch(
                 "torch._inductor.runtime.triton_heuristics.cached_autotune",
                 side_effect=capture_configs,
             ),
@@ -999,8 +1024,30 @@ class TestTritonHeuristics(TestCase):
                 num_warps=4,
                 triton_meta=triton_meta,
             )
+            self.assertEqual(len(configs), 1)
+            self.assertEqual(configs[0].kwargs, expected_kwargs)
 
-        self.assertEqual(configs[0].kwargs, expected_kwargs)
+            # Metadata construction requires no device initialization.
+            autotuner = CachingAutotuner.__new__(CachingAutotuner)
+            autotuner.fn = amd_sqr_kernel
+            autotuner.triton_meta = triton_meta
+            autotuner.device_props = device_props
+            autotuner.inductor_meta = {}
+            compile_meta = autotuner._create_compile_meta(configs[0])
+            options = autotuner._create_compile_options(configs[0], compile_meta)
+
+        self.assertEqual(compile_meta["constants"], {"BLOCK_SIZE": 64})
+        self.assertEqual(compile_meta.get("backend_options", {}), expected_kwargs)
+        self.assertEqual(
+            {key: options[key] for key in hip_options if key in options},
+            expected_kwargs,
+        )
+        for key in ("matrix_instr_nonkdim", "waves_per_eu", "kpack", "tlx_hip_option"):
+            if key not in expected_kwargs:
+                self.assertNotIn(key, options)
+        self.assertEqual(options["num_warps"], 4)
+        self.assertEqual(options["num_stages"], 1)
+        self.assertEqual(triton_meta, original_meta)
 
     @runOnRocm
     def test_amd_special_config_args(self):

@@ -293,6 +293,12 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    bwd_ROCM_SEPARATE_DQ: NotRequired[bool]
+    r"""Run separate dK/dV and dQ kernels for supported gfx950 configurations.
+    Requires an identity score modification and no captured tensors.
+    Set ``False`` to disable automatic selection.
+    """
+
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 
@@ -315,6 +321,22 @@ class FlexKernelOptions(TypedDict, total=False):
 class _KernelOptionsWithInternals(FlexKernelOptions, total=False):
     OUTPUT_LOGSUMEXP: bool
     OUTPUT_MAX: bool
+
+    bwd_XCD_REMAP: NotRequired[bool]
+    bwd_ROCM_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D256_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_EARLY_PROBABILITY_COMPACT: NotRequired[bool]
+    bwd_ROCM_D192_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_D192_DQ_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D96_PANEL_DOTS: NotRequired[bool]
+    bwd_ROCM_D96_DQ_EARLY_DP: NotRequired[bool]
+    bwd_ROCM_D96_DQ_UNROLL2: NotRequired[bool]
+    bwd_ROCM_GQA_SPLIT_DKDV: NotRequired[bool]
+    bwd_ROCM_XCD_SNAKE: NotRequired[bool]
+    bwd_ROCM_D128_REVERSE_DQ_ROWS: NotRequired[bool]
+    bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64: NotRequired[bool]
+    bwd_ROCM_D128_FP16_COVERAGE: NotRequired[bool]
+    bwd_ROCM_D128_FP32_BALANCED64_COVERAGE: NotRequired[bool]
 
 
 class AuxRequest(NamedTuple):

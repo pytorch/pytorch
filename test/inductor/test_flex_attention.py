@@ -31,7 +31,7 @@ from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_kernels
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -624,6 +624,5560 @@ def _tdm_operand(name, stride, size=(2, 4, 128, 64), offset=0, dtype=torch.float
 
 # Host-side gate logic. Device capability is mocked, so these are not ROCm-only:
 # running them on CUDA and XPU builds is what keeps the gate honest there too.
+class TestFlexAttentionROCmOptions(InductorTestCase):
+    @common_utils.parametrize("is_gfx950", (False, True))
+    @common_utils.parametrize("enabled", (False, True))
+    @common_utils.parametrize(
+        "option",
+        (
+            None,
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "ROCM_D256_PANEL_DOTS",
+            "ROCM_XCD_SNAKE",
+            "ROCM_SEPARATE_DQ",
+        ),
+    )
+    def test_backward_template_selection(self, is_gfx950, enabled, option):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_backward_template,
+        )
+
+        options = {} if option is None else {option: enabled}
+        self.assertEqual(
+            _use_rocm_backward_template(is_gfx950, options),
+            is_gfx950 and enabled and option not in (None, "ROCM_SEPARATE_DQ"),
+        )
+
+    @common_utils.parametrize("early_dp", (False, True))
+    def test_backward_templates_share_subgraph_hooks(self, early_dp):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        _, _, options = self._backward_auto_profile_inputs()
+        options = flex_kernel_mod.rocm_backward._get_rocm_backward_config_options(
+            options, is_gfx950=True
+        )
+        options.update(
+            ROCM_EARLY_DP=early_dp,
+            ROCM_D256_PANEL_DOTS=False,
+            ROCM_XCD_SNAKE=False,
+        )
+        calls = []
+        callbacks = dict(
+            def_kernel=lambda *args: "def backward_kernel():",
+            gen_argdefs=lambda: "shared_args",
+            gen_defines=lambda: "",
+            size=lambda name, index: 512,
+            stride=lambda name, index=None: "(1, 1, 1, 1)" if index is None else 1,
+            store_output=lambda *args, **kwargs: "pass",
+            modification=lambda **kwargs: calls.append(kwargs) or "pass",
+        )
+        generic = flex_kernel_mod.flex_attention_backward_template.template.render(
+            **options, **callbacks
+        )
+        generic_calls = list(calls)
+        calls.clear()
+        rocm = flex_kernel_mod.rocm_backward.flex_attention_backward_template.template.render(
+            **options, **callbacks
+        )
+        self.assertTrue(generic_calls)
+        self.assertEqual(calls, generic_calls)
+        boundary_mask = (
+            'tl.where(offs_m1[None, :] < Q_LEN, post_mod_scores, float("-inf"))'
+        )
+        for source in (generic, rocm):
+            self.assertIn(boundary_mask, source)
+
+    def test_backward_public_options(self):
+        from torch.nn.attention.flex_attention import (
+            _KernelOptionsWithInternals,
+            FlexKernelOptions,
+        )
+
+        public = FlexKernelOptions.__annotations__
+        internal = _KernelOptionsWithInternals.__annotations__
+        self.assertIn("BACKEND", public)
+        self.assertIn("bwd_ROCM_SEPARATE_DQ", public)
+        for name in internal:
+            if name.startswith("bwd_ROCM_") and name != "bwd_ROCM_SEPARATE_DQ":
+                self.assertNotIn(name, public)
+        self.assertNotIn("bwd_XCD_REMAP", public)
+
+    @common_utils.parametrize("phase", (0, 1, 2))
+    def test_backward_generic_grid_ignores_rocm_phases(self, phase):
+        from torch._inductor.kernel.flex.flex_attention import (
+            flex_attention_backward_grid,
+        )
+
+        meta = dict(BLOCK_M2=128, BLOCK_N1=128, ROCM_BWD_PHASE=phase, ROCM_GQA_SPLITS=4)
+        self.assertEqual(
+            flex_attention_backward_grid(1, 8, 257, 64, 2, 260, meta), (15, 1, 2)
+        )
+
+    def _backward_auto_profile_inputs(
+        self, dtype=torch.float16, batch=4, length=4096, dim=128, heads=64, kv_heads=8
+    ):
+        def operand(name, shape, dtype):
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            return _tdm_operand(name, strides, size=shape, dtype=dtype)
+
+        query = operand("auto_query", (batch, heads, length, dim), dtype)
+        key = operand("auto_key", (batch, kv_heads, length, dim), dtype)
+        value = operand("auto_value", (batch, kv_heads, length, dim), dtype)
+        lse = operand("auto_lse", (batch, heads, length), torch.float32)
+        delta = operand("auto_delta", (batch, heads, length), torch.float32)
+        grad_out = operand("auto_grad_out", (batch, heads, length, dim), dtype)
+        out = operand("auto_out", (batch, heads, length, dim), dtype)
+        nodes = [query, key, value, lse, delta, grad_out, query, value]
+        sparse_size = 128 if dim == 128 else 1 << 30
+        blocks = length // 128 if dim == 128 else 1
+        for index in range(8, 16):
+            shape = (1, 1, blocks) if index % 2 == 0 else (1, 1, blocks, blocks)
+            nodes.append(
+                operand("auto_metadata_" + str(index), (0,), torch.float32)
+                if dim != 128 and index >= 12
+                else operand("auto_metadata_" + str(index), shape, torch.int32)
+            )
+        options = dict(
+            SM_SCALE=1 / math.sqrt(dim),
+            BLOCKS_ARE_CONTIGUOUS=False,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            SPARSE_Q_BLOCK_SIZE=sparse_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_size,
+            QK_HEAD_DIM=dim,
+            V_HEAD_DIM=dim,
+            QK_HEAD_DIM_ROUNDED=128 if dim == 96 else 256 if dim == 192 else dim,
+            V_HEAD_DIM_ROUNDED=128 if dim == 96 else 256 if dim == 192 else dim,
+            GQA_SHARED_HEADS=heads // kv_heads,
+            HAS_FULL_BLOCKS=dim == 128,
+            SAFE_HEAD_DIM=dim not in (96, 192),
+            IS_DIVISIBLE=True,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            matrix_instr_nonkdim=0,
+            waves_per_eu=0,
+            kpack=2,
+            FLOAT32_PRECISION="'ieee'",
+            ROCM_SEPARATE_DQ=False,
+            ROCM_EARLY_DP=False,
+            XCD_REMAP=False,
+        )
+        return nodes, out, options
+
+    def _backward_auto_profile(
+        self, nodes, out, options, user_options=None, *, autotune=False, **flags
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_auto_profile,
+            _get_rocm_backward_autotune_options,
+            _is_rocm_scalar_true_mask_graph,
+            _is_rocm_simple_causal_mask_graph,
+        )
+        from torch._inductor.virtualized import V
+
+        dim = nodes[0].get_size()[-1]
+        graph = torch.fx.Graph()
+        indices = [graph.placeholder(name) for name in ("b", "h", "q", "k")]
+        mask = (
+            graph.call_function(torch.ops.aten.ge.Tensor, args=(indices[2], indices[3]))
+            if dim == 128
+            else graph.call_function(
+                torch.ops.aten.full.default,
+                args=([], True),
+                kwargs={"dtype": torch.bool},
+            )
+        )
+        graph.output(mask)
+        mask_graph = torch.fx.GraphModule({}, graph)
+        defaults = dict(
+            backend="TRITON",
+            is_gfx950=True,
+            single_config=True,
+            score_is_trivial=True,
+            has_captures=False,
+            mask_is_causal=_is_rocm_simple_causal_mask_graph(mask_graph),
+            mask_is_scalar_true=_is_rocm_scalar_true_mask_graph(mask_graph),
+            block_mask_is_default=dim != 128,
+            grad_logsumexp_is_none=True,
+        )
+        defaults.update(flags)
+        select_options = _get_rocm_backward_auto_profile
+        if autotune:
+            defaults.pop("single_config")
+            select_options = _get_rocm_backward_autotune_options
+        with V.set_graph_handler(_tdm_graph()):
+            return select_options(
+                {
+                    "PRESCALE_QK": False,
+                    "ROWS_GUARANTEED_SAFE": False,
+                    "BLOCKS_ARE_CONTIGUOUS": False,
+                    "WRITE_DQ": True,
+                    "OUTPUT_LOGSUMEXP": True,
+                    "OUTPUT_MAX": False,
+                }
+                if user_options is None
+                else user_options,
+                options,
+                nodes,
+                out,
+                **defaults,
+            )
+
+    @common_utils.parametrize(
+        "dim,heads,kv_heads,mask",
+        (
+            (128, 8, 1, "causal"),
+            (128, 8, 1, "dense"),
+            (256, 4, 1, "dense"),
+            (256, 4, 4, "dense"),
+        ),
+    )
+    @common_utils.parametrize("length", (1024, 8192))
+    def test_backward_autotune_nearby_shapes(self, dim, heads, kv_heads, mask, length):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            batch=3,
+            length=length,
+            dim=dim,
+            heads=heads,
+            kv_heads=kv_heads,
+        )
+        flags = {}
+        if dim == 128 and mask == "dense":
+            dense_nodes, _, dense_options = self._backward_auto_profile_inputs(dim=256)
+            nodes[8:] = dense_nodes[8:]
+            sparse_options = (
+                "HAS_FULL_BLOCKS",
+                "SPARSE_Q_BLOCK_SIZE",
+                "SPARSE_KV_BLOCK_SIZE",
+            )
+            for name in sparse_options:
+                options[name] = dense_options[name]
+            flags.update(
+                mask_is_causal=False,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+            )
+        original = dict(options)
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+        candidates = self._backward_auto_profile(
+            nodes, out, options, autotune=True, **flags
+        )
+        self.assertEqual(options, original)
+        self.assertEqual(len(candidates), 2)
+        remaps = {candidate["XCD_REMAP"] for candidate in candidates}
+        self.assertEqual(remaps, {False, True})
+        for candidate in candidates:
+            self.assertIs(candidate["ROCM_SEPARATE_DQ"], True)
+            self.assertIs(candidate["ROCM_EARLY_DP"], True)
+            self.assertIs(candidate["ROCM_D256_PANEL_DOTS"], dim == 256)
+
+    @common_utils.parametrize("dim", (128, 256))
+    @common_utils.parametrize(
+        "case",
+        (
+            "architecture",
+            "backend",
+            "score",
+            "capture",
+            "mask",
+            "grad_lse",
+            "scale",
+            "prescale",
+            "tma",
+            "dtype",
+            "stride",
+            "length",
+            "gqa",
+        ),
+    )
+    def test_backward_autotune_fallback(self, dim, case):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            batch=3,
+            length=8192 if case != "length" else 8193,
+            dim=dim,
+            heads=8 if dim == 128 else 4,
+            kv_heads=1,
+        )
+        flags = {
+            "architecture": dict(is_gfx950=False),
+            "backend": dict(backend="FLASH"),
+            "score": dict(score_is_trivial=False),
+            "capture": dict(has_captures=True),
+            "mask": dict(mask_is_causal=False, mask_is_scalar_true=False),
+            "grad_lse": dict(grad_logsumexp_is_none=False),
+        }
+        if case == "scale":
+            options["SM_SCALE"] = 0.0
+        elif case == "prescale":
+            options["PRESCALE_QK"] = True
+        elif case == "tma":
+            options["USE_TMA"] = True
+        elif case == "gqa":
+            options["GQA_SHARED_HEADS"] = 2
+        elif case in ("dtype", "stride"):
+            stride = list(nodes[0].get_stride())
+            if case == "stride":
+                stride[-1] = 2
+            nodes[0] = _tdm_operand(
+                "invalid_autotune_query",
+                stride,
+                size=nodes[0].get_size(),
+                dtype=torch.float16 if case == "dtype" else torch.bfloat16,
+            )
+        self.assertEqual(
+            self._backward_auto_profile(
+                nodes, out, options, autotune=True, **flags.get(case, {})
+            ),
+            [],
+        )
+
+    @common_utils.parametrize(
+        "dtype,batch,dim,heads,kv_heads",
+        (
+            (torch.float16, 2, 128, 64, 8),
+            (torch.float32, 1, 128, 64, 8),
+            (torch.bfloat16, 2, 96, 8, 2),
+            (torch.bfloat16, 4, 96, 21, 21),
+            (torch.bfloat16, 2, 192, 8, 2),
+        ),
+    )
+    @config.patch(max_autotune=True)
+    def test_backward_autotune_measured_profile_phases(
+        self, dtype, batch, dim, heads, kv_heads
+    ):
+        from torch._inductor.kernel.flex import flex_rocm_backward as rocm
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            dtype, batch=batch, length=2048, dim=dim, heads=heads, kv_heads=kv_heads
+        )
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        original_profile = dict(profile)
+        fw = torch.fx.Graph()
+        fw.output(fw.placeholder("score"))
+        mask = torch.fx.Graph()
+        indices = [mask.placeholder(name) for name in ("b", "h", "q", "kv")]
+        mask.output(
+            mask.call_function(torch.ops.aten.ge.Tensor, (indices[2], indices[3]))
+            if dim == 128
+            else mask.call_function(
+                torch.ops.aten.full.default, ([], True), {"dtype": torch.bool}
+            )
+        )
+        block_mask = [
+            1,
+            1,
+            nodes[8],
+            nodes[9],
+            None,
+            None,
+            nodes[10],
+            nodes[11],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            options["SPARSE_Q_BLOCK_SIZE"],
+            options["SPARSE_KV_BLOCK_SIZE"],
+        ]
+        requests = rocm._normalize_rocm_backward_options(dict(options))
+        with (
+            V.set_graph_handler(_tdm_graph()),
+            mock.patch.object(
+                rocm.flex_attention_backward_template, "maybe_append_choice"
+            ) as append,
+        ):
+            rocm.create_backward_plan(
+                nodes,
+                cur_kernel_options=options,
+                user_kernel_options={},
+                rocm_requests=requests,
+                out=out,
+                backend="TRITON",
+                single_config=False,
+                fw_graph=torch.fx.GraphModule({}, fw),
+                mask_graph=torch.fx.GraphModule({}, mask),
+                block_mask=block_mask,
+                grad_logsumexp=None,
+                score_mod_other_buffers=(),
+                mask_mod_other_buffers=(),
+                bwd_subgraphs=[],
+                dkdv_layout=nodes[1].get_layout(),
+                layout_grad_query=out.get_layout(),
+                candidate_options=profile,
+                profile_candidate=True,
+            )
+        self.assertEqual(profile, original_profile)
+        self.assertEqual(append.call_count, 2)
+        dkdv, dq = [call.kwargs for call in append.call_args_list]
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        if dim == 128:
+            self.assertIs(dq["ROCM_D128_REVERSE_DQ_ROWS"], True)
+        elif dim == 96:
+            self.assertIs(dq["ROCM_D96_DQ_UNROLL2"], heads == 21)
+            if heads == 8:
+                self.assertEqual((dkdv["BLOCK_N1"], dkdv["num_stages"]), (32, 1))
+        else:
+            self.assertIs(dq["ROCM_D192_DQ_EARLY_DP"], True)
+
+    @common_utils.parametrize(
+        "profile_kind", ("valid", "workspace", "gqa", "duplicate")
+    )
+    def test_backward_autotune_profile_registration(self, profile_kind):
+        from torch._inductor.kernel.flex import (
+            flex_rocm_backward as rocm,
+            flex_rocm_backward_autotune as autotune,
+        )
+        from torch._inductor.virtualized import V
+
+        class Choice:
+            def __init__(self, key):
+                self.key = key
+
+            def hash_key(self):
+                return self.key
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=1024, heads=8, kv_heads=1
+        )
+        fw = torch.fx.Graph()
+        fw.output(fw.placeholder("score"))
+        mask = torch.fx.Graph()
+        indices = [mask.placeholder(name) for name in ("b", "h", "q", "kv")]
+        mask.output(
+            mask.call_function(torch.ops.aten.ge.Tensor, (indices[2], indices[3]))
+        )
+        block_mask = [None] * 14 + [128, 128]
+        block_mask[:2] = [1, 1]
+        profile = {"candidate": "profile", "ROCM_GQA_SPLIT_DKDV": profile_kind == "gqa"}
+        stock = Choice("stock")
+        choices = [stock]
+
+        def create_plan(*args, candidate_options, profile_candidate, **kwargs):
+            self.assertEqual(profile_candidate, candidate_options is profile)
+            key = candidate_options["candidate"]
+            if profile_kind == "duplicate":
+                key = "broad"
+            return types.SimpleNamespace(
+                split_dkdv=False,
+                partial_grad_value=object()
+                if profile_candidate and profile_kind == "workspace"
+                else None,
+                dkdv_choices=[Choice(key)],
+                dq_choices=[Choice("dq")],
+            )
+
+        def combine(inputs, dkdv, dq):
+            self.assertIs(inputs, nodes)
+            return Choice("split_" + dkdv.key)
+
+        with (
+            V.set_graph_handler(_tdm_graph()),
+            mock.patch.object(
+                rocm,
+                "_get_rocm_backward_autotune_options",
+                return_value=[{"candidate": "broad"}],
+            ),
+            mock.patch.object(
+                rocm, "_get_rocm_backward_auto_profile", return_value=profile
+            ) as select_profile,
+            mock.patch.object(
+                rocm, "create_backward_plan", side_effect=create_plan
+            ) as plans,
+            mock.patch.object(
+                autotune, "RocmBackwardChoiceCaller", side_effect=combine
+            ),
+        ):
+            result = rocm.append_backward_autotune_choices(
+                choices,
+                nodes,
+                cur_kernel_options=options,
+                user_kernel_options={},
+                rocm_requests=rocm._normalize_rocm_backward_options(dict(options)),
+                out=out,
+                backend="TRITON",
+                fw_graph=torch.fx.GraphModule({}, fw),
+                mask_graph=torch.fx.GraphModule({}, mask),
+                block_mask=block_mask,
+                grad_logsumexp=None,
+                score_mod_other_buffers=(),
+                mask_mod_other_buffers=(),
+                bwd_subgraphs=[],
+                dkdv_layout=nodes[1].get_layout(),
+                layout_grad_query=out.get_layout(),
+            )
+        self.assertIs(result, choices)
+        self.assertIs(choices[0], stock)
+        self.assertEqual(
+            [choice.hash_key() for choice in choices],
+            ["stock", "split_broad", "split_profile"]
+            if profile_kind == "valid"
+            else ["stock", "split_broad"],
+        )
+        self.assertIs(select_profile.call_args.kwargs["single_config"], True)
+        self.assertEqual(
+            [call.kwargs["profile_candidate"] for call in plans.call_args_list],
+            [False] if profile_kind == "gqa" else [False, True],
+        )
+
+    @common_utils.parametrize("prefix", ("", "bwd_", "fwd_"))
+    @common_utils.parametrize(
+        "option",
+        (
+            "ROCM_SEPARATE_DQ",
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "BLOCK_M1",
+            "BLOCK_N1",
+            "BLOCK_M2",
+            "BLOCK_N2",
+            "num_warps",
+            "num_stages",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+        ),
+    )
+    def test_backward_autotune_option_scope(self, prefix, option):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=8192, heads=8, kv_heads=1
+        )
+        user_options = {prefix + option: False if option.startswith("ROCM_") else 1}
+        original = dict(user_options)
+        candidates = self._backward_auto_profile(
+            nodes, out, options, user_options, autotune=True
+        )
+        self.assertEqual(user_options, original)
+        self.assertEqual(len(candidates), 2 if prefix == "fwd_" else 0)
+
+    def test_backward_split_benchmark_complete_plan(self):
+        import pickle
+
+        from torch._inductor.autotune_process import TensorMeta, TritonBenchmarkRequest
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            RocmBackwardBenchmarkRequest,
+        )
+
+        metadata = [
+            TensorMeta(torch.device("cpu"), torch.float32, (2,), (1,), 0, name)
+            for name in ("query", "grad_query", "grad_value")
+        ]
+        children = []
+        for name, inputs, output in (
+            ("dkdv", [metadata[0], metadata[2]], metadata[2]),
+            ("dq", [metadata[2], metadata[0]], metadata[1]),
+        ):
+            children.append(
+                TritonBenchmarkRequest(
+                    kernel_name=name,
+                    input_tensor_meta=inputs,
+                    output_tensor_meta=output,
+                    extra_args=(),
+                    module_path=name,
+                    module_cache_key=name,
+                    num_stages=2,
+                    num_warps=4,
+                )
+            )
+        request = pickle.loads(
+            pickle.dumps(RocmBackwardBenchmarkRequest(metadata, *children, 1))
+        )
+        query, grad_query, grad_value = torch.ones(2), torch.zeros(2), torch.zeros(2)
+        output = torch.empty(2)
+        events = []
+
+        def dkdv_run(query, grad_value, *, out):
+            self.assertIs(out, output)
+
+            def run():
+                events.append("dkdv")
+                grad_value.copy_(query * 2)
+                out.copy_(grad_value)
+
+            return run
+
+        def dq_run(grad_value, query, *, out):
+            self.assertIs(out, grad_query)
+
+            def run():
+                events.append("dq")
+                out.copy_(grad_value + query)
+
+            return run
+
+        def measure(run, *inputs, out):
+            self.assertEqual(events, [])
+            run()
+            return 7.0
+
+        with (
+            mock.patch.object(request.dkdv, "make_run_fn", side_effect=dkdv_run),
+            mock.patch.object(request.dq, "make_run_fn", side_effect=dq_run),
+            mock.patch.object(
+                request, "benchmark_run_fn", side_effect=measure
+            ) as benchmark,
+            mock.patch.object(
+                request.dkdv,
+                "benchmark",
+                side_effect=AssertionError("Unexpected child timing"),
+            ),
+            mock.patch.object(
+                request.dq,
+                "benchmark",
+                side_effect=AssertionError("Unexpected child timing"),
+            ),
+            mock.patch.object(request.dkdv, "cleanup_run_fn"),
+            mock.patch.object(request.dq, "cleanup_run_fn"),
+        ):
+            elapsed = request.benchmark(query, grad_query, grad_value, out=output)
+        self.assertEqual(elapsed, 7.0)
+        self.assertEqual(benchmark.call_count, 1)
+        self.assertEqual(events, ["dkdv", "dq"])
+        self.assertEqual(output, torch.full((2,), 2.0))
+        self.assertEqual(grad_query, torch.full((2,), 3.0))
+
+    @common_utils.parametrize("dim,causal", ((128, False), (256, False), (128, True)))
+    def test_backward_split_benchmark_sparse_inputs(self, dim, causal):
+        import pickle
+
+        from torch._inductor.autotune_process import TensorMeta, TritonBenchmarkRequest
+        from torch._inductor.ir import Buffer, FixedLayout
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            prepare_backward_benchmark_requests,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, _, _ = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch=3, length=512 if causal else 8192, dim=dim
+        )
+        for index in range(8, 16):
+            node = nodes[index]
+            nodes[index] = Buffer(
+                name=node.get_name(),
+                layout=FixedLayout(
+                    torch.device("cpu"),
+                    node.get_dtype(),
+                    node.get_size(),
+                    node.get_stride(),
+                ),
+            )
+        with V.set_graph_handler(_tdm_graph()):
+            metadata = TensorMeta.from_irnodes(nodes[8:])
+            request = TritonBenchmarkRequest(
+                kernel_name="sparse_probe",
+                input_tensor_meta=metadata,
+                output_tensor_meta=metadata[0],
+                extra_args=(),
+                module_path="sparse_probe",
+                module_cache_key="sparse_probe",
+                num_stages=2,
+                num_warps=4,
+            )
+            generators = prepare_backward_benchmark_requests(
+                [types.SimpleNamespace(bmreq=request)], nodes, causal=causal
+            )
+        restored = pickle.loads(pickle.dumps(request))
+        self.assertEqual(set(generators), set(range(8, 16)))
+        causal_values = (
+            (1, 1, 1, 1),
+            ((0, 0, 0, 0), (1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3)),
+            (1, 1, 1, 1),
+            ((0, 0, 0, 0), (1, 1, 1, 1), (2, 2, 2, 2), (3, 3, 3, 3)),
+            (0, 1, 2, 3),
+            ((0, 1, 2, 3), (0, 1, 2, 3), (0, 1, 2, 3), (0, 1, 2, 3)),
+            (3, 2, 1, 0),
+            ((1, 2, 3, 3), (2, 3, 3, 3), (3, 3, 3, 3), (3, 3, 3, 3)),
+        )
+        for index, meta in enumerate(restored.input_tensor_meta):
+            tensor = meta.to_tensor()
+            if causal:
+                expected = torch.tensor(causal_values[index], dtype=meta.dtype).reshape(
+                    meta.sizes
+                )
+            elif index % 2 == 0:
+                width = restored.input_tensor_meta[index + 1].sizes[-1]
+                expected = torch.full(meta.sizes, width, dtype=meta.dtype)
+            else:
+                expected = torch.arange(meta.sizes[-1], dtype=meta.dtype).expand(
+                    meta.sizes
+                )
+            self.assertEqual(tensor, expected)
+            self.assertEqual(generators[index + 8](nodes[index + 8]), tensor)
+
+    @common_utils.parametrize(
+        "dtype,batch,length,dim,heads,kv_heads",
+        (
+            (torch.bfloat16, 4, 2048, 96, 21, 21),
+            (torch.bfloat16, 4, 4096, 96, 21, 21),
+            (torch.bfloat16, 2, 2048, 96, 8, 2),
+            (torch.bfloat16, 2, 4096, 96, 8, 2),
+            (torch.bfloat16, 4, 4096, 64, 64, 8),
+            (torch.bfloat16, 4, 4096, 128, 64, 8),
+            (torch.bfloat16, 4, 2048, 192, 10, 10),
+            (torch.bfloat16, 4, 4096, 192, 10, 10),
+            (torch.bfloat16, 2, 2048, 192, 8, 2),
+            (torch.bfloat16, 4, 4096, 256, 32, 8),
+            (torch.bfloat16, 4, 4096, 256, 32, 32),
+            (torch.float16, 4, 2048, 128, 64, 8),
+            (torch.float16, 4, 4096, 128, 64, 8),
+            (torch.float16, 2, 2048, 128, 64, 8),
+            (torch.float16, 2, 4096, 128, 64, 8),
+            (torch.float16, 1, 4096, 128, 64, 8),
+            (torch.float32, 4, 2048, 128, 64, 8),
+            (torch.float32, 4, 4096, 128, 64, 8),
+            (torch.float32, 2, 2048, 128, 64, 8),
+            (torch.float32, 2, 4096, 128, 64, 8),
+            (torch.float32, 1, 2048, 128, 64, 8),
+            (torch.float32, 1, 4096, 128, 64, 8),
+        ),
+    )
+    def test_backward_auto_profile_measured_shapes(
+        self, dtype, batch, length, dim, heads, kv_heads
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _get_rocm_backward_phase_options,
+            _normalize_rocm_backward_options,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            dtype, batch, length, dim, heads, kv_heads
+        )
+        original = dict(options)
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        self.assertIs(profile["ROCM_SEPARATE_DQ"], dim not in (96, 192))
+        self.assertIs(profile["ROCM_EARLY_DP"], dim not in (96, 192))
+        self.assertIs(profile.get("bwd_ROCM_D96_PANEL_DOTS", False), dim == 96)
+        self.assertIs(profile.get("ROCM_D256_PANEL_DOTS", False), dim == 256)
+        self.assertIs(
+            profile.get("bwd_ROCM_EARLY_PROBABILITY_COMPACT", False), dim == 256
+        )
+        self.assertIs(profile.get("bwd_ROCM_D128_REVERSE_DQ_ROWS", False), dim == 128)
+        self.assertIs(
+            profile.get("bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64", False), dim == 128
+        )
+        self.assertIs(
+            profile.get("bwd_ROCM_D128_FP16_COVERAGE", False), dtype == torch.float16
+        )
+        self.assertIs(
+            profile.get("bwd_ROCM_D128_FP32_BALANCED64_COVERAGE", False),
+            dtype == torch.float32,
+        )
+        self.assertIs(profile["BLOCKS_ARE_CONTIGUOUS"], dim in (96, 192))
+        self.assertEqual(
+            tuple(
+                profile[key] for key in ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
+            ),
+            (16, 64, 128, 32)
+            if dim in (192, 256)
+            else (16, 64, 64, 16)
+            if dtype == torch.float32
+            else (32, 128, 128, 32),
+        )
+        self.assertEqual(options, original)
+        self.assertIsNot(profile, options)
+        requests = _normalize_rocm_backward_options(profile)
+        current = _get_rocm_backward_config_options(profile, is_gfx950=True)
+        with V.set_graph_handler(_tdm_graph()):
+            dkdv, dq = _get_rocm_backward_phase_options(
+                current,
+                nodes,
+                requests=requests,
+                single_config=True,
+                is_gfx950=True,
+                query=nodes[0],
+                key=nodes[1],
+                value=nodes[2],
+                grad_out=nodes[5],
+                use_separate_dq=True,
+                use_d192_panel_phase=dim == 192,
+                use_d96_panel_phase=dim == 96,
+                fp16_pilot=dtype == torch.float16,
+                fp32_balanced64_pilot=dtype == torch.float32,
+                score_is_trivial=True,
+                has_captures=False,
+                mask_is_causal=True if dim == 128 else None,
+                mask_is_scalar_true=dim != 128,
+                block_mask_is_default=dim != 128,
+                grad_logsumexp_is_none=True,
+                is_automatic=True,
+            )
+        self.assertEqual(
+            dkdv["BLOCK_M1"],
+            (32 if length == 2048 else 64)
+            if dim == 96 and heads != kv_heads
+            else 32
+            if dim == 256 and heads != kv_heads
+            else current["BLOCK_M1"],
+        )
+        self.assertEqual(dq["BLOCK_M1"], current["BLOCK_M1"])
+        d96_gqa4 = dim == 96 and heads != kv_heads
+        self.assertEqual(
+            dkdv["BLOCK_N1"],
+            (32 if length == 2048 else 64) if d96_gqa4 else current["BLOCK_N1"],
+        )
+        self.assertEqual(dkdv["num_stages"], 1 if d96_gqa4 else current["num_stages"])
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertIs(dkdv["ROCM_D192_PANEL_DOTS"], dim == 192)
+        self.assertIs(dq["ROCM_D192_DQ_EARLY_DP"], dim == 192)
+        self.assertIs(dkdv["ROCM_D96_PANEL_DOTS"], dim == 96 and heads == kv_heads)
+        self.assertIs(dq["ROCM_D96_DQ_UNROLL2"], dim == 96 and heads == kv_heads)
+        self.assertIs(dq["ROCM_D96_DQ_EARLY_DP"], dim == 96 and heads == kv_heads)
+        self.assertIs(dkdv["ROCM_EARLY_PROBABILITY_COMPACT"], dim == 256)
+        self.assertIs(dq["ROCM_EARLY_PROBABILITY_COMPACT"], False)
+        self.assertIs(dkdv["ROCM_D128_DV_VIEW_CARRY_SPLIT64"], dim == 128)
+        self.assertIs(dq["ROCM_D128_REVERSE_DQ_ROWS"], dim == 128)
+        self.assertIs(
+            dkdv.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False),
+            dim == 128
+            and (
+                dtype == torch.float16
+                or dtype == torch.float32
+                and (length == 4096 or (batch, length) == (4, 2048))
+            ),
+        )
+        self.assertEqual(
+            dkdv["matrix_instr_nonkdim"],
+            16
+            if (dtype, batch, heads, kv_heads, length, dim)
+            == (torch.bfloat16, 4, 10, 10, 4096, 192)
+            else 0,
+        )
+        self.assertEqual(
+            dq["matrix_instr_nonkdim"],
+            16
+            if (dtype, batch, heads, kv_heads, length, dim)
+            == (torch.bfloat16, 4, 10, 10, 4096, 192)
+            else 0,
+        )
+        self.assertIs(
+            dkdv["XCD_REMAP"], current["XCD_REMAP"] or dim == 256 and heads != kv_heads
+        )
+        self.assertIs(dq["XCD_REMAP"], current["XCD_REMAP"])
+        profile["num_warps"] = 8
+        self.assertEqual(options, original)
+
+    def test_backward_auto_profile_d256_gqa4_uses_panel_profile(self):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _normalize_rocm_backward_options,
+            _use_rocm_separate_dq,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, dim=256, heads=32, kv_heads=8
+        )
+        before = dict(options)
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        self.assertEqual(options, before)
+        self.assertIs(profile["ROCM_D256_PANEL_DOTS"], True)
+        self.assertIs(profile["bwd_ROCM_EARLY_PROBABILITY_COMPACT"], True)
+        _normalize_rocm_backward_options(profile)
+        current = _get_rocm_backward_config_options(profile, is_gfx950=True)
+        self.assertEqual(current["BLOCK_M1"], 16)
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertTrue(
+                _use_rocm_separate_dq(
+                    True,
+                    *nodes[:3],
+                    current,
+                    True,
+                    False,
+                    mask_is_scalar_true=True,
+                    block_mask_is_default=True,
+                )
+            )
+
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("automatic", (False, True))
+    @common_utils.parametrize("panel", (False, True))
+    @common_utils.parametrize("gqa", (1, 4))
+    def test_backward_auto_profile_d96_gqa4_phase_options(
+        self, length, automatic, panel, gqa
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _get_rocm_backward_phase_options,
+            _normalize_rocm_backward_options,
+        )
+        from torch._inductor.virtualized import V
+
+        batch, heads, kv_heads = (2, 8, 2) if gqa == 4 else (4, 21, 21)
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, batch, length, 96, heads, kv_heads
+        )
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        requests = _normalize_rocm_backward_options(profile)
+        current = _get_rocm_backward_config_options(profile, is_gfx950=True)
+        before = current.copy()
+        kwargs = dict(
+            requests=requests,
+            single_config=True,
+            is_gfx950=True,
+            query=nodes[0],
+            key=nodes[1],
+            value=nodes[2],
+            grad_out=nodes[5],
+            use_separate_dq=True,
+            use_d192_panel_phase=False,
+            use_d96_panel_phase=panel,
+            fp16_pilot=False,
+            fp32_balanced64_pilot=False,
+            score_is_trivial=True,
+            has_captures=False,
+            mask_is_causal=False,
+            mask_is_scalar_true=True,
+            block_mask_is_default=True,
+            grad_logsumexp_is_none=True,
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            explicit_dkdv, explicit_dq = _get_rocm_backward_phase_options(
+                current, nodes, **kwargs
+            )
+            dkdv, dq = _get_rocm_backward_phase_options(
+                current, nodes, is_automatic=automatic, **kwargs
+            )
+        expected = explicit_dkdv.copy()
+        if automatic and panel and gqa == 4:
+            expected.update(
+                ROCM_D96_PANEL_DOTS=False,
+                BLOCK_M1=32 if length == 2048 else 64,
+                BLOCK_N1=32 if length == 2048 else 64,
+                num_stages=1,
+            )
+        self.assertEqual(dkdv, expected)
+        self.assertEqual(dq, explicit_dq)
+        self.assertEqual(current, before)
+        self.assertEqual(
+            (explicit_dkdv["BLOCK_M1"], explicit_dkdv["BLOCK_N1"]), (32, 128)
+        )
+        self.assertEqual(
+            (explicit_dkdv["num_warps"], explicit_dkdv["num_stages"]), (4, 2)
+        )
+        self.assertEqual((dq["num_warps"], dq["num_stages"]), (4, 2))
+
+    @common_utils.parametrize("compact", (False, True))
+    def test_backward_auto_profile_d256_gqa4_preserves_explicit_options(self, compact):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _get_rocm_backward_phase_options,
+            _normalize_rocm_backward_options,
+            _use_rocm_separate_dq,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16, dim=256, heads=32, kv_heads=8
+        )
+        explicit = dict(
+            bwd_BLOCK_M1=16,
+            bwd_BLOCK_N1=64,
+            bwd_BLOCK_M2=128,
+            bwd_BLOCK_N2=32,
+            bwd_num_warps=4,
+            bwd_num_stages=2,
+            bwd_matrix_instr_nonkdim=0,
+            bwd_waves_per_eu=0,
+            bwd_kpack=1,
+            bwd_ROCM_SEPARATE_DQ=True,
+            bwd_ROCM_EARLY_DP=True,
+            bwd_XCD_REMAP=False,
+            bwd_ROCM_D256_PANEL_DOTS=True,
+            bwd_ROCM_EARLY_PROBABILITY_COMPACT=compact,
+        )
+        before = dict(explicit)
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options, explicit))
+        self.assertEqual(explicit, before)
+        current = dict(options, **explicit)
+        requests = _normalize_rocm_backward_options(current)
+        current = _get_rocm_backward_config_options(current, is_gfx950=True)
+        with V.set_graph_handler(_tdm_graph()):
+            separate = _use_rocm_separate_dq(
+                True,
+                *nodes[:3],
+                current,
+                True,
+                False,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+            )
+            self.assertTrue(separate)
+            dkdv, dq = _get_rocm_backward_phase_options(
+                current,
+                nodes,
+                requests=requests,
+                single_config=True,
+                is_gfx950=True,
+                query=nodes[0],
+                key=nodes[1],
+                value=nodes[2],
+                grad_out=nodes[5],
+                use_separate_dq=separate,
+                use_d192_panel_phase=False,
+                use_d96_panel_phase=False,
+                fp16_pilot=False,
+                fp32_balanced64_pilot=False,
+                score_is_trivial=True,
+                has_captures=False,
+                mask_is_causal=None,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+                grad_logsumexp_is_none=True,
+                is_automatic=False,
+            )
+        self.assertEqual((dkdv["BLOCK_M1"], dq["BLOCK_M1"]), (16, 16))
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertEqual(
+            (dkdv["matrix_instr_nonkdim"], dq["matrix_instr_nonkdim"]), (0, 0)
+        )
+        self.assertIs(dkdv["ROCM_EARLY_PROBABILITY_COMPACT"], compact)
+        self.assertIs(dq["ROCM_EARLY_PROBABILITY_COMPACT"], False)
+
+    @common_utils.parametrize("dim", (96, 128, 192, 256))
+    @common_utils.parametrize(
+        "case",
+        (
+            "architecture",
+            "backend",
+            "multi_config",
+            "score",
+            "capture",
+            "mask",
+            "grad_lse",
+            "zero_scale",
+            "negative_scale",
+            "nan_scale",
+            "boolean_scale",
+            "shape",
+            "batch",
+            "heads",
+            "query_dtype",
+            "query_stride",
+            "out_stride",
+        ),
+    )
+    def test_backward_auto_profile_fallback(self, dim, case):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            dim=dim,
+            heads=21 if dim == 96 else 10 if dim == 192 else 32 if dim == 256 else 64,
+            kv_heads=21 if dim == 96 else 10 if dim == 192 else 32 if dim == 256 else 8,
+        )
+        flags = {
+            "architecture": dict(is_gfx950=False),
+            "backend": dict(backend="FLASH"),
+            "multi_config": dict(single_config=False),
+            "score": dict(score_is_trivial=False),
+            "capture": dict(has_captures=True),
+            "mask": dict(mask_is_causal=False, mask_is_scalar_true=False),
+            "grad_lse": dict(grad_logsumexp_is_none=False),
+        }
+        scales = {
+            "zero_scale": 0.0,
+            "negative_scale": -0.125,
+            "nan_scale": float("nan"),
+            "boolean_scale": False,
+        }
+        if case in scales:
+            options["SM_SCALE"] = scales[case]
+        if case in ("shape", "batch", "heads", "query_dtype", "query_stride"):
+            size, stride = list(nodes[0].get_size()), list(nodes[0].get_stride())
+            if case in ("shape", "batch", "heads"):
+                size[{"batch": 0, "heads": 1, "shape": 2}[case]] += 1
+            if case == "query_stride":
+                stride[-1] = 2
+            nodes[0] = _tdm_operand(
+                "invalid_auto_query",
+                stride,
+                size=size,
+                dtype=torch.float16 if case == "query_dtype" else torch.bfloat16,
+            )
+        if case == "out_stride":
+            stride = list(out.get_stride())
+            stride[-1] = 2
+            out = _tdm_operand(
+                "invalid_auto_out", stride, size=out.get_size(), dtype=out.get_dtype()
+            )
+        self.assertIsNone(
+            self._backward_auto_profile(nodes, out, options, **flags.get(case, {}))
+        )
+
+    @common_utils.parametrize("index", tuple(range(8, 16)))
+    @common_utils.parametrize("field", ("shape", "stride", "dtype"))
+    def test_backward_auto_profile_sparse_metadata(self, index, field):
+        nodes, out, options = self._backward_auto_profile_inputs()
+        size, stride = list(nodes[index].get_size()), list(nodes[index].get_stride())
+        if field == "shape":
+            size[0] = 4
+        elif field == "stride":
+            stride[-1] = 2
+        nodes[index] = _tdm_operand(
+            "invalid_auto_metadata",
+            stride,
+            size=size,
+            dtype=torch.int64 if field == "dtype" else torch.int32,
+        )
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize("index", (0, 1, 2, 3, 4, 5, 16))
+    @common_utils.parametrize("field", ("shape", "stride", "dtype"))
+    def test_backward_auto_profile_operand_boundaries(self, index, field):
+        nodes, out, options = self._backward_auto_profile_inputs()
+        tensor = out if index == 16 else nodes[index]
+        size, stride = list(tensor.get_size()), list(tensor.get_stride())
+        if field == "shape":
+            size[2] -= 1
+        elif field == "stride":
+            stride[-1] = 2
+        replacement = _tdm_operand(
+            "invalid_auto_operand",
+            stride,
+            size=size,
+            dtype=torch.bfloat16 if field == "dtype" else tensor.get_dtype(),
+        )
+        if index == 16:
+            out = replacement
+        else:
+            nodes[index] = replacement
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize("prefix", ("", "bwd_", "fwd_"))
+    @common_utils.parametrize(
+        "option",
+        (
+            "ROCM_SEPARATE_DQ",
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "BLOCK_M1",
+            "num_warps",
+            "num_stages",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+        ),
+    )
+    def test_backward_auto_profile_option_scope(self, prefix, option):
+        nodes, out, options = self._backward_auto_profile_inputs()
+        user_options = {
+            prefix + option: False
+            if option.startswith("ROCM_") or option == "XCD_REMAP"
+            else 1
+        }
+        original = dict(user_options)
+        profile = self._backward_auto_profile(nodes, out, options, user_options)
+        self.assertEqual(user_options, original)
+        if prefix == "fwd_":
+            self.assertIsNotNone(profile)
+        else:
+            self.assertIsNone(profile)
+
+    @common_utils.parametrize("dim", (96, 128, 256))
+    def test_backward_auto_profile_indexed_blocks(self, dim):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            torch.bfloat16,
+            dim=dim,
+            heads=21 if dim == 96 else 32 if dim == 256 else 64,
+            kv_heads=21 if dim == 96 else 10 if dim == 192 else 32 if dim == 256 else 8,
+        )
+        profile = self._backward_auto_profile(
+            nodes, out, options, {"bwd_BLOCKS_ARE_CONTIGUOUS": False}
+        )
+        if dim == 96:
+            self.assertIsNone(profile)
+        else:
+            self.assertIsNotNone(profile)
+            self.assertIs(profile["BLOCKS_ARE_CONTIGUOUS"], False)
+
+    @common_utils.parametrize("split_available", (False, True))
+    @common_utils.parametrize(
+        "operation",
+        ("unchanged", "copy", "append", "replace", "remove", "reverse", "clear"),
+    )
+    def test_backward_choices_hook_split_precedence(self, split_available, operation):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.kernel.flex.flex_attention import (
+            _append_flex_attention_backward_choices,
+        )
+        from torch._inductor.virtualized import V
+
+        class CustomChoices(InductorChoices):
+            def __init__(self):
+                self.returned = None
+                self.abi_sizes = None
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                self.abi_sizes = (len(input_nodes), len(subgraphs), len(mutated_inputs))
+                input_nodes.clear()
+                subgraphs.clear()
+                mutated_inputs.clear()
+                if operation == "copy":
+                    choices = list(choices)
+                elif operation == "append":
+                    choices.append(custom)
+                elif operation == "replace":
+                    choices[:] = [custom]
+                elif operation == "remove":
+                    choices.pop()
+                elif operation == "reverse":
+                    choices.reverse()
+                elif operation == "clear":
+                    choices.clear()
+                self.returned = choices
+                return choices
+
+        first, second, custom = object(), object(), object()
+        inputs = [object() for _ in range(16)]
+        subgraphs = [object() for _ in range(4)]
+        mutations = [inputs[6], inputs[7]]
+        handler = CustomChoices()
+        with V.set_choices_handler(handler):
+            choices, use_split = _append_flex_attention_backward_choices(
+                [first, second],
+                [],
+                inputs,
+                subgraphs,
+                None,
+                {},
+                128,
+                128,
+                mutated_inputs=mutations,
+                split_available=split_available,
+            )
+        expected = {
+            "unchanged": [first, second],
+            "copy": [first, second],
+            "append": [first, second, custom],
+            "replace": [custom],
+            "remove": [first],
+            "reverse": [second, first],
+            "clear": [],
+        }
+        self.assertIs(choices, handler.returned)
+        self.assertEqual(choices, expected[operation])
+        self.assertEqual(
+            use_split, split_available and operation in ("unchanged", "copy")
+        )
+        self.assertEqual(handler.abi_sizes, (16, 4, 2))
+        self.assertEqual(len(inputs), 16)
+        self.assertEqual(len(subgraphs), 4)
+        self.assertEqual(mutations, [inputs[6], inputs[7]])
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "b2_n2048",
+            "kpack2",
+            "zero_scale",
+            "negative_scale",
+            "n4096",
+            "n4096_mixed_key",
+            "n4096_default",
+            "n4096_numeric",
+            "n4096_mi16",
+            "n4096_mi32",
+            "default",
+            "numeric",
+            "architecture",
+            "score",
+            "capture",
+            "mask",
+            "grad_lse",
+            "query_dtype",
+            "key_dtype",
+            "value_dtype",
+            "do_dtype",
+            "out_dtype",
+            "lse_dtype",
+            "batch",
+            "heads",
+            "length",
+            "key_shape",
+            "out_shape",
+            "lse_shape",
+            "query_stride",
+            "out_stride",
+            "stages",
+            "warps",
+            "phase",
+            "gqa",
+            "prescale",
+            "tma",
+        ),
+    )
+    def test_d128_fp16_coverage_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_fp16_coverage,
+        )
+        from torch._inductor.virtualized import V
+
+        names = ("query", "key", "value", "do", "out", "lse")
+        length = 4096 if case.startswith("n4096") else 2048
+        shapes = (
+            (4, 64, length, 128),
+            (4, 8, length, 128),
+            (4, 8, length, 128),
+            (4, 64, length, 128),
+            (4, 64, length, 128),
+            (4, 64, length),
+        )
+        operands = []
+        for name, shape in zip(names, shapes, strict=True):
+            sizes = list(shape)
+            if case == "batch":
+                sizes[0] = 3
+            if case == "b2_n2048":
+                sizes[0] = 2
+            if case == "heads" and name == "query":
+                sizes[1] = 32
+            if case == "length":
+                sizes[2] = 8192
+            if case == name + "_shape" or (case == "n4096_mixed_key" and name == "key"):
+                sizes[2] = 1024
+            strides, stride = [], 1
+            for size in reversed(sizes):
+                strides.insert(0, stride)
+                stride *= size
+            if case == name + "_stride":
+                strides[-1] = 2
+            dtype = torch.float32 if name == "lse" else torch.float16
+            if case == name + "_dtype":
+                dtype = torch.float16 if name == "lse" else torch.bfloat16
+            operands.append(
+                types.SimpleNamespace(
+                    get_size=lambda sizes=sizes: sizes,
+                    get_stride=lambda strides=strides: strides,
+                    get_dtype=lambda dtype=dtype: dtype,
+                    get_device=lambda: torch.device("cuda"),
+                )
+            )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            SM_SCALE=0.0
+            if case == "zero_scale"
+            else -0.125
+            if case == "negative_scale"
+            else 128**-0.5,
+            ROCM_BWD_PHASE=1 if case == "phase" else 0,
+            ROCM_GQA_SPLITS=1,
+            GQA_SHARED_HEADS=4 if case == "gqa" else 8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            matrix_instr_nonkdim=16
+            if case == "n4096_mi16"
+            else 32
+            if case == "n4096_mi32"
+            else 0,
+            waves_per_eu=0,
+            kpack=2 if case == "kpack2" else 1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+        )
+        sizevars = types.SimpleNamespace(
+            statically_known_equals=lambda first, second: first == second
+        )
+        with V.set_graph_handler(types.SimpleNamespace(sizevars=sizevars)):
+            actual = _use_rocm_d128_fp16_coverage(
+                case != "architecture",
+                *operands,
+                options,
+                case != "score",
+                case == "capture",
+                requested=1
+                if case in ("numeric", "n4096_numeric")
+                else case not in ("default", "n4096_default"),
+                mask_is_causal=case != "mask",
+                grad_logsumexp_is_none=case != "grad_lse",
+            )
+        self.assertIs(
+            actual,
+            case
+            in (
+                "enabled",
+                "kpack2",
+                "zero_scale",
+                "negative_scale",
+                "n4096",
+                "b2_n2048",
+            ),
+        )
+
+    @common_utils.parametrize(
+        "batch,length,fp32,expected",
+        (
+            (4, 2048, False, True),
+            (4, 4096, False, True),
+            (2, 4096, False, True),
+            (2, 2048, False, True),
+            (2, 1024, False, False),
+            (4, 1024, False, False),
+            (4, 2048, True, True),
+            (4, 4096, True, True),
+            (2, 4096, True, True),
+            (2, 2048, True, True),
+            (2, 1024, True, False),
+            (1, 4096, False, True),
+            (1, 2048, False, False),
+            (1, 4096, True, True),
+            (1, 2048, True, True),
+            (1, 1024, True, False),
+            (3, 4096, False, False),
+        ),
+    )
+    def test_d128_fp16_joint_batch_scope(self, batch, length, fp32, expected):
+        from torch._inductor.virtualized import V
+
+        values = self._d128_coverage_operands(batch, length, fp32)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = self._d128_coverage_routes(values, fp32)
+        self.assertEqual(actual, (expected,) * 4)
+
+    @common_utils.parametrize("fp32", (False, True))
+    @common_utils.parametrize("option", ("PRESCALE_QK", "USE_TMA"))
+    @common_utils.parametrize(
+        "case,expected",
+        (
+            ("forward", True),
+            ("forward_backward", True),
+            ("shared_backward", True),
+            ("backward", False),
+            ("shared", False),
+            ("forward_shared", False),
+        ),
+    )
+    def test_d128_coverage_option_scoping(self, fp32, option, case, expected):
+        from torch._inductor.virtualized import V
+
+        overrides = {
+            "forward": {"fwd_" + option: True},
+            "forward_backward": {"fwd_" + option: True, "bwd_" + option: False},
+            "shared_backward": {option: True, "bwd_" + option: False},
+            "backward": {"bwd_" + option: True},
+            "shared": {option: True},
+            "forward_shared": {"fwd_" + option: False, option: True},
+        }
+        values = self._d128_coverage_operands(4, 4096, fp32)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = self._d128_coverage_routes(values, fp32, **overrides[case])
+        self.assertEqual(actual[0], expected)
+
+    @common_utils.parametrize("fp32", (False, True))
+    @common_utils.parametrize("prefix", ("", "fwd_"))
+    def test_d128_coverage_rejects_request_aliases(self, fp32, prefix):
+        from torch._inductor.virtualized import V
+
+        option = (
+            "ROCM_D128_FP32_BALANCED64_COVERAGE" if fp32 else "ROCM_D128_FP16_COVERAGE"
+        )
+        values = self._d128_coverage_operands(4, 4096, fp32)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = self._d128_coverage_routes(values, fp32, **{prefix + option: True})
+        self.assertEqual(actual[0], False)
+
+    @common_utils.parametrize("fp32", (False, True))
+    @common_utils.parametrize(
+        "case,value",
+        (
+            ("true", True),
+            ("false", False),
+            ("missing", None),
+            ("numeric", 1),
+            ("string", "True"),
+        ),
+    )
+    def test_d128_coverage_indexed_blocks(self, fp32, case, value):
+        from torch._inductor.virtualized import V
+
+        values = self._d128_coverage_operands(4, 4096, fp32)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = self._d128_coverage_routes(
+                values, fp32, BLOCKS_ARE_CONTIGUOUS=value
+            )
+        admitted = type(value) is bool
+        self.assertEqual(actual, (admitted, True, admitted, admitted))
+
+    @common_utils.parametrize(
+        "batch,length,fp32",
+        (
+            (1, 4096, False),
+            (2, 4096, False),
+            (2, 2048, False),
+            (1, 4096, True),
+            (2, 4096, True),
+            (1, 2048, True),
+            (2, 2048, True),
+        ),
+    )
+    @common_utils.parametrize("field", ("batch", "length", "dtype", "stride"))
+    @common_utils.parametrize("index", tuple(range(6)))
+    def test_d128_coverage_joint_operand_boundaries(
+        self, batch, length, fp32, field, index
+    ):
+        from torch._inductor.virtualized import V
+
+        values = self._d128_coverage_operands(batch, length, fp32, field, index)
+        if field == "length":
+            other_length = 4096 if length == 2048 else 2048
+            values[index] = self._d128_coverage_operands(batch, other_length, fp32)[
+                index
+            ]
+        with V.set_graph_handler(_tdm_graph()):
+            actual = self._d128_coverage_routes(values, fp32)
+        self.assertEqual(actual, (False, index >= 3, index >= 4, index >= 4))
+
+    def _d128_coverage_operands(self, batch, length, fp32, field=None, index=None):
+        values = []
+        for current, heads in enumerate((64, 8, 8, 64, 64, 64)):
+            shape = [batch, heads, length]
+            if current != 5:
+                shape.append(128)
+            if current == index and field == "batch":
+                shape[0] = 4
+            if current == index and field == "length":
+                shape[2] = 2048
+            strides, stride = [], 1
+            for size in reversed(shape):
+                strides.insert(0, stride)
+                stride *= size
+            if current == index and field == "stride":
+                strides[-1] = 2
+            dtype = torch.float32 if fp32 or current == 5 else torch.float16
+            if current == index and field == "dtype":
+                dtype = torch.float16 if current == 5 else torch.bfloat16
+            values.append(
+                _tdm_operand("joint_" + str(current), strides, size=shape, dtype=dtype)
+            )
+        return values
+
+    def _d128_coverage_routes(self, values, fp32, **option_overrides):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _normalize_rocm_backward_options,
+            _use_rocm_d128_dv_view_carry_split64,
+            _use_rocm_d128_fp16_coverage,
+            _use_rocm_d128_fp32_balanced64_coverage,
+            _use_rocm_d128_reverse_causal_dq_rows,
+            _use_rocm_separate_dq,
+        )
+
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            SM_SCALE=128**-0.5,
+            FLOAT32_PRECISION="'ieee'",
+            ROCM_BWD_PHASE=0,
+            ROCM_GQA_SPLITS=1,
+            GQA_SHARED_HEADS=8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=16 if fp32 else 32,
+            BLOCK_N1=64 if fp32 else 128,
+            BLOCK_M2=64 if fp32 else 128,
+            BLOCK_N2=16 if fp32 else 32,
+            num_warps=4,
+            num_stages=1 if fp32 else 2,
+            matrix_instr_nonkdim=0,
+            waves_per_eu=0,
+            kpack=1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+        )
+        coverage = (
+            _use_rocm_d128_fp32_balanced64_coverage
+            if fp32
+            else _use_rocm_d128_fp16_coverage
+        )
+        flags = dict(requested=True, mask_is_causal=True, grad_logsumexp_is_none=True)
+        if option_overrides:
+            option = (
+                "ROCM_D128_FP32_BALANCED64_COVERAGE"
+                if fp32
+                else "ROCM_D128_FP16_COVERAGE"
+            )
+            options["bwd_" + option] = True
+            options.update(option_overrides)
+            requests = _normalize_rocm_backward_options(options)
+            options = _get_rocm_backward_config_options(options, is_gfx950=True)
+            flags["requested"] = (
+                requests.fp32_balanced64_coverage_requested
+                if fp32
+                else requests.fp16_coverage_requested
+            )
+            flags["other_requests"] = (
+                requests.fp32_balanced64_coverage_other_requests
+                if fp32
+                else requests.fp16_coverage_other_requests
+            )
+        admitted = coverage(True, *values, options, True, False, **flags)
+        pilot = dict(fp16_pilot=not fp32, fp32_balanced64_pilot=fp32)
+        separate = _use_rocm_separate_dq(
+            True, *values[:3], options, True, False, **pilot
+        )
+        reverse = _use_rocm_d128_reverse_causal_dq_rows(
+            separate, True, *values[:4], options, True, False, **flags, **pilot
+        )
+        dv = _use_rocm_d128_dv_view_carry_split64(
+            separate,
+            True,
+            *values[:4],
+            options,
+            True,
+            False,
+            reverse_requested=True,
+            **flags,
+            **pilot,
+        )
+        return admitted, separate, reverse, dv
+
+    @common_utils.parametrize(
+        "query_length,key_length,do_length,out_length,lse_length,expected",
+        (
+            (2048, 2048, 2048, 2048, 2048, True),
+            (4096, 4096, 4096, 4096, 4096, True),
+            (1024, 1024, 1024, 1024, 1024, False),
+            (8192, 8192, 8192, 8192, 8192, False),
+            (4096, 2048, 4096, 4096, 4096, False),
+            (2048, 4096, 2048, 2048, 2048, False),
+            (4096, 4096, 2048, 4096, 4096, False),
+            (4096, 4096, 4096, 2048, 4096, False),
+            (4096, 4096, 4096, 4096, 2048, False),
+        ),
+    )
+    def test_d128_fp32_balanced64_joint_length_scope(
+        self, query_length, key_length, do_length, out_length, lse_length, expected
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_fp32_balanced64_coverage,
+        )
+        from torch._inductor.virtualized import V
+
+        shapes = (
+            (4, 64, query_length, 128),
+            (4, 8, key_length, 128),
+            (4, 8, key_length, 128),
+            (4, 64, do_length, 128),
+            (4, 64, out_length, 128),
+            (4, 64, lse_length),
+        )
+        operands = []
+        for shape in shapes:
+            strides, stride = [], 1
+            for size in reversed(shape):
+                strides.insert(0, stride)
+                stride *= size
+            operands.append(
+                types.SimpleNamespace(
+                    get_size=lambda shape=shape: shape,
+                    get_stride=lambda strides=strides: strides,
+                    get_dtype=lambda: torch.float32,
+                    get_device=lambda: torch.device("cuda"),
+                )
+            )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            SM_SCALE=1 / math.sqrt(128),
+            ROCM_BWD_PHASE=0,
+            ROCM_GQA_SPLITS=1,
+            GQA_SHARED_HEADS=8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=16,
+            BLOCK_N1=64,
+            BLOCK_M2=64,
+            BLOCK_N2=16,
+            num_warps=4,
+            num_stages=1,
+            matrix_instr_nonkdim=0,
+            waves_per_eu=0,
+            kpack=1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+            FLOAT32_PRECISION="'ieee'",
+        )
+        sizevars = types.SimpleNamespace(
+            statically_known_equals=lambda first, second: first == second
+        )
+        with V.set_graph_handler(types.SimpleNamespace(sizevars=sizevars)):
+            actual = _use_rocm_d128_fp32_balanced64_coverage(
+                True,
+                *operands,
+                options,
+                True,
+                False,
+                requested=True,
+                mask_is_causal=True,
+                grad_logsumexp_is_none=True,
+            )
+        self.assertIs(actual, expected)
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "b2_n4096",
+            "b1_n4096",
+            "b1_n2048",
+            "b2_n2048",
+            "kpack2",
+            "zero_scale",
+            "negative_scale",
+            "default",
+            "numeric",
+            "architecture",
+            "score",
+            "capture",
+            "mask",
+            "grad_lse",
+            "query_dtype",
+            "key_dtype",
+            "value_dtype",
+            "do_dtype",
+            "out_dtype",
+            "lse_dtype",
+            "batch",
+            "heads",
+            "length",
+            "key_shape",
+            "out_shape",
+            "lse_shape",
+            "query_stride",
+            "out_stride",
+            "stages",
+            "warps",
+            "phase",
+            "gqa",
+            "prescale",
+            "tma",
+            "precision",
+            "boolean_precision",
+            "boolean_tiles",
+            "boolean_stages",
+            "boolean_scale",
+            "scale_inf",
+            "other_requests",
+            "raw",
+            "forward",
+        ),
+    )
+    def test_d128_fp32_balanced64_coverage_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_fp32_balanced64_coverage,
+        )
+        from torch._inductor.virtualized import V
+
+        names = ("query", "key", "value", "do", "out", "lse")
+        shapes = (
+            (4, 64, 2048, 128),
+            (4, 8, 2048, 128),
+            (4, 8, 2048, 128),
+            (4, 64, 2048, 128),
+            (4, 64, 2048, 128),
+            (4, 64, 2048),
+        )
+        operands = []
+        for name, shape in zip(names, shapes, strict=True):
+            sizes = list(shape)
+            if case == "b2_n2048":
+                sizes[0] = 2
+            if case == "b1_n2048":
+                sizes[0] = 1
+            if case == "b1_n4096":
+                sizes[0] = 1
+                sizes[2] = 4096
+            if case == "b2_n4096":
+                sizes[0] = 2
+                sizes[2] = 4096
+            if case == "batch":
+                sizes[0] = 3
+            if case == "heads" and name == "query":
+                sizes[1] = 32
+            if case == "length":
+                sizes[2] = 8192
+            if case == name + "_shape":
+                sizes[2] = 1024
+            strides, stride = [], 1
+            for size in reversed(sizes):
+                strides.insert(0, stride)
+                stride *= size
+            if case == name + "_stride":
+                strides[-1] = 2
+            dtype = torch.float32
+            if case == name + "_dtype":
+                dtype = torch.bfloat16
+            operands.append(
+                types.SimpleNamespace(
+                    get_size=lambda sizes=sizes: sizes,
+                    get_stride=lambda strides=strides: strides,
+                    get_dtype=lambda dtype=dtype: dtype,
+                    get_device=lambda: torch.device("cuda"),
+                )
+            )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            SM_SCALE=0.0
+            if case == "zero_scale"
+            else -0.125
+            if case == "negative_scale"
+            else 128**-0.5,
+            ROCM_BWD_PHASE=1 if case == "phase" else 0,
+            ROCM_GQA_SPLITS=1,
+            GQA_SHARED_HEADS=4 if case == "gqa" else 8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=True if case == "boolean_tiles" else 16,
+            BLOCK_N1=64,
+            BLOCK_M2=64,
+            BLOCK_N2=16,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=True
+            if case == "boolean_stages"
+            else 2
+            if case == "stages"
+            else 1,
+            matrix_instr_nonkdim=0,
+            waves_per_eu=0,
+            kpack=2 if case == "kpack2" else 1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+            FLOAT32_PRECISION=True
+            if case == "boolean_precision"
+            else "'tf32'"
+            if case == "precision"
+            else "'ieee'",
+        )
+        if case == "boolean_scale":
+            options["SM_SCALE"] = True
+        if case == "scale_inf":
+            options["SM_SCALE"] = float("inf")
+        sizevars = types.SimpleNamespace(
+            statically_known_equals=lambda first, second: first == second
+        )
+        with V.set_graph_handler(types.SimpleNamespace(sizevars=sizevars)):
+            actual = _use_rocm_d128_fp32_balanced64_coverage(
+                case != "architecture",
+                *operands,
+                options,
+                case != "score",
+                case == "capture",
+                requested=1
+                if case == "numeric"
+                else case not in ("default", "raw", "forward"),
+                other_requests=case == "other_requests",
+                mask_is_causal=case != "mask",
+                grad_logsumexp_is_none=case != "grad_lse",
+            )
+        self.assertIs(
+            actual,
+            case
+            in (
+                "enabled",
+                "zero_scale",
+                "negative_scale",
+                "b2_n4096",
+                "b1_n4096",
+                "b1_n2048",
+                "b2_n2048",
+            ),
+        )
+
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize(
+        "case",
+        (
+            "default",
+            "disabled",
+            "numeric_optin",
+            "architecture",
+            "fp16",
+            "fp32",
+            "key_dtype",
+            "query_dim",
+            "value_dim",
+            "zero_len",
+            "broadcast",
+            "value_shape",
+            "query_stride",
+            "key_stride",
+            "value_stride",
+            "gqa",
+            "gqa_metadata",
+            "unknown_gqa",
+            "unknown_len",
+            "score",
+            "mask",
+            "score_capture",
+            "mask_capture",
+            "tma",
+            "prescale",
+            "consumers",
+            "panels",
+            "separate",
+            "split",
+            "early_dp",
+            "xcd_remap",
+            "m1",
+            "n1",
+            "m2",
+            "n2",
+            "warps",
+            "stages",
+            "phase",
+            "owners",
+            "length_bound",
+        ),
+    )
+    def test_d256_xcd_snake_guard(self, gqa, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_xcd_snake
+        from torch._inductor.virtualized import V
+
+        dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
+        actual_gqa = 2 if case == "gqa" else gqa
+        q_len = 0 if case == "zero_len" else 257
+        if case == "unknown_len":
+            q_len = sympy.Symbol("snake_q_len", integer=True, positive=True)
+        if case == "length_bound":
+            q_len = 2147483647 - 62
+
+        def operand(name, size, dtype=dtype):
+            strides, stride = [], 1
+            for extent in reversed(size):
+                strides.append(stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[1] *= 2
+            return _tdm_operand(name, list(reversed(strides)), size=size, dtype=dtype)
+
+        query = operand(
+            "query", (1, 2 * actual_gqa, q_len, 128 if case == "query_dim" else 256)
+        )
+        key = operand(
+            "key",
+            (2 if case == "broadcast" else 1, 2, 260, 256),
+            torch.float16 if case == "key_dtype" else dtype,
+        )
+        value = operand(
+            "value",
+            (
+                2 if case == "broadcast" else 1,
+                2,
+                259 if case == "value_shape" else 260,
+                128 if case == "value_dim" else 256,
+            ),
+        )
+        options = dict(
+            ROCM_XCD_SNAKE=1 if case == "numeric_optin" else case != "disabled",
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            num_consumer_groups=1 if case == "consumers" else 0,
+            ROCM_D256_PANEL_DOTS=case == "panels",
+            ROCM_SEPARATE_DQ=case == "separate",
+            ROCM_GQA_SPLIT_DKDV=case == "split",
+            ROCM_EARLY_DP=case == "early_dp",
+            XCD_REMAP=case == "xcd_remap",
+            BLOCK_M1=64 if case == "m1" else 32,
+            BLOCK_N1=128 if case == "n1" else 64,
+            BLOCK_M2=128 if case == "m2" else 64,
+            BLOCK_N2=32 if case == "n2" else 64,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=2 if case == "stages" else 1,
+            GQA_SHARED_HEADS=4
+            if case == "gqa_metadata" and gqa == 1
+            else 1
+            if case == "gqa_metadata"
+            else actual_gqa,
+            ROCM_BWD_PHASE=1 if case == "phase" else 0,
+            ROCM_GQA_SPLITS=2 if case == "owners" else 1,
+        )
+        if case == "unknown_gqa":
+            options["GQA_SHARED_HEADS"] = sympy.Symbol(
+                "snake_gqa", integer=True, positive=True
+            )
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_xcd_snake(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score",
+                case != "mask",
+                case in ("score_capture", "mask_capture"),
+            )
+        self.assertEqual(actual, case == "default")
+
+    @common_utils.parametrize(
+        "case,expected",
+        (
+            ("ge", True),
+            ("le", True),
+            ("reversed_ge", False),
+            ("reversed_le", False),
+            ("scalar_true", False),
+            ("scalar_false", False),
+            ("numeric_fill", False),
+            ("extra_node", False),
+            ("different_output", False),
+            ("kwargs", False),
+            ("extra_placeholder", False),
+            ("unknown_target", False),
+        ),
+    )
+    def test_d256_xcd_snake_causal_graph(self, case, expected):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _is_rocm_simple_causal_mask_graph,
+        )
+
+        graph = torch.fx.Graph()
+        indices = [graph.placeholder(name) for name in ("b", "h", "q_idx", "kv_idx")]
+        if case == "extra_placeholder":
+            graph.placeholder("captured")
+        if case in ("scalar_true", "scalar_false", "numeric_fill"):
+            result = graph.call_function(
+                torch.ops.aten.full.default,
+                ([], 1 if case == "numeric_fill" else case == "scalar_true"),
+                {"dtype": torch.bool},
+            )
+        else:
+            target = (
+                torch.ops.aten.le.Tensor
+                if case in ("le", "reversed_le")
+                else torch.ops.aten.ge.Tensor
+            )
+            if case == "unknown_target":
+                target = torch.ops.aten.eq.Tensor
+            left, right = (
+                (indices[3], indices[2])
+                if case in ("le", "reversed_ge")
+                else (indices[2], indices[3])
+            )
+            result = graph.call_function(
+                target, (left, right), {"unknown": True} if case == "kwargs" else {}
+            )
+        if case == "extra_node":
+            graph.call_function(torch.ops.aten.add.Tensor, (indices[2], indices[3]))
+        graph.output(indices[2] if case == "different_output" else result)
+        self.assertEqual(
+            _is_rocm_simple_causal_mask_graph(types.SimpleNamespace(graph=graph)),
+            expected,
+        )
+
+    @common_utils.parametrize(
+        "gfx950,dtype,qk_dim,v_dim,use_tma,requested,expected",
+        (
+            (True, torch.bfloat16, 256, 256, False, True, True),
+            (True, torch.bfloat16, 256, 256, False, None, False),
+            (True, torch.bfloat16, 256, 256, False, False, False),
+            (False, torch.bfloat16, 256, 256, False, True, False),
+            (True, torch.float16, 256, 256, False, True, False),
+            (True, torch.float32, 256, 256, False, True, False),
+            (True, torch.bfloat16, 128, 256, False, True, False),
+            (True, torch.bfloat16, 256, 128, False, True, False),
+            (True, torch.bfloat16, 255, 256, False, True, False),
+            (True, torch.bfloat16, 256, 255, False, True, False),
+            (True, torch.bfloat16, 256, 256, True, True, False),
+        ),
+    )
+    def test_d256_panel_guard(
+        self, gfx950, dtype, qk_dim, v_dim, use_tma, requested, expected
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d256_panel_dots,
+        )
+
+        options = {"QK_HEAD_DIM": qk_dim, "V_HEAD_DIM": v_dim, "USE_TMA": use_tma}
+        if requested is not None:
+            options["ROCM_D256_PANEL_DOTS"] = requested
+        self.assertEqual(
+            _use_rocm_d256_panel_dots(gfx950, dtype, qk_dim, v_dim, options), expected
+        )
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "default",
+            "disabled",
+            "bf16",
+            "fp32",
+            "gqa2",
+            "gqa8",
+            "broadcast",
+            "key_stride",
+            "value_stride",
+            "architecture",
+            "captures",
+            "score_mod",
+            "custom_mask",
+            "unknown_mask",
+            "tma",
+            "prescale",
+            "consumers",
+            "tiles",
+        ),
+    )
+    def test_gqa_split_dkdv_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_gqa_split_dkdv,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}.get(case, torch.float16)
+        gqa = {"gqa2": 2, "gqa8": 8}.get(case, 4)
+        batch_kv = 1 if case == "broadcast" else 2
+
+        def operand(name, size):
+            strides, stride = [], 1
+            for extent in reversed(size):
+                strides.append(stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[1] *= 2
+            return _tdm_operand(name, list(reversed(strides)), size=size, dtype=dtype)
+
+        query = operand("query", (2, 4 * gqa, 257, 64))
+        key = operand("key", (batch_kv, 4, 260, 64))
+        value = operand("value", (batch_kv, 4, 260, 64))
+        options = dict(
+            ROCM_GQA_SPLIT_DKDV=case != "disabled",
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            num_consumer_groups=2 if case == "consumers" else 0,
+            BLOCK_M1=16 if case == "tiles" else 32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            GQA_SHARED_HEADS=gqa,
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_gqa_split_dkdv(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score_mod",
+                case != "custom_mask",
+                case != "unknown_mask",
+                case == "captures",
+            )
+        self.assertEqual(actual, case == "default")
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "default",
+            "length",
+            "block_size",
+            "full_blocks",
+            "ordering",
+            "counts",
+            "indices",
+            "missing_q",
+        ),
+    )
+    def test_gqa_split_default_mask_structure(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _is_rocm_default_block_mask,
+        )
+        from torch._inductor.virtualized import V
+        from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
+
+        def metadata(name, rank):
+            return _tdm_operand(name, [1] * rank, size=[1] * rank, dtype=torch.int32)
+
+        query = _tdm_operand("query", [131584, 16448, 64, 1], size=[1, 8, 257, 64])
+        key = _tdm_operand("key", [33280, 16640, 64, 1], size=[1, 2, 260, 64])
+        block_mask = [
+            1,
+            1,
+            metadata("kv_num", 3),
+            metadata("kv_idx", 4),
+            None,
+            None,
+            metadata("q_num", 3),
+            metadata("q_idx", 4),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _LARGE_SPARSE_BLOCK_SIZE,
+            _LARGE_SPARSE_BLOCK_SIZE,
+            None,
+        ]
+        if case == "length":
+            block_mask[0] = 257
+        elif case == "block_size":
+            block_mask[14] = 128
+        elif case == "full_blocks":
+            block_mask[4] = metadata("full_num", 3)
+        elif case == "ordering":
+            block_mask[10] = metadata("order", 3)
+        elif case == "counts":
+            block_mask[2] = _tdm_operand(
+                "counts", [2, 2, 1], size=[1, 1, 2], dtype=torch.int32
+            )
+        elif case == "indices":
+            block_mask[3] = _tdm_operand(
+                "indices", [2, 2, 2, 1], size=[1, 1, 1, 2], dtype=torch.int32
+            )
+        elif case == "missing_q":
+            block_mask[6] = None
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _is_rocm_default_block_mask(tuple(block_mask), query, key)
+        self.assertEqual(actual, case == "default")
+
+    @common_utils.parametrize(
+        "phase,splits,expected",
+        ((0, 1, (15, 1, 2)), (1, 2, (3, 1, 4)), (2, 1, (12, 1, 2))),
+    )
+    def test_gqa_split_grid(self, phase, splits, expected):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            flex_attention_backward_grid,
+        )
+
+        meta = dict(
+            BLOCK_M2=128, BLOCK_N1=128, ROCM_BWD_PHASE=phase, ROCM_GQA_SPLITS=splits
+        )
+        self.assertEqual(
+            flex_attention_backward_grid(1, 8, 257, 64, 2, 260, meta), expected
+        )
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "true",
+            "false",
+            "integer",
+            "float",
+            "shape",
+            "dtype",
+            "tensor_fill",
+            "output",
+            "placeholders",
+        ),
+    )
+    def test_d256_scalar_true_mask_graph(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _is_rocm_scalar_true_mask_graph,
+        )
+
+        graph = torch.fx.Graph()
+        placeholders = [graph.placeholder(name) for name in ("b", "h", "q", "kv")]
+        if case == "placeholders":
+            graph.placeholder("extra")
+        fill = {"false": False, "integer": 1, "float": 1.0}.get(case, True)
+        if case == "tensor_fill":
+            fill = placeholders[0]
+        output = graph.call_function(
+            torch.ops.aten.full.default,
+            ([1] if case == "shape" else [], fill),
+            {"dtype": torch.float32 if case == "dtype" else torch.bool},
+        )
+        graph.output(placeholders[0] if case == "output" else output)
+        self.assertEqual(
+            _is_rocm_scalar_true_mask_graph(torch.fx.GraphModule({}, graph)),
+            case == "true",
+        )
+
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize("dq_m,dq_n", ((64, 16), (128, 32)))
+    @common_utils.parametrize(
+        "case",
+        (
+            "default",
+            "disabled",
+            "architecture",
+            "fp16",
+            "fp32",
+            "key_dtype",
+            "value_dim",
+            "zero_len",
+            "broadcast",
+            "value_shape",
+            "stride",
+            "gqa",
+            "gqa_metadata",
+            "unknown_gqa_metadata",
+            "score",
+            "captures",
+            "false_mask",
+            "custom_block",
+            "panels",
+            "tma",
+            "prescale",
+            "consumers",
+            "tiles",
+            "warps",
+            "stages",
+        ),
+    )
+    def test_d256_dense_separate_dq_guard(self, gqa, dq_m, dq_n, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_separate_dq
+        from torch._inductor.virtualized import V
+
+        dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
+        actual_gqa = 2 if case == "gqa" else gqa
+
+        def operand(name, size, dtype=dtype):
+            strides, stride = [], 1
+            for extent in reversed(size):
+                strides.append(stride)
+                stride *= extent
+            if case == "stride" and name == "value":
+                strides[1] *= 2
+            return _tdm_operand(name, list(reversed(strides)), size=size, dtype=dtype)
+
+        query = operand(
+            "query", (2, 4 * actual_gqa, 0 if case == "zero_len" else 257, 256)
+        )
+        key = operand(
+            "key",
+            (1 if case == "broadcast" else 2, 4, 260, 256),
+            torch.float16 if case == "key_dtype" else dtype,
+        )
+        value = operand(
+            "value",
+            (
+                1 if case == "broadcast" else 2,
+                4,
+                259 if case == "value_shape" else 260,
+                128 if case == "value_dim" else 256,
+            ),
+        )
+        options = dict(
+            ROCM_SEPARATE_DQ=case != "disabled",
+            ROCM_D256_PANEL_DOTS=case != "panels",
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            num_consumer_groups=1 if case == "consumers" else 0,
+            BLOCK_M1=32 if case == "tiles" else 16,
+            BLOCK_N1=64,
+            BLOCK_M2=dq_m,
+            BLOCK_N2=dq_n,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            GQA_SHARED_HEADS=(4 if gqa == 1 else 1)
+            if case == "gqa_metadata"
+            else actual_gqa,
+            ROCM_BWD_PHASE=1,
+            ROCM_GQA_SPLITS=2,
+        )
+        if case == "unknown_gqa_metadata":
+            options["GQA_SHARED_HEADS"] = sympy.Symbol(
+                "gqa_metadata", integer=True, positive=True
+            )
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_separate_dq(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_scalar_true=case != "false_mask",
+                block_mask_is_default=case != "custom_block",
+            )
+        self.assertEqual(actual, case == "default")
+
+    @common_utils.parametrize(
+        "mask_is_scalar_true,block_mask_is_default",
+        ((False, False), (True, False), (False, True), (True, True)),
+    )
+    def test_d256_dense_guard_preserves_d128(
+        self, mask_is_scalar_true, block_mask_is_default
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import _use_rocm_separate_dq
+        from torch._inductor.virtualized import V
+
+        query = _tdm_operand(
+            "query",
+            [526336, 32896, 128, 1],
+            size=[1, 16, 257, 128],
+            dtype=torch.bfloat16,
+        )
+        key = _tdm_operand(
+            "key", [66560, 33280, 128, 1], size=[1, 2, 260, 128], dtype=torch.bfloat16
+        )
+        value = _tdm_operand(
+            "value", [66560, 33280, 128, 1], size=[1, 2, 260, 128], dtype=torch.bfloat16
+        )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_D256_PANEL_DOTS=False,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            GQA_SHARED_HEADS=8,
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_separate_dq(
+                True,
+                query,
+                key,
+                value,
+                options,
+                True,
+                False,
+                mask_is_scalar_true=mask_is_scalar_true,
+                block_mask_is_default=block_mask_is_default,
+            )
+        self.assertTrue(actual)
+
+    def test_d256_dense_guard_preserves_fp16(self):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_gqa_split_dkdv,
+            _use_rocm_separate_dq,
+        )
+        from torch._inductor.virtualized import V
+
+        query = _tdm_operand(
+            "query", [131584, 16448, 64, 1], size=[1, 8, 257, 64], dtype=torch.float16
+        )
+        key = _tdm_operand(
+            "key", [33280, 16640, 64, 1], size=[1, 2, 260, 64], dtype=torch.float16
+        )
+        value = _tdm_operand(
+            "value", [33280, 16640, 64, 1], size=[1, 2, 260, 64], dtype=torch.float16
+        )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_GQA_SPLIT_DKDV=True,
+            ROCM_D256_PANEL_DOTS=False,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            GQA_SHARED_HEADS=4,
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            separate = _use_rocm_separate_dq(
+                True,
+                query,
+                key,
+                value,
+                options,
+                True,
+                False,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+            )
+            split = _use_rocm_gqa_split_dkdv(
+                True, query, key, value, options, True, True, True, False
+            )
+        self.assertFalse(separate)
+        self.assertTrue(split)
+
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "missing",
+            "disabled",
+            "numeric_request",
+            "raw",
+            "architecture",
+            "fp16",
+            "fp32",
+            "key_dtype",
+            "value_dim",
+            "broadcast",
+            "value_shape",
+            "zero_len",
+            "stride",
+            "gqa",
+            "gqa_metadata",
+            "unknown_gqa_metadata",
+            "score",
+            "captures",
+            "false_mask",
+            "custom_block",
+            "panels",
+            "separate",
+            "early_dp",
+            "numeric_early_dp",
+            "tma",
+            "prescale",
+            "consumers",
+            "m1",
+            "n1",
+            "m2",
+            "n2",
+            "warps",
+            "stages",
+        ),
+    )
+    def test_early_probability_compact_guard(self, gqa, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_early_probability_compact,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
+        actual_gqa = 2 if case == "gqa" else gqa
+
+        def operand(name, shape, dtype=dtype):
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            if case == "stride" and name == "value":
+                strides[-2] *= 2
+            return _tdm_operand(name, strides, size=shape, dtype=dtype)
+
+        query = operand(
+            "query", (2, 4 * actual_gqa, 0 if case == "zero_len" else 257, 256)
+        )
+        key = operand(
+            "key",
+            (1 if case == "broadcast" else 2, 4, 260, 256),
+            torch.float16 if case == "key_dtype" else dtype,
+        )
+        value = operand(
+            "value",
+            (
+                1 if case == "broadcast" else 2,
+                4,
+                259 if case == "value_shape" else 260,
+                128 if case == "value_dim" else 256,
+            ),
+        )
+        options = dict(
+            ROCM_SEPARATE_DQ=case != "separate",
+            ROCM_D256_PANEL_DOTS=case != "panels",
+            ROCM_EARLY_DP=1 if case == "numeric_early_dp" else case != "early_dp",
+            ROCM_EARLY_PROBABILITY_COMPACT=True,
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            num_consumer_groups=1 if case == "consumers" else 0,
+            BLOCK_M1=32 if case == "m1" else 16,
+            BLOCK_N1=128 if case == "n1" else 64,
+            BLOCK_M2=64 if case == "m2" else 128,
+            BLOCK_N2=16 if case == "n2" else 32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            GQA_SHARED_HEADS=(4 if gqa == 1 else 1)
+            if case == "gqa_metadata"
+            else actual_gqa,
+        )
+        if case == "unknown_gqa_metadata":
+            options["GQA_SHARED_HEADS"] = sympy.Symbol(
+                "unknown_gqa", integer=True, positive=True
+            )
+        requested = 1 if case == "numeric_request" else case not in ("disabled", "raw")
+        keywords = {} if case == "missing" else {"requested": requested}
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_early_probability_compact(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_scalar_true=case != "false_mask",
+                block_mask_is_default=case != "custom_block",
+                **keywords,
+            )
+        self.assertEqual(actual, case == "enabled")
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "gqa4_pilot_enabled",
+            "gqa4_pilot_zero_scale",
+            "gqa4_pilot_negative_scale",
+            "gqa4_pilot_query_length",
+            "gqa4_pilot_key_length",
+            "gqa4_pilot_value_length",
+            "gqa4_pilot_do_length",
+            "gqa4_pilot_gqa_metadata",
+            "gqa4_pilot_unknown_gqa",
+            "gqa4_pilot_gqa2",
+            "gqa4_pilot_small_batch",
+            "gqa4_pilot_small_heads",
+            "gqa4_pilot_sequence4096",
+            "gqa4_pilot_missing",
+            "gqa4_pilot_disabled",
+            "gqa4_pilot_numeric_request",
+            "gqa4_pilot_raw",
+            "gqa4_pilot_forward",
+            "gqa4_pilot_captures",
+            "gqa4_pilot_grad_lse",
+            "gqa4_pilot_score",
+            "gqa4_pilot_false_mask",
+            "gqa4_pilot_custom_block",
+            "gqa4_pilot_do_dtype",
+            "gqa4_pilot_do_stride",
+            "gqa4_pilot_query_stride",
+            "gqa4_pilot_key_stride",
+            "gqa4_pilot_value_stride",
+            "gqa4_pilot_boolean_warps",
+            "gqa4_pilot_boolean_stages",
+            "gqa4_pilot_boolean_kpack",
+            "gqa4_pilot_string_stages",
+            "sequence2048",
+            "sequence1024",
+            "mixed_lengths",
+            "short_both",
+            "excluded_tail",
+            "small_batch1024",
+            "small_batch2048",
+            "zero_scale",
+            "negative_scale",
+            "missing",
+            "disabled",
+            "numeric_request",
+            "raw",
+            "architecture",
+            "fp16",
+            "fp32",
+            "key_dtype",
+            "value_dtype",
+            "query_dim",
+            "value_dim",
+            "broadcast",
+            "value_shape",
+            "zero_len",
+            "short_q",
+            "short_kv",
+            "small_batch",
+            "small_heads",
+            "length_bound",
+            "query_stride",
+            "key_stride",
+            "value_stride",
+            "gqa2",
+            "gqa4",
+            "gqa_metadata",
+            "unknown_gqa",
+            "unknown_len",
+            "score",
+            "captures",
+            "false_mask",
+            "custom_block",
+            "grad_lse",
+            "tma",
+            "prescale",
+            "panels",
+            "early_dp",
+            "compact",
+            "xcd_remap",
+            "snake",
+            "owners",
+            "consumers",
+            "safe_head",
+            "rounded_q",
+            "rounded_v",
+            "m1",
+            "n1",
+            "m2",
+            "n2",
+            "warps",
+            "stages",
+            "matrix",
+            "waves",
+            "kpack",
+            "nonfinite_scale",
+            "missing_do",
+            "do_dtype",
+            "do_shape",
+            "do_rank",
+            "do_stride",
+        ),
+    )
+    def test_d192_panel_phase_guard(self, case):
+        gqa4_pilot = case.startswith("gqa4_pilot_")
+        if gqa4_pilot:
+            case = case.removeprefix("gqa4_pilot_")
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d192_panel_phase,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
+        batch = (
+            1
+            if case
+            in ("small_batch", "short_both", "small_batch1024", "small_batch2048")
+            else 4
+        )
+        heads = 2 if case == "small_heads" else 10
+        actual_gqa = {"gqa2": 2, "gqa4": 4}.get(case, 1)
+        q_len = {
+            "zero_len": 0,
+            "short_q": 257,
+            "short_both": 257,
+            "excluded_tail": 1025,
+            "sequence2048": 2048,
+            "small_batch2048": 2048,
+            "sequence1024": 1024,
+            "small_batch1024": 1024,
+            "mixed_lengths": 2048,
+        }.get(case, 4096)
+        kv_len = {
+            "short_kv": 260,
+            "short_both": 260,
+            "excluded_tail": 1030,
+            "length_bound": 4097,
+            "sequence2048": 2048,
+            "small_batch2048": 2048,
+            "sequence1024": 1024,
+            "small_batch1024": 1024,
+        }.get(case, 4096)
+        if gqa4_pilot:
+            batch = 1 if case == "small_batch" else 2
+            heads = 1 if case == "small_heads" else 2
+            actual_gqa = 2 if case == "gqa2" else 4
+            q_len = kv_len = 4096 if case == "sequence4096" else 2048
+        if case == "unknown_len":
+            q_len = sympy.Symbol("d192_q_len", integer=True, positive=True)
+
+        def operand(name, shape, dtype=dtype):
+            if gqa4_pilot and case == name + "_length":
+                shape = (*shape[:2], 4096, shape[3])
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[-2] *= 2
+            return _tdm_operand(name, strides, size=shape, dtype=dtype)
+
+        query = operand(
+            "query",
+            (batch, heads * actual_gqa, q_len, 128 if case == "query_dim" else 192),
+        )
+        key = operand(
+            "key",
+            (1 if case == "broadcast" else batch, heads, kv_len, 192),
+            torch.float16 if case == "key_dtype" else dtype,
+        )
+        value = operand(
+            "value",
+            (
+                1 if case == "broadcast" else batch,
+                heads,
+                kv_len - 1 if case == "value_shape" else kv_len,
+                128 if case == "value_dim" else 192,
+            ),
+            torch.float16 if case == "value_dtype" else dtype,
+        )
+        do_shape = (
+            batch,
+            heads * actual_gqa,
+            q_len - 1 if case == "do_shape" else q_len,
+            192,
+        )
+        if case == "do_rank":
+            do_shape = do_shape[:-1]
+        grad_out = operand(
+            "do", do_shape, torch.float32 if case == "do_dtype" else torch.bfloat16
+        )
+        options = dict(
+            ROCM_D192_PANEL_DOTS=True,
+            SAFE_HEAD_DIM=case == "safe_head",
+            QK_HEAD_DIM=192,
+            V_HEAD_DIM=192,
+            QK_HEAD_DIM_ROUNDED=192 if case == "rounded_q" else 256,
+            V_HEAD_DIM_ROUNDED=192 if case == "rounded_v" else 256,
+            BLOCK_M1=32 if case == "m1" else 16,
+            BLOCK_N1=128 if case == "n1" else 64,
+            BLOCK_M2=64 if case == "m2" else 128,
+            BLOCK_N2=16 if case == "n2" else 32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            matrix_instr_nonkdim=16 if case == "matrix" else 0,
+            waves_per_eu=1 if case == "waves" else 0,
+            kpack=2 if case == "kpack" else 1,
+            GQA_SHARED_HEADS=4 if case == "gqa_metadata" else actual_gqa,
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            ROCM_D256_PANEL_DOTS=case == "panels",
+            ROCM_EARLY_DP=case == "early_dp",
+            ROCM_EARLY_PROBABILITY_COMPACT=case == "compact",
+            XCD_REMAP=case == "xcd_remap",
+            ROCM_XCD_SNAKE=case == "snake",
+            ROCM_GQA_SPLIT_DKDV=case == "owners",
+            num_consumer_groups=1 if case == "consumers" else 0,
+            SM_SCALE=0.0
+            if case == "zero_scale"
+            else (-0.125 if gqa4_pilot else -0.07)
+            if case == "negative_scale"
+            else float("inf")
+            if case == "nonfinite_scale"
+            else (192**-0.5 if gqa4_pilot else 0.07),
+        )
+        if gqa4_pilot and case == "gqa_metadata":
+            options["GQA_SHARED_HEADS"] = 8
+        if gqa4_pilot and case in (
+            "boolean_warps",
+            "boolean_stages",
+            "boolean_kpack",
+            "string_stages",
+        ):
+            key, value = {
+                "boolean_warps": ("num_warps", True),
+                "boolean_stages": ("num_stages", True),
+                "boolean_kpack": ("kpack", False),
+                "string_stages": ("num_stages", "2"),
+            }[case]
+            options[key] = value
+        if case == "unknown_gqa":
+            options["GQA_SHARED_HEADS"] = sympy.Symbol(
+                "d192_gqa", integer=True, positive=True
+            )
+        requested = (
+            1
+            if case == "numeric_request"
+            else case not in ("disabled", "raw", "forward")
+        )
+        keywords = {} if case == "missing" else {"requested": requested}
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d192_panel_phase(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_scalar_true=case != "false_mask",
+                block_mask_is_default=case != "custom_block",
+                grad_logsumexp_is_none=case != "grad_lse",
+                grad_out=None if case == "missing_do" else grad_out,
+                **keywords,
+            )
+        self.assertEqual(
+            actual, case in ("enabled", "sequence2048", "zero_scale", "negative_scale")
+        )
+
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "zero_scale",
+            "negative_scale",
+            "missing",
+            "disabled",
+            "numeric_request",
+            "raw",
+            "forward_only",
+            "architecture",
+            "fp16",
+            "fp32",
+            "key_dtype",
+            "value_dtype",
+            "query_dim",
+            "value_dim",
+            "broadcast",
+            "value_shape",
+            "short",
+            "sequence2048",
+            "sequence1024",
+            "mixed_lengths",
+            "zero_len",
+            "negative_len",
+            "large_len",
+            "batch",
+            "heads",
+            "key_heads",
+            "unknown_batch",
+            "unknown_heads",
+            "unknown_len",
+            "unknown_stride",
+            "query_stride",
+            "key_stride",
+            "value_stride",
+            "gqa2",
+            "gqa8",
+            "gqa_metadata",
+            "unknown_gqa",
+            "score",
+            "captures",
+            "false_mask",
+            "custom_block",
+            "grad_lse",
+            "tma",
+            "prescale",
+            "panels",
+            "d192",
+            "early_dp",
+            "compact",
+            "xcd_remap",
+            "snake",
+            "owners",
+            "consumers",
+            "safe_head",
+            "rounded_q",
+            "rounded_v",
+            "m1",
+            "n1",
+            "m2",
+            "n2",
+            "warps",
+            "stages",
+            "matrix",
+            "waves",
+            "kpack",
+            "nonfinite_scale",
+            "missing_do",
+            "do_dtype",
+            "do_shape",
+            "do_rank",
+            "do_stride",
+        ),
+    )
+    def test_d96_panel_phase_guard(self, gqa, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_panel_phase,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = {"fp16": torch.float16, "fp32": torch.float32}.get(case, torch.bfloat16)
+        batch, heads = (4, 21) if gqa == 1 else (2, 2)
+        if case == "batch":
+            batch = 1
+        if case == "heads":
+            heads += 1
+        actual_gqa = {"gqa2": 2, "gqa8": 8}.get(case, gqa)
+        q_len = {
+            "short": 257,
+            "sequence2048": 2048,
+            "sequence1024": 1024,
+            "mixed_lengths": 2048,
+            "zero_len": 0,
+            "negative_len": -1,
+            "large_len": 4097,
+        }.get(case, 4096)
+        kv_len = {
+            "short": 260,
+            "sequence2048": 2048,
+            "sequence1024": 1024,
+            "large_len": 4097,
+        }.get(case, 4096)
+        if case == "unknown_batch":
+            batch = sympy.Symbol("d96_batch", integer=True, positive=True)
+        if case == "unknown_heads":
+            heads = sympy.Symbol("d96_heads", integer=True, positive=True)
+        if case == "unknown_len":
+            q_len = sympy.Symbol("d96_q_len", integer=True, positive=True)
+
+        def operand(name, shape, dtype=dtype):
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[-2] *= 2
+            if case == "unknown_stride" and name == "query":
+                strides[-2] = sympy.Symbol("d96_stride", integer=True, positive=True)
+            return _tdm_operand(name, strides, size=shape, dtype=dtype)
+
+        query = operand(
+            "query",
+            (batch, heads * actual_gqa, q_len, 128 if case == "query_dim" else 96),
+        )
+        key = operand(
+            "key",
+            (
+                1 if case == "broadcast" else batch,
+                heads + 1 if case == "key_heads" else heads,
+                kv_len,
+                96,
+            ),
+            torch.float16 if case == "key_dtype" else dtype,
+        )
+        value = operand(
+            "value",
+            (
+                1 if case == "broadcast" else batch,
+                heads,
+                kv_len - 1 if case == "value_shape" else kv_len,
+                128 if case == "value_dim" else 96,
+            ),
+            torch.float16 if case == "value_dtype" else dtype,
+        )
+        do_shape = (
+            batch,
+            heads * actual_gqa,
+            q_len - 1 if case == "do_shape" else q_len,
+            96,
+        )
+        if case == "do_rank":
+            do_shape = do_shape[:-1]
+        grad_out = operand(
+            "do", do_shape, torch.float32 if case == "do_dtype" else torch.bfloat16
+        )
+        options = dict(
+            ROCM_D96_PANEL_DOTS=True,
+            fwd_ROCM_D96_PANEL_DOTS=case == "forward_only",
+            SAFE_HEAD_DIM=case == "safe_head",
+            QK_HEAD_DIM=96,
+            V_HEAD_DIM=96,
+            QK_HEAD_DIM_ROUNDED=96 if case == "rounded_q" else 128,
+            V_HEAD_DIM_ROUNDED=96 if case == "rounded_v" else 128,
+            BLOCK_M1=16 if case == "m1" else 32,
+            BLOCK_N1=64 if case == "n1" else 128,
+            BLOCK_M2=64 if case == "m2" else 128,
+            BLOCK_N2=16 if case == "n2" else 32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            matrix_instr_nonkdim=16 if case == "matrix" else 0,
+            waves_per_eu=1 if case == "waves" else 0,
+            kpack=2 if case == "kpack" else 1,
+            GQA_SHARED_HEADS=(4 if gqa == 1 else 1)
+            if case == "gqa_metadata"
+            else actual_gqa,
+            USE_TMA=case == "tma",
+            PRESCALE_QK=case == "prescale",
+            ROCM_D256_PANEL_DOTS=case == "panels",
+            ROCM_D192_PANEL_DOTS=case == "d192",
+            ROCM_EARLY_DP=case == "early_dp",
+            ROCM_EARLY_PROBABILITY_COMPACT=case == "compact",
+            XCD_REMAP=case == "xcd_remap",
+            ROCM_XCD_SNAKE=case == "snake",
+            ROCM_GQA_SPLIT_DKDV=case == "owners",
+            num_consumer_groups=1 if case == "consumers" else 0,
+            SM_SCALE=0.0
+            if case == "zero_scale"
+            else -0.07
+            if case == "negative_scale"
+            else float("inf")
+            if case == "nonfinite_scale"
+            else 0.07,
+        )
+        if case == "unknown_gqa":
+            options["GQA_SHARED_HEADS"] = sympy.Symbol(
+                "d96_gqa", integer=True, positive=True
+            )
+        requested = (
+            1
+            if case == "numeric_request"
+            else case not in ("disabled", "raw", "forward_only")
+        )
+        keywords = {} if case == "missing" else {"requested": requested}
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d96_panel_phase(
+                case != "architecture",
+                query,
+                key,
+                value,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_scalar_true=case != "false_mask",
+                block_mask_is_default=case != "custom_block",
+                grad_logsumexp_is_none=case != "grad_lse",
+                grad_out=None if case == "missing_do" else grad_out,
+                **keywords,
+            )
+        self.assertEqual(
+            actual, case in ("enabled", "sequence2048", "zero_scale", "negative_scale")
+        )
+
+    def _rocm_backward_phase_options(
+        self,
+        options,
+        *,
+        operands=None,
+        single_config=True,
+        use_separate_dq=True,
+        use_d192_panel_phase=False,
+        use_d96_panel_phase=False,
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _get_rocm_backward_phase_options,
+            _normalize_rocm_backward_options,
+        )
+        from torch._inductor.virtualized import V
+
+        if operands is None:
+            operands = self._d128_coverage_operands(4, 2048, False)[:4]
+        query, key, value, grad_out = operands
+        requests = _normalize_rocm_backward_options(options)
+        current = _get_rocm_backward_config_options(options, is_gfx950=True)
+        with V.set_graph_handler(_tdm_graph()):
+            dkdv, dq = _get_rocm_backward_phase_options(
+                current,
+                [query],
+                requests=requests,
+                single_config=single_config,
+                is_gfx950=True,
+                query=query,
+                key=key,
+                value=value,
+                grad_out=grad_out,
+                use_separate_dq=use_separate_dq,
+                use_d192_panel_phase=use_d192_panel_phase,
+                use_d96_panel_phase=use_d96_panel_phase,
+                fp16_pilot=False,
+                fp32_balanced64_pilot=False,
+                score_is_trivial=True,
+                has_captures=False,
+                mask_is_causal=True,
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+                grad_logsumexp_is_none=True,
+            )
+        return current, dkdv, dq
+
+    @common_utils.parametrize(
+        "panel_request",
+        ("missing", "disabled", "backward", "numeric", "raw", "forward"),
+    )
+    @common_utils.parametrize(
+        "early_request",
+        ("missing", "disabled", "backward", "numeric", "raw", "forward"),
+    )
+    def test_d192_gqa4_phase_options(self, panel_request, early_request):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _normalize_rocm_backward_options,
+            _use_rocm_d192_panel_phase,
+        )
+        from torch._inductor.virtualized import V
+
+        requests = {
+            "missing": {},
+            "disabled": {"bwd_": False},
+            "backward": {"bwd_": True},
+            "numeric": {"bwd_": 1},
+            "raw": {"": True},
+            "forward": {"fwd_": True},
+        }
+        options = {
+            prefix + "ROCM_D192_PANEL_DOTS": value
+            for prefix, value in requests[panel_request].items()
+        }
+        options.update(
+            {
+                prefix + "ROCM_D192_DQ_EARLY_DP": value
+                for prefix, value in requests[early_request].items()
+            }
+        )
+        options.update(
+            ROCM_BWD_PHASE=13,
+            bwd_ROCM_BWD_PHASE=17,
+            ROCM_GQA_SPLITS=7,
+            bwd_ROCM_GQA_SPLITS=4,
+            SAFE_HEAD_DIM=False,
+            QK_HEAD_DIM=192,
+            V_HEAD_DIM=192,
+            QK_HEAD_DIM_ROUNDED=256,
+            V_HEAD_DIM_ROUNDED=256,
+            BLOCK_M1=16,
+            BLOCK_N1=64,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            matrix_instr_nonkdim=0,
+            waves_per_eu=0,
+            kpack=1,
+            GQA_SHARED_HEADS=4,
+            SM_SCALE=192**-0.5,
+        )
+        operands = []
+        for name, shape in zip(
+            ("query", "key", "value", "do"),
+            (
+                (2, 8, 2048, 192),
+                (2, 2, 2048, 192),
+                (2, 2, 2048, 192),
+                (2, 8, 2048, 192),
+            ),
+            strict=True,
+        ):
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            operands.append(
+                _tdm_operand(name, strides, size=shape, dtype=torch.bfloat16)
+            )
+        probe = dict(options)
+        _normalize_rocm_backward_options(probe)
+        probe = _get_rocm_backward_config_options(probe, is_gfx950=True)
+        with V.set_graph_handler(_tdm_graph()):
+            parent = _use_rocm_d192_panel_phase(
+                True,
+                *operands[:3],
+                probe,
+                True,
+                False,
+                requested=options.get("bwd_ROCM_D192_PANEL_DOTS", False),
+                mask_is_scalar_true=True,
+                block_mask_is_default=True,
+                grad_logsumexp_is_none=True,
+                grad_out=operands[3],
+            )
+        self.assertIs(parent, panel_request == "backward")
+        current, dkdv, dq = self._rocm_backward_phase_options(
+            options, operands=operands, use_d192_panel_phase=parent
+        )
+        self.assertIs(dkdv["ROCM_D192_PANEL_DOTS"], parent)
+        self.assertIs(dkdv["ROCM_D192_DQ_EARLY_DP"], False)
+        self.assertIs(dq["ROCM_D192_PANEL_DOTS"], False)
+        self.assertIs(
+            dq["ROCM_D192_DQ_EARLY_DP"], parent and early_request == "backward"
+        )
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertEqual((dkdv["ROCM_GQA_SPLITS"], dq["ROCM_GQA_SPLITS"]), (1, 1))
+        self.assertIs(current["ROCM_D192_DQ_EARLY_DP"], False)
+        self.assertFalse(any(key.startswith(("bwd_", "fwd_")) for key in dq))
+
+    @common_utils.parametrize("parent_admitted", (False, True))
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "missing",
+            "disabled",
+            "numeric",
+            "string",
+            "phase1",
+            "phase2",
+            "splits",
+            "early_dp",
+        ),
+    )
+    def test_d192_dq_early_dp_guard(self, parent_admitted, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d192_dq_early_dp,
+        )
+
+        options = dict(
+            ROCM_BWD_PHASE=1 if case == "phase1" else 2 if case == "phase2" else 0,
+            ROCM_GQA_SPLITS=2 if case == "splits" else 1,
+            ROCM_EARLY_DP=case == "early_dp",
+        )
+        requested = (
+            1
+            if case == "numeric"
+            else "True"
+            if case == "string"
+            else case != "disabled"
+        )
+        keywords = {} if case == "missing" else dict(requested=requested)
+        self.assertEqual(
+            _use_rocm_d192_dq_early_dp(parent_admitted, options, **keywords),
+            parent_admitted and case == "enabled",
+        )
+
+    @common_utils.parametrize("parent_admitted", (False, True))
+    @common_utils.parametrize(
+        "request", ("missing", "disabled", "backward", "numeric", "raw", "forward")
+    )
+    def test_d192_dq_early_dp_phase_options(self, parent_admitted, request):
+        flag = "ROCM_D192_DQ_EARLY_DP"
+        requests = {
+            "missing": {},
+            "disabled": {"bwd_" + flag: False},
+            "backward": {"bwd_" + flag: True},
+            "numeric": {"bwd_" + flag: 1},
+            "raw": {flag: True},
+            "forward": {"fwd_" + flag: True},
+        }
+        options = dict(
+            requests[request],
+            BLOCKS_ARE_CONTIGUOUS=True,
+            ROCM_BWD_PHASE=13,
+            bwd_ROCM_BWD_PHASE=17,
+            ROCM_GQA_SPLITS=7,
+            bwd_ROCM_GQA_SPLITS=4,
+        )
+        operands = None
+        current, dkdv, dq = self._rocm_backward_phase_options(
+            options, operands=operands, use_d192_panel_phase=parent_admitted
+        )
+        self.assertIs(dq[flag], parent_admitted and request == "backward")
+        self.assertIs(dkdv[flag], False)
+        self.assertIs(current[flag], False)
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertEqual((dkdv["ROCM_GQA_SPLITS"], dq["ROCM_GQA_SPLITS"]), (1, 1))
+        self.assertFalse(any(key.startswith(("bwd_", "fwd_")) for key in dq))
+
+    @common_utils.parametrize("parent_admitted", (False, True))
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "missing",
+            "disabled",
+            "numeric",
+            "string",
+            "phase1",
+            "phase2",
+            "splits",
+            "early_dp",
+            "contiguous_missing",
+            "contiguous_false",
+            "contiguous_numeric",
+            "contiguous_string",
+            "batch",
+            "heads",
+            "key_heads",
+            "sequence2048",
+            "sequence1024",
+            "mixed_lengths",
+            "gqa4",
+            "unknown_batch",
+            "unknown_heads",
+            "unknown_length",
+            "missing_query",
+            "missing_key",
+            "query_rank",
+            "key_rank",
+        ),
+    )
+    def test_d96_dq_early_dp_guard(self, parent_admitted, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_dq_early_dp,
+        )
+        from torch._inductor.virtualized import V
+
+        q_size, k_size = [4, 21, 4096, 96], [4, 21, 4096, 96]
+        if case == "batch":
+            q_size[0] = k_size[0] = 1
+        elif case == "heads":
+            q_size[1] = 20
+        elif case == "key_heads":
+            k_size[1] = 20
+        elif case == "sequence2048":
+            q_size[2] = k_size[2] = 2048
+        elif case == "sequence1024":
+            q_size[2] = k_size[2] = 1024
+        elif case == "mixed_lengths":
+            q_size[2], k_size[2] = 2048, 4096
+        elif case == "gqa4":
+            q_size, k_size = [2, 8, 4096, 96], [2, 2, 4096, 96]
+        elif case == "unknown_batch":
+            q_size[0] = sympy.Symbol("d96_early_batch", integer=True, positive=True)
+        elif case == "unknown_heads":
+            q_size[1] = sympy.Symbol("d96_early_heads", integer=True, positive=True)
+        elif case == "unknown_length":
+            q_size[2] = sympy.Symbol("d96_early_length", integer=True, positive=True)
+        elif case == "query_rank":
+            q_size = q_size[1:]
+        elif case == "key_rank":
+            k_size = k_size[1:]
+        query = (
+            None
+            if case == "missing_query"
+            else _tdm_operand(
+                "query", [1] * len(q_size), size=q_size, dtype=torch.bfloat16
+            )
+        )
+        key = (
+            None
+            if case == "missing_key"
+            else _tdm_operand(
+                "key", [1] * len(k_size), size=k_size, dtype=torch.bfloat16
+            )
+        )
+        options = dict(
+            ROCM_BWD_PHASE=1 if case == "phase1" else 2 if case == "phase2" else 0,
+            ROCM_GQA_SPLITS=2 if case == "splits" else 1,
+            ROCM_EARLY_DP=case == "early_dp",
+        )
+        if case != "contiguous_missing":
+            options["BLOCKS_ARE_CONTIGUOUS"] = (
+                False
+                if case == "contiguous_false"
+                else 1
+                if case == "contiguous_numeric"
+                else "True"
+                if case == "contiguous_string"
+                else True
+            )
+        requested = (
+            1
+            if case == "numeric"
+            else "True"
+            if case == "string"
+            else case != "disabled"
+        )
+        keywords = {} if case == "missing" else dict(requested=requested)
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertEqual(
+                _use_rocm_d96_dq_early_dp(
+                    parent_admitted, options, query=query, key=key, **keywords
+                ),
+                parent_admitted and case in ("enabled", "sequence2048"),
+            )
+
+    @common_utils.parametrize("parent_admitted", (False, True))
+    @common_utils.parametrize(
+        "request", ("missing", "disabled", "backward", "numeric", "raw", "forward")
+    )
+    def test_d96_dq_early_dp_phase_options(self, parent_admitted, request):
+        flag = "ROCM_D96_DQ_EARLY_DP"
+        requests = {
+            "missing": {},
+            "disabled": {"bwd_" + flag: False},
+            "backward": {"bwd_" + flag: True},
+            "numeric": {"bwd_" + flag: 1},
+            "raw": {flag: True},
+            "forward": {"fwd_" + flag: True},
+        }
+        options = dict(
+            requests[request],
+            BLOCKS_ARE_CONTIGUOUS=True,
+            ROCM_BWD_PHASE=13,
+            bwd_ROCM_BWD_PHASE=17,
+            ROCM_GQA_SPLITS=7,
+            bwd_ROCM_GQA_SPLITS=4,
+        )
+        query = _tdm_operand(
+            "query", [1] * 4, size=[4, 21, 4096, 96], dtype=torch.bfloat16
+        )
+        key = _tdm_operand("key", [1] * 4, size=[4, 21, 4096, 96], dtype=torch.bfloat16)
+        operands = [query, key, key, query]
+        current, dkdv, dq = self._rocm_backward_phase_options(
+            options, operands=operands, use_d96_panel_phase=parent_admitted
+        )
+        self.assertIs(dq[flag], parent_admitted and request == "backward")
+        self.assertIs(dkdv[flag], False)
+        self.assertIs(current[flag], False)
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertEqual((dkdv["ROCM_GQA_SPLITS"], dq["ROCM_GQA_SPLITS"]), (1, 1))
+        self.assertFalse(any(key.startswith(("bwd_", "fwd_")) for key in dq))
+        self.assertIs(dq["ROCM_D192_DQ_EARLY_DP"], False)
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "enabled_b2_n4096",
+            "zero_scale_b2_n4096",
+            "negative_scale_b2_n4096",
+            "query_batch_b2_n4096",
+            "key_batch_b2_n4096",
+            "value_batch_b2_n4096",
+            "do_batch_b2_n4096",
+            "query_heads_b2_n4096",
+            "key_heads_b2_n4096",
+            "value_heads_b2_n4096",
+            "do_heads_b2_n4096",
+            "query_length_b2_n4096",
+            "key_length_b2_n4096",
+            "value_length_b2_n4096",
+            "do_length_b2_n4096",
+            "gqa_ratio_b2_n4096",
+            "unsupported_b2_n1024",
+            "unsupported_b2_n2048",
+            "enabled_n1024",
+            "zero_scale_n1024",
+            "negative_scale_n1024",
+            "query_length_n1024",
+            "key_length_n1024",
+            "value_length_n1024",
+            "do_length_n1024",
+            "gqa_ratio_n1024",
+            "enabled_n2048",
+            "zero_scale_n2048",
+            "negative_scale_n2048",
+            "query_length",
+            "key_length",
+            "value_length",
+            "do_length",
+            "gqa_ratio",
+            "missing",
+            "disabled",
+            "numeric",
+            "string",
+            "separate",
+            "architecture",
+            "xcd_false",
+            "xcd_missing",
+            "xcd_numeric",
+            "xcd_string",
+            "early_dp",
+            "contiguous",
+            "captures",
+            "score",
+            "mask",
+            "grad_lse",
+            "batch",
+            "heads",
+            "length",
+            "fp16",
+            "do_dtype",
+            "query_stride",
+            "key_stride",
+            "value_stride",
+            "do_stride",
+            "phase1",
+            "phase2",
+            "splits",
+            "tile",
+            "warps",
+            "stages",
+            "matrix",
+            "waves",
+            "kpack",
+            "llvm_attrs",
+            "nonfinite_scale",
+            "zero_scale",
+            "negative_scale",
+        ),
+    )
+    def test_d128_xcd_reverse_dq_rows_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_reverse_causal_dq_rows,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = torch.float16 if case == "fp16" else torch.bfloat16
+        batch, heads, length = (
+            (1 if case == "batch" else 2 if "_b2_" in case else 4),
+            (32 if case == "heads" else 64),
+            (
+                512
+                if case == "length"
+                else 1024
+                if case.endswith("_n1024")
+                else 2048
+                if case.endswith("_n2048")
+                else 4096
+            ),
+        )
+        shapes = (
+            (batch, heads, length, 128),
+            (batch, 8, length, 128),
+            (batch, 8, length, 128),
+            (batch, heads, length, 128),
+        )
+        operands = []
+        for name, shape in zip(("query", "key", "value", "do"), shapes, strict=True):
+            if case == name + "_batch_b2_n4096":
+                shape = (4, *shape[1:])
+            if case == name + "_heads_b2_n4096":
+                shape = (shape[0], 32 if name in ("query", "do") else 4, *shape[2:])
+            if case in (
+                name + "_length",
+                name + "_length_n1024",
+                name + "_length_b2_n4096",
+            ):
+                shape = (*shape[:2], 2048, shape[3])
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[-1] = 2
+            operands.append(
+                _tdm_operand(
+                    name,
+                    strides,
+                    size=shape,
+                    dtype=torch.float32
+                    if name == "do" and case == "do_dtype"
+                    else dtype,
+                )
+            )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=case != "early_dp",
+            XCD_REMAP=False
+            if case == "xcd_false"
+            else 1
+            if case == "xcd_numeric"
+            else "True"
+            if case == "xcd_string"
+            else True,
+            BLOCKS_ARE_CONTIGUOUS=case != "contiguous",
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            SM_SCALE=0.0
+            if case
+            in (
+                "zero_scale",
+                "zero_scale_n2048",
+                "zero_scale_n1024",
+                "zero_scale_b2_n4096",
+            )
+            else -0.125
+            if case
+            in (
+                "negative_scale",
+                "negative_scale_n2048",
+                "negative_scale_n1024",
+                "negative_scale_b2_n4096",
+            )
+            else float("inf")
+            if case == "nonfinite_scale"
+            else 128**-0.5,
+            ROCM_BWD_PHASE=1 if case == "phase1" else 2 if case == "phase2" else 0,
+            ROCM_GQA_SPLITS=2 if case == "splits" else 1,
+            GQA_SHARED_HEADS=4
+            if case in ("gqa_ratio", "gqa_ratio_n1024", "gqa_ratio_b2_n4096")
+            else 8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=64 if case == "tile" else 128,
+            BLOCK_N2=32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            matrix_instr_nonkdim=16 if case == "matrix" else 0,
+            waves_per_eu=1 if case == "waves" else 0,
+            kpack=3 if case == "kpack" else 1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+            llvm_fn_attrs="amdgpu-sched-strategy=iterative-ilp"
+            if case == "llvm_attrs"
+            else "",
+        )
+        if case == "xcd_missing":
+            options.pop("XCD_REMAP")
+        requested = (
+            1
+            if case == "numeric"
+            else "True"
+            if case == "string"
+            else case != "disabled"
+        )
+        keywords = {} if case == "missing" else dict(requested=requested)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_reverse_causal_dq_rows(
+                case != "separate",
+                case != "architecture",
+                *operands,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_causal=case != "mask",
+                grad_logsumexp_is_none=case != "grad_lse",
+                **keywords,
+            )
+        self.assertEqual(type(actual), bool)
+        self.assertEqual(
+            actual,
+            case
+            in (
+                "enabled",
+                "contiguous",
+                "zero_scale",
+                "negative_scale",
+                "enabled_n2048",
+                "zero_scale_n2048",
+                "negative_scale_n2048",
+                "enabled_n1024",
+                "zero_scale_n1024",
+                "negative_scale_n1024",
+                "enabled_b2_n4096",
+                "zero_scale_b2_n4096",
+                "negative_scale_b2_n4096",
+            ),
+        )
+
+    @common_utils.parametrize("separate", (False, True))
+    @common_utils.parametrize("xcd", (False, True, 1))
+    @common_utils.parametrize(
+        "request",
+        (
+            "missing",
+            "disabled",
+            "backward",
+            "numeric",
+            "raw",
+            "forward",
+            "raw_backward",
+            "forward_backward",
+        ),
+    )
+    def test_d128_xcd_reverse_dq_rows_phase_options(self, separate, xcd, request):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        flag = "ROCM_D128_REVERSE_DQ_ROWS"
+        requests = {
+            "missing": {},
+            "disabled": {"bwd_" + flag: False},
+            "backward": {"bwd_" + flag: True},
+            "numeric": {"bwd_" + flag: 1},
+            "raw": {flag: True},
+            "forward": {"fwd_" + flag: True},
+            "raw_backward": {flag: True, "bwd_" + flag: True},
+            "forward_backward": {"fwd_" + flag: True, "bwd_" + flag: True},
+        }
+        options = dict(
+            requests[request],
+            ROCM_BWD_PHASE=13,
+            bwd_ROCM_BWD_PHASE=17,
+            ROCM_GQA_SPLITS=7,
+            bwd_ROCM_GQA_SPLITS=4,
+            XCD_REMAP=xcd,
+        )
+        calls = []
+
+        def guard(
+            parent,
+            architecture,
+            query,
+            key,
+            value,
+            grad_out,
+            options,
+            score,
+            captures,
+            **keywords,
+        ):
+            calls.append((parent, architecture, keywords))
+            return (
+                parent
+                and architecture
+                and keywords["requested"] is True
+                and not keywords["other_requests"]
+                and options["XCD_REMAP"] is True
+            )
+
+        with mock.patch.object(
+            flex_kernel_mod.rocm_backward,
+            "_use_rocm_d128_reverse_causal_dq_rows",
+            guard,
+        ):
+            current, dkdv, dq = self._rocm_backward_phase_options(
+                options, use_separate_dq=separate
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertIs(dkdv[flag], False)
+        self.assertIs(dq[flag], separate and xcd is True and request == "backward")
+        self.assertIs(current[flag], False)
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+        self.assertEqual((dkdv["ROCM_GQA_SPLITS"], dq["ROCM_GQA_SPLITS"]), (1, 1))
+        self.assertFalse(any(key.startswith(("fwd_", "bwd_")) for key in dq))
+
+    @common_utils.parametrize("parent_admitted", (False, True))
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "missing",
+            "disabled",
+            "numeric",
+            "string",
+            "phase1",
+            "phase2",
+            "splits",
+            "early_dp",
+            "contiguous_missing",
+            "contiguous_false",
+            "contiguous_numeric",
+            "contiguous_string",
+            "batch",
+            "heads",
+            "key_heads",
+            "sequence2048",
+            "sequence1024",
+            "mixed_lengths",
+            "gqa4",
+            "unknown_batch",
+            "unknown_heads",
+            "unknown_length",
+            "missing_query",
+            "missing_key",
+            "query_rank",
+            "key_rank",
+            "missing_early",
+            "early_numeric",
+            "raw_conflict",
+        ),
+    )
+    def test_d96_dq_unroll2_guard(self, parent_admitted, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d96_dq_unroll2,
+        )
+        from torch._inductor.virtualized import V
+
+        q_size, k_size = ([4, 21, 4096, 96], [4, 21, 4096, 96])
+        if case == "batch":
+            q_size[0] = k_size[0] = 1
+        elif case == "heads":
+            q_size[1] = 20
+        elif case == "key_heads":
+            k_size[1] = 20
+        elif case == "sequence2048":
+            q_size[2] = k_size[2] = 2048
+        elif case == "sequence1024":
+            q_size[2] = k_size[2] = 1024
+        elif case == "mixed_lengths":
+            q_size[2], k_size[2] = 2048, 4096
+        elif case == "gqa4":
+            q_size, k_size = ([2, 8, 4096, 96], [2, 2, 4096, 96])
+        elif case == "unknown_batch":
+            q_size[0] = sympy.Symbol("d96_early_batch", integer=True, positive=True)
+        elif case == "unknown_heads":
+            q_size[1] = sympy.Symbol("d96_early_heads", integer=True, positive=True)
+        elif case == "unknown_length":
+            q_size[2] = sympy.Symbol("d96_early_length", integer=True, positive=True)
+        elif case == "query_rank":
+            q_size = q_size[1:]
+        elif case == "key_rank":
+            k_size = k_size[1:]
+        query = (
+            None
+            if case == "missing_query"
+            else _tdm_operand(
+                "query", [1] * len(q_size), size=q_size, dtype=torch.bfloat16
+            )
+        )
+        key = (
+            None
+            if case == "missing_key"
+            else _tdm_operand(
+                "key", [1] * len(k_size), size=k_size, dtype=torch.bfloat16
+            )
+        )
+        options = dict(
+            ROCM_BWD_PHASE=1 if case == "phase1" else 2 if case == "phase2" else 0,
+            ROCM_GQA_SPLITS=2 if case == "splits" else 1,
+            ROCM_EARLY_DP=case == "early_dp",
+        )
+        if case != "contiguous_missing":
+            options["BLOCKS_ARE_CONTIGUOUS"] = (
+                False
+                if case == "contiguous_false"
+                else 1
+                if case == "contiguous_numeric"
+                else "True"
+                if case == "contiguous_string"
+                else True
+            )
+        requested = (
+            1
+            if case == "numeric"
+            else "True"
+            if case == "string"
+            else case != "disabled"
+        )
+        keywords = {} if case == "missing" else dict(requested=requested)
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertEqual(
+                _use_rocm_d96_dq_unroll2(
+                    parent_admitted,
+                    options,
+                    query=query,
+                    key=key,
+                    **keywords,
+                    early_dq_dp_requested=1
+                    if case == "early_numeric"
+                    else case != "missing_early",
+                    other_requests=case == "raw_conflict",
+                ),
+                parent_admitted and case in ("enabled", "sequence2048"),
+            )
+
+    @common_utils.parametrize(
+        "request",
+        (
+            "missing",
+            "backward",
+            "false",
+            "numeric",
+            "string",
+            "raw",
+            "forward",
+            "raw_conflict",
+            "forward_conflict",
+        ),
+    )
+    @common_utils.parametrize("panel", (False, True))
+    @common_utils.parametrize("early", (False, True))
+    @common_utils.parametrize("config_count", (1, 2))
+    def test_d96_dq_unroll2_phase_options(self, request, panel, early, config_count):
+        flag = "ROCM_D96_DQ_UNROLL2"
+        requests = {
+            "missing": {},
+            "backward": {"bwd_" + flag: True},
+            "false": {"bwd_" + flag: False},
+            "numeric": {"bwd_" + flag: 1},
+            "string": {"bwd_" + flag: "True"},
+            "raw": {flag: True},
+            "forward": {"fwd_" + flag: True},
+            "raw_conflict": {"bwd_" + flag: True, flag: True},
+            "forward_conflict": {"bwd_" + flag: True, "fwd_" + flag: True},
+        }
+        query = _tdm_operand(
+            "query", [1] * 4, size=[4, 21, 4096, 96], dtype=torch.bfloat16
+        )
+        key = _tdm_operand("key", [1] * 4, size=[4, 21, 4096, 96], dtype=torch.bfloat16)
+        options = dict(
+            requests[request],
+            bwd_ROCM_D96_DQ_EARLY_DP=early,
+            BLOCKS_ARE_CONTIGUOUS=True,
+        )
+        current, dkdv, dq = self._rocm_backward_phase_options(
+            options,
+            operands=[query, key, key, query],
+            use_d96_panel_phase=panel,
+            single_config=config_count == 1,
+        )
+        self.assertIs(options[flag], False)
+        self.assertIs(current[flag], False)
+        self.assertIs(dkdv[flag], False)
+        self.assertIs(
+            dq[flag], request == "backward" and panel and early and config_count == 1
+        )
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "enabled_b2_n4096",
+            "zero_scale_b2_n4096",
+            "negative_scale_b2_n4096",
+            "query_batch_b2_n4096",
+            "key_batch_b2_n4096",
+            "value_batch_b2_n4096",
+            "do_batch_b2_n4096",
+            "query_heads_b2_n4096",
+            "key_heads_b2_n4096",
+            "value_heads_b2_n4096",
+            "do_heads_b2_n4096",
+            "query_length_b2_n4096",
+            "key_length_b2_n4096",
+            "value_length_b2_n4096",
+            "do_length_b2_n4096",
+            "gqa_ratio_b2_n4096",
+            "unsupported_b2_n1024",
+            "unsupported_b2_n2048",
+            "enabled_n1024",
+            "zero_scale_n1024",
+            "negative_scale_n1024",
+            "query_length_n1024",
+            "key_length_n1024",
+            "value_length_n1024",
+            "do_length_n1024",
+            "gqa_ratio_n1024",
+            "enabled_n2048",
+            "zero_scale_n2048",
+            "negative_scale_n2048",
+            "query_length",
+            "key_length",
+            "value_length",
+            "do_length",
+            "gqa_ratio",
+            "missing",
+            "disabled",
+            "numeric",
+            "string",
+            "separate",
+            "architecture",
+            "xcd_false",
+            "xcd_missing",
+            "xcd_numeric",
+            "xcd_string",
+            "early_dp",
+            "contiguous",
+            "captures",
+            "score",
+            "mask",
+            "grad_lse",
+            "batch",
+            "heads",
+            "length",
+            "fp16",
+            "do_dtype",
+            "query_stride",
+            "key_stride",
+            "value_stride",
+            "do_stride",
+            "phase1",
+            "phase2",
+            "splits",
+            "tile",
+            "warps",
+            "stages",
+            "matrix",
+            "waves",
+            "kpack",
+            "llvm_attrs",
+            "nonfinite_scale",
+            "zero_scale",
+            "negative_scale",
+            "reverse_disabled",
+            "reverse_numeric",
+            "raw_conflict",
+            "forward_conflict",
+        ),
+    )
+    def test_d128_dv_view_carry_split64_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_dv_view_carry_split64,
+        )
+        from torch._inductor.virtualized import V
+
+        dtype = torch.float16 if case == "fp16" else torch.bfloat16
+        batch, heads, length = (
+            (1 if case == "batch" else 2 if "_b2_" in case else 4),
+            (32 if case == "heads" else 64),
+            (
+                512
+                if case == "length"
+                else 1024
+                if case.endswith("_n1024")
+                else 2048
+                if case.endswith("_n2048")
+                else 4096
+            ),
+        )
+        shapes = (
+            (batch, heads, length, 128),
+            (batch, 8, length, 128),
+            (batch, 8, length, 128),
+            (batch, heads, length, 128),
+        )
+        operands = []
+        for name, shape in zip(("query", "key", "value", "do"), shapes, strict=True):
+            if case == name + "_batch_b2_n4096":
+                shape = (4, *shape[1:])
+            if case == name + "_heads_b2_n4096":
+                shape = (shape[0], 32 if name in ("query", "do") else 4, *shape[2:])
+            if case in (
+                name + "_length",
+                name + "_length_n1024",
+                name + "_length_b2_n4096",
+            ):
+                shape = (*shape[:2], 2048, shape[3])
+            strides, stride = [], 1
+            for extent in reversed(shape):
+                strides.insert(0, stride)
+                stride *= extent
+            if case == name + "_stride":
+                strides[-1] = 2
+            operands.append(
+                _tdm_operand(
+                    name,
+                    strides,
+                    size=shape,
+                    dtype=torch.float32
+                    if name == "do" and case == "do_dtype"
+                    else dtype,
+                )
+            )
+        options = dict(
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=case != "early_dp",
+            XCD_REMAP=False
+            if case == "xcd_false"
+            else 1
+            if case == "xcd_numeric"
+            else "True"
+            if case == "xcd_string"
+            else True,
+            BLOCKS_ARE_CONTIGUOUS=case != "contiguous",
+            SAFE_HEAD_DIM=True,
+            IS_DIVISIBLE=True,
+            HAS_FULL_BLOCKS=True,
+            SM_SCALE=0.0
+            if case
+            in (
+                "zero_scale",
+                "zero_scale_n2048",
+                "zero_scale_n1024",
+                "zero_scale_b2_n4096",
+            )
+            else -0.125
+            if case
+            in (
+                "negative_scale",
+                "negative_scale_n2048",
+                "negative_scale_n1024",
+                "negative_scale_b2_n4096",
+            )
+            else float("inf")
+            if case == "nonfinite_scale"
+            else 128**-0.5,
+            ROCM_BWD_PHASE=1 if case == "phase1" else 2 if case == "phase2" else 0,
+            ROCM_GQA_SPLITS=2 if case == "splits" else 1,
+            GQA_SHARED_HEADS=4
+            if case in ("gqa_ratio", "gqa_ratio_n1024", "gqa_ratio_b2_n4096")
+            else 8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=64 if case == "tile" else 128,
+            BLOCK_N2=32,
+            num_warps=8 if case == "warps" else 4,
+            num_stages=1 if case == "stages" else 2,
+            matrix_instr_nonkdim=16 if case == "matrix" else 0,
+            waves_per_eu=1 if case == "waves" else 0,
+            kpack=3 if case == "kpack" else 1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+            llvm_fn_attrs="amdgpu-sched-strategy=iterative-ilp"
+            if case == "llvm_attrs"
+            else "",
+        )
+        if case == "xcd_missing":
+            options.pop("XCD_REMAP")
+        requested = (
+            1
+            if case == "numeric"
+            else "True"
+            if case == "string"
+            else case != "disabled"
+        )
+        keywords = {} if case == "missing" else dict(requested=requested)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_dv_view_carry_split64(
+                case != "separate",
+                case != "architecture",
+                *operands,
+                options,
+                case != "score",
+                case == "captures",
+                mask_is_causal=case != "mask",
+                grad_logsumexp_is_none=case != "grad_lse",
+                reverse_requested=False
+                if case == "reverse_disabled"
+                else 1
+                if case == "reverse_numeric"
+                else True,
+                other_requests=case in ("raw_conflict", "forward_conflict"),
+                **keywords,
+            )
+        self.assertEqual(type(actual), bool)
+        self.assertEqual(
+            actual,
+            case
+            in (
+                "enabled",
+                "contiguous",
+                "zero_scale",
+                "negative_scale",
+                "enabled_n2048",
+                "zero_scale_n2048",
+                "negative_scale_n2048",
+                "enabled_n1024",
+                "zero_scale_n1024",
+                "negative_scale_n1024",
+                "enabled_b2_n4096",
+                "zero_scale_b2_n4096",
+                "negative_scale_b2_n4096",
+            ),
+        )
+
+    @common_utils.parametrize(
+        "request",
+        (
+            "missing",
+            "disabled",
+            "backward",
+            "numeric",
+            "raw",
+            "forward",
+            "raw_backward",
+            "forward_backward",
+            "unroll2",
+        ),
+    )
+    @common_utils.parametrize("reverse", (False, True))
+    @common_utils.parametrize("config_count", (1, 2))
+    def test_d128_dv_view_carry_split64_phase_options(
+        self, request, reverse, config_count
+    ):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        flag = "ROCM_D128_DV_VIEW_CARRY_SPLIT64"
+        options = {flag: False, "bwd_ROCM_D128_REVERSE_DQ_ROWS": reverse}
+        if request in ("backward", "raw_backward", "forward_backward", "unroll2"):
+            options["bwd_" + flag] = True
+        elif request == "disabled":
+            options["bwd_" + flag] = False
+        elif request == "numeric":
+            options["bwd_" + flag] = 1
+        if request in ("raw", "raw_backward"):
+            options[flag] = True
+        if request in ("forward", "forward_backward"):
+            options["fwd_" + flag] = True
+        options["bwd_ROCM_D96_DQ_UNROLL2"] = request == "unroll2"
+        calls = []
+
+        def guard(
+            *args,
+            requested=False,
+            reverse_requested=False,
+            other_requests=False,
+            **kwargs,
+        ):
+            calls.append((requested, reverse_requested, other_requests))
+            return (
+                requested is True and reverse_requested is True and not other_requests
+            )
+
+        with mock.patch.object(
+            flex_kernel_mod.rocm_backward, "_use_rocm_d128_dv_view_carry_split64", guard
+        ):
+            current, dkdv, dq = self._rocm_backward_phase_options(
+                options, single_config=config_count == 1
+            )
+        self.assertIs(options[flag], False)
+        self.assertNotIn("bwd_" + flag, options)
+        self.assertIs(current[flag], False)
+        self.assertIs(dq[flag], False)
+        self.assertIs(
+            dkdv[flag], request == "backward" and reverse and config_count == 1
+        )
+        self.assertEqual(len(calls), int(config_count == 1))
+
+    def _d128_query_tile_outer_fp32_inputs(self, batch=4, length=4096):
+        nodes, options = self._d128_query_tile_outer_inputs()
+        values = self._d128_coverage_operands(batch, length, True)
+        nodes[:8] = [
+            values[0],
+            values[1],
+            values[2],
+            values[5],
+            values[5],
+            values[3],
+            values[0],
+            values[2],
+        ]
+        if length != 4096:
+            blocks = length // 128
+            for index in range(8, 16):
+                shape = (1, 1, blocks) if index % 2 == 0 else (1, 1, blocks, blocks)
+                strides, stride = [], 1
+                for size in reversed(shape):
+                    strides.insert(0, stride)
+                    stride *= size
+                nodes[index] = _tdm_operand(
+                    "fp32_query_outer_metadata_" + str(index),
+                    strides,
+                    size=shape,
+                    dtype=torch.int32,
+                )
+        options.update(
+            BLOCK_M1=16,
+            BLOCK_N1=64,
+            BLOCK_M2=64,
+            BLOCK_N2=16,
+            num_stages=1,
+            matrix_instr_nonkdim=0,
+            FLOAT32_PRECISION="'ieee'",
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            IS_DIVISIBLE=True,
+            SAFE_HEAD_DIM=True,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+        )
+        return nodes, options
+
+    @common_utils.parametrize(
+        "batch,case",
+        (
+            (4, "enabled"),
+            (4, "zero"),
+            (4, "negative"),
+            (4, "common_device2"),
+            (4, "option_off"),
+            (4, "multi_config"),
+            (4, "phase2"),
+            (4, "matrix16"),
+            (4, "stages2"),
+            (4, "warps8"),
+            (4, "waves1"),
+            (4, "kpack2"),
+            (4, "tile"),
+            (4, "non_ieee"),
+            (4, "prescale"),
+            (4, "tma"),
+            (4, "contiguous_false"),
+            (4, "contiguous_numeric"),
+            (4, "contiguous_string"),
+            (4, "contiguous_missing"),
+            (4, "other_scale"),
+            (4, "bool_scale"),
+            (4, "nan_scale"),
+            (4, "pow_scale"),
+            (4, "missing_option"),
+            (4, "query_alias"),
+            (4, "batch2"),
+            (4, "length2048"),
+            (4, "input_dtype"),
+            (4, "lse_dtype"),
+            (4, "dv_dtype"),
+            (4, "metadata_dtype"),
+            (4, "stride"),
+            (4, "mixed_device"),
+            (1, "enabled"),
+            (1, "zero"),
+            (1, "negative"),
+            (1, "common_device2"),
+            (1, "option_off"),
+            (1, "matrix16"),
+            (1, "stages2"),
+            (1, "kpack2"),
+            (1, "rank0"),
+            (1, "batch0"),
+            (1, "batch3"),
+            (1, "mixed_key"),
+            (1, "mixed_do"),
+            (1, "mixed_lse"),
+            (1, "mixed_dv"),
+            (2, "enabled"),
+            (2, "zero"),
+            (2, "negative"),
+            (2, "common_device2"),
+            (2, "option_off"),
+            (2, "matrix16"),
+            (2, "stages2"),
+            (2, "kpack2"),
+            (2, "warps8"),
+            (2, "waves1"),
+            (2, "other_scale"),
+            (2, "pow_scale"),
+            (2, "rank0"),
+            (2, "batch0"),
+            (2, "batch3"),
+            (2, "mixed_key"),
+            (2, "mixed_do"),
+            (2, "mixed_lse"),
+            (2, "mixed_dv"),
+        ),
+    )
+    def test_d128_query_tile_outer_fp32_guard(self, batch, case):
+        from torch._inductor.ir import Buffer, FixedLayout
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp32_inputs(batch=batch)
+        changes = {
+            "zero": ("SM_SCALE", 0.0),
+            "negative": ("SM_SCALE", -0.125),
+            "option_off": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", False),
+            "phase2": ("ROCM_BWD_PHASE", 2),
+            "matrix16": ("matrix_instr_nonkdim", 16),
+            "stages2": ("num_stages", 2),
+            "warps8": ("num_warps", 8),
+            "waves1": ("waves_per_eu", 1),
+            "kpack2": ("kpack", 2),
+            "tile": ("BLOCK_N1", 32),
+            "non_ieee": ("FLOAT32_PRECISION", "'tf32'"),
+            "prescale": ("PRESCALE_QK", True),
+            "tma": ("USE_TMA", True),
+            "contiguous_false": ("BLOCKS_ARE_CONTIGUOUS", False),
+            "contiguous_numeric": ("BLOCKS_ARE_CONTIGUOUS", 1),
+            "contiguous_string": ("BLOCKS_ARE_CONTIGUOUS", "True"),
+            "other_scale": ("SM_SCALE", 0.125),
+            "bool_scale": ("SM_SCALE", False),
+            "nan_scale": ("SM_SCALE", float("nan")),
+            "pow_scale": ("SM_SCALE", 128**-0.5),
+        }
+        if case in changes:
+            key, value = changes[case]
+            options[key] = value
+        if case == "contiguous_missing":
+            options.pop("BLOCKS_ARE_CONTIGUOUS")
+        if case == "missing_option":
+            options.pop("num_stages")
+        if case in ("batch0", "batch3"):
+            nodes, options = self._d128_query_tile_outer_fp32_inputs(
+                batch=0 if case == "batch0" else 3
+            )
+        if case == "query_alias":
+            nodes[6] = _tdm_operand(
+                "other_query",
+                nodes[0].get_stride(),
+                size=nodes[0].get_size(),
+                dtype=torch.float32,
+            )
+        if case in ("batch2", "length2048"):
+            values = self._d128_coverage_operands(
+                (2 if batch == 4 else 4) if case == "batch2" else batch,
+                2048 if case == "length2048" else 4096,
+                True,
+            )
+            nodes[0] = nodes[6] = values[0]
+        if case == "rank0":
+            nodes[0] = nodes[6] = _tdm_operand(
+                "scalar_query", (), size=(), dtype=torch.float32
+            )
+        if case in ("mixed_key", "mixed_do", "mixed_lse", "mixed_dv"):
+            index = {"mixed_key": 1, "mixed_do": 5, "mixed_lse": 3, "mixed_dv": 7}[case]
+            other, _ = self._d128_query_tile_outer_fp32_inputs(
+                batch=2 if batch == 4 else 4
+            )
+            nodes[index] = other[index]
+        if case in ("input_dtype", "lse_dtype", "dv_dtype", "metadata_dtype", "stride"):
+            index = {
+                "input_dtype": 5,
+                "lse_dtype": 3,
+                "dv_dtype": 7,
+                "metadata_dtype": 10,
+                "stride": 4,
+            }[case]
+            operand = nodes[index]
+            strides = list(operand.get_stride())
+            if case == "stride":
+                strides[-1] = 2
+            nodes[index] = _tdm_operand(
+                "invalid_fp32_query_outer",
+                strides,
+                size=operand.get_size(),
+                dtype=operand.get_dtype()
+                if case == "stride"
+                else torch.int64
+                if case == "metadata_dtype"
+                else torch.float16,
+            )
+        if case == "common_device2":
+            nodes = [
+                Buffer(
+                    name="same_device_" + str(index),
+                    layout=FixedLayout(
+                        torch.device("cuda:2"),
+                        node.get_dtype(),
+                        size=node.get_size(),
+                        stride=node.get_stride(),
+                    ),
+                )
+                for index, node in enumerate(nodes)
+            ]
+            nodes[6] = nodes[0]
+        if case == "mixed_device":
+            operand = nodes[10]
+            nodes[10] = Buffer(
+                name="other_device",
+                layout=FixedLayout(
+                    torch.device("cuda:2"),
+                    operand.get_dtype(),
+                    size=operand.get_size(),
+                    stride=operand.get_stride(),
+                ),
+            )
+        before = dict(options)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_gqa_query_tile_outer(
+                nodes, options, single_config=case != "multi_config"
+            )
+        self.assertIs(
+            actual,
+            case
+            in ("enabled", "zero", "negative", "common_device2", "contiguous_false"),
+        )
+        self.assertEqual(options.keys(), before.keys())
+        for name in before:
+            self.assertIs(options[name], before[name])
+
+    @common_utils.parametrize(
+        "batch,index",
+        (
+            (1, 8),
+            (1, 10),
+            (1, 14),
+            (1, 15),
+            (2, 8),
+            (2, 9),
+            (2, 10),
+            (2, 11),
+            (2, 12),
+            (2, 13),
+            (2, 14),
+            (2, 15),
+            (4, 8),
+            (4, 9),
+            (4, 10),
+            (4, 11),
+            (4, 12),
+            (4, 13),
+            (4, 14),
+            (4, 15),
+        ),
+    )
+    @common_utils.parametrize("field", ("batch", "head", "stride"))
+    def test_d128_query_tile_outer_fp32_metadata(self, batch, index, field):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp32_inputs(batch=batch)
+        shape = list(nodes[index].get_size())
+        if field in ("batch", "head"):
+            shape[0 if field == "batch" else 1] = (
+                max(2, batch) if field == "batch" else 64
+            )
+        strides, stride = [], 1
+        for size in reversed(shape):
+            strides.insert(0, stride)
+            stride *= size
+        if field == "stride":
+            strides[-1] = 2
+        nodes[index] = _tdm_operand(
+            "fp32_metadata", strides, size=shape, dtype=torch.int32
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertIs(
+                _use_rocm_d128_gqa_query_tile_outer(nodes, options, single_config=True),
+                False,
+            )
+
+    @common_utils.parametrize("batch", (1, 2, 4))
+    @common_utils.parametrize(
+        "case", ("enabled", "matrix16", "stages2", "expanded", "option_off")
+    )
+    def test_d128_query_tile_outer_fp32_selection(self, batch, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _select_rocm_d128_query_tile_outer_options,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp32_inputs(batch=batch)
+        if case in ("matrix16", "stages2", "option_off"):
+            key, value = {
+                "matrix16": ("matrix_instr_nonkdim", 16),
+                "stages2": ("num_stages", 2),
+                "option_off": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", False),
+            }[case]
+            options[key] = value
+        if case == "expanded":
+            nodes[10] = _tdm_operand(
+                "expanded_fp32_metadata",
+                (2048, 32, 1) if batch == 1 else (32, 32, 1),
+                size=(1, 64, 32) if batch == 1 else (batch, 1, 32),
+                dtype=torch.int32,
+            )
+        before = dict(options)
+        with V.set_graph_handler(_tdm_graph()):
+            _select_rocm_d128_query_tile_outer_options(
+                nodes,
+                options,
+                single_config=True,
+                fp16_pilot=False,
+                fp32_balanced64_pilot=True,
+            )
+        self.assertIs(
+            options.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), case == "enabled"
+        )
+        if case == "enabled":
+            before["ROCM_D128_GQA_QUERY_TILE_OUTER"] = True
+        self.assertEqual(options, before)
+
+    @common_utils.parametrize("batch", (1, 2, 4))
+    @common_utils.parametrize("length", (1024, 2048, 4096))
+    @common_utils.parametrize("scale", (0.08838834764831843, 0.0, -0.125))
+    @common_utils.parametrize("contiguous", (False, True))
+    def test_d128_query_tile_outer_fp32_shape_scope(
+        self, batch, length, scale, contiguous
+    ):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp32_inputs(batch, length)
+        options.update(SM_SCALE=scale, BLOCKS_ARE_CONTIGUOUS=contiguous)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_gqa_query_tile_outer(
+                nodes, options, single_config=True
+            )
+        self.assertIs(actual, length == 4096 or (batch, length) == (4, 2048))
+
+    @common_utils.parametrize("index", tuple(range(16)))
+    @common_utils.parametrize("field", ("size", "stride", "dtype", "missing"))
+    def test_d128_query_tile_outer_fp32_n2048_operand_guard(self, index, field):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp32_inputs(length=2048)
+        operand = nodes[index]
+        shape, strides = list(operand.get_size()), list(operand.get_stride())
+        if field == "size":
+            shape[-1] += 1
+        if field == "stride":
+            strides[-1] = 2
+        nodes[index] = (
+            None
+            if field == "missing"
+            else _tdm_operand(
+                "invalid_fp32_n2048",
+                strides,
+                size=shape,
+                dtype=torch.float16 if field == "dtype" else operand.get_dtype(),
+            )
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertIs(
+                _use_rocm_d128_gqa_query_tile_outer(nodes, options, single_config=True),
+                False,
+            )
+
+    def _d128_query_tile_outer_inputs(self):
+        values = self._d128_coverage_operands(4, 4096, False)
+        nodes = [
+            values[0],
+            values[1],
+            values[2],
+            values[5],
+            values[5],
+            values[3],
+            values[0],
+            values[2],
+        ]
+        for index in range(8, 16):
+            shape = (1, 1, 32) if index % 2 == 0 else (1, 1, 32, 32)
+            strides, stride = [], 1
+            for size in reversed(shape):
+                strides.insert(0, stride)
+                stride *= size
+            nodes.append(
+                _tdm_operand(
+                    "query_outer_" + str(index), strides, size=shape, dtype=torch.int32
+                )
+            )
+        options = dict(
+            ROCM_D128_DV_VIEW_CARRY_SPLIT64=True,
+            HAS_FULL_BLOCKS=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            SM_SCALE=0.08838834764831843,
+            ROCM_BWD_PHASE=1,
+            ROCM_GQA_SPLITS=1,
+            GQA_SHARED_HEADS=8,
+            QK_HEAD_DIM=128,
+            V_HEAD_DIM=128,
+            QK_HEAD_DIM_ROUNDED=128,
+            V_HEAD_DIM_ROUNDED=128,
+            BLOCK_M1=32,
+            BLOCK_N1=128,
+            BLOCK_M2=128,
+            BLOCK_N2=32,
+            num_warps=4,
+            num_stages=2,
+            matrix_instr_nonkdim=0,
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            IS_DIVISIBLE=True,
+            SAFE_HEAD_DIM=True,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            FLOAT32_PRECISION="'ieee'",
+            waves_per_eu=0,
+            kpack=1,
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+        )
+        return nodes, options
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "zero",
+            "negative",
+            "option_off",
+            "numeric_option",
+            "multi_config",
+            "phase2",
+            "kpack2",
+            "matrix16",
+            "stages1",
+            "warps8",
+            "waves1",
+            "tile",
+            "no_full",
+            "contiguous_false",
+            "contiguous_numeric",
+            "contiguous_string",
+            "contiguous_missing",
+            "other_scale",
+            "bool_scale",
+            "nan_scale",
+            "pow_scale",
+            "missing_nodes",
+            "missing_config",
+            "batch2",
+            "length2048",
+            "dtype",
+            "stride",
+        ),
+    )
+    def test_d128_query_tile_outer_guard(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_inputs()
+        changes = {
+            "zero": ("SM_SCALE", 0.0),
+            "negative": ("SM_SCALE", -0.125),
+            "option_off": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", False),
+            "numeric_option": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", 1),
+            "phase2": ("ROCM_BWD_PHASE", 2),
+            "kpack2": ("kpack", 2),
+            "matrix16": ("matrix_instr_nonkdim", 16),
+            "stages1": ("num_stages", 1),
+            "warps8": ("num_warps", 8),
+            "waves1": ("waves_per_eu", 1),
+            "tile": ("BLOCK_N1", 64),
+            "no_full": ("HAS_FULL_BLOCKS", False),
+            "contiguous_false": ("BLOCKS_ARE_CONTIGUOUS", False),
+            "contiguous_numeric": ("BLOCKS_ARE_CONTIGUOUS", 1),
+            "contiguous_string": ("BLOCKS_ARE_CONTIGUOUS", "True"),
+            "other_scale": ("SM_SCALE", 0.125),
+            "bool_scale": ("SM_SCALE", False),
+            "nan_scale": ("SM_SCALE", float("nan")),
+            "pow_scale": ("SM_SCALE", 128**-0.5),
+        }
+        if case in changes:
+            key, value = changes[case]
+            options[key] = value
+        if case == "contiguous_missing":
+            options.pop("BLOCKS_ARE_CONTIGUOUS")
+        if case == "missing_nodes":
+            nodes.pop()
+        if case == "missing_config":
+            options.pop("num_stages")
+        if case in ("batch2", "length2048", "dtype", "stride"):
+            values = self._d128_coverage_operands(
+                2 if case == "batch2" else 4,
+                2048 if case == "length2048" else 4096,
+                case == "dtype",
+                "stride" if case == "stride" else None,
+                0,
+            )
+            nodes[0] = values[0]
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_gqa_query_tile_outer(
+                nodes, options, single_config=case != "multi_config"
+            )
+        self.assertIs(
+            actual, case in ("enabled", "zero", "negative", "contiguous_false")
+        )
+
+    @common_utils.parametrize("index", tuple(range(8, 16)))
+    @common_utils.parametrize("field", ("batch", "head", "shape", "dtype", "unknown"))
+    def test_d128_query_tile_outer_metadata(self, index, field):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_inputs()
+        shape = list(nodes[index].get_size())
+        if field == "batch":
+            shape[0] = 4
+        elif field == "head":
+            shape[1] = 64
+        elif field == "shape":
+            shape.pop()
+        elif field == "unknown":
+            shape[0] = sympy.Symbol("query_outer_batch", positive=True, integer=True)
+        strides, stride = [], 1
+        for size in reversed(shape):
+            strides.insert(0, stride)
+            stride *= size
+        nodes[index] = _tdm_operand(
+            "invalid_query_outer",
+            strides,
+            size=shape,
+            dtype=torch.int64 if field == "dtype" else torch.int32,
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertIs(
+                _use_rocm_d128_gqa_query_tile_outer(nodes, options, single_config=True),
+                False,
+            )
+
+    @common_utils.parametrize("prefix", ("", "fwd_", "bwd_"))
+    def test_d128_query_tile_outer_private_aliases(self, prefix):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _strip_rocm_query_tile_outer_options,
+        )
+
+        options = {
+            prefix + "ROCM_D128_GQA_QUERY_TILE_OUTER": True,
+            "bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64": True,
+        }
+        _strip_rocm_query_tile_outer_options(options)
+        self.assertEqual(options, {"bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64": True})
+
+    @common_utils.parametrize(
+        "case",
+        ("broadcast", "expanded", "unknown", "kpack2", "option_off", "other_scale"),
+    )
+    def test_d128_query_tile_outer_selection(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _select_rocm_d128_query_tile_outer_options,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_inputs()
+        options["matrix_instr_nonkdim"] = 0
+        if case in ("expanded", "unknown"):
+            shape = (
+                4
+                if case == "expanded"
+                else sympy.Symbol("unknown_batch", positive=True, integer=True),
+                1,
+                32,
+            )
+            nodes[10] = _tdm_operand(
+                "selection_metadata", (32, 32, 1), size=shape, dtype=torch.int32
+            )
+        if case == "kpack2":
+            options["kpack"] = 2
+        if case == "option_off":
+            options["ROCM_D128_DV_VIEW_CARRY_SPLIT64"] = False
+        if case == "other_scale":
+            options["SM_SCALE"] = 128**-0.5
+        with V.set_graph_handler(_tdm_graph()):
+            _select_rocm_d128_query_tile_outer_options(
+                nodes,
+                options,
+                single_config=True,
+                fp16_pilot=True,
+                fp32_balanced64_pilot=False,
+            )
+        self.assertEqual(
+            options["matrix_instr_nonkdim"],
+            0,
+        )
+        self.assertIs(
+            options.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), case == "broadcast"
+        )
+
+    def _d128_query_tile_outer_fp16_B2_inputs(self):
+        nodes, options = self._d128_query_tile_outer_inputs()
+        values = self._d128_coverage_operands(2, 4096, False)
+        nodes[:8] = [
+            values[0],
+            values[1],
+            values[2],
+            values[5],
+            values[5],
+            values[3],
+            values[0],
+            values[2],
+        ]
+        options.update(
+            matrix_instr_nonkdim=0,
+            ROCM_SEPARATE_DQ=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=True,
+            BLOCKS_ARE_CONTIGUOUS=True,
+            IS_DIVISIBLE=True,
+            SAFE_HEAD_DIM=True,
+            USE_TMA=False,
+            PRESCALE_QK=False,
+            FLOAT32_PRECISION="'ieee'",
+        )
+        return nodes, options
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "zero",
+            "negative",
+            "common_device2",
+            "option_off",
+            "matrix16",
+            "stages1",
+            "warps8",
+            "waves1",
+            "kpack2",
+            "pow_scale",
+            "bool_scale",
+            "missing_config",
+            "multi_config",
+            "contiguous_false",
+            "contiguous_numeric",
+            "contiguous_string",
+            "contiguous_missing",
+            "rank0",
+            "mixed_lse",
+            "mixed_delta",
+            "mixed_dv",
+            "alias",
+            "different_device",
+        ),
+    )
+    def test_d128_query_tile_outer_fp16_B2_guard(self, case):
+        from torch._inductor.ir import Buffer, FixedLayout
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp16_B2_inputs()
+        changes = {
+            "zero": ("SM_SCALE", 0.0),
+            "negative": ("SM_SCALE", -0.125),
+            "option_off": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", False),
+            "matrix16": ("matrix_instr_nonkdim", 16),
+            "stages1": ("num_stages", 1),
+            "warps8": ("num_warps", 8),
+            "waves1": ("waves_per_eu", 1),
+            "kpack2": ("kpack", 2),
+            "pow_scale": ("SM_SCALE", 128**-0.5),
+            "bool_scale": ("SM_SCALE", False),
+            "contiguous_false": ("BLOCKS_ARE_CONTIGUOUS", False),
+            "contiguous_numeric": ("BLOCKS_ARE_CONTIGUOUS", 1),
+            "contiguous_string": ("BLOCKS_ARE_CONTIGUOUS", "True"),
+        }
+        if case in changes:
+            name, value = changes[case]
+            options[name] = value
+        if case == "contiguous_missing":
+            options.pop("BLOCKS_ARE_CONTIGUOUS")
+        if case == "missing_config":
+            options.pop("num_stages")
+        if case == "rank0":
+            nodes[0] = nodes[6] = _tdm_operand(
+                "fp16_scalar_query", (), size=(), dtype=torch.float16
+            )
+        if case.startswith("mixed_"):
+            index = {"mixed_lse": 3, "mixed_delta": 4, "mixed_dv": 7}[case]
+            other, _ = self._d128_query_tile_outer_inputs()
+            nodes[index] = other[index]
+        if case == "alias":
+            nodes[6] = Buffer(
+                name="fp16_wrong_alias",
+                layout=FixedLayout(
+                    nodes[0].get_device(),
+                    nodes[0].get_dtype(),
+                    size=nodes[0].get_size(),
+                    stride=nodes[0].get_stride(),
+                ),
+            )
+        if case == "common_device2":
+            nodes = [
+                Buffer(
+                    name="fp16_common_device_" + str(index),
+                    layout=FixedLayout(
+                        torch.device("cuda:2"),
+                        node.get_dtype(),
+                        size=node.get_size(),
+                        stride=node.get_stride(),
+                    ),
+                )
+                for index, node in enumerate(nodes)
+            ]
+            nodes[6] = nodes[0]
+        if case == "different_device":
+            nodes[7] = Buffer(
+                name="fp16_other_device",
+                layout=FixedLayout(
+                    torch.device("cuda:2"),
+                    nodes[7].get_dtype(),
+                    size=nodes[7].get_size(),
+                    stride=nodes[7].get_stride(),
+                ),
+            )
+        before = dict(options)
+        with V.set_graph_handler(_tdm_graph()):
+            actual = _use_rocm_d128_gqa_query_tile_outer(
+                nodes, options, single_config=case != "multi_config"
+            )
+        self.assertIs(
+            actual,
+            case
+            in ("enabled", "zero", "negative", "common_device2", "contiguous_false"),
+        )
+        self.assertEqual(options.keys(), before.keys())
+        for name in before:
+            self.assertIs(options[name], before[name])
+
+    @common_utils.parametrize("index", tuple(range(16)))
+    @common_utils.parametrize("field", ("dtype", "stride"))
+    def test_d128_query_tile_outer_fp16_B2_operands(self, index, field):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp16_B2_inputs()
+        if field == "dtype":
+            name = "get_dtype"
+            value = (
+                torch.float16
+                if index in (3, 4)
+                else torch.bfloat16
+                if index < 8
+                else torch.int64
+            )
+        else:
+            name = "get_stride"
+            value = list(nodes[index].get_stride())
+            value[-1] = 2
+        with (
+            mock.patch.object(nodes[index], name, return_value=value),
+            V.set_graph_handler(_tdm_graph()),
+        ):
+            self.assertIs(
+                _use_rocm_d128_gqa_query_tile_outer(nodes, options, single_config=True),
+                False,
+            )
+
+    @common_utils.parametrize("index", (3, 4, 7, 8, 11, 14, 15))
+    @common_utils.parametrize("field", ("rank", "stride_count"))
+    def test_d128_query_tile_outer_fp16_B2_rank(self, index, field):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp16_B2_inputs()
+        name = "get_size" if field == "rank" else "get_stride"
+        value = list(getattr(nodes[index], name)())[:-1]
+        with (
+            mock.patch.object(nodes[index], name, return_value=value),
+            V.set_graph_handler(_tdm_graph()),
+        ):
+            self.assertIs(
+                _use_rocm_d128_gqa_query_tile_outer(nodes, options, single_config=True),
+                False,
+            )
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "dimension_bool",
+            "dimension_float",
+            "dimension_string",
+            "dimension_none",
+            "stride_bool",
+            "stride_float",
+            "stride_string",
+            "stride_none",
+            "config_bool",
+            "config_float",
+            "config_string",
+            "config_none",
+        ),
+    )
+    def test_d128_query_tile_outer_fp16_B2_types(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _use_rocm_d128_gqa_query_tile_outer,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp16_B2_inputs()
+        field, kind = case.split("_")
+        if field == "config":
+            options["matrix_instr_nonkdim"] = {
+                "bool": False,
+                "float": 0.0,
+                "string": "0",
+                "none": None,
+            }[kind]
+            with V.set_graph_handler(_tdm_graph()):
+                self.assertIs(
+                    _use_rocm_d128_gqa_query_tile_outer(
+                        nodes, options, single_config=True
+                    ),
+                    False,
+                )
+        else:
+            index, name = (3, "get_size") if field == "dimension" else (7, "get_stride")
+            value = list(getattr(nodes[index], name)())
+            value[-1] = {
+                "bool": True,
+                "float": float(value[-1]),
+                "string": str(value[-1]),
+                "none": None,
+            }[kind]
+            with (
+                mock.patch.object(nodes[index], name, return_value=value),
+                V.set_graph_handler(_tdm_graph()),
+            ):
+                self.assertIs(
+                    _use_rocm_d128_gqa_query_tile_outer(
+                        nodes, options, single_config=True
+                    ),
+                    False,
+                )
+
+    @common_utils.parametrize(
+        "case",
+        (
+            "enabled",
+            "zero",
+            "negative",
+            "expanded",
+            "option_off",
+            "matrix16",
+            "stages1",
+            "multi_config",
+            "indexed",
+            "pow_scale",
+            "kpack2",
+        ),
+    )
+    def test_d128_query_tile_outer_fp16_B2_selection(self, case):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _select_rocm_d128_query_tile_outer_options,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, options = self._d128_query_tile_outer_fp16_B2_inputs()
+        changes = {
+            "zero": ("SM_SCALE", 0.0),
+            "negative": ("SM_SCALE", -0.125),
+            "option_off": ("ROCM_D128_DV_VIEW_CARRY_SPLIT64", False),
+            "matrix16": ("matrix_instr_nonkdim", 16),
+            "stages1": ("num_stages", 1),
+            "indexed": ("BLOCKS_ARE_CONTIGUOUS", False),
+            "pow_scale": ("SM_SCALE", 128**-0.5),
+            "kpack2": ("kpack", 2),
+        }
+        if case in changes:
+            name, value = changes[case]
+            options[name] = value
+        if case == "expanded":
+            nodes[10] = _tdm_operand(
+                "fp16_expanded_metadata",
+                (32, 32, 1),
+                size=(2, 1, 32),
+                dtype=torch.int32,
+            )
+        before = dict(options)
+        with V.set_graph_handler(_tdm_graph()):
+            _select_rocm_d128_query_tile_outer_options(
+                nodes,
+                options,
+                single_config=case != "multi_config",
+                fp16_pilot=True,
+                fp32_balanced64_pilot=False,
+            )
+        enabled = case in ("enabled", "zero", "negative", "indexed")
+        self.assertIs(options.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), enabled)
+        if enabled:
+            before["ROCM_D128_GQA_QUERY_TILE_OUTER"] = True
+        self.assertEqual(options, before)
+
+    @common_utils.parametrize("contiguous", (False, True))
+    def test_d128_query_tile_outer_fp16_B2_automatic_scope(self, contiguous):
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            _get_rocm_backward_config_options,
+            _get_rocm_backward_phase_options,
+            _normalize_rocm_backward_options,
+        )
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._backward_auto_profile_inputs(
+            dtype=torch.float16,
+            batch=2,
+            length=4096,
+        )
+        options["BLOCKS_ARE_CONTIGUOUS"] = contiguous
+        profile = self._backward_auto_profile(
+            nodes,
+            out,
+            options,
+            {"bwd_BLOCKS_ARE_CONTIGUOUS": contiguous},
+        )
+        self.assertIsNotNone(profile)
+        requests = _normalize_rocm_backward_options(profile)
+        current = _get_rocm_backward_config_options(profile, is_gfx950=True)
+        with V.set_graph_handler(_tdm_graph()):
+            dkdv, dq = _get_rocm_backward_phase_options(
+                current,
+                nodes,
+                requests=requests,
+                single_config=True,
+                is_gfx950=True,
+                query=nodes[0],
+                key=nodes[1],
+                value=nodes[2],
+                grad_out=nodes[5],
+                use_separate_dq=True,
+                use_d192_panel_phase=False,
+                use_d96_panel_phase=False,
+                fp16_pilot=True,
+                fp32_balanced64_pilot=False,
+                score_is_trivial=True,
+                has_captures=False,
+                mask_is_causal=True,
+                mask_is_scalar_true=False,
+                block_mask_is_default=False,
+                grad_logsumexp_is_none=True,
+            )
+        self.assertIs(dkdv.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), True)
+        self.assertIs(dq.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), False)
+        self.assertEqual(dkdv["matrix_instr_nonkdim"], 0)
+        self.assertEqual(dq["matrix_instr_nonkdim"], 0)
+        self.assertEqual((dkdv["ROCM_BWD_PHASE"], dq["ROCM_BWD_PHASE"]), (1, 2))
+
+    def _d64_four_owner_inputs(
+        self,
+        dtype=torch.float16,
+        batch=1,
+        heads=8,
+        kv_heads=2,
+        length=4096,
+        dimension=64,
+    ):
+        nodes, out, options = self._backward_auto_profile_inputs(
+            dtype, batch, length, dimension, heads, kv_heads
+        )
+        return (nodes, out, options)
+
+    def test_backward_auto_profile_d64_default_profile_and_parent(self):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+        from torch._inductor.virtualized import V
+
+        nodes, out, options = self._d64_four_owner_inputs()
+        original = dict(options)
+        profile = self._backward_auto_profile(nodes, out, options)
+        self.assertIsNotNone(profile)
+        self.assertEqual(options, original)
+        self.assertEqual(
+            tuple(
+                profile[name]
+                for name in (
+                    "BLOCK_M1",
+                    "BLOCK_N1",
+                    "BLOCK_M2",
+                    "BLOCK_N2",
+                    "num_warps",
+                    "num_stages",
+                    "matrix_instr_nonkdim",
+                    "waves_per_eu",
+                    "kpack",
+                )
+            ),
+            (32, 128, 128, 32, 4, 2, 0, 0, 1),
+        )
+        self.assertIs(profile["ROCM_GQA_SPLIT_DKDV"], True)
+        self.assertIs(profile["ROCM_SEPARATE_DQ"], False)
+        self.assertIs(profile["ROCM_EARLY_DP"], False)
+        self.assertIs(profile["XCD_REMAP"], False)
+        current = dict(profile)
+        requests = flex_kernel_mod.rocm_backward._normalize_rocm_backward_options(
+            current
+        )
+        current = flex_kernel_mod.rocm_backward._get_rocm_backward_config_options(
+            current, is_gfx950=True
+        )
+        with V.set_graph_handler(_tdm_graph()):
+            self.assertTrue(
+                flex_kernel_mod.rocm_backward._use_rocm_gqa_split_dkdv(
+                    True, *nodes[:3], current, True, True, True, False
+                )
+            )
+            self.assertFalse(
+                flex_kernel_mod.rocm_backward._use_rocm_separate_dq(
+                    True,
+                    *nodes[:3],
+                    current,
+                    True,
+                    False,
+                    mask_is_scalar_true=True,
+                    block_mask_is_default=True,
+                )
+            )
+            phase1, phase2 = (
+                flex_kernel_mod.rocm_backward._get_rocm_backward_phase_options(
+                    current,
+                    nodes,
+                    requests=requests,
+                    single_config=True,
+                    is_gfx950=True,
+                    query=nodes[0],
+                    key=nodes[1],
+                    value=nodes[2],
+                    grad_out=nodes[5],
+                    use_separate_dq=False,
+                    use_d192_panel_phase=False,
+                    use_d96_panel_phase=False,
+                    fp16_pilot=False,
+                    fp32_balanced64_pilot=False,
+                    score_is_trivial=True,
+                    has_captures=False,
+                    mask_is_causal=False,
+                    mask_is_scalar_true=True,
+                    block_mask_is_default=True,
+                    grad_logsumexp_is_none=True,
+                )
+            )
+        self.assertEqual((phase1["ROCM_BWD_PHASE"], phase2["ROCM_BWD_PHASE"]), (1, 2))
+        for phase in (phase1, phase2):
+            self.assertIs(phase.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False), False)
+            self.assertIs(phase["ROCM_EARLY_DP"], False)
+            self.assertIs(phase["XCD_REMAP"], False)
+
+    @common_utils.parametrize(
+        "flag,value",
+        (
+            ("is_gfx950", False),
+            ("single_config", False),
+            ("score_is_trivial", False),
+            ("has_captures", True),
+            ("grad_logsumexp_is_none", False),
+            ("mask_is_scalar_true", False),
+            ("block_mask_is_default", False),
+            ("mask_is_causal", True),
+            ("backend", "FLASH"),
+        ),
+    )
+    def test_backward_auto_profile_d64_semantic_fallback(self, flag, value):
+        nodes, out, options = self._d64_four_owner_inputs()
+        self.assertIsNone(
+            self._backward_auto_profile(nodes, out, options, **{flag: value})
+        )
+
+    @common_utils.parametrize(
+        "dtype,batch,heads,kv_heads,length,dimension",
+        (
+            (torch.bfloat16, 1, 8, 2, 4096, 64),
+            (torch.float32, 1, 8, 2, 4096, 64),
+            (torch.float16, 4, 32, 8, 4096, 64),
+            (torch.float16, 1, 8, 2, 2048, 64),
+            (torch.float16, 1, 8, 2, 8192, 64),
+            (torch.float16, 2, 8, 2, 4096, 64),
+            (torch.float16, 1, 16, 4, 4096, 64),
+            (torch.float16, 1, 8, 1, 4096, 64),
+            (torch.float16, 1, 8, 2, 4096, 128),
+        ),
+    )
+    def test_backward_auto_profile_d64_shape_fallback(
+        self, dtype, batch, heads, kv_heads, length, dimension
+    ):
+        nodes, out, options = self._d64_four_owner_inputs(
+            dtype, batch, heads, kv_heads, length, dimension
+        )
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize(
+        "scale", (0.0, -0.125, 0.25, True, float("nan"), float("inf"))
+    )
+    def test_backward_auto_profile_d64_scale_fallback(self, scale):
+        nodes, out, options = self._d64_four_owner_inputs()
+        options["SM_SCALE"] = scale
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize("index", (0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 16))
+    @common_utils.parametrize("field", ("dtype", "stride", "device", "shape", "rank"))
+    def test_backward_auto_profile_d64_operand_fallback(self, index, field):
+        nodes, out, options = self._d64_four_owner_inputs()
+        tensor = out if index == 16 else nodes[index]
+        shape, stride, dtype, device = (
+            list(tensor.get_size()),
+            list(tensor.get_stride()),
+            tensor.get_dtype(),
+            tensor.get_device(),
+        )
+        if field == "dtype":
+            dtype = torch.float32 if dtype != torch.float32 else torch.float16
+        elif field == "stride":
+            stride[-1] = 2
+        elif field == "device":
+            device = torch.device("cpu")
+        elif field == "shape":
+            shape[0] += 1
+        else:
+            shape.append(1)
+            stride.append(1)
+        invalid = _tdm_operand("invalid_d64_owner", stride, size=shape, dtype=dtype)
+        invalid.layout.device = device
+        if index == 16:
+            out = invalid
+        else:
+            nodes[index] = invalid
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize("index", (12, 13, 14, 15))
+    def test_backward_auto_profile_d64_full_metadata_fallback(self, index):
+        nodes, out, options = self._d64_four_owner_inputs()
+        nodes[index] = nodes[8 if index % 2 == 0 else 9]
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize(
+        "option,value",
+        (
+            ("BLOCKS_ARE_CONTIGUOUS", True),
+            ("HAS_FULL_BLOCKS", True),
+            ("IS_DIVISIBLE", False),
+            ("SAFE_HEAD_DIM", False),
+            ("GQA_SHARED_HEADS", 8),
+            ("QK_HEAD_DIM", 128),
+            ("V_HEAD_DIM", 128),
+            ("QK_HEAD_DIM_ROUNDED", 128),
+            ("V_HEAD_DIM_ROUNDED", 128),
+            ("SPARSE_Q_BLOCK_SIZE", 128),
+            ("SPARSE_KV_BLOCK_SIZE", 128),
+            ("USE_TMA", True),
+            ("PRESCALE_QK", True),
+        ),
+    )
+    def test_backward_auto_profile_d64_metadata_and_option_fallback(
+        self, option, value
+    ):
+        nodes, out, options = self._d64_four_owner_inputs()
+        options[option] = value
+        self.assertIsNone(self._backward_auto_profile(nodes, out, options))
+
+    @common_utils.parametrize(
+        "option",
+        (
+            "ROCM_GQA_SPLITS",
+            "ROCM_BWD_PHASE",
+            "ROCM_GQA_SPLIT_DKDV",
+            "ROCM_GQA_FOUR_OWNER",
+            "ROCM_SEPARATE_DQ",
+            "ROCM_EARLY_DP",
+            "XCD_REMAP",
+            "BLOCK_M1",
+            "BLOCK_N1",
+            "BLOCK_M2",
+            "BLOCK_N2",
+            "num_warps",
+            "num_stages",
+            "matrix_instr_nonkdim",
+            "waves_per_eu",
+            "kpack",
+            "BLOCKS_ARE_CONTIGUOUS",
+        ),
+    )
+    @common_utils.parametrize("prefix", ("", "bwd_", "fwd_"))
+    def test_backward_auto_profile_d64_explicit_options_reject_automatic_owner_selection(
+        self, option, prefix
+    ):
+        nodes, out, options = self._d64_four_owner_inputs()
+        selected = self._backward_auto_profile(
+            nodes, out, options, {prefix + option: False}
+        )
+        if prefix == "fwd_" or (prefix == "" and option == "BLOCKS_ARE_CONTIGUOUS"):
+            self.assertIsNotNone(selected)
+        else:
+            self.assertIsNone(selected)
+
+    @common_utils.parametrize(
+        "name,value",
+        (
+            ("fwd_num_warps", 4),
+            ("fwd_num_warps", 8),
+            ("fwd_num_stages", 1),
+            ("fwd_BLOCK_M1", 64),
+            ("fwd_BLOCKS_ARE_CONTIGUOUS", True),
+        ),
+    )
+    def test_backward_auto_profile_d64_forward_options_preserve_defaults(
+        self, name, value
+    ):
+        nodes, out, options = self._d64_four_owner_inputs()
+        expected = self._backward_auto_profile(nodes, out, options)
+        user = {name: value}
+        before = dict(user)
+        self.assertIsNotNone(expected)
+        self.assertEqual(
+            self._backward_auto_profile(nodes, out, options, user), expected
+        )
+        self.assertEqual(user, before)
+
+
 class TestFlexAttentionTDMOptions(InductorTestCase):
     _PREREQS = "torch._inductor.utils._gfx1250_device_prereqs"
 
@@ -3330,6 +8884,1632 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         """Test learnable scalar parameter with shape (1,) using literal index."""
         self._run_test_captured_scalar_grad(device, dtype)
 
+    @supported_platform
+    @common_utils.parametrize(
+        "dtype,qk_dim,v_dim",
+        (
+            (torch.bfloat16, 64, 64),
+            (torch.bfloat16, 128, 128),
+            (torch.float16, 64, 128),
+            (torch.float32, 128, 64),
+        ),
+    )
+    @common_utils.parametrize("mask", ("dense", "causal", "sliding"))
+    @common_utils.parametrize(
+        "early_dp,xcd_remap",
+        ((False, False), (True, False), (False, True), (True, True)),
+    )
+    def test_gfx950_backward_options(
+        self, device, dtype, qk_dim, v_dim, mask, early_dp, xcd_remap
+    ):
+        self._run_gfx950_backward_options(
+            device, dtype, qk_dim, v_dim, mask, early_dp, xcd_remap
+        )
+
+    @supported_platform
+    def test_gfx950_backward_options_arch_guard(self, device):
+        self._run_gfx950_backward_options(
+            device, torch.bfloat16, 64, 64, "dense", True, True, arch="gfx942"
+        )
+
+    @contextmanager
+    def _observe_gfx950_backward_templates(self, callback=None):
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        generic = flex_kernel_mod.flex_attention_backward_template
+        rocm = flex_kernel_mod.rocm_backward.flex_attention_backward_template
+        originals = {
+            template: template.maybe_append_choice for template in (generic, rocm)
+        }
+
+        def append(template, *args, **kwargs):
+            specialized = kwargs.get("ROCM_BWD_PHASE", 0) != 0 or any(
+                kwargs.get(option, False)
+                for option in (
+                    "ROCM_EARLY_DP",
+                    "XCD_REMAP",
+                    "ROCM_D256_PANEL_DOTS",
+                    "ROCM_XCD_SNAKE",
+                )
+            )
+            self.assertIs(template, rocm if specialized else generic)
+            original = originals[template]
+            if callback is not None:
+                return callback(original, *args, **kwargs)
+            return original(*args, **kwargs)
+
+        observed = mock.Mock(side_effect=append)
+        with contextlib.ExitStack() as stack:
+            for template in (generic, rocm):
+                stack.enter_context(
+                    mock.patch.object(
+                        template,
+                        "maybe_append_choice",
+                        side_effect=functools.partial(observed, template),
+                    )
+                )
+            yield observed
+
+    def _gfx950_backward_constants(self, parsed):
+        import ast
+
+        return {
+            node.target.id: node.value.value
+            for node in ast.walk(parsed)
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+        }
+
+    def _run_gfx950_backward_options(
+        self, device, dtype, qk_dim, v_dim, mask, early_dp, xcd_remap, *, arch="gfx950"
+    ):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len = 257, 260
+        q = torch.randn(3, 10, q_len, qk_dim, device=device, dtype=dtype) * 0.5
+        k = torch.randn(3, 5, kv_len, qk_dim, device=device, dtype=dtype) * 0.5
+        v = torch.randn(3, 5, kv_len, v_dim, device=device, dtype=dtype)
+        scale = torch.linspace(0.75, 1.2, 10, device=device, requires_grad=True)
+        inputs = tuple(tensor.requires_grad_() for tensor in (q, k, v, scale))
+        grad_out = torch.randn(3, 10, q_len, v_dim, device=device, dtype=dtype) * 0.25
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            coefficient = scale[h]
+            return score * coefficient + (coefficient - 1) * ((kv_idx + 1) / kv_len)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            valid = q_idx >= kv_idx
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx < 67)
+            return valid
+
+        block_mask = None
+        if mask != "dense":
+            block_mask = create_block_mask(
+                mask_mod, None, None, q_len, kv_len, device=device
+            )
+
+        def attention(query, key, value):
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "bwd_ROCM_EARLY_DP": early_dp,
+                    "bwd_XCD_REMAP": xcd_remap,
+                },
+            )
+
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        architecture_patch = contextlib.nullcontext()
+        if arch != "gfx950":
+            # Keep the compiler and runtime on the real device.
+            lowering_torch = types.SimpleNamespace(**vars(torch))
+            lowering_torch.cuda = types.SimpleNamespace(**vars(torch.cuda))
+            lowering_torch.cuda.get_device_properties = mock.Mock(
+                return_value=types.SimpleNamespace(gcnArchName=arch)
+            )
+            architecture_patch = mock.patch.object(
+                flex_kernel_mod, "torch", lowering_torch
+            )
+        with (
+            architecture_patch,
+            self._observe_gfx950_backward_templates() as choices,
+        ):
+            out = torch.compile(attention, fullgraph=True)(q, k, v)
+            gradients = torch.autograd.grad(out, inputs, grad_out)
+        self.assertTrue(choices.call_args_list)
+        for call in choices.call_args_list:
+            self.assertEqual(
+                call.kwargs["ROCM_EARLY_DP"], arch == "gfx950" and early_dp
+            )
+            self.assertEqual(call.kwargs["XCD_REMAP"], arch == "gfx950" and xcd_remap)
+        ref_q, ref_k, ref_v, ref_scale = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        scores = ref_q @ ref_k.repeat_interleave(2, dim=1).transpose(-1, -2)
+        coefficient = ref_scale[None, :, None, None]
+        scores = scores * (qk_dim**-0.5) * coefficient
+        kv_idx = torch.arange(kv_len, device=device)
+        scores = scores + (coefficient - 1) * ((kv_idx + 1) / kv_len)
+        if mask != "dense":
+            q_idx = torch.arange(q_len, device=device)[:, None]
+            valid = q_idx >= kv_idx[None, :]
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx[None, :] < 67)
+            scores = scores.masked_fill(~valid, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(2, dim=1)
+        ref_gradients = torch.autograd.grad(
+            ref_out, (ref_q, ref_k, ref_v, ref_scale), grad_out.float()
+        )
+        for actual, expected in zip(
+            (out, *gradients), (ref_out, *ref_gradients), strict=True
+        ):
+            self.assertTrue(actual.isfinite().all().item())
+            self.assertTrue(expected.isfinite().all().item())
+            self.assertEqual(actual.float(), expected, rtol=0.08, atol=0.02)
+            difference = actual.float() - expected
+            error = difference.norm() / expected.norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.01)
+
+    @supported_platform
+    @config.patch(
+        fx_graph_cache=False,
+        max_autotune=False,
+        max_autotune_gemm=False,
+        compile_threads=1,
+        emulate_precision_casts=False,
+    )
+    @common_utils.parametrize("gqa,q_len,kv_len", ((1, 257, 260), (4, 129, 129)))
+    @common_utils.parametrize("scale", (0.0625, 0.0, -0.0625))
+    @common_utils.parametrize("capture", ("none", "score", "mask"))
+    def test_gfx950_d256_xcd_snake(self, device, gqa, q_len, kv_len, scale, capture):
+        self._run_gfx950_d256_xcd_snake(device, gqa, q_len, kv_len, scale, capture)
+
+    def _check_gfx950_xcd_snake_values(self, actual, expected, *, strict):
+        self.assertEqual(len(actual), len(expected))
+        for index, (value, target) in enumerate(zip(actual, expected, strict=True)):
+            self.assertTrue(value.isfinite().all().item())
+            self.assertTrue(target.isfinite().all().item())
+            if strict:
+                atol, rtol = (0, 0) if index == 0 else (0.0003, 0.005)
+                self.assertEqual(value, target, atol=atol, rtol=rtol)
+                if index:
+                    relative_l2 = (
+                        value.float() - target.float()
+                    ).norm() / target.float().norm().clamp_min(1e-12)
+                    self.assertLessEqual(relative_l2.item(), 0.001)
+            else:
+                atol, rtol = (0.02, 0.02) if index == 0 else (0.03, 0.03)
+                self.assertEqual(value.float(), target.float(), atol=atol, rtol=rtol)
+        return len(actual)
+
+    def _run_gfx950_d256_xcd_snake(self, device, gqa, q_len, kv_len, scale, capture):
+        import re
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_heads, kv_heads = 2 * gqa, 2
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (1, q_heads, q_len, 256),
+            (1, kv_heads, kv_len, 256),
+            (1, kv_heads, kv_len, 256),
+        )
+        q, k, v = tuple(
+            torch.randn(
+                shape, device=device, dtype=torch.bfloat16, generator=generator
+            ).requires_grad_()
+            for shape in shapes
+        )
+        bias = (
+            torch.randn(kv_len, device=device, dtype=torch.float32, generator=generator)
+            * 0.01
+        ).requires_grad_()
+        limit = torch.tensor([min(q_len, kv_len) - 3], device=device, dtype=torch.int32)
+        inputs = (q, k, v, bias) if capture == "score" else (q, k, v)
+        do = torch.randn(
+            shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+        )
+        original_do = do.clone()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            if capture == "mask":
+                return (q_idx >= kv_idx) & (kv_idx < limit[0])
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            mask_mod, None, None, q_len, kv_len, device=device
+        )
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs[:3]
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if capture == "score":
+                scores = scores + reference_inputs[3]
+            q_idx = torch.arange(q_len, device=device)[:, None]
+            kv_idx = torch.arange(kv_len, device=device)[None, :]
+            keep = q_idx >= kv_idx
+            if capture == "mask":
+                keep = keep & (kv_idx < limit[0])
+            probabilities = scores.masked_fill(~keep, float("-inf")).softmax(-1)
+            out = probabilities @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers, comparisons = {}, 0
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with torch.cuda.stream(stream), temp_float32_matmul_precision("highest"):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_ROCM_XCD_SNAKE=requested,
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=64,
+                        bwd_BLOCK_M2=64,
+                        bwd_BLOCK_N2=64,
+                        bwd_num_warps=4,
+                        bwd_num_stages=1,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_GQA_SPLIT_DKDV=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_XCD_REMAP=False,
+                    )
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            score_mod=score_mod if capture == "score" else None,
+                            block_mask=block_mask,
+                            enable_gqa=True,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    choices = []
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choices.append(
+                            (
+                                kwargs["ROCM_XCD_SNAKE"],
+                                kwargs["ROCM_BWD_PHASE"],
+                                kwargs["ROCM_GQA_SPLITS"],
+                                tuple(
+                                    kwargs[name]
+                                    for name in (
+                                        "BLOCK_M1",
+                                        "BLOCK_N1",
+                                        "BLOCK_M2",
+                                        "BLOCK_N2",
+                                    )
+                                ),
+                                kwargs["num_warps"],
+                                kwargs["num_stages"],
+                            )
+                        )
+                        return original_append(*args, **kwargs)
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with self._observe_gfx950_backward_templates(append_choice):
+                        (out, gradients), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    active = requested and capture == "none"
+                    self.assertEqual(choices, [(active, 0, 1, (32, 64, 64, 64), 4, 1)])
+                    backward_source = "\n".join(
+                        part for part in code if "ROCM_XCD_SNAKE" in part
+                    )
+                    flags = re.findall(
+                        r"ROCM_XCD_SNAKE\s*:\s*tl\.constexpr\s*=\s*(True|False)",
+                        backward_source,
+                    )
+                    self.assertTrue(flags)
+                    self.assertEqual(set(flags), {str(active)})
+                    self.assertEqual(
+                        "snake_group_size = tl.minimum(8, snake_work_per_head - snake_group_base)"
+                        in backward_source,
+                        active,
+                    )
+                    for name, expected in (
+                        ("BLOCK_M1", 32),
+                        ("BLOCK_N1", 64),
+                        ("BLOCK_M2", 64),
+                        ("BLOCK_N2", 64),
+                        ("ROCM_BWD_PHASE", 0),
+                        ("ROCM_GQA_SPLITS", 1),
+                        ("GQA_SHARED_HEADS", gqa),
+                    ):
+                        self.assertRegex(
+                            backward_source,
+                            rf"{name}\s*:\s*tl\.constexpr\s*=\s*{expected}\b",
+                        )
+                    if scale == 0:
+                        self.assertEqual(
+                            gradients[0], torch.zeros_like(q), atol=0, rtol=0
+                        )
+                        self.assertEqual(
+                            gradients[1], torch.zeros_like(k), atol=0, rtol=0
+                        )
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled, out=out, backward=backward, initial=gradients
+                    )
+                for sign in (1, -1, 1):
+                    do.copy_(original_do * sign)
+                    target = reference()
+                    actual = {
+                        name: (
+                            problem["out"].detach().clone(),
+                            *(
+                                gradient.detach().clone()
+                                for gradient in problem["backward"]()
+                            ),
+                        )
+                        for name, problem in providers.items()
+                    }
+                    for value in actual.values():
+                        comparisons += self._check_gfx950_xcd_snake_values(
+                            value, target, strict=False
+                        )
+                    comparisons += self._check_gfx950_xcd_snake_values(
+                        actual[True], actual[False], strict=True
+                    )
+                do.copy_(original_do)
+                for problem in providers.values():
+                    for _ in range(5):
+                        problem["backward"]()
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph, stream=stream):
+                        retained = [problem["backward"]() for _ in range(10)]
+                    problem.update(graph=graph, retained=retained)
+                for sign in (1, -1, 1):
+                    do.copy_(original_do * sign)
+                    for problem in providers.values():
+                        problem["graph"].replay()
+                    torch.cuda.synchronize(device)
+                    target = reference()
+                    for index in range(10):
+                        actual = {
+                            name: (
+                                problem["out"].detach().clone(),
+                                *(
+                                    gradient.detach().clone()
+                                    for gradient in problem["retained"][index]
+                                ),
+                            )
+                            for name, problem in providers.items()
+                        }
+                        for value in actual.values():
+                            comparisons += self._check_gfx950_xcd_snake_values(
+                                value, target, strict=False
+                            )
+                        comparisons += self._check_gfx950_xcd_snake_values(
+                            actual[True], actual[False], strict=True
+                        )
+                self.assertEqual(comparisons, 9 * (len(inputs) + 1) * 11)
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("scale", (None, 0.0, 0.125, -0.125))
+    def test_gfx950_gqa_split_dkdv(self, device, scale):
+        self._run_gfx950_gqa_split_dkdv(device, scale=scale)
+
+    @supported_platform
+    @common_utils.parametrize("fwd_num_warps", (None, 4))
+    def test_gfx950_gqa_split_dkdv_automatic(self, device, fwd_num_warps):
+        self._run_gfx950_gqa_split_dkdv(
+            device, automatic=True, fwd_num_warps=fwd_num_warps, graph_replay=True
+        )
+
+    @supported_platform
+    def test_gfx950_gqa_split_dkdv_options(self, device):
+        self._run_gfx950_gqa_split_dkdv(
+            device, batch_size=2, early_dp=True, xcd_remap=True
+        )
+
+    @supported_platform
+    def test_gfx950_gqa_split_dkdv_graph(self, device):
+        self._run_gfx950_gqa_split_dkdv(device, graph_replay=True)
+
+    @supported_platform
+    @common_utils.parametrize("enabled", (False, True))
+    @common_utils.parametrize("override_prefix", ("", "bwd_"))
+    def test_gfx950_gqa_split_host_options(self, device, enabled, override_prefix):
+        self._run_gfx950_gqa_split_dkdv(
+            device, enabled=enabled, override_prefix=override_prefix
+        )
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        ("bf16", "causal", "sliding", "dense_mask", "score_capture", "mask_capture"),
+    )
+    def test_gfx950_gqa_split_dkdv_fallback(self, device, fallback):
+        self._run_gfx950_gqa_split_dkdv(device, fallback=fallback)
+
+    @supported_platform
+    @common_utils.parametrize("fp16_fallback", (False, True))
+    def test_gfx950_gqa_split_d128_optins(self, device, fp16_fallback):
+        self._run_gfx950_separate_dq(
+            device,
+            "dense",
+            0.125,
+            fallback="dtype" if fp16_fallback else None,
+            gqa_split=True,
+        )
+
+    def _run_gfx950_gqa_split_dkdv(
+        self,
+        device,
+        *,
+        scale=0.125,
+        batch_size=1,
+        early_dp=False,
+        xcd_remap=False,
+        enabled=True,
+        override_prefix=None,
+        fallback=None,
+        graph_replay=False,
+        automatic=False,
+        fwd_num_warps=None,
+    ):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len = (4096, 4096) if automatic else (257, 260)
+        q_heads, kv_heads = 8 * batch_size, 2 * batch_size
+        dtype = torch.bfloat16 if fallback == "bf16" else torch.float16
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        q = (
+            torch.randn(
+                batch_size,
+                q_heads,
+                q_len,
+                64,
+                device=device,
+                dtype=dtype,
+                generator=generator,
+            )
+            * 0.5
+        )
+        k = (
+            torch.randn(
+                batch_size,
+                kv_heads,
+                kv_len,
+                64,
+                device=device,
+                dtype=dtype,
+                generator=generator,
+            )
+            * 0.5
+        )
+        v = torch.randn_like(k)
+        q, k, v = tuple(tensor.requires_grad_() for tensor in (q, k, v))
+        inputs = (q, k, v)
+        bias = (
+            torch.randn(
+                q_heads, kv_len, device=device, dtype=torch.float32, requires_grad=True
+            )
+            * 0.01
+        )
+        if fallback == "score_capture":
+            inputs += (bias,)
+        limit = torch.tensor([251], device=device, dtype=torch.int32)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h, kv_idx]
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            if fallback == "mask_capture":
+                return kv_idx < limit[0]
+            if fallback == "dense_mask":
+                return kv_idx >= 0
+            valid = q_idx >= kv_idx
+            return valid & (q_idx - kv_idx < 67) if fallback == "sliding" else valid
+
+        block_mask = None
+        if fallback in ("causal", "sliding", "dense_mask", "mask_capture"):
+            block_mask = create_block_mask(
+                mask_mod, None, None, q_len, kv_len, device=device
+            )
+
+        def attention(query, key, value, requested):
+            options = {
+                "BACKEND": "TRITON",
+                "bwd_ROCM_GQA_SPLIT_DKDV": requested and enabled,
+                "bwd_ROCM_EARLY_DP": requested and early_dp,
+                "bwd_XCD_REMAP": requested and xcd_remap,
+            }
+            if automatic:
+                options = {"BACKEND": "TRITON"}
+                if not requested:
+                    options["bwd_ROCM_GQA_SPLIT_DKDV"] = False
+                if fwd_num_warps is not None:
+                    options["fwd_num_warps"] = fwd_num_warps
+            if requested and override_prefix is not None:
+                options[override_prefix + "ROCM_BWD_PHASE"] = 13
+                options[override_prefix + "ROCM_GQA_SPLITS"] = 17
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                score_mod=score_mod if fallback == "score_capture" else None,
+                scale=scale,
+                enable_gqa=True,
+                kernel_options=options,
+            )
+
+        grad = torch.randn_like(q) * 0.25
+        grad_outputs = (grad, -grad, grad)
+        compiled = torch.compile(attention, fullgraph=True)
+        stock_out = compiled(q, k, v, False)
+        stock_gradients = tuple(
+            torch.autograd.grad(stock_out, inputs, do, retain_graph=True)
+            for do in grad_outputs
+        )
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        original_select = flex_kernel_mod.autotune_select_algorithm
+        choice_metadata, selected = {}, []
+
+        def append_choice(original_append, *args, **kwargs):
+            choices = kwargs["choices"]
+            count = len(choices)
+            result = original_append(*args, **kwargs)
+            for choice in choices[count:]:
+                choice_metadata[id(choice)] = (
+                    kwargs["ROCM_BWD_PHASE"],
+                    kwargs["ROCM_GQA_SPLITS"],
+                )
+            return result
+
+        def select_algorithm(*args, **kwargs):
+            result = original_select(*args, **kwargs)
+            if args[0] in ("flex_attention_backward", "flex_attention_backward_dq"):
+                self.assertIn(id(result[1]), choice_metadata)
+                selected.append(choice_metadata[id(result[1])])
+            return result
+
+        with (
+            self._observe_gfx950_backward_templates(append_choice) as choices,
+            mock.patch.object(
+                flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
+            ),
+        ):
+            out = compiled(q, k, v, True)
+            gradients = tuple(
+                torch.autograd.grad(out, inputs, do, retain_graph=True)
+                for do in grad_outputs
+            )
+        admitted = enabled and fallback is None
+        splits = 4 if automatic else 2
+        self.assertTrue(choices.call_args_list)
+        self.assertEqual(selected, [(1, splits), (2, 1)] if admitted else [(0, 1)])
+        self.assertEqual(
+            [
+                (call.kwargs["ROCM_BWD_PHASE"], call.kwargs["ROCM_GQA_SPLITS"])
+                for call in choices.call_args_list
+            ],
+            [(0, 1), (1, splits), (2, 1)] if admitted else [(0, 1)],
+        )
+        for call in choices.call_args_list:
+            self.assertEqual(call.kwargs["num_warps"], 4)
+            self.assertEqual(call.kwargs["num_stages"], 2)
+            self.assertEqual(
+                tuple(
+                    call.kwargs[name]
+                    for name in ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
+                ),
+                (32, 128, 128, 32),
+            )
+            if call.kwargs["ROCM_BWD_PHASE"] == 1:
+                self.assertIs(
+                    call.kwargs["input_nodes"][6], call.kwargs["input_nodes"][0]
+                )
+                self.assertEqual(call.kwargs["layout"].dtype, torch.float32)
+                self.assertEqual(
+                    list(call.kwargs["layout"].size),
+                    [batch_size, kv_heads * splits, kv_len, 64],
+                )
+                mutations = call.kwargs["mutated_inputs"]
+                self.assertEqual(len(mutations), 1)
+                self.assertIs(mutations[0], call.kwargs["input_nodes"][7])
+                self.assertEqual(mutations[0].get_dtype(), torch.float32)
+                self.assertEqual(
+                    list(mutations[0].get_size()),
+                    [batch_size, kv_heads * splits, kv_len, 64],
+                )
+            elif call.kwargs["ROCM_BWD_PHASE"] == 2:
+                self.assertIs(
+                    call.kwargs["input_nodes"][6], call.kwargs["input_nodes"][0]
+                )
+                self.assertIs(
+                    call.kwargs["input_nodes"][7], call.kwargs["input_nodes"][2]
+                )
+                self.assertEqual(call.kwargs["layout"].dtype, torch.float16)
+                self.assertEqual(
+                    list(call.kwargs["layout"].size), [batch_size, q_heads, q_len, 64]
+                )
+                self.assertEqual(call.kwargs["mutated_inputs"], [])
+
+        reference_inputs = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        ref_q, ref_k, ref_v = reference_inputs[:3]
+        scores = (ref_q @ ref_k.repeat_interleave(4, dim=1).transpose(-1, -2)) * (
+            0.125 if scale is None else scale
+        )
+        if fallback == "score_capture":
+            scores = scores + reference_inputs[3][None, :, None, :]
+        if fallback == "mask_capture":
+            scores = scores.masked_fill(
+                torch.arange(kv_len, device=device) >= limit[0], float("-inf")
+            )
+        elif fallback in ("causal", "sliding"):
+            rows = torch.arange(q_len, device=device)[:, None]
+            columns = torch.arange(kv_len, device=device)[None, :]
+            valid = rows >= columns
+            if fallback == "sliding":
+                valid = valid & (rows - columns < 67)
+            scores = scores.masked_fill(~valid, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(4, dim=1)
+        ref_gradients = tuple(
+            torch.autograd.grad(
+                ref_out, reference_inputs, do.float(), retain_graph=True
+            )
+            for do in grad_outputs
+        )
+        if graph_replay:
+            mutable_grad = grad.clone()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    torch.autograd.grad(out, inputs, mutable_grad, retain_graph=True)
+            torch.cuda.current_stream().wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                captured_gradients = torch.autograd.grad(
+                    out, inputs, mutable_grad, retain_graph=True
+                )
+            replay_gradients = []
+            for do in grad_outputs:
+                mutable_grad.copy_(do)
+                graph.replay()
+                replay_gradients.append(
+                    tuple(tensor.clone() for tensor in captured_gradients)
+                )
+            torch.cuda.synchronize()
+            gradients += tuple(replay_gradients)
+            stock_gradients += stock_gradients
+            ref_gradients += ref_gradients
+            grad_outputs += grad_outputs
+        for tensor in (out, stock_out, ref_out):
+            self.assertTrue(tensor.isfinite().all().item())
+        self.assertEqual(out, stock_out, atol=0, rtol=0)
+        self.assertEqual(out.float(), ref_out, atol=0.02, rtol=0.02)
+        for actual_grads, stock_grads, expected_grads, do in zip(
+            gradients, stock_gradients, ref_gradients, grad_outputs, strict=True
+        ):
+            for actual, stock, expected in zip(
+                actual_grads, stock_grads, expected_grads, strict=True
+            ):
+                self.assertTrue(actual.isfinite().all().item())
+                self.assertTrue(stock.isfinite().all().item())
+                self.assertTrue(expected.isfinite().all().item())
+                self.assertEqual(actual, stock, atol=0.0003, rtol=0.005)
+                error = (
+                    actual.float() - stock.float()
+                ).norm() / stock.float().norm().clamp_min(1e-12)
+                self.assertLessEqual(error.item(), 0.001)
+                self.assertEqual(actual.float(), expected, atol=0.03, rtol=0.03)
+            if scale == 0:
+                self.assertEqual(actual_grads[0], torch.zeros_like(q), atol=0, rtol=0)
+                self.assertEqual(actual_grads[1], torch.zeros_like(k), atol=0, rtol=0)
+                uniform = (
+                    do.float().reshape(batch_size, kv_heads, 4, q_len, 64).sum((2, 3))
+                    / kv_len
+                )
+                uniform = uniform[:, :, None, :].expand_as(k)
+                self.assertEqual(actual_grads[2].float(), uniform, atol=0.03, rtol=0.03)
+
+    @supported_platform
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize("dq_m,dq_n", ((64, 16), (128, 32)))
+    @common_utils.parametrize("scale", (0.0625, 0.0, -0.0625))
+    def test_gfx950_d256_dense_separate_dq(self, device, gqa, dq_m, dq_n, scale):
+        self._run_gfx950_d256_dense_separate_dq(device, gqa, dq_m, dq_n, scale)
+
+    @supported_platform
+    @largeTensorTest("64GB", inductor=True)
+    def test_gfx950_d256_dense_separate_dq_automatic(self, device):
+        self._run_gfx950_d256_dense_separate_dq(
+            device, 4, 128, 32, 0.0625, automatic=True
+        )
+
+    @supported_platform
+    @common_utils.parametrize("fallback", ("causal", "mask_capture", "score_capture"))
+    def test_gfx950_d256_dense_separate_dq_fallback(self, device, fallback):
+        self._run_gfx950_d256_dense_separate_dq(
+            device, 4, 128, 32, 0.0625, fallback=fallback
+        )
+
+    def _run_gfx950_d256_dense_separate_dq(
+        self, device, gqa, dq_m, dq_n, scale, *, fallback=None, automatic=False
+    ):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        import ast
+
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        torch.manual_seed(20261008)
+        batch_size = 4 if automatic else 1
+        q_len, kv_len, q_heads = (4096, 4096, 32) if automatic else (257, 260, 4)
+        inputs = tuple(
+            tensor.requires_grad_()
+            for tensor in (
+                torch.randn(
+                    batch_size, q_heads, q_len, 256, dtype=torch.bfloat16, device=device
+                )
+                * 0.5,
+                torch.randn(
+                    batch_size,
+                    q_heads // gqa,
+                    kv_len,
+                    256,
+                    dtype=torch.bfloat16,
+                    device=device,
+                )
+                * 0.5,
+                torch.randn(
+                    batch_size,
+                    q_heads // gqa,
+                    kv_len,
+                    256,
+                    dtype=torch.bfloat16,
+                    device=device,
+                )
+                * 0.5,
+            )
+        )
+        q, k, v = inputs
+        grad = torch.randn_like(q) * 0.25
+        grad_outputs = (grad, -grad, grad)
+        limit = torch.tensor([251], dtype=torch.int32, device=device)
+        bias = torch.linspace(-0.1, 0.1, kv_len, device=device)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return kv_idx < limit[0] if fallback == "mask_capture" else q_idx >= kv_idx
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        block_mask = (
+            create_block_mask(mask_mod, None, None, q_len, kv_len, device=device)
+            if fallback in ("causal", "mask_capture")
+            else None
+        )
+
+        def attention(query, key, value, separate_dq, current_default):
+            options = {"BACKEND": "TRITON"}
+            if automatic:
+                if not separate_dq:
+                    options["bwd_ROCM_SEPARATE_DQ"] = False
+            elif not current_default:
+                options.update(
+                    bwd_BLOCK_M1=16,
+                    bwd_BLOCK_N1=64,
+                    bwd_BLOCK_M2=dq_m,
+                    bwd_BLOCK_N2=dq_n,
+                    bwd_num_warps=4,
+                    bwd_num_stages=2,
+                    bwd_USE_TMA=False,
+                    bwd_PRESCALE_QK=False,
+                    bwd_ROCM_D256_PANEL_DOTS=True,
+                    bwd_ROCM_EARLY_DP=True,
+                    bwd_XCD_REMAP=False,
+                    bwd_ROCM_SEPARATE_DQ=separate_dq,
+                    bwd_ROCM_GQA_SPLIT_DKDV=separate_dq,
+                    ROCM_BWD_PHASE=13,
+                    bwd_ROCM_BWD_PHASE=2,
+                    ROCM_GQA_SPLITS=7,
+                    bwd_ROCM_GQA_SPLITS=2,
+                )
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                score_mod=score_mod if fallback == "score_capture" else None,
+                scale=scale,
+                enable_gqa=True,
+                kernel_options=options,
+            )
+
+        compiled = torch.compile(attention, fullgraph=True)
+        matched_out = compiled(q, k, v, False, False)
+        matched_gradients = tuple(
+            torch.autograd.grad(matched_out, inputs, do, retain_graph=True)
+            for do in grad_outputs
+        )
+        controls = [(matched_out, matched_gradients)]
+        if fallback is None and not automatic:
+            default_out = compiled(q, k, v, False, True)
+            default_gradients = tuple(
+                torch.autograd.grad(default_out, inputs, do, retain_graph=True)
+                for do in grad_outputs
+            )
+            controls.append((default_out, default_gradients))
+        original_select = flex_kernel_mod.autotune_select_algorithm
+        choice_metadata, selected = {}, []
+
+        def append_choice(original_append, *args, **kwargs):
+            choices, count = kwargs["choices"], len(kwargs["choices"])
+            result = original_append(*args, **kwargs)
+            for choice in choices[count:]:
+                choice_metadata[id(choice)] = (
+                    kwargs["ROCM_BWD_PHASE"],
+                    kwargs["ROCM_GQA_SPLITS"],
+                )
+            return result
+
+        def select_algorithm(*args, **kwargs):
+            result = original_select(*args, **kwargs)
+            if args[0] in ("flex_attention_backward", "flex_attention_backward_dq"):
+                selected.append(choice_metadata.get(id(result[1])))
+            return result
+
+        with (
+            self._observe_gfx950_backward_templates(append_choice) as choices,
+            mock.patch.object(
+                flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
+            ),
+        ):
+            out = compiled(q, k, v, True, False)
+            gradients = tuple(
+                torch.autograd.grad(out, inputs, do, retain_graph=True)
+                for do in grad_outputs
+            )
+        expected_phases = [0] if fallback else [1, 2]
+        self.assertEqual(selected, [(phase, 1) for phase in expected_phases])
+        self.assertEqual(
+            [call.kwargs["ROCM_BWD_PHASE"] for call in choices.call_args_list],
+            [0] if fallback else [0, 1, 2],
+        )
+        for call in choices.call_args_list:
+            options = call.kwargs
+            self.assertEqual(options["ROCM_GQA_SPLITS"], 1)
+            self.assertEqual(options["GQA_SHARED_HEADS"], gqa)
+            if automatic and options["ROCM_BWD_PHASE"] == 0:
+                self.assertEqual(
+                    tuple(
+                        options[name]
+                        for name in ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
+                    ),
+                    (64, 64, 64, 64),
+                )
+                self.assertEqual((options["num_warps"], options["num_stages"]), (4, 1))
+                self.assertFalse(options["ROCM_D256_PANEL_DOTS"])
+                self.assertFalse(options["ROCM_EARLY_DP"])
+                self.assertFalse(options["XCD_REMAP"])
+                continue
+            self.assertEqual(
+                tuple(
+                    options[name]
+                    for name in ("BLOCK_M1", "BLOCK_N1", "BLOCK_M2", "BLOCK_N2")
+                ),
+                (
+                    32 if automatic and options["ROCM_BWD_PHASE"] == 1 else 16,
+                    64,
+                    dq_m,
+                    dq_n,
+                ),
+            )
+            self.assertEqual((options["num_warps"], options["num_stages"]), (4, 2))
+            self.assertTrue(options["ROCM_D256_PANEL_DOTS"])
+            self.assertTrue(options["ROCM_EARLY_DP"])
+            self.assertIs(
+                options["XCD_REMAP"],
+                automatic and gqa == 4 and options["ROCM_BWD_PHASE"] == 1,
+            )
+        modules = tuple(PyCodeCache.modules)
+        actual_phases = set()
+        expected_constants = dict(
+            BLOCK_M1=16,
+            BLOCK_N1=64,
+            BLOCK_M2=dq_m,
+            BLOCK_N2=dq_n,
+            QK_HEAD_DIM=256,
+            V_HEAD_DIM=256,
+            GQA_SHARED_HEADS=gqa,
+            ROCM_GQA_SPLITS=1,
+            ROCM_D256_PANEL_DOTS=True,
+            ROCM_EARLY_DP=True,
+            XCD_REMAP=False,
+        )
+        for module in modules:
+            for tuner in vars(module).values():
+                if not isinstance(tuner, CachingAutotuner):
+                    continue
+                source = getattr(getattr(tuner, "fn", None), "src", "")
+                constants = {
+                    node.target.id: node.value.value
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and isinstance(node.value, ast.Constant)
+                }
+                phase = constants.get("ROCM_BWD_PHASE")
+                phase_constants = expected_constants.copy()
+                if automatic and phase == 1:
+                    phase_constants["BLOCK_M1"] = 32
+                    phase_constants["XCD_REMAP"] = gqa == 4
+                if all(
+                    constants.get(name) == value
+                    for name, value in phase_constants.items()
+                ):
+                    actual_phases.add(phase)
+        self.assertTrue(set(expected_phases).issubset(actual_phases))
+        reference_inputs = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        ref_q, ref_k, ref_v = reference_inputs
+        scores = (ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)) * scale
+        if fallback == "score_capture":
+            scores = scores + bias.float()[None, None, None, :]
+        if fallback in ("causal", "mask_capture"):
+            rows, columns = (
+                torch.arange(q_len, device=device)[:, None],
+                torch.arange(kv_len, device=device)[None, :],
+            )
+            valid = (
+                columns < limit[0] if fallback == "mask_capture" else rows >= columns
+            )
+            scores = scores.masked_fill(~valid, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+        ref_gradients = tuple(
+            torch.autograd.grad(
+                ref_out, reference_inputs, do.float(), retain_graph=True
+            )
+            for do in grad_outputs
+        )
+        self.assertTrue(out.isfinite().all().item())
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(out.float(), ref_out, atol=0.02, rtol=0.02)
+        for stock_out, stock_gradients in controls:
+            self.assertEqual(out, stock_out, atol=0, rtol=0)
+            for actual_grads, stock_grads, expected_grads in zip(
+                gradients, stock_gradients, ref_gradients, strict=True
+            ):
+                for actual, stock, expected in zip(
+                    actual_grads, stock_grads, expected_grads, strict=True
+                ):
+                    self.assertEqual(actual.dtype, torch.bfloat16)
+                    self.assertTrue(actual.isfinite().all().item())
+                    self.assertTrue(stock.isfinite().all().item())
+                    self.assertTrue(expected.isfinite().all().item())
+                    self.assertEqual(actual, stock, atol=0.0003, rtol=0.005)
+                    error = (
+                        actual.float() - stock.float()
+                    ).norm() / stock.float().norm().clamp_min(1e-12)
+                    self.assertLessEqual(error.item(), 0.001)
+                    self.assertEqual(actual.float(), expected, atol=0.03, rtol=0.03)
+        if scale == 0:
+            for actual_grads in gradients:
+                self.assertEqual(actual_grads[0], torch.zeros_like(q), atol=0, rtol=0)
+                self.assertEqual(actual_grads[1], torch.zeros_like(k), atol=0, rtol=0)
+
+    @supported_platform
+    @common_utils.parametrize("mask", ("dense", "causal", "sliding"))
+    @common_utils.parametrize("scale", (None, 0.125, -0.125))
+    def test_gfx950_separate_dq(self, device, mask, scale):
+        self._run_gfx950_separate_dq(device, mask, scale)
+
+    @supported_platform
+    def test_gfx950_separate_dq_options(self, device):
+        self._run_gfx950_separate_dq(
+            device,
+            "dense",
+            0.125,
+            batch_size=2,
+            q_heads=16,
+            early_dp=True,
+            xcd_remap=True,
+        )
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "architecture",
+            "dtype",
+            "head_dim",
+            "gqa",
+            "captures",
+            "score_mod",
+            "stride",
+            "tile",
+            "prescale",
+        ),
+    )
+    def test_gfx950_separate_dq_fallback(self, device, fallback):
+        self._run_gfx950_separate_dq(device, "dense", 0.125, fallback=fallback)
+
+    def _run_gfx950_separate_dq(
+        self,
+        device,
+        mask,
+        scale,
+        *,
+        fallback=None,
+        batch_size=1,
+        q_heads=8,
+        early_dp=False,
+        xcd_remap=False,
+        gqa_split=False,
+    ):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len = 257, 260
+        dtype = torch.float16 if fallback == "dtype" else torch.bfloat16
+        head_dim = 64 if fallback == "head_dim" else 128
+        gqa = 2 if fallback == "gqa" else 8
+        q = (
+            torch.randn(
+                batch_size, q_heads, q_len, head_dim, device=device, dtype=dtype
+            )
+            * 0.5
+        )
+        k = (
+            torch.randn(
+                batch_size, q_heads // gqa, kv_len, head_dim, device=device, dtype=dtype
+            )
+            * 0.5
+        )
+        v = torch.randn_like(k)
+        if fallback == "stride":
+            q = q.transpose(1, 2).contiguous().transpose(1, 2)
+            self.assertFalse(q.is_contiguous())
+            self.assertEqual(q.stride(-1), 1)
+        inputs = tuple(tensor.requires_grad_() for tensor in (q, k, v))
+        q, k, v = inputs
+        grad_out = torch.randn_like(q) * 0.25
+        grad_outputs = (grad_out, grad_out.flip(-2), grad_out)
+        kv_limit = torch.tensor([251], device=device, dtype=torch.int32)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            if fallback == "captures":
+                return kv_idx < kv_limit[0]
+            valid = q_idx >= kv_idx
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx < 67)
+            return valid
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score * 1.1
+
+        block_mask = None
+        if mask != "dense" or fallback == "captures":
+            block_mask = create_block_mask(
+                mask_mod, None, None, q_len, kv_len, device=device
+            )
+
+        def attention(query, key, value, separate_dq):
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                score_mod=score_mod if fallback == "score_mod" else None,
+                scale=scale,
+                enable_gqa=True,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "bwd_ROCM_SEPARATE_DQ": separate_dq,
+                    "bwd_ROCM_GQA_SPLIT_DKDV": separate_dq and gqa_split,
+                    "bwd_ROCM_EARLY_DP": separate_dq and early_dp,
+                    "bwd_XCD_REMAP": separate_dq and xcd_remap,
+                    "bwd_BLOCK_M1": 32,
+                    "bwd_BLOCK_N1": 64 if fallback == "tile" else 128,
+                    "bwd_BLOCK_M2": 128,
+                    "bwd_BLOCK_N2": 32,
+                    "bwd_num_warps": 4,
+                    "bwd_num_stages": 2,
+                    "bwd_PRESCALE_QK": fallback == "prescale",
+                },
+            )
+
+        compiled = torch.compile(attention, fullgraph=True)
+        stock_out = compiled(q, k, v, False)
+        stock_gradients = tuple(
+            torch.autograd.grad(stock_out, inputs, grad, retain_graph=True)
+            for grad in grad_outputs
+        )
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        architecture_patch = contextlib.nullcontext()
+        if fallback == "architecture":
+            lowering_torch = types.SimpleNamespace(**vars(torch))
+            lowering_torch.cuda = types.SimpleNamespace(**vars(torch.cuda))
+            lowering_torch.cuda.get_device_properties = mock.Mock(
+                return_value=types.SimpleNamespace(gcnArchName="gfx942")
+            )
+            architecture_patch = mock.patch.object(
+                flex_kernel_mod, "torch", lowering_torch
+            )
+        original_select = flex_kernel_mod.autotune_select_algorithm
+        choice_phases = {}
+        selected_phases = []
+
+        def append_choice(original_append, *args, **kwargs):
+            choices = kwargs["choices"]
+            original_count = len(choices)
+            result = original_append(*args, **kwargs)
+            for choice in choices[original_count:]:
+                choice_phases[id(choice)] = kwargs["ROCM_BWD_PHASE"]
+            return result
+
+        def select_algorithm(*args, **kwargs):
+            result = original_select(*args, **kwargs)
+            if args[0] in ("flex_attention_backward", "flex_attention_backward_dq"):
+                self.assertIn(id(result[1]), choice_phases)
+                selected_phases.append(choice_phases[id(result[1])])
+            return result
+
+        with (
+            architecture_patch,
+            self._observe_gfx950_backward_templates(append_choice) as choices,
+            mock.patch.object(
+                flex_kernel_mod, "autotune_select_algorithm", wraps=select_algorithm
+            ) as selections,
+        ):
+            out = compiled(q, k, v, True)
+            gradients = tuple(
+                torch.autograd.grad(out, inputs, grad, retain_graph=True)
+                for grad in grad_outputs
+            )
+        self.assertTrue(selections.call_args_list)
+        self.assertEqual(
+            [call.kwargs["ROCM_BWD_PHASE"] for call in choices.call_args_list],
+            [0] if fallback else [0, 1, 2],
+        )
+        self.assertEqual(selected_phases, [0] if fallback else [1, 2])
+        for call in choices.call_args_list:
+            self.assertEqual(call.kwargs["ROCM_GQA_SPLITS"], 1)
+            self.assertEqual(
+                call.kwargs["ROCM_EARLY_DP"], fallback != "architecture" and early_dp
+            )
+            self.assertEqual(
+                call.kwargs["XCD_REMAP"], fallback != "architecture" and xcd_remap
+            )
+
+        ref_q, ref_k, ref_v = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        scores = ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+        scores = scores * (head_dim**-0.5 if scale is None else scale)
+        if fallback == "score_mod":
+            scores = scores * 1.1
+        kv_idx = torch.arange(kv_len, device=device)
+        if fallback == "captures":
+            scores = scores.masked_fill(kv_idx >= kv_limit[0], float("-inf"))
+        elif mask != "dense":
+            q_idx = torch.arange(q_len, device=device)[:, None]
+            valid = q_idx >= kv_idx[None, :]
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx[None, :] < 67)
+            scores = scores.masked_fill(~valid, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+        ref_gradients = tuple(
+            torch.autograd.grad(
+                ref_out, (ref_q, ref_k, ref_v), grad.float(), retain_graph=True
+            )
+            for grad in grad_outputs
+        )
+        comparisons = [(out, stock_out, ref_out, 0.02)]
+        for actual_grads, stock_grads, expected_grads in zip(
+            gradients, stock_gradients, ref_gradients, strict=True
+        ):
+            comparisons.extend(
+                (actual, stock, expected, 0.03)
+                for actual, stock, expected in zip(
+                    actual_grads, stock_grads, expected_grads, strict=True
+                )
+            )
+        for actual, stock, expected, tolerance in comparisons:
+            for tensor in (actual, stock, expected):
+                self.assertTrue(tensor.isfinite().all().item())
+            self.assertEqual(actual, stock, atol=0.0003, rtol=0.005)
+            error = (actual.float() - stock.float()).norm()
+            error = error / stock.float().norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.001)
+            self.assertEqual(actual.float(), expected, atol=tolerance, rtol=tolerance)
+
+    @supported_platform
+    @common_utils.parametrize("gqa,write_dq", ((1, True), (2, False)))
+    @common_utils.parametrize("mask", ("dense", "causal", "sliding"))
+    @common_utils.parametrize(
+        "early_dp,xcd_remap",
+        ((False, False), (True, False), (False, True), (True, True)),
+    )
+    def test_gfx950_d256_panel_dots(
+        self, device, gqa, write_dq, mask, early_dp, xcd_remap
+    ):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        head_dim = 256
+        q_len, kv_len = 257, 260
+        dtype = torch.bfloat16
+        q = torch.randn(1, 4, q_len, head_dim, device=device, dtype=dtype) * 0.5
+        k = torch.randn(1, 4 // gqa, kv_len, head_dim, device=device, dtype=dtype) * 0.5
+        v = torch.randn_like(k)
+        scale = torch.linspace(0.75, 1.2, 4, device=device, requires_grad=True)
+        inputs = tuple(tensor.requires_grad_() for tensor in (q, k, v, scale))
+        grad_out = torch.randn_like(q) * 0.25
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            coefficient = scale[h]
+            return score * coefficient + (coefficient - 1) * ((kv_idx + 1) / kv_len)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            valid = q_idx >= kv_idx
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx < 67)
+            return valid
+
+        block_mask = None
+        if mask != "dense":
+            block_mask = create_block_mask(
+                mask_mod, None, None, q_len, kv_len, device=device
+            )
+
+        def attention(query, key, value):
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "bwd_ROCM_EARLY_DP": early_dp,
+                    "bwd_XCD_REMAP": xcd_remap,
+                    "bwd_ROCM_D256_PANEL_DOTS": True,
+                    "bwd_WRITE_DQ": write_dq,
+                    "bwd_BLOCK_M1": 16,
+                    "bwd_BLOCK_N1": 64,
+                    "bwd_BLOCK_M2": 64,
+                    "bwd_BLOCK_N2": 16,
+                    "bwd_num_stages": 2,
+                    "bwd_num_warps": 4,
+                },
+            )
+
+        from torch._inductor.kernel.flex.flex_rocm_backward import (
+            flex_attention_backward_template,
+        )
+
+        with mock.patch.object(
+            flex_attention_backward_template,
+            "maybe_append_choice",
+            wraps=flex_attention_backward_template.maybe_append_choice,
+        ) as choices:
+            out = torch.compile(attention, fullgraph=True)(q, k, v)
+            gradients = torch.autograd.grad(out, inputs, grad_out)
+        self.assertTrue(choices.call_args_list)
+        for call in choices.call_args_list:
+            self.assertTrue(call.kwargs["ROCM_D256_PANEL_DOTS"])
+        ref_q, ref_k, ref_v, ref_scale = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        scores = ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+        coefficient = ref_scale[None, :, None, None]
+        scores = scores * (head_dim**-0.5) * coefficient
+        kv_idx = torch.arange(kv_len, device=device)
+        scores = scores + (coefficient - 1) * ((kv_idx + 1) / kv_len)
+        if mask != "dense":
+            q_idx = torch.arange(q_len, device=device)[:, None]
+            valid = q_idx >= kv_idx[None, :]
+            if mask == "sliding":
+                valid = valid & (q_idx - kv_idx[None, :] < 67)
+            scores = scores.masked_fill(~valid, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+        ref_gradients = torch.autograd.grad(
+            ref_out, (ref_q, ref_k, ref_v, ref_scale), grad_out.float()
+        )
+        for actual, expected in zip(
+            (out, *gradients), (ref_out, *ref_gradients), strict=True
+        ):
+            self.assertTrue(actual.isfinite().all().item())
+            self.assertTrue(expected.isfinite().all().item())
+            self.assertEqual(actual.float(), expected, rtol=0.08, atol=0.02)
+            difference = actual.float() - expected
+            error = difference.norm() / expected.norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.01)
+
+    @supported_platform
+    @common_utils.parametrize("prescale", (False, True))
+    @common_utils.parametrize("feature_stride", (1, 2))
+    @common_utils.parametrize("mask", ("dense", "causal"))
+    def test_gfx950_d256_panel_boundaries(self, device, prescale, feature_stride, mask):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len, head_dim = 129, 133, 256
+        q = (
+            torch.randn(
+                1,
+                4,
+                q_len,
+                head_dim * feature_stride,
+                device=device,
+                dtype=torch.bfloat16,
+            )
+            * 0.5
+        )
+        k = (
+            torch.randn(
+                1,
+                2,
+                kv_len,
+                head_dim * feature_stride,
+                device=device,
+                dtype=torch.bfloat16,
+            )
+            * 0.5
+        )
+        v = torch.randn_like(k)
+        inputs = tuple(
+            tensor[..., ::feature_stride].requires_grad_() for tensor in (q, k, v)
+        )
+        grad_out = torch.randn_like(q) * 0.25
+        grad_out = grad_out[..., ::feature_stride]
+        self.assertEqual(
+            tuple(tensor.stride(-1) for tensor in inputs), (feature_stride,) * 3
+        )
+        self.assertEqual(grad_out.stride(-1), feature_stride)
+        block_mask = None
+        if mask == "causal":
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+            block_mask = create_block_mask(
+                mask_mod, None, None, q_len, kv_len, device=device
+            )
+
+        def attention(query, key, value, panels):
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "bwd_ROCM_D256_PANEL_DOTS": panels,
+                    "bwd_ROCM_EARLY_DP": False,
+                    "bwd_XCD_REMAP": False,
+                    "bwd_PRESCALE_QK": prescale,
+                    "bwd_BLOCK_M1": 16,
+                    "bwd_BLOCK_N1": 64,
+                    "bwd_BLOCK_M2": 64,
+                    "bwd_BLOCK_N2": 16,
+                    "bwd_num_stages": 2,
+                    "bwd_num_warps": 4,
+                },
+            )
+
+        compiled = torch.compile(attention, fullgraph=True)
+        baseline = compiled(*inputs, False)
+        baseline_grads = torch.autograd.grad(baseline, inputs, grad_out)
+        out = compiled(*inputs, True)
+        gradients = torch.autograd.grad(out, inputs, grad_out)
+        for actual, expected in zip(
+            (out, *gradients), (baseline, *baseline_grads), strict=True
+        ):
+            self.assertEqual(actual, expected, rtol=0.005, atol=0.0003)
+            error = (actual.float() - expected.float()).norm()
+            error = error / expected.float().norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.001)
+
+        ref_q, ref_k, ref_v = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        scores = ref_q @ ref_k.repeat_interleave(2, dim=1).transpose(-1, -2)
+        scores = scores * (head_dim**-0.5)
+        if mask == "causal":
+            q_idx = torch.arange(q_len, device=device)[:, None]
+            kv_idx = torch.arange(kv_len, device=device)[None, :]
+            scores = scores.masked_fill(q_idx < kv_idx, float("-inf"))
+        ref_out = scores.softmax(-1) @ ref_v.repeat_interleave(2, dim=1)
+        ref_grads = torch.autograd.grad(
+            ref_out, (ref_q, ref_k, ref_v), grad_out.float()
+        )
+        for actual, expected in zip(
+            (out, *gradients), (ref_out, *ref_grads), strict=True
+        ):
+            self.assertTrue(actual.isfinite().all().item())
+            self.assertTrue(expected.isfinite().all().item())
+            self.assertEqual(actual.float(), expected, rtol=0.08, atol=0.02)
+            error = (actual.float() - expected).norm()
+            error = error / expected.norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.01)
+
+    @supported_platform
+    def test_gfx950_d256_panel_empty_rows(self, device):
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len, head_dim = 257, 260, 256
+        q_shape, kv_shape = (1, 4, q_len, head_dim), (1, 2, kv_len, head_dim)
+        q = torch.randn(q_shape, device=device, dtype=torch.bfloat16) * 0.5
+        k = torch.randn(kv_shape, device=device, dtype=torch.bfloat16) * 0.5
+        v = torch.randn_like(k)
+        gain = torch.linspace(0.75, 1.2, 4, device=device, requires_grad=True)
+        inputs = tuple(tensor.requires_grad_() for tensor in (q, k, v, gain))
+        grad_out = torch.randn_like(q) * 0.25
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            active = ((q_idx < 128) | (q_idx >= 256)) & (q_idx % 17 != 0)
+            return active & (kv_idx < 113) & (q_idx >= kv_idx)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score * gain[h]
+
+        block_mask = create_block_mask(
+            mask_mod, None, None, q_len, kv_len, device=device
+        )
+
+        def attention(query, key, value, panels):
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "bwd_ROCM_D256_PANEL_DOTS": panels,
+                    "bwd_ROCM_EARLY_DP": True,
+                    "bwd_XCD_REMAP": True,
+                    "bwd_WRITE_DQ": False,
+                    "bwd_BLOCK_M1": 16,
+                    "bwd_BLOCK_N1": 64,
+                    "bwd_BLOCK_M2": 64,
+                    "bwd_BLOCK_N2": 16,
+                    "bwd_num_stages": 2,
+                    "bwd_num_warps": 4,
+                },
+            )
+
+        compiled = torch.compile(attention, fullgraph=True)
+        baseline = compiled(q, k, v, False)
+        baseline_grads = torch.autograd.grad(baseline, inputs, grad_out)
+        out = compiled(q, k, v, True)
+        gradients = torch.autograd.grad(out, inputs, grad_out)
+        q_idx = torch.arange(q_len, device=device)[:, None]
+        kv_idx = torch.arange(kv_len, device=device)[None, :]
+        valid = mask_mod(None, None, q_idx, kv_idx)
+        empty_rows = ~valid.any(-1)
+        empty_keys = ~valid.any(-2)
+        self.assertTrue(empty_rows[128:256].all().item())
+        self.assertTrue(empty_keys[128:].all().item())
+        self.assertEqual(valid[256].sum().item(), 113)
+        for values, grads in ((baseline, baseline_grads), (out, gradients)):
+            for actual in (values[:, :, empty_rows], grads[0][:, :, empty_rows]):
+                self.assertEqual(actual, torch.zeros_like(actual))
+            for tensor in grads[1:3]:
+                actual = tensor[:, :, empty_keys]
+                self.assertEqual(actual, torch.zeros_like(actual))
+            for tensor in (values, *grads):
+                self.assertTrue(tensor.isfinite().all().item())
+        for actual, expected in zip(
+            (out, *gradients), (baseline, *baseline_grads), strict=True
+        ):
+            self.assertEqual(actual, expected, rtol=0.005, atol=0.0003)
+            error = (actual.float() - expected.float()).norm()
+            error = error / expected.float().norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.001)
+
+        ref_q, ref_k, ref_v, ref_gain = tuple(
+            tensor.detach().float().requires_grad_() for tensor in inputs
+        )
+        scores = ref_q @ ref_k.repeat_interleave(2, dim=1).transpose(-1, -2)
+        scores = scores * (head_dim**-0.5) * ref_gain[None, :, None, None]
+        scores = scores.masked_fill(~valid, float("-inf"))
+        scores = torch.where(empty_rows[:, None], 0.0, scores)
+        probabilities = scores.softmax(-1).masked_fill(~valid, 0.0)
+        ref_out = probabilities @ ref_v.repeat_interleave(2, dim=1)
+        ref_grads = torch.autograd.grad(
+            ref_out, (ref_q, ref_k, ref_v, ref_gain), grad_out.float()
+        )
+        for actual, expected in zip(
+            (out, *gradients), (ref_out, *ref_grads), strict=True
+        ):
+            self.assertTrue(expected.isfinite().all().item())
+            self.assertEqual(actual.float(), expected, rtol=0.08, atol=0.02)
+            error = (actual.float() - expected).norm()
+            error = error / expected.norm().clamp_min(1e-12)
+            self.assertLessEqual(error.item(), 0.01)
+
     def _run_test_captured_scalar_grad(self, device, dtype):
         def run():
             scale = torch.ones((1,), device=device, dtype=dtype, requires_grad=True)
@@ -4622,6 +11802,144 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ):
             out_mixed = (compiled_fn(q, k, v, _identity)).mean()
             out_mixed.backward()
+
+    @supported_platform
+    @common_utils.parametrize(
+        "dtype,batch,dim,length,heads,kv_heads,mask",
+        (
+            (torch.bfloat16, 3, 128, 1024, 8, 1, "causal"),
+            (torch.bfloat16, 3, 128, 1024, 8, 1, "dense"),
+            (torch.bfloat16, 3, 256, 8192, 4, 1, "dense"),
+            (torch.bfloat16, 4, 64, 4096, 64, 8, "dense"),
+            (torch.float16, 2, 128, 2048, 64, 8, "causal"),
+            (torch.float32, 1, 128, 2048, 64, 8, "causal"),
+            (torch.bfloat16, 2, 96, 2048, 8, 2, "dense"),
+            (torch.bfloat16, 2, 192, 2048, 8, 2, "dense"),
+        ),
+    )
+    @config.patch(
+        fx_graph_cache=False,
+        max_autotune=True,
+        max_autotune_gemm=False,
+        compile_threads=1,
+        emulate_precision_casts=False,
+    )
+    def test_gfx950_backward_max_autotune_candidates(
+        self, device, dtype, batch, dim, length, heads, kv_heads, mask
+    ):
+        from torch._functorch import config as aot_config
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.heuristics.template.triton import FlexBwDConfig
+        from torch._inductor.kernel.flex.flex_rocm_backward_autotune import (
+            RocmBackwardChoiceCaller,
+        )
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        generator = torch.Generator(device=device).manual_seed(20261029)
+        inputs = tuple(
+            (
+                torch.randn(
+                    (batch, count, length, dim),
+                    device=device,
+                    dtype=dtype,
+                    generator=generator,
+                )
+                * 0.5
+            ).requires_grad_()
+            for count in (heads, kv_heads, kv_heads)
+        )
+        grad_out = (
+            torch.randn(
+                inputs[0].shape,
+                device=device,
+                dtype=dtype,
+                generator=generator,
+            )
+            * 0.25
+        )
+        block_mask = (
+            create_block_mask(
+                lambda b, h, q, kv: q >= kv,
+                None,
+                None,
+                length,
+                length,
+                device=device,
+            )
+            if mask == "causal"
+            else None
+        )
+
+        def attention(query, key, value):
+            return flex_attention(
+                query,
+                key,
+                value,
+                block_mask=block_mask,
+                enable_gqa=True,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+
+        original_fwd_configs = InductorChoices.get_flex_attention_fwd_configs
+
+        def fwd_configs(handler, *args, **kwargs):
+            return original_fwd_configs(handler, *args, **kwargs)[:1]
+
+        results = []
+        for force_split in (False, True):
+            torch._dynamo.reset()
+            measured = []
+
+            def select(handler, best, timings):
+                split = [
+                    choice
+                    for choice in timings
+                    if isinstance(choice, RocmBackwardChoiceCaller)
+                ]
+                if not split:
+                    return best
+                stock = [choice for choice in timings if choice not in split]
+                self.assertTrue(stock)
+                self.assertTrue(any(math.isfinite(timings[choice]) for choice in stock))
+                self.assertTrue(all(math.isfinite(timings[choice]) for choice in split))
+                measured.append(dict(timings))
+                choices = split if force_split else stock
+                return min(choices, key=timings.__getitem__)
+
+            with (
+                temp_float32_matmul_precision("highest"),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "get_flex_attention_fwd_configs",
+                    autospec=True,
+                    side_effect=fwd_configs,
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "get_flex_attention_bwd_configs",
+                    return_value=[FlexBwDConfig(32, 128, 128, 32, 2, 4)],
+                ),
+                mock.patch.object(
+                    InductorChoices,
+                    "override_best_choice",
+                    autospec=True,
+                    side_effect=select,
+                ),
+            ):
+                output = torch.compile(attention, fullgraph=True)(*inputs)
+                gradients = torch.autograd.grad(output, inputs, grad_out)
+                results.append((output.detach(), *gradients))
+            self.assertEqual(len(measured), 1)
+        self._check_gfx950_xcd_snake_values(results[1], results[0], strict=True)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -8628,6 +15946,3557 @@ class GraphModule(torch.nn.Module):
 
         torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
+    @supported_platform
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize("scale", (0.0625, 0.0, -0.07))
+    def test_gfx950_d256_early_probability_compact(self, device, gqa, scale):
+        self._run_gfx950_d256_early_probability_compact(device, gqa, scale)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "causal",
+            "explicit_dense",
+            "score_capture",
+            "mask_capture",
+            "early_dp",
+            "panels",
+            "separate",
+            "tiles",
+            "raw",
+            "forward_only",
+        ),
+    )
+    def test_gfx950_d256_early_probability_compact_fallback(self, device, fallback):
+        self._run_gfx950_d256_early_probability_compact(
+            device, 4, 0.0625, fallback=fallback
+        )
+
+    @supported_platform
+    @common_utils.parametrize("scale", (192**-0.5, 0.0, -0.125))
+    def test_gfx950_d192_gqa4_panel_phase(self, device, scale):
+        self._run_gfx950_d192_panel_phase(device, 2048, scale, gqa4_pilot=True)
+
+    @supported_platform
+    @common_utils.parametrize("scale", (192**-0.5, 0.0, -0.125))
+    def test_gfx950_d192_gqa4_dq_early_dp(self, device, scale):
+        self._run_gfx950_d192_dq_early_dp(device, 2048, scale, gqa4_pilot=True)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "short",
+            "missing_panel",
+            "raw",
+            "forward_only",
+            "score_capture",
+            "mask_capture",
+        ),
+    )
+    def test_gfx950_d192_gqa4_dq_early_dp_fallback(self, device, fallback):
+        self._run_gfx950_d192_dq_early_dp(
+            device, 2048, 192**-0.5, fallback=fallback, gqa4_pilot=True
+        )
+
+    @supported_platform
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("scale", (192**-0.5, 0.0, -0.125))
+    def test_gfx950_d192_panel_phase(self, device, length, scale):
+        self._run_gfx950_d192_panel_phase(device, length, scale)
+
+    @supported_platform
+    @common_utils.parametrize("fallback", ("short", "gqa4"))
+    def test_gfx950_d192_panel_phase_fallback(self, device, fallback):
+        self._run_gfx950_d192_panel_phase(device, 2048, 192**-0.5, fallback=fallback)
+
+    @supported_platform
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("scale", (96**-0.5, 0.0, -0.125))
+    def test_gfx950_d96_dq_early_dp(self, device, length, scale):
+        self._run_gfx950_d96_dq_early_dp(device, length, scale)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "sequence1024",
+            "gqa4",
+            "short",
+            "causal",
+            "contiguous",
+            "missing_panel",
+            "raw",
+            "forward_only",
+            "score_capture",
+            "mask_capture",
+        ),
+    )
+    def test_gfx950_d96_dq_early_dp_fallback(self, device, fallback):
+        self._run_gfx950_d96_dq_early_dp(device, 4096, 96**-0.5, fallback=fallback)
+
+    def _check_gfx950_backward_gradients_and_graphs(
+        self, device, stream, providers, inputs, do, original_do, scale, reference
+    ):
+        q, k, _ = inputs
+        comparisons = 0
+        for sign in (1, -1, 1):
+            do.copy_(original_do * sign)
+            target = reference()
+            actual = {
+                name: (
+                    problem["out"].detach().clone(),
+                    *(gradient.detach().clone() for gradient in problem["backward"]()),
+                )
+                for name, problem in providers.items()
+            }
+            for value in actual.values():
+                comparisons += self._check_gfx950_xcd_snake_values(
+                    value, target, strict=False
+                )
+            comparisons += self._check_gfx950_xcd_snake_values(
+                actual[True], actual[False], strict=True
+            )
+            if scale == 0:
+                self.assertEqual(actual[True][1], torch.zeros_like(q), atol=0, rtol=0)
+                self.assertEqual(actual[True][2], torch.zeros_like(k), atol=0, rtol=0)
+        do.copy_(original_do)
+        for problem in providers.values():
+            for _ in range(5):
+                problem["backward"]()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                retained = [problem["backward"]() for _ in range(10)]
+            problem.update(graph=graph, retained=retained)
+        for sign in (1, -1, 1):
+            do.copy_(original_do * sign)
+            for problem in providers.values():
+                problem["graph"].replay()
+            torch.cuda.synchronize(device)
+            target = reference()
+            for index in range(10):
+                actual = {
+                    name: (
+                        problem["out"].detach().clone(),
+                        *(
+                            gradient.detach().clone()
+                            for gradient in problem["retained"][index]
+                        ),
+                    )
+                    for name, problem in providers.items()
+                }
+                for value in actual.values():
+                    comparisons += self._check_gfx950_xcd_snake_values(
+                        value, target, strict=False
+                    )
+                comparisons += self._check_gfx950_xcd_snake_values(
+                    actual[True], actual[False], strict=True
+                )
+        self.assertEqual(comparisons, 9 * (len(inputs) + 1) * 11)
+
+    def _run_gfx950_d96_dq_early_dp(self, device, length, scale, *, fallback=None):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads, q_len, kv_len = 4, 21, 21, length, length
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        elif fallback == "gqa4":
+            batch, q_heads, kv_heads, q_len, kv_len = 2, 8, 2, 4096, 4096
+        elif fallback == "sequence1024":
+            q_len = kv_len = 1024
+        gqa = q_heads // kv_heads
+        bias = (
+            torch.linspace(-0.1, 0.1, kv_len, device=device)
+            if fallback == "score_capture"
+            else None
+        )
+        limit = (
+            torch.tensor(kv_len // 2, device=device)
+            if fallback == "mask_capture"
+            else None
+        )
+        score_mod = (
+            (lambda score, b, h, q_idx, kv_idx: score + bias[kv_idx])
+            if bias is not None
+            else None
+        )
+        mask_mod = (
+            (lambda b, h, q_idx, kv_idx: q_idx >= kv_idx)
+            if fallback == "causal"
+            else (lambda b, h, q_idx, kv_idx: kv_idx < limit)
+            if limit is not None
+            else None
+        )
+        block_mask = (
+            create_block_mask(mask_mod, batch, q_heads, q_len, kv_len, device=device)
+            if mask_mod is not None
+            else None
+        )
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 96),
+            (batch, kv_heads, kv_len, 96),
+            (batch, kv_heads, kv_len, 96),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if bias is not None:
+                scores = scores + bias.float()[None, None, None, :]
+            if limit is not None:
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    cols[None, None, None, :] >= limit, float("-inf")
+                )
+            if fallback == "causal":
+                rows = torch.arange(q_len, device=device)
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    rows[None, None, :, None] < cols[None, None, None, :],
+                    float("-inf"),
+                )
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=128,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_ROCM_D96_PANEL_DOTS=fallback != "missing_panel",
+                        bwd_ROCM_D96_DQ_EARLY_DP=requested
+                        if fallback not in ("raw", "forward_only")
+                        else False,
+                        ROCM_D96_DQ_EARLY_DP=requested if fallback == "raw" else False,
+                        fwd_ROCM_D96_DQ_EARLY_DP=requested
+                        if fallback == "forward_only"
+                        else False,
+                        bwd_BLOCKS_ARE_CONTIGUOUS=fallback != "contiguous",
+                        bwd_ROCM_D192_PANEL_DOTS=False,
+                        bwd_ROCM_D192_DQ_EARLY_DP=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=False,
+                        ROCM_D96_PANEL_DOTS=True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            score_mod=score_mod,
+                            block_mask=block_mask,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_D96_PANEL_DOTS"],
+                            kwargs["ROCM_D96_DQ_EARLY_DP"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    panel_active = fallback not in (
+                        "sequence1024",
+                        "short",
+                        "causal",
+                        "missing_panel",
+                        "score_capture",
+                        "mask_capture",
+                    )
+                    active = (
+                        requested
+                        and panel_active
+                        and fallback
+                        not in (
+                            "raw",
+                            "forward_only",
+                            "gqa4",
+                            "sequence1024",
+                            "contiguous",
+                        )
+                    )
+                    phases = [1, 2] if panel_active else [0]
+                    self.assertEqual(
+                        selected,
+                        [
+                            (
+                                phase,
+                                1,
+                                panel_active and phase == 1,
+                                active and phase == 2,
+                            )
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices],
+                        [0, 1, 2] if panel_active else [0],
+                    )
+                    for (
+                        phase,
+                        splits,
+                        panels,
+                        early_dp,
+                    ), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(panels, panel_active and phase == 1)
+                        self.assertEqual(early_dp, active and phase == 2)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in compiler.items()
+                                if key != "kpack"
+                            },
+                            dict(
+                                num_warps=4,
+                                num_stages=2,
+                                matrix_instr_nonkdim=0,
+                                waves_per_eu=0,
+                            ),
+                        )
+                    self.assertTrue(
+                        all(item[-1]["kpack"] in (1, 2) for item in choices)
+                    )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"),
+                                panel_active and phase == 1,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_DQ_EARLY_DP"),
+                                active and phase == 2,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("BLOCKS_ARE_CONTIGUOUS"),
+                                fallback != "contiguous",
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                BLOCK_M1=32,
+                                BLOCK_N1=128,
+                                BLOCK_M2=128,
+                                BLOCK_N2=32,
+                                QK_HEAD_DIM=96,
+                                V_HEAD_DIM=96,
+                                QK_HEAD_DIM_ROUNDED=128,
+                                V_HEAD_DIM_ROUNDED=128,
+                                SAFE_HEAD_DIM=False,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("scale", (192**-0.5, 0.0, -0.125))
+    def test_gfx950_d192_dq_early_dp(self, device, length, scale):
+        self._run_gfx950_d192_dq_early_dp(device, length, scale)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "short",
+            "missing_panel",
+            "raw",
+            "forward_only",
+            "score_capture",
+            "mask_capture",
+        ),
+    )
+    def test_gfx950_d192_dq_early_dp_fallback(self, device, fallback):
+        self._run_gfx950_d192_dq_early_dp(device, 2048, 192**-0.5, fallback=fallback)
+
+    def _run_gfx950_d192_dq_early_dp(
+        self, device, length, scale, *, fallback=None, gqa4_pilot=False
+    ):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads, q_len, kv_len = 4, 10, 10, length, length
+        if gqa4_pilot:
+            batch, q_heads, kv_heads = 2, 8, 2
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        elif fallback == "gqa4":
+            batch, q_heads, kv_heads, q_len, kv_len = 1, 8, 2, 257, 260
+        gqa = q_heads // kv_heads
+        bias = (
+            torch.linspace(-0.1, 0.1, kv_len, device=device)
+            if fallback == "score_capture"
+            else None
+        )
+        limit = (
+            torch.tensor(kv_len // 2, device=device)
+            if fallback == "mask_capture"
+            else None
+        )
+        score_mod = (
+            (lambda score, b, h, q_idx, kv_idx: score + bias[kv_idx])
+            if bias is not None
+            else None
+        )
+        mask_mod = (
+            (lambda b, h, q_idx, kv_idx: kv_idx < limit) if limit is not None else None
+        )
+        block_mask = (
+            create_block_mask(mask_mod, batch, q_heads, q_len, kv_len, device=device)
+            if mask_mod is not None
+            else None
+        )
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 192),
+            (batch, kv_heads, kv_len, 192),
+            (batch, kv_heads, kv_len, 192),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if bias is not None:
+                scores = scores + bias.float()[None, None, None, :]
+            if limit is not None:
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    cols[None, None, None, :] >= limit, float("-inf")
+                )
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=16,
+                        bwd_BLOCK_N1=64,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_ROCM_D192_PANEL_DOTS=fallback != "missing_panel",
+                        bwd_ROCM_D192_DQ_EARLY_DP=requested
+                        if fallback not in ("raw", "forward_only")
+                        else False,
+                        ROCM_D192_DQ_EARLY_DP=requested if fallback == "raw" else False,
+                        fwd_ROCM_D192_DQ_EARLY_DP=requested
+                        if fallback == "forward_only"
+                        else False,
+                        bwd_BLOCKS_ARE_CONTIGUOUS=True,
+                        bwd_ROCM_D96_PANEL_DOTS=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=False,
+                        ROCM_D192_PANEL_DOTS=True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            score_mod=score_mod,
+                            block_mask=block_mask,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_D192_PANEL_DOTS"],
+                            kwargs["ROCM_D192_DQ_EARLY_DP"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    panel_active = fallback not in (
+                        "short",
+                        "gqa4",
+                        "missing_panel",
+                        "score_capture",
+                        "mask_capture",
+                    )
+                    active = (
+                        requested
+                        and panel_active
+                        and fallback not in ("raw", "forward_only")
+                    )
+                    phases = [1, 2] if panel_active else [0]
+                    self.assertEqual(
+                        selected,
+                        [
+                            (
+                                phase,
+                                1,
+                                panel_active and phase == 1,
+                                active and phase == 2,
+                            )
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices],
+                        [0, 1, 2] if panel_active else [0],
+                    )
+                    for (
+                        phase,
+                        splits,
+                        panels,
+                        early_dp,
+                    ), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(panels, panel_active and phase == 1)
+                        self.assertEqual(early_dp, active and phase == 2)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in compiler.items()
+                                if key != "kpack"
+                            },
+                            dict(
+                                num_warps=4,
+                                num_stages=2,
+                                matrix_instr_nonkdim=0,
+                                waves_per_eu=0,
+                            ),
+                        )
+                    self.assertTrue(
+                        all(item[-1]["kpack"] in (1, 2) for item in choices)
+                    )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"),
+                                panel_active and phase == 1,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_DQ_EARLY_DP"),
+                                active and phase == 2,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("BLOCKS_ARE_CONTIGUOUS"), True
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                BLOCK_M1=16,
+                                BLOCK_N1=64,
+                                BLOCK_M2=128,
+                                BLOCK_N2=32,
+                                QK_HEAD_DIM=192,
+                                V_HEAD_DIM=192,
+                                QK_HEAD_DIM_ROUNDED=256,
+                                V_HEAD_DIM_ROUNDED=256,
+                                SAFE_HEAD_DIM=False,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("scale", (128**-0.5, 0.0, -0.125))
+    def test_gfx950_d128_xcd_reverse_dq_rows(self, device, scale):
+        self._run_gfx950_d128_xcd_reverse_dq_rows(device, 4096, scale)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        ("short", "xcd_false", "raw", "forward_only", "score_capture", "mask_capture"),
+    )
+    def test_gfx950_d128_xcd_reverse_dq_rows_fallback(self, device, fallback):
+        self._run_gfx950_d128_xcd_reverse_dq_rows(
+            device, 4096, 128**-0.5, fallback=fallback
+        )
+
+    def _run_gfx950_d128_xcd_reverse_dq_rows(
+        self, device, length, scale, *, fallback=None
+    ):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads, q_len, kv_len = 4, 64, 8, length, length
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        gqa = q_heads // kv_heads
+        bias = (
+            torch.linspace(-0.1, 0.1, kv_len, device=device)
+            if fallback == "score_capture"
+            else None
+        )
+        limit = (
+            torch.tensor(kv_len // 2, device=device)
+            if fallback == "mask_capture"
+            else None
+        )
+        score_mod = (
+            (lambda score, b, h, q_idx, kv_idx: score + bias[kv_idx])
+            if bias is not None
+            else None
+        )
+        mask_mod = (
+            (lambda b, h, q_idx, kv_idx: (q_idx >= kv_idx) & (kv_idx < limit))
+            if limit is not None
+            else (lambda b, h, q_idx, kv_idx: q_idx >= kv_idx)
+        )
+        block_mask = create_block_mask(
+            mask_mod, None, None, q_len, kv_len, device=device, BLOCK_SIZE=128
+        )
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 128),
+            (batch, kv_heads, kv_len, 128),
+            (batch, kv_heads, kv_len, 128),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if bias is not None:
+                scores = scores + bias.float()[None, None, None, :]
+            rows = torch.arange(q_len, device=device)
+            cols = torch.arange(kv_len, device=device)
+            scores = scores.masked_fill(
+                rows[None, None, :, None] < cols[None, None, None, :], float("-inf")
+            )
+            if limit is not None:
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    cols[None, None, None, :] >= limit, float("-inf")
+                )
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=128,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=True,
+                        bwd_ROCM_EARLY_DP=True,
+                        bwd_ROCM_D192_PANEL_DOTS=False,
+                        bwd_ROCM_D192_DQ_EARLY_DP=False,
+                        bwd_ROCM_D128_REVERSE_DQ_ROWS=requested
+                        if fallback not in ("raw", "forward_only")
+                        else False,
+                        ROCM_D128_REVERSE_DQ_ROWS=requested
+                        if fallback == "raw"
+                        else False,
+                        fwd_ROCM_D128_REVERSE_DQ_ROWS=requested
+                        if fallback == "forward_only"
+                        else False,
+                        bwd_BLOCKS_ARE_CONTIGUOUS=fallback != "short",
+                        bwd_ROCM_D96_PANEL_DOTS=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=fallback != "xcd_false",
+                        ROCM_D192_PANEL_DOTS=False,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            score_mod=score_mod,
+                            block_mask=block_mask,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["XCD_REMAP"],
+                            kwargs["ROCM_D128_REVERSE_DQ_ROWS"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    separate_active = fallback not in ("score_capture", "mask_capture")
+                    active = requested and fallback is None
+                    xcd_active = fallback != "xcd_false"
+                    phases = [1, 2] if separate_active else [0]
+                    self.assertEqual(
+                        selected,
+                        [
+                            (
+                                phase,
+                                1,
+                                xcd_active,
+                                active and phase == 2,
+                            )
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices],
+                        [0, 1, 2] if separate_active else [0],
+                    )
+                    for (
+                        phase,
+                        splits,
+                        xcd,
+                        reverse_rows,
+                    ), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(xcd, xcd_active)
+                        self.assertEqual(reverse_rows, active and phase == 2)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in compiler.items()
+                                if key != "kpack"
+                            },
+                            dict(
+                                num_warps=4,
+                                num_stages=2,
+                                matrix_instr_nonkdim=0,
+                                waves_per_eu=0,
+                            ),
+                        )
+                    self.assertTrue(
+                        all(item[-1]["kpack"] in (1, 2) for item in choices)
+                    )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("XCD_REMAP"),
+                                xcd_active,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D128_REVERSE_DQ_ROWS"),
+                                active and phase == 2,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("BLOCKS_ARE_CONTIGUOUS"),
+                                fallback != "short",
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(constants.get("ROCM_EARLY_DP"), True)
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_DQ_EARLY_DP"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_DQ_EARLY_DP"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                BLOCK_M1=32,
+                                BLOCK_N1=128,
+                                BLOCK_M2=128,
+                                BLOCK_N2=32,
+                                QK_HEAD_DIM=128,
+                                V_HEAD_DIM=128,
+                                QK_HEAD_DIM_ROUNDED=128,
+                                V_HEAD_DIM_ROUNDED=128,
+                                SAFE_HEAD_DIM=True,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @largeTensorTest("16GB", inductor=True)
+    @common_utils.parametrize("length", (2048, 4096))
+    def test_gfx950_d192_panel_phase_automatic(self, device, length):
+        import math
+
+        self._run_gfx950_d192_panel_phase(
+            device, length, 1 / math.sqrt(192), automatic=True
+        )
+
+    def _run_gfx950_d192_panel_phase(
+        self, device, length, scale, *, fallback=None, gqa4_pilot=False, automatic=False
+    ):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads, q_len, kv_len = 4, 10, 10, length, length
+        if gqa4_pilot:
+            batch, q_heads, kv_heads = 2, 8, 2
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        elif fallback == "gqa4":
+            batch, q_heads, kv_heads, q_len, kv_len = 1, 8, 2, 257, 260
+        gqa = q_heads // kv_heads
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 192),
+            (batch, kv_heads, kv_len, 192),
+            (batch, kv_heads, kv_len, 192),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=16,
+                        bwd_BLOCK_N1=64,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_ROCM_D192_PANEL_DOTS=requested,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=False,
+                        ROCM_D192_PANEL_DOTS=True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    if automatic:
+                        options = {"BACKEND": "TRITON"}
+                        if not requested:
+                            options["bwd_ROCM_SEPARATE_DQ"] = False
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    automatic_options_by_choice, selected_automatic_options = {}, []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_D192_PANEL_DOTS"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                            if automatic:
+                                automatic_options_by_choice[id(choice)] = {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "ROCM_BWD_PHASE",
+                                        "BLOCK_M1",
+                                        "BLOCK_N1",
+                                        "BLOCK_M2",
+                                        "BLOCK_N2",
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                        "ROCM_D192_PANEL_DOTS",
+                                        "ROCM_D192_DQ_EARLY_DP",
+                                    )
+                                }
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                            if automatic:
+                                selected_automatic_options.append(
+                                    automatic_options_by_choice.get(id(result[1]))
+                                )
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    active = requested and fallback is None
+                    phases = [1, 2] if active else [0]
+                    self.assertEqual(
+                        selected,
+                        [(phase, 1, active and phase == 1) for phase in phases],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices], [0, 1, 2] if active else [0]
+                    )
+                    if automatic:
+                        self.assertEqual(len(selected_automatic_options), len(phases))
+                        for phase, observed in zip(
+                            phases, selected_automatic_options, strict=True
+                        ):
+                            self.assertIsNotNone(observed)
+                            self.assertEqual(observed["ROCM_BWD_PHASE"], phase)
+                            self.assertEqual(
+                                tuple(
+                                    observed[key]
+                                    for key in (
+                                        "BLOCK_M1",
+                                        "BLOCK_N1",
+                                        "BLOCK_M2",
+                                        "BLOCK_N2",
+                                    )
+                                ),
+                                (64, 64, 64, 64) if phase == 0 else (16, 64, 128, 32),
+                            )
+                            self.assertEqual(
+                                (
+                                    observed["num_warps"],
+                                    observed["num_stages"],
+                                    observed["matrix_instr_nonkdim"],
+                                ),
+                                (
+                                    4,
+                                    1 if phase == 0 else 2,
+                                    16 if phase in (1, 2) and length == 4096 else 0,
+                                ),
+                            )
+                            self.assertEqual(
+                                (observed["waves_per_eu"], observed["kpack"]), (0, 1)
+                            )
+                            self.assertIs(observed["ROCM_D192_PANEL_DOTS"], phase == 1)
+                            self.assertIs(observed["ROCM_D192_DQ_EARLY_DP"], phase == 2)
+                    for (phase, splits, panels), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(panels, active and phase == 1)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            compiler,
+                            dict(
+                                num_warps=4,
+                                num_stages=1 if automatic and phase == 0 else 2,
+                                matrix_instr_nonkdim=16
+                                if automatic and phase in (1, 2) and length == 4096
+                                else 0,
+                                waves_per_eu=0,
+                                kpack=1,
+                            ),
+                        )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"),
+                                active and phase == 1,
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            if automatic:
+                                self.assertIs(
+                                    constants.get("ROCM_D192_DQ_EARLY_DP"), phase == 2
+                                )
+                            for key, value in dict(
+                                BLOCK_M1=64 if automatic and phase == 0 else 16,
+                                BLOCK_N1=64,
+                                BLOCK_M2=64 if automatic and phase == 0 else 128,
+                                BLOCK_N2=64 if automatic and phase == 0 else 32,
+                                QK_HEAD_DIM=192,
+                                V_HEAD_DIM=192,
+                                QK_HEAD_DIM_ROUNDED=256,
+                                V_HEAD_DIM_ROUNDED=256,
+                                SAFE_HEAD_DIM=False,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("scale", (96**-0.5, 0.0, -0.125))
+    def test_gfx950_d96_panel_phase(self, device, gqa, length, scale):
+        self._run_gfx950_d96_panel_phase(device, gqa, length, scale)
+
+    @supported_platform
+    @largeTensorTest("16GB", inductor=True)
+    @common_utils.parametrize("length", (2048, 4096))
+    def test_gfx950_d96_panel_phase_automatic(self, device, length):
+        import math
+
+        self._run_gfx950_d96_panel_phase(
+            device, 4, length, 1 / math.sqrt(96), automatic=True
+        )
+
+    @supported_platform
+    @common_utils.parametrize("gqa", (1, 4))
+    @common_utils.parametrize("fallback", ("short", "causal"))
+    def test_gfx950_d96_panel_phase_fallback(self, device, gqa, fallback):
+        self._run_gfx950_d96_panel_phase(device, gqa, 4096, 96**-0.5, fallback=fallback)
+
+    def _run_gfx950_d96_panel_phase(
+        self, device, gqa, length, scale, *, fallback=None, automatic=False
+    ):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads = (4, 21, 21) if gqa == 1 else (2, 8, 2)
+        q_len = kv_len = length
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        gqa = q_heads // kv_heads
+        generator = torch.Generator(device=device).manual_seed(
+            20261016 if automatic else 20261008
+        )
+        shapes = (
+            (batch, q_heads, q_len, 96),
+            (batch, kv_heads, kv_len, 96),
+            (batch, kv_heads, kv_len, 96),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * (1.0 if automatic else 0.5)
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = torch.randn(
+            shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+        ) * (1.0 if automatic else 0.25)
+        original_do = do.clone()
+        block_mask = None
+        if fallback == "causal":
+            block_mask = create_block_mask(
+                lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
+                None,
+                None,
+                q_len,
+                kv_len,
+                device=device,
+            )
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if fallback == "causal":
+                q_idx = torch.arange(q_len, device=device)[:, None]
+                kv_idx = torch.arange(kv_len, device=device)[None, :]
+                scores = scores.masked_fill(q_idx < kv_idx, float("-inf"))
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=128,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_ROCM_D96_PANEL_DOTS=requested,
+                        bwd_ROCM_D192_PANEL_DOTS=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=False,
+                        ROCM_D96_PANEL_DOTS=True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    if automatic:
+                        options = {"BACKEND": "TRITON"}
+                        if not requested:
+                            options["bwd_ROCM_D96_PANEL_DOTS"] = False
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            block_mask=block_mask,
+                            enable_gqa=True,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_D96_PANEL_DOTS"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                        "ROCM_D192_PANEL_DOTS",
+                                        "ROCM_D256_PANEL_DOTS",
+                                    )
+                                },
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "ROCM_BWD_PHASE",
+                                        "BLOCK_M1",
+                                        "BLOCK_N1",
+                                        "BLOCK_M2",
+                                        "BLOCK_N2",
+                                        "num_warps",
+                                        "num_stages",
+                                        "ROCM_D96_PANEL_DOTS",
+                                        "ROCM_EARLY_DP",
+                                        "XCD_REMAP",
+                                    )
+                                }
+                                if automatic
+                                else {},
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    active = requested and fallback is None
+                    phases = [1, 2] if active else [0]
+                    self.assertEqual(
+                        selected,
+                        [
+                            (phase, 1, active and phase == 1 and not automatic)
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices], [0, 1, 2] if active else [0]
+                    )
+                    for (
+                        phase,
+                        splits,
+                        panels,
+                    ), count, mutated, compiler, automatic_options in choices:
+                        if automatic:
+                            phase = automatic_options["ROCM_BWD_PHASE"]
+                            expected_tiles = (
+                                (64, 64, 64, 64)
+                                if phase == 0
+                                else (
+                                    (
+                                        (32, 32, 128, 32)
+                                        if length == 2048
+                                        else (64, 64, 128, 32)
+                                    )
+                                    if phase == 1
+                                    else (32, 128, 128, 32)
+                                )
+                            )
+                            self.assertEqual(
+                                tuple(
+                                    automatic_options[name]
+                                    for name in (
+                                        "BLOCK_M1",
+                                        "BLOCK_N1",
+                                        "BLOCK_M2",
+                                        "BLOCK_N2",
+                                    )
+                                ),
+                                expected_tiles,
+                            )
+                            self.assertEqual(
+                                (
+                                    automatic_options["num_warps"],
+                                    automatic_options["num_stages"],
+                                ),
+                                (4, 2 if phase == 2 else 1),
+                            )
+                            self.assertFalse(automatic_options["ROCM_D96_PANEL_DOTS"])
+                            self.assertFalse(automatic_options["ROCM_EARLY_DP"])
+                            self.assertFalse(automatic_options["XCD_REMAP"])
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(
+                            panels, active and phase == 1 and not automatic
+                        )
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            compiler,
+                            dict(
+                                num_warps=4,
+                                num_stages=1 if automatic and phase != 2 else 2,
+                                matrix_instr_nonkdim=0,
+                                waves_per_eu=0,
+                                kpack=1,
+                                ROCM_D192_PANEL_DOTS=False,
+                                ROCM_D256_PANEL_DOTS=False,
+                            ),
+                        )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"),
+                                active and phase == 1 and not automatic,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                BLOCK_M1=(
+                                    (32 if length == 2048 else 64)
+                                    if automatic and phase == 1
+                                    else 64
+                                    if automatic and phase == 0
+                                    else 32
+                                ),
+                                BLOCK_N1=(
+                                    (32 if length == 2048 else 64)
+                                    if automatic and phase == 1
+                                    else 64
+                                    if automatic and phase == 0
+                                    else 128
+                                ),
+                                BLOCK_M2=64 if automatic and phase == 0 else 128,
+                                BLOCK_N2=64 if automatic and phase == 0 else 32,
+                                QK_HEAD_DIM=96,
+                                V_HEAD_DIM=96,
+                                QK_HEAD_DIM_ROUNDED=128,
+                                V_HEAD_DIM_ROUNDED=128,
+                                SAFE_HEAD_DIM=False,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    def _run_gfx950_d256_early_probability_compact(
+        self, device, gqa, scale, *, fallback=None
+    ):
+        import ast
+
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_len, kv_len, q_heads = 257, 260, 4
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (1, q_heads, q_len, 256),
+            (1, q_heads // gqa, kv_len, 256),
+            (1, q_heads // gqa, kv_len, 256),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+        bias = torch.linspace(-0.1, 0.1, kv_len, device=device)
+        limit = torch.tensor([251], device=device, dtype=torch.int32)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            if fallback == "explicit_dense":
+                return torch.ones((), dtype=torch.bool, device=device)
+            if fallback == "mask_capture":
+                return kv_idx < limit[0]
+            return q_idx >= kv_idx
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        block_mask = (
+            create_block_mask(mask_mod, None, None, q_len, kv_len, device=device)
+            if fallback in ("causal", "explicit_dense", "mask_capture")
+            else None
+        )
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if fallback == "score_capture":
+                scores = scores + bias.float()[None, None, None, :]
+            if fallback in ("causal", "mask_capture"):
+                rows = torch.arange(q_len, device=device)[:, None]
+                columns = torch.arange(kv_len, device=device)[None, :]
+                valid = (
+                    columns < limit[0]
+                    if fallback == "mask_capture"
+                    else rows >= columns
+                )
+                scores = scores.masked_fill(~valid, float("-inf"))
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with torch.cuda.stream(stream), temp_float32_matmul_precision("highest"):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=16,
+                        bwd_BLOCK_N1=64,
+                        bwd_BLOCK_M2=64 if fallback == "tiles" else 128,
+                        bwd_BLOCK_N2=16 if fallback == "tiles" else 32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=fallback != "panels",
+                        bwd_ROCM_SEPARATE_DQ=fallback != "separate",
+                        bwd_ROCM_EARLY_DP=fallback != "early_dp",
+                        bwd_XCD_REMAP=False,
+                        ROCM_EARLY_PROBABILITY_COMPACT=requested
+                        if fallback == "raw"
+                        else True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+                    if fallback == "forward_only":
+                        options["fwd_ROCM_EARLY_PROBABILITY_COMPACT"] = requested
+                    if requested and fallback not in ("raw", "forward_only"):
+                        options["bwd_ROCM_EARLY_PROBABILITY_COMPACT"] = True
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            block_mask=block_mask,
+                            score_mod=score_mod
+                            if fallback == "score_capture"
+                            else None,
+                            enable_gqa=True,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected = [], {}, []
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_EARLY_PROBABILITY_COMPACT"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    separate = fallback not in (
+                        "causal",
+                        "explicit_dense",
+                        "score_capture",
+                        "mask_capture",
+                        "panels",
+                        "separate",
+                    )
+                    active = requested and fallback is None
+                    phases = [1, 2] if separate else [0]
+                    self.assertEqual(
+                        selected,
+                        [(phase, 1, active and phase == 1) for phase in phases],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices], [0, 1, 2] if separate else [0]
+                    )
+                    for (phase, splits, compact), count, mutated in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(compact, active and phase == 1)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"),
+                                active and phase == 1,
+                            )
+                            self.assertEqual(
+                                "ppT = pT.to(MATMUL_PRECISION)" in body,
+                                active and phase == 1,
+                            )
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("length", (2048, 4096))
+    @common_utils.parametrize("scale", (96**-0.5, 0.0, -0.125))
+    def test_gfx950_d96_dq_unroll2(self, device, length, scale):
+        self._run_gfx950_d96_dq_unroll2(device, length, scale)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "sequence1024",
+            "gqa4",
+            "contiguous",
+            "raw",
+            "forward_only",
+            "score_capture",
+            "mask_capture",
+            "early_disabled",
+        ),
+    )
+    def test_gfx950_d96_dq_unroll2_fallback(self, device, fallback):
+        self._run_gfx950_d96_dq_unroll2(device, 4096, 96**-0.5, fallback=fallback)
+
+    def _run_gfx950_d96_dq_unroll2(self, device, length, scale, *, fallback=None):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        batch, q_heads, kv_heads, q_len, kv_len = 4, 21, 21, length, length
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        elif fallback == "gqa4":
+            batch, q_heads, kv_heads, q_len, kv_len = 2, 8, 2, 4096, 4096
+        elif fallback == "sequence1024":
+            q_len = kv_len = 1024
+        gqa = q_heads // kv_heads
+        bias = (
+            torch.linspace(-0.1, 0.1, kv_len, device=device)
+            if fallback == "score_capture"
+            else None
+        )
+        limit = (
+            torch.tensor(kv_len // 2, device=device)
+            if fallback == "mask_capture"
+            else None
+        )
+        score_mod = (
+            (lambda score, b, h, q_idx, kv_idx: score + bias[kv_idx])
+            if bias is not None
+            else None
+        )
+        mask_mod = (
+            (lambda b, h, q_idx, kv_idx: q_idx >= kv_idx)
+            if fallback == "causal"
+            else (lambda b, h, q_idx, kv_idx: kv_idx < limit)
+            if limit is not None
+            else None
+        )
+        block_mask = (
+            create_block_mask(mask_mod, batch, q_heads, q_len, kv_len, device=device)
+            if mask_mod is not None
+            else None
+        )
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 96),
+            (batch, kv_heads, kv_len, 96),
+            (batch, kv_heads, kv_len, 96),
+        )
+        inputs = tuple(
+            (
+                torch.randn(
+                    shape, device=device, dtype=torch.bfloat16, generator=generator
+                )
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(
+                shapes[0], device=device, dtype=torch.bfloat16, generator=generator
+            )
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if bias is not None:
+                scores = scores + bias.float()[None, None, None, :]
+            if limit is not None:
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    cols[None, None, None, :] >= limit, float("-inf")
+                )
+            if fallback == "causal":
+                rows = torch.arange(q_len, device=device)
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    rows[None, None, :, None] < cols[None, None, None, :],
+                    float("-inf"),
+                )
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=128,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=False,
+                        bwd_ROCM_EARLY_DP=False,
+                        bwd_ROCM_D96_PANEL_DOTS=fallback != "missing_panel",
+                        bwd_ROCM_D96_DQ_EARLY_DP=fallback != "early_disabled",
+                        bwd_ROCM_D96_DQ_UNROLL2=requested
+                        if fallback not in ("raw", "forward_only")
+                        else False,
+                        ROCM_D96_DQ_UNROLL2=requested if fallback == "raw" else False,
+                        fwd_ROCM_D96_DQ_UNROLL2=requested
+                        if fallback == "forward_only"
+                        else False,
+                        bwd_BLOCKS_ARE_CONTIGUOUS=fallback != "contiguous",
+                        bwd_ROCM_D192_PANEL_DOTS=False,
+                        bwd_ROCM_D192_DQ_EARLY_DP=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=False,
+                        ROCM_D96_PANEL_DOTS=True,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            score_mod=score_mod,
+                            block_mask=block_mask,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["ROCM_D96_PANEL_DOTS"],
+                            kwargs["ROCM_D96_DQ_UNROLL2"],
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    panel_active = fallback not in (
+                        "sequence1024",
+                        "short",
+                        "causal",
+                        "missing_panel",
+                        "score_capture",
+                        "mask_capture",
+                    )
+                    active = (
+                        requested
+                        and panel_active
+                        and fallback
+                        not in (
+                            "raw",
+                            "forward_only",
+                            "gqa4",
+                            "sequence1024",
+                            "contiguous",
+                            "early_disabled",
+                        )
+                    )
+                    common_early = panel_active and fallback not in (
+                        "gqa4",
+                        "sequence1024",
+                        "contiguous",
+                        "early_disabled",
+                    )
+                    phases = [1, 2] if panel_active else [0]
+                    self.assertEqual(
+                        selected,
+                        [
+                            (
+                                phase,
+                                1,
+                                panel_active and phase == 1,
+                                active and phase == 2,
+                            )
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices],
+                        [0, 1, 2] if panel_active else [0],
+                    )
+                    for (
+                        phase,
+                        splits,
+                        panels,
+                        early_dp,
+                    ), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(panels, panel_active and phase == 1)
+                        self.assertEqual(early_dp, active and phase == 2)
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in compiler.items()
+                                if key != "kpack"
+                            },
+                            dict(
+                                num_warps=4,
+                                num_stages=2,
+                                matrix_instr_nonkdim=0,
+                                waves_per_eu=0,
+                            ),
+                        )
+                    self.assertTrue(
+                        all(item[-1]["kpack"] in (1, 2) for item in choices)
+                    )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, torch.bfloat16)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"),
+                                panel_active and phase == 1,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_DQ_UNROLL2"),
+                                active and phase == 2,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_DQ_EARLY_DP"),
+                                common_early and phase == 2,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("BLOCKS_ARE_CONTIGUOUS"),
+                                fallback != "contiguous",
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                BLOCK_M1=32,
+                                BLOCK_N1=128,
+                                BLOCK_M2=128,
+                                BLOCK_N2=32,
+                                QK_HEAD_DIM=96,
+                                V_HEAD_DIM=96,
+                                QK_HEAD_DIM_ROUNDED=128,
+                                V_HEAD_DIM_ROUNDED=128,
+                                SAFE_HEAD_DIM=False,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "batch,length", ((4, 1024), (4, 2048), (4, 4096), (2, 4096))
+    )
+    @common_utils.parametrize("scale", (128**-0.5, 0.0, -0.125))
+    def test_gfx950_d128_dv_view_carry_split64(self, device, batch, length, scale):
+        self._run_gfx950_d128_dv_view_carry_split64(device, length, scale, batch=batch)
+
+    @supported_platform
+    @common_utils.parametrize(
+        "fallback",
+        (
+            "short",
+            "gqa1",
+            "xcd_false",
+            "reverse_false",
+            "raw",
+            "forward_only",
+            "score_capture",
+            "mask_capture",
+        ),
+    )
+    def test_gfx950_d128_dv_view_carry_split64_fallback(self, device, fallback):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device, 4096, 128**-0.5, fallback=fallback
+        )
+
+    @supported_platform
+    @common_utils.parametrize(
+        "dtype,batch,length,default_scale",
+        (
+            (torch.float16, 4, 2048, 128**-0.5),
+            (torch.float16, 4, 4096, 128**-0.5),
+            (torch.float16, 2, 4096, 128**-0.5),
+            (torch.float16, 2, 2048, 128**-0.5),
+            (torch.float16, 1, 4096, 128**-0.5),
+            (torch.float32, 4, 2048, 128**-0.5),
+            (torch.float32, 4, 4096, 1 / math.sqrt(128)),
+            (torch.float32, 2, 4096, 1 / math.sqrt(128)),
+            (torch.float32, 1, 4096, 1 / math.sqrt(128)),
+            (torch.float32, 1, 2048, 1 / math.sqrt(128)),
+            (torch.float32, 2, 2048, 1 / math.sqrt(128)),
+        ),
+    )
+    @common_utils.parametrize("scale", (None, 0.0, -0.125))
+    def test_gfx950_d128_dv_view_carry_split64_dtype_coverage(
+        self, device, dtype, batch, length, default_scale, scale
+    ):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            length,
+            default_scale if scale is None else scale,
+            batch=batch,
+            dtype=dtype,
+            fp16_scope=dtype == torch.float16,
+            fp32_balanced64_scope=dtype == torch.float32,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", (torch.float16, torch.float32))
+    @common_utils.parametrize("scale", (0.08838834764831843,))
+    def test_gfx950_d128_query_tile_outer_qualified_default(self, device, dtype, scale):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            scale,
+            dtype=dtype,
+            fp16_scope=dtype == torch.float16,
+            fp32_balanced64_scope=dtype == torch.float32,
+        )
+
+    @supported_platform
+    @common_utils.parametrize(
+        "dtype,batch,default_scale",
+        (
+            (torch.float16, 4, 0.08838834764831843),
+            (torch.float32, 4, 0.08838834764831843),
+            (torch.float32, 2, 0.08838834764831843),
+            (torch.float32, 1, 0.08838834764831843),
+        ),
+    )
+    @common_utils.parametrize("scale", (None, 0.0, -0.125))
+    def test_gfx950_d128_query_tile_outer_expanded_metadata(
+        self, device, dtype, batch, default_scale, scale
+    ):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            default_scale if scale is None else scale,
+            batch=batch,
+            dtype=dtype,
+            fp16_scope=dtype == torch.float16,
+            fp32_balanced64_scope=dtype == torch.float32,
+            expanded_metadata=True,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("scale", (0.08838834764831843, 0.0, -0.125))
+    @common_utils.parametrize("expanded_metadata", (False, True))
+    def test_gfx950_d128_query_tile_outer_fp32_n2048(
+        self, device, scale, expanded_metadata
+    ):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            2048,
+            scale,
+            dtype=torch.float32,
+            fp32_balanced64_scope=True,
+            expanded_metadata=expanded_metadata,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", (torch.bfloat16, torch.float16, torch.float32))
+    def test_gfx950_d128_automatic_backward_profile(self, device, dtype):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            1 / math.sqrt(128),
+            dtype=dtype,
+            fp16_scope=dtype == torch.float16,
+            fp32_balanced64_scope=dtype == torch.float32,
+            automatic=True,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", (torch.bfloat16, torch.float16, torch.float32))
+    def test_gfx950_d128_automatic_backward_profile_sparse_gap(self, device, dtype):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            1 / math.sqrt(128),
+            dtype=dtype,
+            fp16_scope=dtype == torch.float16,
+            fp32_balanced64_scope=dtype == torch.float32,
+            automatic=True,
+            indexed_gap=True,
+        )
+
+    def _run_gfx950_d128_dv_view_carry_split64(
+        self,
+        device,
+        length,
+        scale,
+        *,
+        fallback=None,
+        batch=4,
+        dtype=torch.bfloat16,
+        fp16_scope=False,
+        fp32_balanced64_scope=False,
+        expanded_metadata=False,
+        automatic=False,
+        indexed_gap=False,
+    ):
+        import ast
+
+        from torch._functorch import config as aot_config
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        if (
+            not torch.version.hip
+            or torch.device(device).type != "cuda"
+            or torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+            != "gfx950"
+        ):
+            self.skipTest("Requires gfx950")
+        q_heads, kv_heads, q_len, kv_len = 64, 8, length, length
+        if fallback == "short":
+            batch, q_len, kv_len = 1, 257, 260
+        if fallback == "gqa1":
+            q_heads = kv_heads
+        gqa = q_heads // kv_heads
+        bias = (
+            torch.linspace(-0.1, 0.1, kv_len, device=device)
+            if fallback == "score_capture"
+            else None
+        )
+        limit = (
+            torch.tensor(kv_len // 2, device=device)
+            if fallback == "mask_capture"
+            else None
+        )
+        score_mod = (
+            (lambda score, b, h, q_idx, kv_idx: score + bias[kv_idx])
+            if bias is not None
+            else None
+        )
+        mask_mod = (
+            (lambda b, h, q_idx, kv_idx: (q_idx >= kv_idx) & (kv_idx < limit))
+            if limit is not None
+            else (lambda b, h, q_idx, kv_idx: q_idx >= kv_idx)
+        )
+        block_mask = create_block_mask(
+            mask_mod,
+            batch if expanded_metadata else None,
+            q_heads if expanded_metadata else None,
+            q_len,
+            kv_len,
+            device=device,
+            BLOCK_SIZE=128,
+        )
+        if indexed_gap:
+            full_num_blocks = block_mask.full_kv_num_blocks.clone()
+            full_indices = block_mask.full_kv_indices.clone()
+            full_indices[..., 4, 1:3] = full_indices[..., 4, 2:4].clone()
+            full_num_blocks[..., 4] -= 1
+            block_mask = BlockMask.from_kv_blocks(
+                block_mask.kv_num_blocks,
+                block_mask.kv_indices,
+                full_num_blocks,
+                full_indices,
+                BLOCK_SIZE=128,
+                mask_mod=mask_mod,
+                seq_lengths=(q_len, kv_len),
+            )
+            query_count = int(block_mask.full_q_num_blocks[0, 0, 1])
+            query_blocks = block_mask.full_q_indices[0, 0, 1, :query_count].tolist()
+            self.assertEqual(query_blocks, [2, 3, *range(5, q_len // 128)])
+        generator = torch.Generator(device=device).manual_seed(20261008)
+        shapes = (
+            (batch, q_heads, q_len, 128),
+            (batch, kv_heads, kv_len, 128),
+            (batch, kv_heads, kv_len, 128),
+        )
+        inputs = tuple(
+            (
+                torch.randn(shape, device=device, dtype=dtype, generator=generator)
+                * 0.5
+            ).requires_grad_()
+            for shape in shapes
+        )
+        q, k, v = inputs
+        do = (
+            torch.randn(shapes[0], device=device, dtype=dtype, generator=generator)
+            * 0.25
+        )
+        original_do = do.clone()
+
+        def reference():
+            reference_inputs = tuple(
+                value.detach().float().requires_grad_() for value in inputs
+            )
+            ref_q, ref_k, ref_v = reference_inputs
+            scores = (
+                ref_q @ ref_k.repeat_interleave(gqa, dim=1).transpose(-1, -2)
+            ) * scale
+            if bias is not None:
+                scores = scores + bias.float()[None, None, None, :]
+            rows = torch.arange(q_len, device=device)
+            cols = torch.arange(kv_len, device=device)
+            scores = scores.masked_fill(
+                rows[None, None, :, None] < cols[None, None, None, :], float("-inf")
+            )
+            if indexed_gap:
+                scores = scores.masked_fill(
+                    (rows[None, None, :, None] // 128 == 4)
+                    & (cols[None, None, None, :] // 128 == 1),
+                    float("-inf"),
+                )
+            if limit is not None:
+                cols = torch.arange(kv_len, device=device)
+                scores = scores.masked_fill(
+                    cols[None, None, None, :] >= limit, float("-inf")
+                )
+            out = scores.softmax(-1) @ ref_v.repeat_interleave(gqa, dim=1)
+            gradients = torch.autograd.grad(out, reference_inputs, do.float())
+            return (out.detach(), *(gradient.detach() for gradient in gradients))
+
+        providers = {}
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        try:
+            with (
+                torch.cuda.stream(stream),
+                temp_float32_matmul_precision("highest"),
+                config.patch(
+                    fx_graph_cache=False,
+                    max_autotune=False,
+                    compile_threads=1,
+                    emulate_precision_casts=False,
+                ),
+                aot_config.patch(
+                    enable_autograd_cache=False, enable_remote_autograd_cache=False
+                ),
+            ):
+                for requested in (False, True):
+                    torch._dynamo.reset()
+                    options = dict(
+                        BACKEND="TRITON",
+                        bwd_BLOCK_M1=32,
+                        bwd_BLOCK_N1=128,
+                        bwd_BLOCK_M2=128,
+                        bwd_BLOCK_N2=32,
+                        bwd_num_warps=4,
+                        bwd_num_stages=2,
+                        bwd_USE_TMA=False,
+                        bwd_PRESCALE_QK=False,
+                        bwd_ROCM_D256_PANEL_DOTS=False,
+                        bwd_ROCM_SEPARATE_DQ=True,
+                        bwd_ROCM_EARLY_DP=True,
+                        bwd_ROCM_D192_PANEL_DOTS=False,
+                        bwd_ROCM_D192_DQ_EARLY_DP=False,
+                        bwd_ROCM_D128_REVERSE_DQ_ROWS=fallback != "reverse_false",
+                        bwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64=requested
+                        if fallback not in ("raw", "forward_only")
+                        else False,
+                        ROCM_D128_DV_VIEW_CARRY_SPLIT64=requested
+                        if fallback == "raw"
+                        else False,
+                        fwd_ROCM_D128_DV_VIEW_CARRY_SPLIT64=requested
+                        if fallback == "forward_only"
+                        else False,
+                        bwd_BLOCKS_ARE_CONTIGUOUS=not indexed_gap
+                        and fallback != "short",
+                        bwd_ROCM_D96_PANEL_DOTS=False,
+                        bwd_matrix_instr_nonkdim=0,
+                        bwd_waves_per_eu=0,
+                        bwd_kpack=1,
+                        fwd_USE_TMA=False,
+                        fwd_PRESCALE_QK=False,
+                        fwd_BLOCK_M=128,
+                        fwd_BLOCK_N=32,
+                        fwd_num_warps=4,
+                        fwd_num_stages=1,
+                        bwd_XCD_REMAP=fallback != "xcd_false",
+                        ROCM_D192_PANEL_DOTS=False,
+                        ROCM_BWD_PHASE=13,
+                        bwd_ROCM_BWD_PHASE=17,
+                        ROCM_GQA_SPLITS=7,
+                        bwd_ROCM_GQA_SPLITS=4,
+                    )
+
+                    if fp16_scope:
+                        options["bwd_ROCM_D128_FP16_COVERAGE"] = True
+                    if fp32_balanced64_scope:
+                        options.update(
+                            bwd_ROCM_D128_FP32_BALANCED64_COVERAGE=True,
+                            bwd_BLOCK_M1=16,
+                            bwd_BLOCK_N1=64,
+                            bwd_BLOCK_M2=64,
+                            bwd_BLOCK_N2=16,
+                            bwd_num_stages=1,
+                        )
+                    if automatic:
+                        options = {"BACKEND": "TRITON"}
+                        if not requested:
+                            options["bwd_ROCM_SEPARATE_DQ"] = False
+
+                    def forward(query, key, value, options=options):
+                        return flex_attention(
+                            query,
+                            key,
+                            value,
+                            enable_gqa=True,
+                            score_mod=score_mod,
+                            block_mask=block_mask,
+                            scale=scale,
+                            kernel_options=options,
+                        )
+
+                    compiled = torch.compile(forward, fullgraph=True, dynamic=False)
+                    original_select = flex_kernel_mod.autotune_select_algorithm
+                    choices, choice_metadata, selected, modules = [], {}, [], []
+                    original_load = PyCodeCache.load_by_key_path
+
+                    def retain_module(*args, **kwargs):
+                        module = original_load(*args, **kwargs)
+                        modules.append(module)
+                        return module
+
+                    def append_choice(original_append, *args, **kwargs):
+                        choice_list, count = kwargs["choices"], len(kwargs["choices"])
+                        metadata = (
+                            kwargs["ROCM_BWD_PHASE"],
+                            kwargs["ROCM_GQA_SPLITS"],
+                            kwargs["XCD_REMAP"],
+                            kwargs["ROCM_D128_REVERSE_DQ_ROWS"],
+                            kwargs["ROCM_D128_DV_VIEW_CARRY_SPLIT64"],
+                            kwargs.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False),
+                        )
+                        choices.append(
+                            (
+                                metadata,
+                                len(kwargs["input_nodes"]),
+                                [
+                                    index
+                                    for index, value in enumerate(kwargs["input_nodes"])
+                                    if any(
+                                        value is target
+                                        for target in kwargs["mutated_inputs"]
+                                    )
+                                ],
+                                {
+                                    key: kwargs[key]
+                                    for key in (
+                                        "num_warps",
+                                        "num_stages",
+                                        "matrix_instr_nonkdim",
+                                        "waves_per_eu",
+                                        "kpack",
+                                    )
+                                },
+                            )
+                        )
+                        result = original_append(*args, **kwargs)
+                        for choice in choice_list[count:]:
+                            choice_metadata[id(choice)] = metadata
+                        return result
+
+                    def select_algorithm(*args, **kwargs):
+                        result = original_select(*args, **kwargs)
+                        if args[0] in (
+                            "flex_attention_backward",
+                            "flex_attention_backward_dq",
+                        ):
+                            selected.append(choice_metadata.get(id(result[1])))
+                        return result
+
+                    def invoke():
+                        out = compiled(q, k, v)
+                        return out, torch.autograd.grad(
+                            out, inputs, do, retain_graph=True
+                        )
+
+                    with (
+                        mock.patch.object(
+                            PyCodeCache, "load_by_key_path", side_effect=retain_module
+                        ),
+                        self._observe_gfx950_backward_templates(append_choice),
+                        mock.patch.object(
+                            flex_kernel_mod,
+                            "autotune_select_algorithm",
+                            side_effect=select_algorithm,
+                        ),
+                    ):
+                        (out, initial), code = run_and_get_kernels(
+                            invoke, remove_quote=True
+                        )
+                    torch.cuda.synchronize(device)
+                    separate_active = (
+                        requested
+                        if automatic
+                        else fallback
+                        not in (
+                            "score_capture",
+                            "mask_capture",
+                            "gqa1",
+                        )
+                    )
+                    active = requested and fallback is None
+                    reverse_active = (
+                        requested
+                        if automatic
+                        else fallback
+                        not in (
+                            "short",
+                            "xcd_false",
+                            "score_capture",
+                            "mask_capture",
+                            "reverse_false",
+                            "gqa1",
+                        )
+                    )
+                    xcd_active = requested if automatic else fallback != "xcd_false"
+                    phases = [1, 2] if separate_active else [0]
+                    query_tile_outer_eligible = (
+                        active
+                        and not expanded_metadata
+                        and scale in (0.08838834764831843, 0.0, -0.125)
+                        and (
+                            fp16_scope
+                            and (batch, length)
+                            in ((4, 2048), (4, 4096), (2, 2048), (2, 4096), (1, 4096))
+                            or fp32_balanced64_scope
+                            and (batch, length)
+                            in ((4, 4096), (2, 4096), (1, 4096), (4, 2048))
+                        )
+                    )
+                    query_tile_outer_active = query_tile_outer_eligible and any(
+                        item[0][0] == 1 and item[-1]["kpack"] == 1 for item in choices
+                    )
+                    self.assertEqual(
+                        selected,
+                        [
+                            (
+                                phase,
+                                1,
+                                xcd_active,
+                                reverse_active and phase == 2,
+                                active and phase == 1,
+                                query_tile_outer_active and phase == 1,
+                            )
+                            for phase in phases
+                        ],
+                    )
+                    self.assertEqual(
+                        [item[0][0] for item in choices],
+                        [0, 1, 2] if separate_active else [0],
+                    )
+                    for (
+                        phase,
+                        splits,
+                        xcd,
+                        reverse_rows,
+                        view_carry,
+                        query_tile_outer,
+                    ), count, mutated, compiler in choices:
+                        self.assertEqual(splits, 1)
+                        self.assertEqual(
+                            xcd, xcd_active and (not automatic or phase != 0)
+                        )
+                        self.assertEqual(reverse_rows, reverse_active and phase == 2)
+                        self.assertIs(view_carry, active and phase == 1)
+                        self.assertIs(
+                            query_tile_outer,
+                            query_tile_outer_eligible
+                            and phase == 1
+                            and compiler["kpack"] == 1,
+                        )
+                        self.assertEqual(count, 16)
+                        self.assertEqual(
+                            mutated, [7] if phase == 1 else [] if phase == 2 else [6, 7]
+                        )
+                        if not automatic or phase != 0:
+                            self.assertEqual(
+                                {
+                                    key: value
+                                    for key, value in compiler.items()
+                                    if key != "kpack"
+                                },
+                                dict(
+                                    num_warps=4,
+                                    num_stages=1 if fp32_balanced64_scope else 2,
+                                    matrix_instr_nonkdim=0,
+                                    waves_per_eu=0,
+                                ),
+                            )
+                    if not automatic or requested:
+                        self.assertTrue(
+                            all(
+                                item[-1]["kpack"]
+                                in ((1,) if fp32_balanced64_scope else (1, 2))
+                                for item in choices
+                                if not automatic or item[0][0] != 0
+                            )
+                        )
+                    for value, shape in zip(
+                        (out, *initial), (shapes[0], *shapes), strict=True
+                    ):
+                        self.assertEqual(value.dtype, dtype)
+                        self.assertEqual(tuple(value.shape), shape)
+                    actual_phases = set()
+                    for part in code:
+                        wrapper = ast.parse(part)
+                        bodies = [
+                            part,
+                            *(
+                                node.value
+                                for node in ast.walk(wrapper)
+                                if isinstance(node, ast.Constant)
+                                and isinstance(node.value, str)
+                                and "flex_attention_backward" in node.value
+                            ),
+                        ]
+                        for body in bodies:
+                            parsed = ast.parse(body)
+                            if not any(
+                                isinstance(node, ast.FunctionDef)
+                                and "flex_attention_backward" in node.name
+                                for node in parsed.body
+                            ):
+                                continue
+                            constants = self._gfx950_backward_constants(parsed)
+                            phase = constants.get("ROCM_BWD_PHASE")
+                            if fp32_balanced64_scope and phase in (0, 1, 2):
+                                self.assertEqual(
+                                    constants.get("FLOAT32_PRECISION"), "ieee"
+                                )
+                                self.assertIs(constants.get("PRESCALE_QK"), False)
+                            if phase not in (0, 1, 2):
+                                continue
+                            actual_phases.add(phase)
+                            self.assertEqual(constants.get("ROCM_GQA_SPLITS"), 1)
+                            self.assertEqual(
+                                constants.get("XCD_REMAP"),
+                                xcd_active and (not automatic or phase != 0),
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D128_REVERSE_DQ_ROWS"),
+                                reverse_active and phase == 2,
+                            )
+                            self.assertIs(
+                                constants.get("ROCM_D128_DV_VIEW_CARRY_SPLIT64"),
+                                active and phase == 1,
+                            )
+                            self.assertIs(
+                                constants.get("ROCM_D128_GQA_QUERY_TILE_OUTER", False),
+                                query_tile_outer_active and phase == 1,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("BLOCKS_ARE_CONTIGUOUS"),
+                                False
+                                if automatic or indexed_gap
+                                else fallback != "short",
+                            )
+                            self.assertEqual(constants.get("ROCM_XCD_SNAKE"), False)
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_DP"),
+                                requested and phase != 0 if automatic else True,
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_PANEL_DOTS"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D192_DQ_EARLY_DP"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D96_DQ_EARLY_DP"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_EARLY_PROBABILITY_COMPACT"), False
+                            )
+                            self.assertEqual(
+                                constants.get("ROCM_D256_PANEL_DOTS"), False
+                            )
+                            for key, value in dict(
+                                QK_HEAD_DIM=128,
+                                V_HEAD_DIM=128,
+                                QK_HEAD_DIM_ROUNDED=128,
+                                V_HEAD_DIM_ROUNDED=128,
+                                SAFE_HEAD_DIM=True,
+                                GQA_SHARED_HEADS=gqa,
+                            ).items():
+                                self.assertEqual(constants.get(key), value)
+                            if not automatic or phase != 0:
+                                for key, value in dict(
+                                    BLOCK_M1=16 if fp32_balanced64_scope else 32,
+                                    BLOCK_N1=64 if fp32_balanced64_scope else 128,
+                                    BLOCK_M2=64 if fp32_balanced64_scope else 128,
+                                    BLOCK_N2=16 if fp32_balanced64_scope else 32,
+                                ).items():
+                                    self.assertEqual(constants.get(key), value)
+                    self.assertTrue(set(phases).issubset(actual_phases))
+
+                    def backward(out=out):
+                        return torch.autograd.grad(out, inputs, do, retain_graph=True)
+
+                    providers[requested] = dict(
+                        compiled=compiled,
+                        out=out,
+                        backward=backward,
+                        initial=initial,
+                        code=code,
+                        modules=tuple(modules),
+                    )
+                self._check_gfx950_backward_gradients_and_graphs(
+                    device, stream, providers, inputs, do, original_do, scale, reference
+                )
+        finally:
+            torch.cuda.current_stream(device).wait_stream(stream)
+
+    @supported_platform
+    @common_utils.parametrize("scale", (0.08838834764831843,))
+    def test_gfx950_d128_query_tile_outer_fp16_B2_qualified_default(
+        self, device, scale
+    ):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            scale,
+            batch=2,
+            dtype=torch.float16,
+            fp16_scope=True,
+        )
+
+    @supported_platform
+    @common_utils.parametrize("scale", (0.08838834764831843, 0.0, -0.125))
+    def test_gfx950_d128_query_tile_outer_fp16_B2_expanded_metadata(
+        self, device, scale
+    ):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            scale,
+            batch=2,
+            dtype=torch.float16,
+            fp16_scope=True,
+            expanded_metadata=True,
+        )
+
+    @supported_platform
+    def test_gfx950_d128_query_tile_outer_fp16_B2_automatic_default(self, device):
+        self._run_gfx950_d128_dv_view_carry_split64(
+            device,
+            4096,
+            1 / math.sqrt(128),
+            batch=2,
+            dtype=torch.float16,
+            fp16_scope=True,
+            automatic=True,
+        )
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
@@ -11750,6 +22619,8 @@ class TestLearnableBiases(InductorTestCase):
                 lambda msg: f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
+
+common_utils.instantiate_parametrized_tests(TestFlexAttentionROCmOptions)
 
 instantiate_device_type_tests(
     TestFlexAttention,
