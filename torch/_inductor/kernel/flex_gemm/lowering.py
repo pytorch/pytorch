@@ -571,17 +571,28 @@ def normalize_flex_gemm_1d_captures(
     return normalized
 
 
-def validate_bmm_capture_views(graph_module: torch.fx.GraphModule) -> None:
-    """Views lower as aliases, so they must preserve broadcast axes and dtype."""
+def validate_bmm_capture_views(
+    graph_module: torch.fx.GraphModule, gemm_node: torch.fx.Node
+) -> None:
+    """Views lower as aliases, so they must preserve broadcast axes and dtype.
+
+    Captures are classified by their placeholder shape, so a view that flattens
+    or reorders axes would read a capture combined with it along the wrong axis.
+    GEMM-derived views returned directly from the epilogue (terminal storage
+    views) are exempt; output plans own those.
+    """
     from ..gemm_epilogue_codegen import _cute_op_name
 
+    gemm_derived = OrderedSet([gemm_node])
     for node in graph_module.graph.nodes:
-        if node.op != "call_function" or _cute_op_name(node.target) not in (
-            "view",
-            "reshape",
-            "squeeze",
-            "unsqueeze",
-        ):
+        if any(arg in gemm_derived for arg in node.all_input_nodes):
+            gemm_derived.add(node)
+    returned = OrderedSet(graph_module.graph.output_node().all_input_nodes)
+    view_ops = ("view", "reshape", "squeeze", "unsqueeze")
+    for node in graph_module.graph.nodes:
+        if node.op != "call_function" or _cute_op_name(node.target) not in view_ops:
+            continue
+        if node in returned and node in gemm_derived:
             continue
         source = node.args[0]
         if not isinstance(source, torch.fx.Node):
@@ -880,8 +891,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_args[capture_start:],
         gemm_fx_node.meta["val"].shape,
     )
-    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
-        validate_bmm_capture_views(subgraph.graph_module)
+    bmm_captures = gemm_op is torch.ops.aten.bmm.default and bool(epilogue_args)
+    if bmm_captures:
+        validate_bmm_capture_views(subgraph.graph_module, gemm_fx_node)
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
         for index, arg in enumerate(gemm_operand_nodes)
@@ -1058,17 +1070,17 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         output_stride,
     )
     mainloop_scale_count = len(mainloop_scale_nodes)
+    if bmm_captures and output_transform is not None:
+        raise NotImplementedError(
+            "FlexGEMM bmm captured tensor reads require a shape-preserving main output"
+        )
     epilogue_arg_kinds = (
         *("scalar" for _ in range(mainloop_scale_count)),
         *infer_flex_gemm_epilogue_arg_kinds(
             gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
         ),
     )
-    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
-        if output_transform is not None:
-            raise NotImplementedError(
-                "FlexGEMM bmm captured tensor reads require a shape-preserving main output"
-            )
+    if bmm_captures:
         # Batch-shared captures become the 2-D forms QuACK broadcasts over every
         # batch; the runtime then passes rows and columns rank-1.
         epilogue_args = [

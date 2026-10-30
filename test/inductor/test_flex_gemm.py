@@ -2521,12 +2521,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("shared_tile", torch.bmm, lambda acc, t: acc * t, (4, 5), "must match"),
             ("aux", torch.bmm, lambda acc, t: (acc * t, acc + 1), (2, 1, 5), "aux"),
             ("baddbmm", torch.baddbmm, lambda acc, t: acc * t, (2, 1, 5), "aten.mm"),
+            # An expanded [B, M, 2N] main output would read the row in the wrong domain.
+            (
+                "output_transform",
+                torch.bmm,
+                lambda acc, t: torch.cat([acc * t, acc], -1),
+                (2, 1, 8),
+                "shape-preserving main output",
+            ),
         ),
         name_fn=lambda case: case[0],
     )
     def test_generated_bmm_capture_rejects_unsupported_scope(self, case):
         _, gemm, epilogue, capture_shape, error = case
-        a, b = torch.randn(2, 4, 8), torch.randn(2, 8, 5)
+        n = capture_shape[-1]
+        a, b = torch.randn(2, 4, 8), torch.randn(2, 8, n)
         operands = (torch.randn(2, 4, 5), a, b) if gemm is torch.baddbmm else (a, b)
 
         def fn(capture, *operands):
@@ -2544,14 +2553,29 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @parametrize(
-        "case", ("vector", "cast_column", "squeezed_row", "prims_reshape", "dtype_view")
+        "case",
+        (
+            "vector",
+            "cast_column",
+            "squeezed_row",
+            "prims_reshape",
+            "dtype_view",
+            "flattened_acc",
+        ),
     )
     def test_bmm_capture_rejects_axis_changing_views(self, case):
         a, b = torch.randn(8, 8, 8), torch.randn(8, 8, 8)
-        shape = {"cast_column": (8, 1), "squeezed_row": (8, 1, 8)}.get(case, (8,))
+        shape = {
+            "cast_column": (8, 1),
+            "squeezed_row": (8, 1, 8),
+            "flattened_acc": (8, 1),
+        }.get(case, (8,))
 
         def fn(a, b, capture):
             def epilogue(acc):
+                if case == "flattened_acc":
+                    # Eager scales each batch; a [B, 1] capture would read as a column.
+                    return (acc.view(8, 64) * capture).view(8, 8, 8)
                 if case == "squeezed_row":
                     value = capture.squeeze(1)
                 elif case == "cast_column":
@@ -9792,20 +9816,56 @@ class TestFlexGemmBatchedCaptureDevice(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         weight = self.makeTensor(self.N, self.K, device=device)
-        for batch, rows in ((2, 125), (4, 201)):
+        for index, (batch, rows) in enumerate(((2, 125), (4, 201))):
             a = self.makeTensor(batch, rows, self.K, device=device)
             modulation = self.makeTensor(batch, 6, self.N, device=device)
             gate = modulation[:, 5:6, :]
             residual = self.makeTensor(batch, rows, self.N, device=device)
-            actual = compiled(a, weight, gate, residual)
+            if index == 0:
+                actual, (code,) = run_and_get_code(compiled, a, weight, gate, residual)
+                self.assertFlexGemmGeneratedCode(code)
+                self.assertNotIn("extern_kernels.bmm(", code)
+            else:
+                actual = compiled(a, weight, gate, residual)
             self.assertMatchesLowPrecisionEager(
                 actual,
                 epilogue(a @ weight.t(), gate, residual),
                 (a.double() @ weight.double().t()) * gate.double() + residual.double(),
                 self.K,
             )
+        # One dynamic-batch graph serves both batch sizes.
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_bmm_capture_terminal_dtype_view(self, device):
+        # A terminal storage view of a GEMM-derived value is not a capture view.
+        a = self.makeTensor(self.B, self.M, self.K, device=device)
+        b = self.makeTensor(self.B, self.K, self.N, device=device)
+        row = self.makeTensor(self.B, 1, self.N, device=device)
+
+        def fn(a, b, row):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                lambda acc: (acc * row).view(torch.float16),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, row
+        )
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertEqual(actual.dtype, torch.float16)
+        self.assertMatchesLowPrecisionEager(
+            actual.view(torch.bfloat16),
+            torch.bmm(a, b) * row,
+            torch.bmm(a.double(), b.double()) * row.double(),
+            self.K,
+        )
 
 
 instantiate_device_type_tests(
