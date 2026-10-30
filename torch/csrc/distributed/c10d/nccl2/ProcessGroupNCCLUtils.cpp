@@ -10,6 +10,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/nccl2/HeartbeatMonitor.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -343,6 +344,10 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
     c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
+    // Like abortProcess(), never terminates in reconfigurable mode.
+    HeartbeatRegistration heartbeat(
+        "[TC]" + getRankPrefix(this) + getCommNamePrefix(this) + " ",
+        /*may_terminate=*/!options_c10d_->enable_reconfigure);
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);
@@ -351,12 +356,16 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         timeout_cv_.wait_for(lock, std::chrono::seconds(1), [this]() {
           return shutdown_.load();
         });
+        timeout_cv_.wait(lock, [this]() {
+          return shutdown_.load() || !stall_watchdog_for_testing_.load();
+        });
 
         // If we're shutting down, exit the loop
         if (shutdown_) {
           break;
         }
       }
+      heartbeat.beat();
 
       // Check work objects for completion or timeout
       // Thread-safety: checkWorkQueue() calls garbageCollect() which acquires
@@ -386,7 +395,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         NCCL_CHECK(
             nccl_api_,
             nccl_comm_,
-            nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
+            nccl_api_->commTryGetAsyncError(nccl_comm_, &asyncErr),
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
           comm_state_ = CommState::ERROR;

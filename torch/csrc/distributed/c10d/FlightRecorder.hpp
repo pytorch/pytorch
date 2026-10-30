@@ -411,6 +411,10 @@ TORCH_API void dump_fr_trace_file(
     bool onlyActive,
     const std::string& backend = kDefaultFRBackend);
 
+// Writes an already serialized trace where dump_fr_trace_file would, and
+// serialized with it, for callers that combine several recorders' traces.
+TORCH_API void write_fr_trace_file(int rank, const std::string& trace);
+
 // dump_fr_trace_file for the rank the recorder was told about at hook attach.
 // Returns false without writing anything if the recorder is off or no rank was
 // ever set, which also means nothing was recorded. Used by

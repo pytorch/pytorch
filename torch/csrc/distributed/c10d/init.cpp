@@ -4783,6 +4783,10 @@ Returns:
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
           .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+          .def(
+              "_stall_watchdog_for_testing",
+              &::c10d::nccl2::ProcessGroupNCCL::stallWatchdogForTesting,
+              py::arg("stall") = true)
           .def_property_readonly(
               "comm_ptr",
               &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,

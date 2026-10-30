@@ -393,6 +393,15 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
+  // Test only: parks the watchdog loop, as a hung NCCL or CUDA call in it
+  // would, until shutdown or a call with stall=false.
+  void stallWatchdogForTesting(bool stall) {
+    {
+      std::lock_guard<std::mutex> lock(timeout_mutex_);
+      stall_watchdog_for_testing_ = stall;
+    }
+    timeout_cv_.notify_all();
+  }
   bool collectivesTimingEnabled() const {
     return event_pool_->timingEnabled();
   }
@@ -693,6 +702,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::thread timeout_thread_;
   std::atomic<bool> shutdown_{false};
+  std::atomic<bool> stall_watchdog_for_testing_{false};
   std::condition_variable timeout_cv_;
   std::mutex timeout_mutex_;
 

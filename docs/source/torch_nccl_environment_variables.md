@@ -3,7 +3,7 @@
 
 These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Each entry below states which backends read it: **nccl-legacy only**, **All NCCL backends**, or the backends it applies to.
 
-`nccl-legacy` records into the flight recorder natively and dumps it itself. For `nccl`, `nccl-lazy` and other backends without native support, `FlightRecorderHook` records and dumps the trace. The recorder reads the buffer size, C++ stack and dump file variables; the dump-on-failure variables are read by `nccl-legacy` or by `FlightRecorderHook`, as noted per entry. Where both are read, the `TORCH_FR_*` name takes precedence over its `TORCH_NCCL_*` alias.
+`nccl-legacy` records into the flight recorder natively and dumps it itself. For `nccl`, `nccl-lazy` and other backends without native support, `FlightRecorderHook` records and dumps the trace. The recorder reads the buffer size, C++ stack and dump file variables; the dump-on-failure variables are read by `nccl-legacy` or by `FlightRecorderHook`, as noted per entry. Where both are read, the `TORCH_FR_*` name takes precedence over its `TORCH_NCCL_*` alias. When a `nccl` or `nccl-lazy` watchdog gets stuck, the heartbeat monitor writes one dump holding both backends' entries, at most once per process. The monitor reads its variables once per process, when the first ``nccl`` or ``nccl-lazy`` group is created, and a malformed value fails that group's creation. With ``TORCH_NCCL_BLOCKING_WAIT=1``, ``nccl`` and ``nccl-lazy`` groups have no watchdog, so there is no heartbeat monitor, stall dump or ``TORCH_NCCL_DEBUG_INFO_PIPE_FILE`` pipe.
 
 ```{list-table}
 :header-rows: 1
@@ -37,9 +37,9 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_ENABLE_TIMING``
   - **All NCCL backends.** If set to ``1``, enable recording start-events for all ProcessGroupNCCL collectives, and compute accurate collective timing per-collective. Default: ``0``.
 * - ``TORCH_NCCL_ENABLE_MONITORING``
-  - **nccl-legacy only.** If set to ``1``, enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources. Default: ``1``.
+  - **All NCCL backends.** If set to ``1``, enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources. ``nccl`` groups in reconfigurable mode are never aborted; their stuck watchdog is only reported. Default: ``1``.
 * - ``TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC``
-  - **nccl-legacy only.** Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process. Default: ``480``.
+  - **All NCCL backends.** Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process. ``nccl`` and ``nccl-lazy`` dump the flight recorder once the watchdog misses this timeout and abort one more timeout later. For ``nccl`` and ``nccl-lazy``, a value of 0 or less disables the check. Default: ``480``.
 * - ``TORCH_NCCL_PROPAGATE_ERROR``
   - **nccl-legacy only.** If set to ``1``, propagate NCCL errors to all ranks through the store. Default: ``0``.
 * - ``TORCH_NCCL_RETHROW_CUDA_ERRORS``
@@ -47,15 +47,15 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_TEARDOWN_ON_TIMEOUT``
   - **nccl-legacy only.** If set to ``1``, a collective timeout tears down the process even when ``TORCH_NCCL_RETHROW_CUDA_ERRORS=0``. Only applies when ``TORCH_NCCL_ASYNC_ERROR_HANDLING`` is 1 or 3. Default: ``0``.
 * - ``TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN``
-  - **nccl-legacy only.** Whether to log C++ stack traces on unclean shutdown. Default: ``1``.
+  - **All NCCL backends.** Whether to log C++ stack traces on unclean shutdown. ``nccl`` and ``nccl-lazy`` log them when the watchdog gets stuck. Default: ``1``.
 * - ``TORCH_NCCL_COORD_CHECK_MILSEC``
   - **nccl-legacy only.** Control the interval inside the monitoring thread to check the coordinated signal from other ranks, e.g. to dump the debugging information. Default value is 1000 ms.
 * - ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``
   - **All NCCL backends.** Control how much extra time we will wait for dumping the debugging info before we exit and throws timeout exception. ``nccl`` waits this long before aborting the process; its flight recorder dump reads ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC`` first. Default: ``15000``.
 * - ``TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC``
-  - **`nccl`, `nccl-lazy` and other hooked backends.** Time limit in milliseconds for a flight recorder dump on failure. Falls back to ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``. Default: ``15000``.
+  - **`nccl`, `nccl-lazy` and other hooked backends.** Time limit in milliseconds for a flight recorder dump on failure or stuck watchdog. Falls back to ``TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC``. Default: ``15000``.
 * - ``TORCH_FR_DUMP_ON_TIMEOUT``
-  - **`nccl`, `nccl-lazy` and other hooked backends.** Whether to dump the flight recorder trace when a collective times out or fails. Falls back to ``TORCH_NCCL_DUMP_ON_TIMEOUT``. Default: ``1``.
+  - **`nccl`, `nccl-lazy` and other hooked backends.** Whether to dump the flight recorder trace when a collective times out or fails, or the watchdog gets stuck. Falls back to ``TORCH_NCCL_DUMP_ON_TIMEOUT``. Default: ``1``.
 * - ``TORCH_NCCL_DUMP_ON_TIMEOUT``
   - **All NCCL backends.** Control whether dumping debug info on watchdog timeout or exception is detected. ``nccl-legacy`` reads only this name; for ``nccl`` it is the alias of ``TORCH_FR_DUMP_ON_TIMEOUT``. Has no effect if the trace buffer size is 0. Default: ``1``.
 * - ``TORCH_FR_BUFFER_SIZE``, ``TORCH_NCCL_TRACE_BUFFER_SIZE``
@@ -73,7 +73,7 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_EXTRA_DUMP_ON_EXEC``
   - **nccl-legacy only.** If set to ``1``, also dump the debugging info when the process group is aborted or its watchdog hits an exception. Default: ``0``.
 * - ``TORCH_NCCL_DEBUG_INFO_PIPE_FILE``
-  - **nccl-legacy only.** The pipe file to trigger debugging dump manually, write anything into the pipe would trigger the dump.
+  - **All NCCL backends.** The pipe file to trigger debugging dump manually, write anything into the pipe would trigger the dump. The pipe is ``<file><rank>.pipe``, using the global rank. In a process with both ``nccl-legacy`` and ``nccl``/``nccl-lazy`` groups, both use the same path and only the later one to create it dumps.
 * - ``TORCH_NCCL_NAN_CHECK``
   - **nccl-legacy only.** Control whether to enable NAN check for the input, Error would be thrown if NAN is detected. For other backends, including ``nccl``, use ``TORCH_DIST_NAN_CHECK``. Default: ``0``.
 * - ``TORCH_NCCL2_RECONFIGURE_SHRINK_GROW``

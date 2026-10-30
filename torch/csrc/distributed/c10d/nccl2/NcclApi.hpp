@@ -106,6 +106,15 @@ class NcclApi {
       ncclComm_t comm,
       ncclResult_t* asyncError) = 0;
 
+  // Like commGetAsyncError, but reports ncclInProgress instead of waiting
+  // while another call holds the API, e.g. a blocking split or init on a comm
+  // sharing it. For the watchdog, which must keep beating.
+  [[nodiscard]] virtual ncclResult_t commTryGetAsyncError(
+      ncclComm_t comm,
+      ncclResult_t* asyncError) {
+    return commGetAsyncError(comm, asyncError);
+  }
+
   [[nodiscard]] virtual ncclResult_t commSplit(
       ncclComm_t comm,
       int color,
@@ -368,6 +377,10 @@ class DefaultNcclApi : public NcclApi {
   [[nodiscard]] ncclResult_t commRevoke(ncclComm_t comm) override;
 
   [[nodiscard]] ncclResult_t commGetAsyncError(
+      ncclComm_t comm,
+      ncclResult_t* asyncError) override;
+
+  [[nodiscard]] ncclResult_t commTryGetAsyncError(
       ncclComm_t comm,
       ncclResult_t* asyncError) override;
 
