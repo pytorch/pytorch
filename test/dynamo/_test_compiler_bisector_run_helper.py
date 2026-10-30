@@ -3,8 +3,7 @@
 
 Not collected by the test loader (leading underscore): the compiler bisector
 repeatedly runs this file as a script and inspects the process exit code, so
-``test_fn`` stays a zero-argument function. The device under test comes from
-the parent test via ``TORCH_BISECT_TEST_DEVICE``.
+``test_fn`` stays a zero-argument function.
 """
 
 import os
@@ -18,17 +17,16 @@ aten = torch.ops.aten
 
 # Device is passed via environment variable from the parent test process
 # (consistent with bisector CLI pattern: TORCH_COMPILE_BACKEND, TORCH_BISECT_BACKEND).
-# When run standalone, resolve the current accelerator dynamically; if no
-# accelerator is available, fail loudly instead of guessing a device.
-_DEVICE = os.environ.get("TORCH_BISECT_TEST_DEVICE")
+# When run standalone, resolve the current accelerator; if none is available,
+# fail loudly instead of guessing a device.
+_DEVICE = os.environ.get("TORCH_BISECT_TEST_DEVICE") or getattr(
+    torch.accelerator.current_accelerator(check_available=True), "type", None
+)
 if _DEVICE is None:
-    _accel = torch.accelerator.current_accelerator(check_available=True)
-    if _accel is None:
-        raise RuntimeError(
-            "No accelerator available. Set TORCH_BISECT_TEST_DEVICE to the "
-            "device under test when running this helper standalone."
-        )
-    _DEVICE = _accel.type
+    raise RuntimeError(
+        "No accelerator available. Set TORCH_BISECT_TEST_DEVICE to the "
+        "device under test when running this helper standalone."
+    )
 
 
 def bad_exp_decomp(self, rate=1.0, generator=None):
