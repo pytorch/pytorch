@@ -4933,6 +4933,20 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(load(checkpoint, checkpoint + ".cache")(x), (x * 7.25).relu())
         self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
 
+    def test_graph_code_literal_round_trips_line_for_line(self):
+        from torch._precompile import _source_literal
+
+        for source in (
+            "def k():\n    return 1\n",
+            "a = '''x'''\nb = \"\"\"doc\"\"\"\n",
+            'ends in a quote"',
+            "ends in a backslash\\",
+            "both ''' and \"\"\" and an escaped \\n\n",
+        ):
+            literal = _source_literal(source)
+            self.assertEqual(ast.literal_eval(literal), source)
+            self.assertEqual(literal.count("\n"), source.count("\n"))
+
     def test_compiled_graph_code_is_editable(self):
         from torch.compiler.precompile import no_compilation
 
