@@ -48,7 +48,7 @@ struct MaybeApplyPerSampleWeight {
       opmath_t<T> weight_val,
       bool /*use_per_sample_weights*/,
       uint32_t /*per_sample_weights_index*/,
-      constant T* /*per_sample_weights*/,
+      device const T* /*per_sample_weights*/,
       uint32_t /*per_sample_weights_stride*/) {
     return weight_val;
   }
@@ -60,7 +60,7 @@ struct MaybeApplyPerSampleWeight<EmbeddingBagMode::SUM, T> {
       opmath_t<T> weight_val,
       bool use_per_sample_weights,
       uint32_t per_sample_weights_index,
-      constant T* per_sample_weights,
+      device const T* per_sample_weights,
       uint32_t per_sample_weights_stride) {
     if (use_per_sample_weights) {
       T per_sample_weight = per_sample_weights
@@ -144,10 +144,10 @@ struct MaybeWriteMaxIndex<EmbeddingBagMode::MAX, I> {
 
 template <EmbeddingBagMode M, typename T, typename I>
 void embedding_bag_impl(
-    constant T* weight,
-    constant I* indices,
+    device const T* weight,
+    device const I* indices,
     constant I* offsets,
-    constant T* per_sample_weights,
+    device const T* per_sample_weights,
     device T* output,
     device I* offset2bag,
     device I* bag_size,
@@ -257,10 +257,10 @@ void embedding_bag_impl(
 
 template <typename T, typename I>
 kernel void embedding_bag(
-    constant T* weight [[buffer(0)]],
-    constant I* indices [[buffer(1)]],
+    device const T* weight [[buffer(0)]],
+    device const I* indices [[buffer(1)]],
     constant I* offsets [[buffer(2)]],
-    constant T* per_sample_weights [[buffer(3)]],
+    device const T* per_sample_weights [[buffer(3)]],
     device T* output [[buffer(4)]],
     device I* offset2bag [[buffer(5)]],
     device I* bag_size [[buffer(6)]],
@@ -294,11 +294,11 @@ struct MaybeDivBagSize<EmbeddingBagMode::MEAN, T> {
 
 template <EmbeddingBagMode M, typename T, typename I>
 void embedding_bag_backward_sum_mean_impl(
-    constant T* output_grad,
-    constant I* indices,
+    device const T* output_grad,
+    device const I* indices,
     constant I* offset2bag,
     constant I* bag_size,
-    constant T* per_sample_weights,
+    device const T* per_sample_weights,
     device AtomicType_t<T>* weight_grad,
     constant EmbeddingBagBackwardParams<uint32_t>& params,
     uint tid) {
@@ -340,9 +340,9 @@ void embedding_bag_backward_sum_mean_impl(
 
 template <typename T, typename I>
 void embedding_bag_backward_max_impl(
-    constant T* output_grad,
+    device const T* output_grad,
     constant I* bag_size,
-    constant I* max_indices,
+    device const I* max_indices,
     device AtomicType_t<T>* weight_grad,
     constant EmbeddingBagBackwardParams<uint32_t>& params,
     uint tid) {
@@ -385,12 +385,12 @@ void embedding_bag_backward_max_impl(
 
 template <typename T, typename I>
 kernel void embedding_bag_backward(
-    constant T* output_grad [[buffer(0)]],
-    constant I* indices [[buffer(1)]],
+    device const T* output_grad [[buffer(0)]],
+    device const I* indices [[buffer(1)]],
     constant I* offset2bag [[buffer(2)]],
     constant I* bag_size [[buffer(3)]],
-    constant I* max_indices [[buffer(4)]],
-    constant T* per_sample_weights [[buffer(5)]],
+    device const I* max_indices [[buffer(4)]],
+    device const T* per_sample_weights [[buffer(5)]],
     device AtomicType_t<T>* weight_grad [[buffer(6)]],
     constant EmbeddingBagBackwardParams<uint32_t>& params [[buffer(7)]],
     uint tid [[thread_position_in_grid]]) {
@@ -407,9 +407,9 @@ kernel void embedding_bag_backward(
 
 template <typename T, typename I>
 kernel void embedding_bag_per_sample_weights_backward(
-    constant T* output_grad [[buffer(0)]],
-    constant T* weight [[buffer(1)]],
-    constant I* indices [[buffer(2)]],
+    device const T* output_grad [[buffer(0)]],
+    device const T* weight [[buffer(1)]],
+    device const I* indices [[buffer(2)]],
     constant I* offset2bag [[buffer(3)]],
     device AtomicType_t<T>* per_sample_weights_grad [[buffer(4)]],
     constant EmbeddingBagPerSampleWeightsBackwardParams<uint32_t>& params
@@ -446,41 +446,41 @@ kernel void embedding_bag_per_sample_weights_backward(
 #define REGISTER_EMBEDDING_BAG_OP(T, I)                                     \
   template [[host_name("embedding_bag_" #T "_" #I)]]                        \
   kernel void embedding_bag<T, I>(                                          \
-      constant T * weight [[buffer(0)]],                                    \
-      constant I * indices [[buffer(1)]],                                   \
-      constant I * offsets [[buffer(2)]],                                   \
-      constant T * per_sample_weights [[buffer(3)]],                        \
-      device T * output [[buffer(4)]],                                      \
-      device I * offset2bag [[buffer(5)]],                                  \
-      device I * bag_size [[buffer(6)]],                                    \
-      device I * max_indices [[buffer(7)]],                                 \
-      constant EmbeddingBagParams<uint32_t> & params [[buffer(8)]],         \
-      device ErrorMessages * error_buf [[buffer(9)]],                       \
+      device const T* weight [[buffer(0)]],                                 \
+      device const I* indices [[buffer(1)]],                                \
+      constant I* offsets [[buffer(2)]],                                    \
+      device const T* per_sample_weights [[buffer(3)]],                     \
+      device T* output [[buffer(4)]],                                       \
+      device I* offset2bag [[buffer(5)]],                                   \
+      device I* bag_size [[buffer(6)]],                                     \
+      device I* max_indices [[buffer(7)]],                                  \
+      constant EmbeddingBagParams<uint32_t>& params [[buffer(8)]],          \
+      device ErrorMessages* error_buf [[buffer(9)]],                        \
       uint tid [[thread_position_in_grid]]);                                \
                                                                             \
   template [[host_name("embedding_bag_backward_" #T "_" #I)]]               \
   kernel void embedding_bag_backward<T, I>(                                 \
-      constant T * output_grad [[buffer(0)]],                               \
-      constant I * indices [[buffer(1)]],                                   \
-      constant I * offset2bag [[buffer(2)]],                                \
-      constant I * bag_size [[buffer(3)]],                                  \
-      constant I * max_indices [[buffer(4)]],                               \
-      constant T * per_sample_weights [[buffer(5)]],                        \
-      device AtomicType_t<T> * weight_grad [[buffer(6)]],                   \
-      constant EmbeddingBagBackwardParams<uint32_t> & params [[buffer(7)]], \
+      device const T* output_grad [[buffer(0)]],                            \
+      device const I* indices [[buffer(1)]],                                \
+      constant I* offset2bag [[buffer(2)]],                                 \
+      constant I* bag_size [[buffer(3)]],                                   \
+      device const I* max_indices [[buffer(4)]],                            \
+      device const T* per_sample_weights [[buffer(5)]],                     \
+      device AtomicType_t<T>* weight_grad [[buffer(6)]],                    \
+      constant EmbeddingBagBackwardParams<uint32_t>& params [[buffer(7)]],  \
       uint tid [[thread_position_in_grid]]);                                \
                                                                             \
-  template                                                                  \
-      [[host_name("embedding_bag_per_sample_weights_backward_" #T "_" #I)]] \
-      kernel void embedding_bag_per_sample_weights_backward<T, I>(          \
-          constant T * output_grad [[buffer(0)]],                           \
-          constant T * weight [[buffer(1)]],                                \
-          constant I * indices [[buffer(2)]],                               \
-          constant I * offset2bag [[buffer(3)]],                            \
-          device AtomicType_t<T> * per_sample_weights_grad [[buffer(4)]],   \
-          constant EmbeddingBagPerSampleWeightsBackwardParams<uint32_t> &   \
-              params [[buffer(5)]],                                         \
-          uint tid [[thread_position_in_grid]]);
+  template [[host_name("embedding_bag_per_sample_weights_backward_" #T      \
+                       "_" #I)]]                                            \
+  kernel void embedding_bag_per_sample_weights_backward<T, I>(              \
+      device const T* output_grad [[buffer(0)]],                            \
+      device const T* weight [[buffer(1)]],                                 \
+      device const I* indices [[buffer(2)]],                                \
+      constant I* offset2bag [[buffer(3)]],                                 \
+      device AtomicType_t<T>* per_sample_weights_grad [[buffer(4)]],        \
+      constant EmbeddingBagPerSampleWeightsBackwardParams<uint32_t>& params \
+      [[buffer(5)]],                                                        \
+      uint tid [[thread_position_in_grid]]);
 
 REGISTER_EMBEDDING_BAG_OP(float, int);
 REGISTER_EMBEDDING_BAG_OP(float, long);

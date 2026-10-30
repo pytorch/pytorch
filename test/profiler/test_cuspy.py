@@ -18,10 +18,11 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
+from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
@@ -33,6 +34,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -96,9 +98,83 @@ def _fresh_event_node_recorder(test):
     return _EventNodeRecorder()
 
 
+# A minimal protobuf scanner for asserting on .pftrace output (the perfetto python lib is not
+# installed). Field numbers come from perfetto.h.
+
+
+def _pb_varint(b, i):
+    """Decode the varint at ``b[i]`` (7 bits per byte, LSB group first, high bit set on every
+    byte but the last); return ``(value, offset past it)``."""
+    s = r = 0
+    while True:
+        x = b[i]
+        i += 1
+        r |= (x & 0x7F) << s
+        if not x & 0x80:
+            return r, i
+        s += 7
+
+
+def _pb_fields(b):
+    """Split one message into ``[(field_no, wire_type, value)]``. Varints (wt 0) are decoded;
+    length-delimited fields (wt 2: strings, bytes, nested messages) are returned as raw bytes
+    for the caller to decode or recurse into; fixed32/fixed64 (wt 5/1) are skipped."""
+    i = 0
+    o = []
+    while i < len(b):
+        k, i = _pb_varint(b, i)
+        fn, wt = k >> 3, k & 7
+        if wt == 0:
+            v, i = _pb_varint(b, i)
+            o.append((fn, 0, v))
+        elif wt == 2:
+            n, i = _pb_varint(b, i)
+            o.append((fn, 2, b[i : i + n]))
+            i += n
+        elif wt == 5:
+            i += 4
+        elif wt == 1:
+            i += 8
+    return o
+
+
+def _pftrace_packets(path):
+    """The TracePackets (Trace field 1) of a gzipped .pftrace."""
+    with gzip.open(path, "rb") as f:
+        raw = f.read()
+    return [v for fn, _wt, v in _pb_fields(raw) if fn == 1]
+
+
+def _pftrace_render_stage_extra(packets):
+    """``{event_id: {name: value}}`` of each GpuRenderStageEvent's extra_data (TracePacket
+    field 53; event_id=1, extra_data=6; ExtraData.name=1, value=2)."""
+    per_stage: dict[int, dict[str, str]] = {}
+    for pkt in packets:
+        for fn, _wt, v in _pb_fields(pkt):
+            if fn != 53:
+                continue
+            event_id = 0
+            pairs: dict[str, str] = {}
+            for sfn, _swt, sv in _pb_fields(v):
+                if sfn == 1:
+                    event_id = sv
+                elif sfn == 6:
+                    ef = {
+                        efn: bytes(ev).decode()
+                        for efn, ewt, ev in _pb_fields(sv)
+                        if ewt == 2
+                    }
+                    if 1 in ef:
+                        pairs[ef[1]] = ef.get(2)
+            per_stage[event_id] = pairs
+    return per_stage
+
+
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuspyRecords(TestCase):
-    """Pure Cuspy + metadata unit tests (no CUDA)."""
+class TestCuspyRecordsCUDA(TestCase):
+    """Pure Cuspy + metadata unit tests (no GPU)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -1783,8 +1859,7 @@ class TestCuspyRecords(TestCase):
                 "channel": i64(0, 0),
                 "channel_type": i64(0, 0),
             },
-            # memcpy + memset on stream 9, non-overlapping (so the render-stage per-lane
-            # end-clamp is a no-op and durations stay exact for the compare).
+            # memcpy + memset on stream 9, non-overlapping.
             "gpu_memcpy": {
                 "start_ns": i64(5000),
                 "end_ns": i64(6000),
@@ -1877,6 +1952,7 @@ class TestCuspyRecords(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["tracks"] = tracks
                 captured["name_table"] = name_table
@@ -2072,6 +2148,7 @@ class TestCuspyRecords(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["render"] = render
                 return b""
@@ -2168,6 +2245,7 @@ class TestCuspyRecords(TestCase):
             render,
             counters,
             compression,
+            metadata,
         ):
             captured["base_ns"] = base_ns_arg
             captured["name_table"] = name_table
@@ -2258,35 +2336,6 @@ class TestCuspyRecords(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2295,34 +2344,113 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
+            packets = _pftrace_packets(out_path)
 
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Collect the extra_data (field 6) name/value pairs across all GPU render stages.
-        extra = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                for sfn, _swt, sv in flds(v):
-                    if sfn != 6:
-                        continue
-                    name = value = None
-                    for efn, _ewt, ev in flds(sv):
-                        if efn == 1:
-                            name = bytes(ev).decode()
-                        elif efn == 2:
-                            value = bytes(ev).decode()
-                    if name is not None:
-                        extra[name] = value
+        # The extra_data name/value pairs across all GPU render stages.
+        extra = {
+            k: v
+            for pairs in _pftrace_render_stage_extra(packets).values()
+            for k, v in pairs.items()
+        }
 
         # Each descriptor field is spread as its own extra_data entry: JSON strings keep
         # their raw value, numbers are stringified via dump().
         self.assertEqual(extra["Process Group Name"], "0")
         self.assertEqual(extra["dtype"], "bf16")
         self.assertEqual(extra["In msg nelems"], "1024")
+
+    def test_pftrace_keeps_overlap_and_chrome_metadata(self):
+        # The .pftrace export keeps what the chrome export of the same window carries: GPU
+        # render stages that overlap on a lane keep their exact CUPTI durations (not cut at the
+        # next op's start), and the chrome JSON's top-level fields are written as
+        # ChromeMetadata (name + json_value). Runs the REAL native encoder, gunzips, decodes
+        # the protobuf. No CUDA. Field numbers (perfetto.h): TracePacket.chrome_events=5,
+        # gpu_render_stage_event=53; ChromeEventBundle.metadata=2; ChromeMetadata.name=1,
+        # json_value=5; GpuRenderStageEvent.event_id=1, duration=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # Two eager kernels on one (gpu, stream) lane: A [1000, 3000) overlaps B [2000, 2500).
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 2000),
+                "end_ns": i64(3000, 2500),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(0, 0),
+                "graph_node_id": i64(0, 0),
+                "name": np.array(["k_a", "k_b"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "metadata": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        distributed_info = {"backend": "nccl", "rank": 3, "world_size": 8}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "baseTimeNanoseconds": 0,
+                            "distributedInfo": distributed_info,
+                            "traceName": "cpu.json",
+                            "traceEvents": [],
+                        }
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(
+                cpu_path, out_path, window, trace_name="my_trace"
+            )
+            packets = _pftrace_packets(out_path)
+
+        dur_by_event: dict[int, int] = {}
+        chrome_md: dict[str, str] = {}
+        for pkt in packets:
+            for fn, _wt, v in _pb_fields(pkt):
+                if fn == 53:
+                    stage = {sfn: sv for sfn, swt, sv in _pb_fields(v) if swt == 0}
+                    dur_by_event[stage[1]] = stage[2]
+                elif fn == 5:
+                    for bfn, _bwt, bv in _pb_fields(v):
+                        if bfn == 2:
+                            md = {
+                                mfn: bytes(mv).decode()
+                                for mfn, _mwt, mv in _pb_fields(bv)
+                            }
+                            chrome_md[md[1]] = md[5]
+
+        # Row order is stable: row 0 (A) == event_id 1, row 1 (B) == event_id 2.
+        self.assertEqual(dur_by_event, {1: 2000, 2: 500})
+
+        self.assertEqual(json.loads(chrome_md["distributedInfo"]), distributed_info)
+        self.assertEqual(json.loads(chrome_md["baseTimeNanoseconds"]), 0)
+        self.assertNotIn("traceEvents", chrome_md)
+        # The export's traceName (as chrome sets it), not the CPU input's own.
+        self.assertEqual(json.loads(chrome_md["traceName"]), "my_trace")
 
     def test_pftrace_render_stage_spreads_graph_annotation(self):
         # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
@@ -2379,35 +2507,6 @@ class TestCuspyRecords(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2416,32 +2515,7 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Per render stage (keyed by event_id), collect its extra_data pairs.
-        per_stage: dict[int, dict] = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                event_id = 0
-                pairs: dict = {}
-                for sfn, _swt, sv in flds(v):
-                    if sfn == 1:
-                        event_id = sv
-                    elif sfn == 6:
-                        name = value = None
-                        for efn, _ewt, ev in flds(sv):
-                            if efn == 1:
-                                name = bytes(ev).decode()
-                            elif efn == 2:
-                                value = bytes(ev).decode()
-                        if name is not None:
-                            pairs[name] = value
-                per_stage[event_id] = pairs
+            per_stage = _pftrace_render_stage_extra(_pftrace_packets(out_path))
 
         # Row order (from _render_stage_cols) is stable: row 0 == event_id 1, row 1 == 2.
         # Row 0: annotation-only -> its fields spread (numbers stringified).
@@ -2533,35 +2607,6 @@ class TestCuspyRecords(TestCase):
             "graph_deps": {gnid_b: [gnid_a]},  # B depends on A
         }
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2572,20 +2617,17 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+            packets = _pftrace_packets(out_path)
 
         # Collect the GPU render stages (field 53) as (event_id, [event_wait_ids]).
         render_stages = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 53:
                     continue
                 event_id = 0
                 waits = []
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 1:
                         event_id = sv
                     elif sfn == 18:
@@ -2607,12 +2649,12 @@ class TestCuspyRecords(TestCase):
         # at field 1). Node B is not linked from the launch; it is reached via its wait arrow.
         submission_id_sets = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 11:
                     continue
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 3000:
-                        ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
+                        ids = [gv for gfn, _gwt, gv in _pb_fields(sv) if gfn == 1]
                         submission_id_sets.append(set(ids))
         self.assertEqual(len(submission_id_sets), 1)
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
@@ -2621,6 +2663,8 @@ class TestCuspyRecords(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -3342,9 +3386,11 @@ def _graph_node_created_key():
 # whole class has to be gated -- a method-level gate would still let setUp error out where
 # the stubs were not generated (see TEST_CUPTI in common_cuda).
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-class TestCuspyCallbackRegistry(TestCase):
+class TestCuspyCallbackRegistryCUDA(TestCase):
     """Cuspy's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3525,6 +3571,8 @@ class TestWindowFinalizer(TestCase):
     """Cover-and-finalize loop of WindowFinalizerMixin -- pure Python, no CUDA/CUPTI.
     A fake user supplies a settable native clock and a synthetic record buffer."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     class _Fake(WindowFinalizerMixin):
         def __init__(self) -> None:
             self._clock = 0
@@ -3607,11 +3655,23 @@ class TestWindowFinalizer(TestCase):
         self.assertIsNone(w._poll_thread)
 
 
+class TestCuspyTraceExport(TestCase):
+    def test_cuspy_zstd_perfetto_rejected(self):
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        prof._use_cuspy = True
+        with self.assertRaisesRegex(ValueError, "only supported for Chrome JSON"):
+            prof.export_chrome_trace("trace.pftrace.zst")
+        prof.profiler.export_chrome_trace.assert_not_called()
+
+
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-class TestCuspyProfiler(TestCase):
+class TestCuspyProfilerCUDA(TestCase):
     """Cuspy driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -4019,6 +4079,32 @@ cuspy_core.enable_hes_early()
             prof.export_chrome_trace(trace_path)
             prof.wait_for_exports()
         self.assertIn(str(error), logs.output[0])
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @_isolated
+    def test_cuspy_zstd_export(self):
+        import tempfile
+
+        zstd = try_import("pyzstd") or try_import("zstandard")
+        if zstd is None:
+            self.skipTest("requires zstandard or pyzstd")
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                a = torch.randn(128, 128, device="cuda")
+                (a @ a).relu().sum().item()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(path)
+            self.assertFalse(os.path.exists(path + ".gz"))
+            with zstd.open(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertTrue(any(e.get("cat") == "kernel" for e in trace["traceEvents"]))
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
@@ -4493,6 +4579,8 @@ class TestCuspyNative(TestCase):
     """Cuspy's native buffer-pool / v2-record-layout callbacks driven directly
     via ctypes -- pure C++, no CUDA/cupti-python."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cuspy_buffer_pool_reuse(self):
         # Cuspy's buffer pool is pure C++ (no CUDA/cupti-python), so
@@ -4718,11 +4806,13 @@ class TestCuspyNative(TestCase):
 
 
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuspyClock(TestCase):
+class TestCuspyClockCUDA(TestCase):
     """Clock-alignment math for the cuspy -- record timestamps -> unix-epoch ns on
     kineto's axis. Drives the production _SynchronizedClock directly (its calibrate() reads
     the native clock through an injected callable), so no CUDA / live CUPTI session is needed;
     a lambda returning CLOCK_REALTIME stands in for cuptiGetTimestamp."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _realtime():
