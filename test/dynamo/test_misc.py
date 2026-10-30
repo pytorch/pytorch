@@ -10177,47 +10177,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         worker_read = {}
         entered, release = (threading.Event() for _ in range(2))
-        key = torch.compiler._SESSION_FLAGS_TLS_KEY
+
+        def inherited_job():
+            # Simulate at::ThreadLocalState::setThreadLocalState: the worker's
+            # TLS map becomes a copy of the parent's (same value objects).
+            key = torch.compiler._IS_COMPILING
+            torch._C._stash_obj_in_tls(key, inherited_value)
+            try:
+                worker_read["inherited_compiling"] = torch.compiler.is_compiling()
+                with _compiling_state_context():
+                    worker_read["own_export"] = (
+                        torch.compiler.is_compiling(),
+                        torch.compiler.is_exporting(),
+                    )
+                worker_read["export_session_over"] = (
+                    torch.compiler.is_compiling(),
+                    torch.compiler.is_exporting(),
+                )
+                entered.set()
+                if not release.wait(60):
+                    raise AssertionError("release event not set in time")
+                # The parent's session ended while this thread was parked on
+                # its map copy: presence keeps the flag True there.
+                worker_read["parent_exited"] = torch.compiler.is_compiling()
+            finally:
+                torch._C._remove_obj_from_tls(key)
+
+        # The parent is inside its own compile session, so its map holds the
+        # value the map copy will share.
         with torch.compiler._compile_session_context():
-            parent_object = torch.compiler._current_flags()
-            self.assertFalse(torch.compiler.is_exporting())
-
-            def worker_job():
-                torch._C._stash_obj_in_tls(key, parent_object)
-                try:
-                    with _compiling_state_context():
-                        worker_read["is_exporting"] = torch.compiler.is_exporting()
-                        entered.set()
-                        if not release.wait(60):
-                            raise AssertionError("release event not set in time")
-                finally:
-                    torch._C._remove_obj_from_tls(key)
-
-            worker_thread = self._start_flags_thread(
-                worker_job, "worker-thread", errors
+            inherited_value = torch._C._get_obj_in_tls(torch.compiler._IS_COMPILING)
+            inherited_thread = self._start_flags_thread(
+                inherited_job, "inherited-thread", errors
             )
             self.assertTrue(entered.wait(60))
+            # The worker's own export session inside the copy never crosses
+            # back into the parent thread.
+            self.assertTrue(torch.compiler.is_compiling())
             self.assertFalse(torch.compiler.is_exporting())
-            self.assertIs(torch.compiler._current_flags(), parent_object)
-            self.assertFalse(parent_object.is_exporting)
             release.set()
-            self._join_flags_thread(worker_thread, errors)
-            self.assertTrue(worker_read["is_exporting"])
-
-        # Copy-on-enter with exit-reset: an object captured mid-session (what
-        # a ThreadLocalState snapshot would hold, e.g. a deferred GraphTask)
-        # reads False once the session exits, deterministically, regardless
-        # of concurrent sessions elsewhere.
-        with torch.compiler._compile_session_context():
-            captured = torch.compiler._current_flags()
-            self.assertTrue(captured.is_compiling)
+        self._join_flags_thread(inherited_thread, errors)
+        self.assertTrue(worker_read["inherited_compiling"])
+        self.assertEqual(worker_read["own_export"], (True, True))
+        self.assertEqual(worker_read["export_session_over"], (True, False))
+        self.assertTrue(worker_read["parent_exited"])
         self.assertFalse(torch.compiler.is_compiling())
-        self.assertFalse(captured.is_compiling)
-        # Session-count bookkeeping unwinds to zero (a leaked count would
-        # silently keep every read on the slow TLS path).
-        self.assertEqual(torch.compiler._SESSION_COUNT, 0)
+        self.assertFalse(torch.compiler.is_exporting())
 
-    def test_tracing_flags_in_session_reads_and_shim(self):
+    def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
         backend_started, release_backend = (threading.Event() for _ in range(2))
         errors: list[Exception] = []
@@ -10249,37 +10256,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(backend_flags["vals"], (True, False, False))
         self.assertFalse(torch.compiler.is_compiling())
 
-        self.assertFalse(torch.compiler._is_compiling_flag)
-        self.assertFalse(torch.compiler._is_exporting_flag)
-        self.assertFalse(torch.compiler._is_non_strict_tracing_flag)
-        with torch.compiler._compile_session_context():
-            self.assertTrue(torch.compiler._is_compiling_flag)
-            self.assertFalse(torch.compiler._is_exporting_flag)
-        self.assertFalse(torch.compiler._is_compiling_flag)
-        with _compiling_state_context():
-            self.assertTrue(torch.compiler._is_exporting_flag)
-            self.assertTrue(torch.compiler._is_compiling_flag)
-        self.assertFalse(torch.compiler._is_exporting_flag)
-        with self.assertRaisesRegex(AttributeError, "_compiling_state_context"):
-            torch.compiler._is_exporting_flag = True
-        self.assertNotIn("_is_exporting_flag", torch.compiler.__dict__)
-        self.assertFalse(torch.compiler._is_exporting_flag)
-        # Unknown module attributes keep the clean AttributeError contract
-        # (hasattr only swallows AttributeError).
-        with self.assertRaisesRegex(AttributeError, "has no attribute"):
-            torch.compiler.definitely_not_a_real_thing
-        self.assertFalse(hasattr(torch.compiler, "definitely_not_a_real_thing"))
-
-        # A raising session body still unwinds the count and the flags.
+        # A session body that raises still clears the keys it set.
         with self.assertRaisesRegex(RuntimeError, "session body boom"):
             with _compiling_state_context():
                 self.assertTrue(torch.compiler.is_exporting())
                 self.assertTrue(torch.compiler.is_compiling())
-                self.assertGreater(torch.compiler._SESSION_COUNT, 0)
+                self.assertTrue(torch._C._is_key_in_tls(torch.compiler._IS_EXPORTING))
                 raise RuntimeError("session body boom")
-        self.assertEqual(torch.compiler._SESSION_COUNT, 0)
         self.assertFalse(torch.compiler.is_exporting())
         self.assertFalse(torch.compiler.is_compiling())
+        self.assertFalse(torch._C._is_key_in_tls(torch.compiler._IS_EXPORTING))
 
         # Nested sessions restore correctly within one thread.
         with torch.compiler._compile_session_context():

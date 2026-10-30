@@ -8834,6 +8834,64 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
+    @parametrize("storage_offset", [0, 1, 4])
+    @parametrize("view_chain", [False, True])
+    def test_clone_storage_relative_view(self, storage_offset, view_chain):
+        def fn(x):
+            y = x.clone()
+            if view_chain:
+                y = y.view(2, 32).transpose(0, 1)
+            return y.as_strided((4, 16), (16, 1), 0) + 1
+
+        x = torch.arange(64 + storage_offset, dtype=torch.float32, device=self.device)[
+            storage_offset:
+        ].view(4, 16)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    def test_clone_of_intermediate_storage_relative_view(self):
+        # Returning y realizes it as a buffer, so y[1:] is a view at a nonzero offset.
+        def fn(x):
+            y = x * 2
+            return y, y[1:].clone().as_strided((4, 16), (16, 1), 0) + 1
+
+        x = torch.randn(5, 16, device=self.device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    @parametrize("op", ["split", "unbind"])
+    def test_clone_storage_relative_view_through_multi_output_view(self, op):
+        def fn(x):
+            y = x.clone()
+            if op == "split":
+                return y.split(2)[0].as_strided((2, 16), (16, 1), 0) + 1
+            return y.unbind(0)[0].as_strided((16,), (1,), 0) + 1
+
+        x = torch.arange(65, dtype=torch.float32, device=self.device)[1:].view(4, 16)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    def test_chained_clones_storage_relative_view(self):
+        # The first clone has no storage-relative user and is erased; the second one
+        # then has an offset source and must stay.
+        def fn(x):
+            return x.clone().clone().as_strided((4, 16), (16, 1), 0) + 1
+
+        x = torch.arange(65, dtype=torch.float32, device=self.device)[1:].view(4, 16)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    def test_clone_storage_relative_view_backward(self):
+        # The joint graph runs remove_noop_ops too.
+        def fn(base):
+            y = base[1:].view(4, 16).clone()
+            return y.as_strided((4, 16), (16, 1), 0) * 2
+
+        base = torch.randn(65, device=self.device, requires_grad=True)
+        compiled_base = base.detach().clone().requires_grad_()
+        expected = fn(base)
+        actual = torch.compile(fn, fullgraph=True)(compiled_base)
+        self.assertEqual(actual, expected)
+        expected.sum().backward()
+        actual.sum().backward()
+        self.assertEqual(compiled_base.grad, base.grad)
+
     @torch._inductor.config.patch(fallback_random=True)
     def test_clone_dropout(self):
         def fn(x):
@@ -20938,6 +20996,23 @@ if RUN_CPU:
 
             _, code_vec = run_and_get_cpp_code(opt_f, x_vec)
             FileCheck().check_not(".abs()").run(code_vec)
+
+        def test_bmm_integer_dtype_m1_n1(self):
+            # Verify the compiled result for integer bmm when M==1 or N==1,
+            # checking both dtype and values.
+            def f(a, b):
+                return torch.bmm(a, b)
+
+            m1 = torch.randint(-1000, 1000, (5, 1, 10), dtype=torch.int32)
+            m2 = torch.randint(-1000, 1000, (5, 2, 10), dtype=torch.int32)
+            rhs_n5 = torch.randint(-1000, 1000, (5, 10, 5), dtype=torch.int32)
+            rhs_n1 = torch.randint(-1000, 1000, (5, 10, 1), dtype=torch.int32)
+
+            for a, b in ((m1, rhs_n5), (m2, rhs_n1)):
+                expected = f(a, b)
+                actual = torch.compile(f)(a, b)
+                self.assertEqual(expected.dtype, actual.dtype)
+                self.assertEqual(expected, actual)
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 

@@ -1473,10 +1473,12 @@ def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
 
 
 def _compiling_state_context() -> AbstractContextManager[None]:
-    # Sets both flags on one per-thread session object stashed in TLS, so
-    # autograd worker threads observe them too and export sessions in
-    # different threads cannot clobber each other's save/restore (#202042).
-    return torch.compiler._session_flag("is_compiling", "is_exporting")
+    # Sets both flags in the per-thread TLS, so autograd worker threads
+    # observe them too and export sessions in different threads cannot
+    # clobber each other's save/restore (#202042).
+    return torch.compiler._session_flags(
+        torch.compiler._IS_COMPILING, torch.compiler._IS_EXPORTING
+    )
 
 
 def _fakify_params_buffers(

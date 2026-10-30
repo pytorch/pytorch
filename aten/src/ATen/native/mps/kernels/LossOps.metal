@@ -490,6 +490,78 @@ struct mse_functor {
   }
 };
 
+struct mse_backward_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T c, const T alpha) {
+    return alpha * (a - b) * c;
+  }
+};
+
+struct smooth_l1_functor {
+  template <typename T, typename A>
+  inline T operator()(const T input, const T target, const A beta) {
+    using op_t = c10::metal::opmath_t<T>;
+    const auto z = ::metal::abs(op_t(input) - op_t(target));
+    const auto b = op_t(beta);
+    return static_cast<T>(z < b ? op_t(0.5) * z * z / b : z - op_t(0.5) * b);
+  }
+};
+
+struct huber_functor {
+  template <typename T, typename A>
+  inline T operator()(const T input, const T target, const A delta) {
+    using op_t = c10::metal::opmath_t<T>;
+    const auto z = ::metal::abs(op_t(input) - op_t(target));
+    const auto d = op_t(delta);
+    return static_cast<T>(z < d ? op_t(0.5) * z * z : d * (z - op_t(0.5) * d));
+  }
+};
+
+struct smooth_l1_backward_functor {
+  template <typename T, typename A>
+  inline T operator()(
+      const T input,
+      const T target,
+      const T grad,
+      const A beta) {
+    // Same branch order as the CPU kernel; the reduction's norm is already
+    // folded into grad by the host.
+    using op_t = c10::metal::opmath_t<T>;
+    const auto x = op_t(input) - op_t(target);
+    const auto g = op_t(grad);
+    if (x <= -op_t(beta)) {
+      return static_cast<T>(-g);
+    }
+    if (x >= op_t(beta)) {
+      return static_cast<T>(g);
+    }
+    return static_cast<T>(x * g / op_t(beta));
+  }
+};
+
+struct huber_backward_functor {
+  template <typename T, typename A>
+  inline T operator()(
+      const T input,
+      const T target,
+      const T grad,
+      const A delta) {
+    // Same branch order as the CPU kernel; the reduction's norm is already
+    // folded into grad by the host.
+    using op_t = c10::metal::opmath_t<T>;
+    const auto x = op_t(input) - op_t(target);
+    const auto g = op_t(grad);
+    const auto d = op_t(delta);
+    if (x <= -d) {
+      return static_cast<T>(-g * d);
+    }
+    if (x >= d) {
+      return static_cast<T>(g * d);
+    }
+    return static_cast<T>(x * g);
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -592,6 +664,14 @@ REGISTER_BINARY_CASTOUT_OP(mse, float, float);
 REGISTER_BINARY_CASTOUT_OP(mse, half, half);
 REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
 
+REGISTER_BINARY_ALPHA_OP(smooth_l1, float, float, float);
+REGISTER_BINARY_ALPHA_OP(smooth_l1, half, float, half);
+REGISTER_BINARY_ALPHA_OP(smooth_l1, bfloat, float, bfloat);
+
+REGISTER_BINARY_ALPHA_OP(huber, float, float, float);
+REGISTER_BINARY_ALPHA_OP(huber, half, float, half);
+REGISTER_BINARY_ALPHA_OP(huber, bfloat, float, bfloat);
+
 #define INSTANTIATE_BCE_LOSS_FORWARD(T)                      \
   template [[host_name("bce_loss_forward_" #T)]] kernel void \
   bce_loss_forward<T>(                                       \
@@ -622,3 +702,20 @@ INSTANTIATE_BCE_LOSS_FORWARD(half);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(float);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(bfloat);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(half);
+
+REGISTER_TERNARY_ALPHA_OP(mse_backward, float, float, float);
+REGISTER_TERNARY_ALPHA_OP(mse_backward, half, half, half);
+REGISTER_TERNARY_ALPHA_OP(mse_backward, bfloat, bfloat, bfloat);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, bfloat, float, bfloat);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, long, long, long);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, int, int, int);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, short, short, short);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, char, char, char);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, uchar, uchar, uchar);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, bfloat, float, bfloat);

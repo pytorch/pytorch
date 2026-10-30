@@ -1,9 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import io
-import sys
-import threading
-import types
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -578,85 +575,39 @@ def wrap_numpy(fn):
     return wrap(fn)
 
 
-class _TracingFlags:
-    """Live tracing flags of one compile/export session.
-
-    Sessions run concurrently in different threads (see #202042), so the
-    active flags live in a per-thread TLS slot, not a process-wide global:
-    each session owns its own instance, so one session's exit cannot restore
-    a stale value into another thread's in-flight session.
-    """
-
-    __slots__ = ("is_compiling", "is_exporting", "is_non_strict_tracing")
-
-    def __init__(self) -> None:
-        self.is_compiling = False
-        self.is_exporting = False
-        self.is_non_strict_tracing = False
-
-
-# Shared no-session default; never mutated (sessions stash their own instance).
-_flags = _TracingFlags()
-
-_SESSION_FLAGS_TLS_KEY = "torch_compiler_tracing_flags"
-
-# Number of sessions currently active anywhere in the process, maintained
-# under _SESSION_COUNT_LOCK. Fast-path gate for the flag reads below: with
-# zero active sessions, no session object is live anywhere, so reads return
-# the (never-mutated) default without touching TLS. Sessions update the
-# count under the lock ([re]stash before/after it). Each session resets its
-# own object on exit, so count==0 and the TLS path agree once a session
-# ends.
-_SESSION_COUNT = 0
-_SESSION_COUNT_LOCK = threading.Lock()
-
+# Session flags live in per-thread TLS ("presence means True"), so sessions
+# in different threads cannot see each other and cannot fight over stash /
+# restore (#202042). Plain caller-spawned threads never inherit the flags;
+# threads that receive an at::ThreadLocalState copy mid-session (autograd
+# engine workers, e.g. CUDA backward tracing) observe the session and, being
+# a copy, keep observing it after the session ends.
+_IS_COMPILING = "torch.compiler.is_compiling"
+_IS_EXPORTING = "torch.compiler.is_exporting"
+_IS_NON_STRICT_TRACING = "torch.compiler.is_non_strict_tracing"
 
 # Hot-path bindings hoisted to module globals: inline imports would add
 # attribute lookups to every flag read.
 _IS_KEY_IN_TLS = torch._C._is_key_in_tls
-_GET_OBJ_IN_TLS = torch._C._get_obj_in_tls
-
-
-def _current_flags() -> _TracingFlags:
-    if not _SESSION_COUNT:
-        return _flags
-    if _IS_KEY_IN_TLS(_SESSION_FLAGS_TLS_KEY):
-        return _GET_OBJ_IN_TLS(_SESSION_FLAGS_TLS_KEY)
-    return _flags
+_STASH_OBJ_IN_TLS = torch._C._stash_obj_in_tls
+_REMOVE_OBJ_FROM_TLS = torch._C._remove_obj_from_tls
 
 
 @contextlib.contextmanager
-def _session_flag(*attrs: str):
-    """Hold session flags True; the session flags object lives in a
-    per-thread TLS slot while the session is active."""
-    # Copy-on-enter: every session mutates its own object, so a worker thread
-    # entering a session under a stash inherited from at::ThreadLocalState
-    # never writes the parent thread's object (#202042). Copy-on-exit-reset,
-    # so inherited references read False once the session ends,
-    # deterministically, independent of other sessions in the process.
-    global _SESSION_COUNT
-    current = _current_flags()
-    fresh = current is _flags
-    flags = _TracingFlags()
-    initial = {attr: getattr(current, attr) for attr in _TracingFlags.__slots__}
-    for attr, value in initial.items():
-        setattr(flags, attr, value)
-    for attr in attrs:
-        setattr(flags, attr, True)
-    with _SESSION_COUNT_LOCK:
-        _SESSION_COUNT += 1
-    torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, flags)
+def _session_flags(*keys: str):
+    """Hold each session flag True in per-thread TLS while active.
+
+    Only flags not already set enter ``newly_set`` and are cleared on exit,
+    so nested sessions and inherited (at::ThreadLocalState-copied) flags are
+    left alone.
+    """
+    newly_set = [k for k in keys if not _IS_KEY_IN_TLS(k)]
+    for k in newly_set:
+        _STASH_OBJ_IN_TLS(k, True)
     try:
         yield
     finally:
-        if fresh:
-            torch._C._remove_obj_from_tls(_SESSION_FLAGS_TLS_KEY)
-        else:
-            torch._C._stash_obj_in_tls(_SESSION_FLAGS_TLS_KEY, current)
-        for attr, value in initial.items():
-            setattr(flags, attr, value)
-        with _SESSION_COUNT_LOCK:
-            _SESSION_COUNT -= 1
+        for k in newly_set:
+            _REMOVE_OBJ_FROM_TLS(k)
 
 
 def is_compiling() -> bool:
@@ -668,7 +619,8 @@ def is_compiling() -> bool:
     thread, ThreadPoolExecutor, DataParallel replicas) read False, while
     autograd engine worker threads inherit the session through
     at::ThreadLocalState (e.g. CUDA backward tracing) and observe it while
-    the session is active.
+    the session is active; being a copy, a worker keeps observing it after
+    the session ends.
 
     Note that there are 2 other related flags that should deprecated eventually:
       * torch._dynamo.external_utils.is_compiling()
@@ -685,25 +637,25 @@ def is_compiling() -> bool:
     if torch.jit.is_scripting():
         return False
     else:
-        return _current_flags().is_compiling
+        return _IS_KEY_IN_TLS(_IS_COMPILING)
 
 
 def _is_non_strict_tracing() -> bool:
     """
     Indicates whether we are inside a non-strict make_fx-based tracing session.
     """
-    return _current_flags().is_non_strict_tracing
+    return _IS_KEY_IN_TLS(_IS_NON_STRICT_TRACING)
 
 
 def _non_strict_tracing_context():
     """Context manager that sets the non-strict tracing flag."""
-    return _session_flag("is_non_strict_tracing")
+    return _session_flags(_IS_NON_STRICT_TRACING)
 
 
 def _compile_session_context():
     """Context manager that sets the compiling flag for the duration of a
     torch.compile session in the current thread (per-thread, see #202042)."""
-    return _session_flag("is_compiling")
+    return _session_flags(_IS_COMPILING)
 
 
 @contextlib.contextmanager
@@ -820,45 +772,7 @@ def is_exporting() -> bool:
         >>>
         >>>     # ...rest of the function...
     """
-    return _current_flags().is_exporting
-
-
-# BC for reads: these were module globals for several releases and code
-# outside this codebase reads them directly. Writes raise instead: the
-# session flags are per-session now and there is no process-wide value to
-# write (see _LegacyCompilerModule).
-_LEGACY_FLAG_INFO = {
-    "_is_compiling_flag": ("is_compiling", "torch.compiler._compile_session_context()"),
-    "_is_exporting_flag": (
-        "is_exporting",
-        "torch._export.utils._compiling_state_context()",
-    ),
-    "_is_non_strict_tracing_flag": (
-        "is_non_strict_tracing",
-        "torch.compiler._non_strict_tracing_context()",
-    ),
-}
-
-
-def __getattr__(name: str) -> Any:
-    entry = _LEGACY_FLAG_INFO.get(name)
-    if entry is not None:
-        return getattr(_current_flags(), entry[0])
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-class _LegacyCompilerModule(types.ModuleType):
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in _LEGACY_FLAG_INFO:
-            raise AttributeError(
-                f"Setting torch.compiler.{name} no longer works: the "
-                "tracing flags are per-session now. Enter a session with "
-                f"{_LEGACY_FLAG_INFO[name][1]} instead"
-            )
-        super().__setattr__(name, value)
-
-
-sys.modules[__name__].__class__ = _LegacyCompilerModule
+    return _IS_KEY_IN_TLS(_IS_EXPORTING)
 
 
 def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
