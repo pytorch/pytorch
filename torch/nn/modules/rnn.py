@@ -730,8 +730,6 @@ class RNN(RNNBase):
 
         if hx is None:
             raise AssertionError("hx must not be None")
-        # Each batch of the hidden state should match the input sequence that
-        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
         if hx_supplied:
             hx = self.permute_hidden(hx, sorted_indices)
