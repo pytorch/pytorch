@@ -5266,7 +5266,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj, torch._subclasses.FakeTensor
             ):
                 is_param = isinstance(obj, torch.nn.Parameter)
-                pytype = obj.pytype or (torch.nn.Parameter if is_param else torch.Tensor)
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
