@@ -75,6 +75,16 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
   auto childOptions =
       cloneOptions(overrideOptions ? overrideOptions : options_c10d_);
 
+  ncclConfig_t config = childOptions->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  if (!overrideOptions && config.commName == nullptr) {
+    // Like stock, the shrunk comm keeps this group's name. NCCL keeps the
+    // pointer for the comm's lifetime, which may outlast this group, so leak
+    // it as split does.
+    config.commName = strdup(commConfig().commName);
+  }
+#endif
+
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;
   auto shrinkStatus = nccl_api_->commShrink(
@@ -82,7 +92,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       excluded.data(),
       static_cast<int>(excluded.size()),
       &childComm,
-      &childOptions->config,
+      &config,
       shrink_flags);
   try {
     waitForNcclChildComm(
@@ -96,7 +106,9 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         [this] { unlistComm(); });
   } catch (...) {
     comm_state_ = CommState::ERROR;
-    unlistComm();
+    // The failed call may have aborted the parent; drop its symmetric-memory
+    // registration while nccl_comm_ still names it.
+    retireComm();
     nccl_comm_ = nullptr;
     throw;
   }

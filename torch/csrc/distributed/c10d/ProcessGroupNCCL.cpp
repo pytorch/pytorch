@@ -136,16 +136,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -435,13 +431,17 @@ static std::
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 }
 
+// ProcessGroupNCCL::local_id_ source; also bounds every legacy pg_id below.
+static std::atomic<size_t> process_group_id = 0;
+
 // The in-tree NCCL backends recorded by FlightRecorderHook, each into its own
 // recorder (getFlightRecorder(<backend name>)). The NCCL dump APIs fold them
 // into this backend's trace so callers see every NCCL group in the process.
 // They hold disjoint groups (the hook skips natively recording backends) with
-// unique group names, so merging keeps every entry. record_id and pg_id are
-// numbered per recorder, so pg_status keeps this backend's entry on a pg_id
-// collision.
+// unique group names, so pg_config and entries merge as is. record_id is
+// numbered per recorder. pg_status is keyed by str(pg_id), and hooked pg_ids
+// come from FlightRecorderHook's own counter and collide with local_id_, so
+// they are shifted past every legacy id.
 static constexpr std::array<const char*, 2> kHookedNCCLBackends = {
     "nccl2",
     "nccl-lazy"};
@@ -455,12 +455,16 @@ void reset_nccl_trace() {
 
 static void mergeNCCLTrace(
     c10::Dict<c10::IValue, c10::IValue>& trace,
-    const c10::Dict<c10::IValue, c10::IValue>& other) {
-  for (const auto& key : {pg_config_key, pg_status_key}) {
-    auto dst = trace.at(key).toGenericDict();
-    for (const auto& item : other.at(key).toGenericDict()) {
-      dst.insert(item.key(), item.value());
-    }
+    const c10::Dict<c10::IValue, c10::IValue>& other,
+    int64_t pgIdOffset) {
+  auto pgConfig = trace.at(pg_config_key).toGenericDict();
+  for (const auto& item : other.at(pg_config_key).toGenericDict()) {
+    pgConfig.insert(item.key(), item.value());
+  }
+  auto pgStatus = trace.at(pg_status_key).toGenericDict();
+  for (const auto& item : other.at(pg_status_key).toGenericDict()) {
+    auto pgId = std::stoll(item.key().toStringRef()) + pgIdOffset;
+    pgStatus.insert(std::to_string(pgId), item.value());
   }
   auto it = other.find(entries_key);
   if (it == other.end()) {
@@ -468,7 +472,9 @@ static void mergeNCCLTrace(
   }
   auto dst = trace.at(entries_key).toList();
   for (const auto& entry : it->value().toList()) {
-    dst.push_back(entry);
+    auto dict = c10::IValue(entry).toGenericDict();
+    dict.insert_or_assign(pg_id_key, dict.at(pg_id_key).toInt() + pgIdOffset);
+    dst.push_back(dict);
   }
 }
 
@@ -482,47 +488,45 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
-  std::optional<c10::Dict<c10::IValue, c10::IValue>> trace;
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
+  auto trace = FlightRecorderCUDA::get()->dump_dict(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+  // Read after the legacy dump so it bounds every pg_id in it.
+  auto pgIdOffset = static_cast<int64_t>(process_group_id.load());
   for (const char* backend : kHookedNCCLBackends) {
     auto other = dump_fr_trace_dict(
         includeCollectives, includeStackTraces, onlyActive, backend);
-    // No group was ever attached to this recorder.
-    if (other.at(pg_config_key).toGenericDict().empty()) {
-      continue;
-    }
-    if (!trace) {
-      trace = FlightRecorderCUDA::get()->dump_dict(
-          ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
-    }
-    mergeNCCLTrace(*trace, other);
+    mergeNCCLTrace(trace, other, pgIdOffset);
   }
-  if (trace) {
-    return pickle_str(*trace);
-  }
-  return FlightRecorderCUDA::get()->dump(
-      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+  return pickle_str(trace);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
   auto json = FlightRecorderCUDA::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
+  auto pgIdOffset = static_cast<int64_t>(process_group_id.load());
   std::optional<nlohmann::json> trace;
   for (const char* backend : kHookedNCCLBackends) {
     auto other = nlohmann::json::parse(
         dump_fr_trace_json(includeCollectives, onlyActive, backend));
-    if (other[pg_config_key_str].empty()) {
+    // Nothing recorded; skips re-serializing the legacy trace.
+    if (other[pg_config_key_str].empty() && other[pg_status_key_str].empty() &&
+        other.value(entries_key_str, nlohmann::json::array()).empty()) {
       continue;
     }
     if (!trace) {
       trace = nlohmann::json::parse(json);
     }
-    for (const auto& key : {pg_config_key_str, pg_status_key_str}) {
-      for (const auto& item : other[key].items()) {
-        (*trace)[key].emplace(item.key(), item.value());
-      }
+    for (const auto& item : other[pg_config_key_str].items()) {
+      (*trace)[pg_config_key_str].emplace(item.key(), item.value());
     }
-    for (const auto& entry : other[entries_key_str]) {
+    for (const auto& item : other[pg_status_key_str].items()) {
+      auto pgId = std::stoll(item.key()) + pgIdOffset;
+      (*trace)[pg_status_key_str].emplace(std::to_string(pgId), item.value());
+    }
+    for (auto& entry : other[entries_key_str]) {
+      entry[pg_id_key_str] = entry[pg_id_key_str].get<int64_t>() + pgIdOffset;
       (*trace)[entries_key_str].push_back(entry);
     }
   }
@@ -998,8 +1002,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   }
 }
 
-static std::atomic<size_t> process_group_id = 0;
-
 constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "Expecting one tensor only but got multiple. You are probably using multiple "
     "devices under one thread. The support for such usage has been deprecated. "
@@ -1206,9 +1208,13 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key);
-  if (comm == nullptr) {
-    LOG(ERROR) << logPrefix()
-               << "No parent communicator exists for nocolor split";
+  // Must match the parent-comm check in initNCCLComm: without a healthy parent
+  // comm, members create the child via a fresh init instead of ncclCommSplit,
+  // so there is no collective split to join.
+  if (comm == nullptr || comm->isAborted()) {
+    LOG(INFO) << logPrefix()
+              << "No healthy parent communicator, skipping nocolor split";
+    return;
   }
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 }
@@ -1639,10 +1645,16 @@ void ProcessGroupNCCL::shutdown() {
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Since NCCL 2.31, ncclCommFinalize ends with a barrier among the comm's
+    // host-local ranks. Ranks can hold different comms (e.g. lazily created
+    // 2-rank P2P comms) and iterate this map in different orders, so finalize
+    // them in one group to let NCCL progress them concurrently.
+    C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
       ncclComm->finalize();
     }
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), std::nullopt);
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
@@ -1687,11 +1699,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -2075,7 +2088,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -3054,7 +3067,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3093,7 +3106,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,
@@ -3393,11 +3406,37 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
-    // Unregistered in ~ProcessGroupNCCL.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT. Only the
+    // collective comm is published: a lazily created 2-rank send/recv comm
+    // would otherwise replace it under the same group uid. On CUDA,
+    // ~ProcessGroupNCCL unregisters it unless it was already aborted or
+    // destroyed.
+    if (!singleP2POp) {
+#ifdef USE_ROCM
+      // Register and install the retire hook as one step under the comm's own
+      // lock, which abort() and destroy() also take, so an invalidation cannot
+      // land in between. The pair is captured because abort() nulls the
+      // handle, and the generation tells our entry apart from a successor's at
+      // the same address.
+      NCCLComm::LockType commLock(ncclComm->mutex_);
+      if (!ncclComm->aborted_) {
+        auto& devCommManager =
+            c10d::symmetric_memory::NCCLDevCommManager::get(device);
+        ncclComm_t registeredComm = ncclComm->getNcclComm();
+        devCommManager.register_comm(getGroupUid(), registeredComm);
+        const uint64_t generation =
+            devCommManager.get_comm_generation(getGroupUid(), registeredComm);
+        ncclComm->preInvalidateHook_ =
+            [device, groupUid = getGroupUid(), registeredComm, generation]() {
+              c10d::symmetric_memory::NCCLDevCommManager::get(device)
+                  .unregister_comm(groupUid, registeredComm, generation);
+            };
+      }
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+          getGroupUid(), ncclComm->getNcclComm());
+#endif
+    }
 #endif
   }
 

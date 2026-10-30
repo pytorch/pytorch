@@ -752,23 +752,24 @@ def align_trace_from_beginning(
     This function takes a dictionary of rank names to lists of trace entries as input.
     Each trace entry is a dictionary containing information about a collective operation,
     including its unique identifier (`record_id` is monotonically increasing as we write into the ring buffer).
-    The function finds the largest starting point across all ranks by taking the maximum
-    `record_id` value of the first entry in each rank. Finally, it filters out any
-    entries with `record_id` values less than the maximum starting point.
-    The function returns the updated dictionary of sorted and filtered trace entries.
+    For each comm lib (the `profiling_name` prefix, since each recorder numbers `record_id` separately),
+    the function finds the largest starting point across all ranks by taking the maximum
+    `record_id` value of that lib's first entry in each rank. Finally, it filters out any
+    entries with `record_id` values less than their lib's maximum starting point.
+    The function returns the updated dictionary of filtered trace entries, in their original order.
 
     Args:
         entries (Dict[str, List[Dict[str, Any]]]): A dictionary of rank names to lists of trace entries.
 
     Returns:
-        entries (Dict[str, List[Dict[str, Any]]]): Entries sorted by record ID and filtered by the maximum starting point.
+        entries (Dict[str, List[Dict[str, Any]]]): Entries filtered by the maximum starting point.
     """
 
     # A dump can concatenate several recorders, each numbering record_id from 0
     # (e.g. _dump_nccl_trace with both ProcessGroupNCCL and nccl2 groups), so
     # align each comm lib separately.
     def comm_lib(entry: dict[str, Any]) -> str:
-        return entry["profiling_name"].rpartition(":")[0]
+        return (entry.get("profiling_name") or "").rpartition(":")[0]
 
     maximum_starting_record_id: dict[str, int] = {}
     for rank in entries:

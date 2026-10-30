@@ -568,6 +568,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // `_process_group_color` in `distributed_c10d.py`.
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
 
+    // nccl2 only: create the communicator on the first operation instead of
+    // when the device is bound. Such a group can't be split from until its
+    // first operation.
+    bool lazy_init{false};
+
    private:
     // Keeps clone()'s strdup'ed config.netName alive; see clone().
     std::shared_ptr<const char> owned_net_name_;
@@ -1522,18 +1527,19 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<at::cuda::MemPool> memPool_ = nullptr;
 };
 
-// Reset the flighrecorder recordings for the current rank.
+// Reset the flighrecorder recordings for the current rank, including the nccl2
+// and nccl-lazy recorders.
 TORCH_API void reset_nccl_trace();
 
 // Dumps the NCCL comm traces and additional information about the Process
-// Group.
+// Group. Includes nccl2 and nccl-lazy groups.
 TORCH_API std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive);
 
 // Dumps the NCCL comm traces and additional information about the Process
-// Group in JSON formatted string.
+// Group in JSON formatted string. Includes nccl2 and nccl-lazy groups.
 // We don't include stack traces in JSON format as it is far too much data.
 TORCH_API std::string dump_nccl_trace_json(
     bool includeCollectives,

@@ -59,10 +59,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git zip
 
-      - name: Fix workspace permissions
+      - name: Ack Git cache ownership
         shell: bash
         run: |
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
