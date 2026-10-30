@@ -17,11 +17,12 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    requires_multigpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -343,15 +344,49 @@ class CondModels:
 
     class OperandStrides(torch.nn.Module):
         def forward(self, p, a, b):
-            def true_fn(x, y):
-                return x.sum(0) + y.sum(0)
+            # Exact reductions, so results don't depend on summation order.
+            def true_fn(x, y, z):
+                return x.amax(0) + y.amax(0) + z.amax((0, 1))
 
-            def false_fn(x, y):
-                return x.amax(0) - y.amax(0)
+            def false_fn(x, y, z):
+                return x.amin(0) - y.amin(0) - z.amin((0, 1))
 
-            # Eager gives both operands a.t()'s column-major strides. Inductor
-            # lays out x row-major (it follows b) and pads y's leading stride.
-            return torch.cond(p, true_fn, false_fn, (a.t() + b, a.t().relu()))
+            # Eager gives the operands a.t()'s column-major strides. Left to
+            # itself, Inductor would lay x and z's base out row-major
+            # (following b) and pad y's leading stride.
+            x, y = a.t() + b, a.t().relu()
+            z = (a.t() - b)[None].expand(3, -1, -1)
+            return torch.cond(p, true_fn, false_fn, (x, y, z))
+
+    class OperandStridesCopy(torch.nn.Module):
+        # With layout optimization the conv output is channels-last, a fixed
+        # layout that differs from eager's, so the operand needs a copy.
+        def __init__(self, mutate):
+            super().__init__()
+            self.mutate = mutate
+
+        def forward(self, p, a, w):
+            def true_fn(y):
+                if self.mutate:
+                    y.mul_(2)
+                return y.sum((0, 2, 3))
+
+            def false_fn(y):
+                return y.amax((0, 2, 3))
+
+            y = torch.nn.functional.conv2d(a, w)
+            return torch.cond(p, true_fn, false_fn, (y,)), y.sum((0, 2, 3))
+
+
+def check_operand_strides(test, model, device, dynamic, selectors):
+    # Not _run_test: its dynamic mode tiles dim 0 of every input, which breaks
+    # the models' a.t() + b.
+    compiled = torch.compile(model, fullgraph=True, dynamic=dynamic)
+    for n in (8261, 8300) if dynamic else (8261,):
+        a, b = torch.randn(19, n, device=device), torch.randn(n, 19, device=device)
+        for sel in selectors:
+            s = torch.tensor(sel, device=device)
+            test.assertEqual(compiled(s, a, b), model(s, a, b))
 
 
 class CondTests(TestCase):
@@ -423,14 +458,30 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    def test_cond_operand_strides(self, device):
-        # The branches are compiled for the operands' eager strides. 8261 rows
-        # trigger stride padding on GPU.
-        self._run_test(
-            model=CondModels.OperandStrides(),
-            inputs=(torch.randn(19, 8261), torch.randn(8261, 19)),
-            device=device,
+    @parametrize("dynamic", [False, True])
+    def test_cond_operand_strides(self, device, dynamic):
+        # The branches are compiled for the operands' eager strides. 8261
+        # columns trigger stride padding on GPU.
+        check_operand_strides(
+            self, CondModels.OperandStrides(), device, dynamic, [True, False]
         )
+
+    @requires_gpu
+    @parametrize("mutate", [False, True])
+    @torch._inductor.config.patch(force_layout_optimization=True)
+    def test_cond_operand_strides_copy(self, mutate):
+        # Branches may mutate operands under no_grad; a mutation of a copied
+        # operand must reach the original.
+        model = CondModels.OperandStridesCopy(mutate)
+        a = torch.randn(2, 3, 16, 16, device=GPU_TYPE)
+        w = torch.randn(8, 3, 3, 3, device=GPU_TYPE)
+        compiled = torch.compile(model, fullgraph=True)
+        with torch.no_grad():
+            for pred in (True, False):
+                p = torch.tensor(pred)
+                self.assertEqual(
+                    compiled(p, a, w), model(p, a, w), atol=1e-4, rtol=1e-4
+                )
 
     @requires_gpu
     def test_cond_shared_input_predicate_codegen(self):
@@ -478,7 +529,7 @@ class CondTests(TestCase):
         x = torch.randn(8, device=device)
         compiled = torch.compile(model, fullgraph=True)
         for preds in ([True, False], [False, True]):
-            p = torch.tensor(preds)
+            p = torch.tensor(preds, device=device)
             self.assertEqual(compiled(p, x), model(p, x))
 
     @requires_gpu
@@ -500,9 +551,31 @@ class CondTests(TestCase):
         x = torch.randn(8, device=device)
         compiled = torch.compile(model, fullgraph=True)
         for pred in (True, False):
-            p, p_ref = torch.tensor(pred), torch.tensor(pred)
+            p = torch.tensor(pred, device=device)
+            p_ref = p.clone()
             self.assertEqual(compiled(p, x), model(p_ref, x))
             self.assertEqual(p, p_ref)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_mutated_computed_predicate(self, device):
+        # As test_cond_mutated_input_predicate, for a predicate the graph computes.
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(x):
+            p = x.sum() > 0
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            flip_(p)
+            return a, torch.cond(p, true_fn, false_fn, (x,))[0]
+
+        compiled = torch.compile(model, fullgraph=True)
+        for sign in (1, -1):
+            x = sign * (torch.rand(8, device=device) + 0.1)
+            self.assertEqual(compiled(x), model(x))
 
     @requires_gpu
     def test_cond_branch_on_two_devices(self):
@@ -526,6 +599,67 @@ class CondTests(TestCase):
         for pred in (True, False):
             p = torch.tensor(pred)
             self.assertEqual(compiled(p, x, y), model(p, x, y))
+
+    @requires_gpu
+    @requires_multigpu
+    def test_cond_branch_on_second_gpu(self):
+        # Branches that skip their own device guard rely on the one call()
+        # entered; with operands off the current device, that guard is what
+        # puts their kernels and allocations on the right one.
+        device = torch.device(GPU_TYPE, 1)
+
+        def inner_true(x):
+            return (x.sin(),)
+
+        def inner_false(x):
+            return (x.cos(),)
+
+        def true_fn(x, q):
+            return (torch.cond(q, inner_true, inner_false, (x * 2,))[0] + 1,)
+
+        def false_fn(x, q):
+            return (x - 1,)
+
+        def model(p, q, x):
+            return torch.cond(p, true_fn, false_fn, (x, q))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        _, codes = run_and_get_code(compiled, torch.tensor(True), torch.tensor(True), x)
+        if not torch._inductor.config.cpp_wrapper:
+            self.assertEqual(codes[0].count("_DeviceGuard(1)"), 1)
+        for p, q in itertools.product((True, False), repeat=2):
+            p, q = torch.tensor(p), torch.tensor(q)
+            out = compiled(p, q, x)
+            self.assertEqual(out.device, device)
+            self.assertEqual(out, model(p, q, x))
+
+    @requires_gpu
+    @torch._inductor.config.patch({"triton.autotune_at_compile_time": True})
+    def test_cond_branch_guard_with_compile_time_autotune(self):
+        # Compile-time autotuning emits setup at each device guard, so the
+        # branches keep their own.
+        if torch._inductor.config.cpp_wrapper:
+            self.skipTest("checks Python wrapper code")
+
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            return torch.cond(p, true_fn, false_fn, (x * 2,))
+
+        x = torch.randn(8, device=GPU_TYPE)
+        compiled = torch.compile(model, fullgraph=True)
+        _, (code,) = run_and_get_code(compiled, torch.tensor(True), x)
+        for branch in ("true_graph_0", "false_graph_0"):
+            body = code.split(f"def {branch}(args):")[1].split("\ndef ")[0]
+            self.assertIn("_DeviceGuard(", body)
+        for pred in (True, False):
+            p = torch.tensor(pred)
+            self.assertEqual(compiled(p, x), model(p, x))
 
     @requires_gpu
     @torch._functorch.config.patch("donated_buffer", True)
@@ -2813,6 +2947,20 @@ class SwitchModels:
         def forward(self, idx, x):
             return switch(idx, [self.b0, self.b1, self.b2], (x,))
 
+    class OperandStrides(torch.nn.Module):
+        def forward(self, idx, a, b):
+            # See CondModels.OperandStrides.
+            x, y = a.t() + b, a.t().relu()
+            return switch(
+                idx,
+                [
+                    lambda x, y: x.amax(0) + y.amax(0),
+                    lambda x, y: x.amin(0) - y.amin(0),
+                    lambda x, y: x.abs().amax(0) * y.amin(0),
+                ],
+                (x, y),
+            )
+
 
 class SwitchTests(TestCase):
     def _run_test(
@@ -2865,6 +3013,14 @@ class SwitchTests(TestCase):
             inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_switch_operand_strides(self, device, dynamic):
+        check_operand_strides(
+            self, SwitchModels.OperandStrides(), device, dynamic, [0, 1, 2]
         )
 
     @requires_gpu
@@ -2944,7 +3100,26 @@ class _CppWrapperMixin:
 
 
 class CondTestsCppWrapper(_CppWrapperMixin, CondTests):
-    pass
+    @requires_gpu
+    def test_cond_computed_predicate_read_once(self):
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(x):
+            p = x.sum() > 0
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            return a, torch.cond(p, true_fn, false_fn, (a * 2,))[0]
+
+        for device in ("cpu", GPU_TYPE):
+            torch._dynamo.reset()
+            x = torch.randn(8, device=device)
+            out, code = run_and_get_cpp_code(torch.compile(model, fullgraph=True), x)
+            self.assertEqual(out, model(x))
+            # Both conds share one read of the unmutated predicate buffer.
+            self.assertEqual(code.count("aoti_torch_item_int64("), 1)
 
 
 class AssociativeScanTestsCppWrapper(_CppWrapperMixin, AssociativeScanTests):

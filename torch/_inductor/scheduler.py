@@ -12602,15 +12602,12 @@ class Scheduler:
     ) -> torch.device | None:
         """enclosing_device, if codegen can rely on the caller's guard for every
         node instead of entering its own."""
-        from torch.fx.experimental.proxy_tensor import _coor_enabled
-
         device = enclosing_device
         if (
             device is None
-            # These emit setup at the guard (see codegen_device_guard_enter).
-            or config.triton.autotune_at_compile_time
-            or _coor_enabled()
-            or self._has_multi_stream_nodes()
+            or not V.graph.wrapper_code.can_inherit_device_guard(
+                self._has_multi_stream_nodes()
+            )
             or any(n.get_device() not in (None, device) for n in nodes)
         ):
             return None

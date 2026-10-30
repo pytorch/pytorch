@@ -3001,11 +3001,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # The region runs its own Scheduler, which re-emits per-device state such as
         # `<stream_t> stream0;`; unscoped that redefines the parent's declaration.
         self.writeline("{")
+        used_switch_selector = OrderedSet(self.used_switch_selector)
         with self._preserve_device_guard_state():
             self.writeline(EnterSubgraphLine(self, invoke_subgraph.subgraph.graph))
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
             self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
+        # Selector reads declared in the block are out of scope after it.
+        self.used_switch_selector = used_switch_selector
 
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
@@ -3023,15 +3026,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # (cond: True==1, False==0)
             if self.is_shareable_selector(node.selector):
                 selector_var = f"{node.selector.get_name()}_scalar"
+                already_read = selector_var in self.used_switch_selector
+                self.used_switch_selector.add(selector_var)
             else:
+                # A view, or a buffer mutated in the graph, can hold different
+                # values at different switches, so it is read per switch (see
+                # is_shareable_selector), even when two switches use the same view.
                 selector_var = f"{node.get_name()}_selector"
-            if selector_var not in self.used_switch_selector:
+                already_read = False
+            if not already_read:
                 self.codegen_tensor_item(
                     torch.int64,
                     node.selector.codegen_reference(),
                     selector_var,
                 )
-                self.used_switch_selector.add(selector_var)
         else:
             # ShapeAsConstantBuffer yields a C++ bool/int expression; Cast to int64_t.
             selector_var = f"static_cast<int64_t>({node.selector.codegen_reference()})"
@@ -3083,7 +3091,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+    def codegen_subgraph(
+        self, subgraph, outer_inputs, outer_outputs, *, enclosing_device=None
+    ):
         # TODO (desertfire) - This function is the old way of supporting
         # subgraph codegen by inlining subgraphs in the output code. For python
         # wrapper, we have moved to lifting subgraphs as functions, supported by

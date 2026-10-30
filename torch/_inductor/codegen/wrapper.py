@@ -3167,12 +3167,24 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
+    def can_inherit_device_guard(self, multi_stream: bool) -> bool:
+        """Whether a subgraph's code may run inside its caller's device guard
+        instead of entering its own. Not when entering a guard also emits setup
+        the subgraph's code uses: compile-time autotuning's block, the
+        compile-on-one-rank device index, stream locals. A subclass whose
+        codegen_device_guard_enter emits more must override this."""
+        return not (
+            multi_stream or config.triton.autotune_at_compile_time or _coor_enabled()
+        )
+
     def codegen_device_guard_enter(
         self,
         device_idx: int,
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
+        # Setup emitted here beyond the guard itself must be reflected in
+        # can_inherit_device_guard, including in subclasses.
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
@@ -6460,10 +6472,12 @@ class PythonWrapperCodegen(CodeGen):
             subgraph, outer_inputs, outer_flattened_outputs
         )
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_buffer_name):
+    def codegen_subgraph(
+        self, subgraph, outer_inputs, outer_buffer_name, *, enclosing_device=None
+    ):
         # Codegen subgraph by recursively calling the codegen for the subgraph.
         # This lifts the subgraph as a function in the output code.
-        self.codegen_subgraph_common(subgraph)
+        self.codegen_subgraph_common(subgraph, enclosing_device=enclosing_device)
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_buffer_name)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
@@ -6488,6 +6502,7 @@ class PythonWrapperCodegen(CodeGen):
         every switch on it can share one read of its value."""
         return (
             isinstance(selector, ir.StorageBox)
+            and isinstance(selector.data, ir.Buffer)
             and selector.get_name() not in V.graph.mutated_inputs
             and selector.get_name() not in V.graph.mutated_buffers
         )
@@ -6519,7 +6534,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{name} = [None] * {len(node.outputs)}")
         # Each branch function is only called below, inside this node's device
         # guard, so it need not enter the guard itself.
-        device = V.graph.scheduler.current_device
+        device = node.get_device()
 
         def _emit_branch(keyword: str, condition: str, branch) -> None:
             self.writeline(f"{keyword}{condition}:")
@@ -6528,8 +6543,9 @@ class PythonWrapperCodegen(CodeGen):
                 outer_outputs = [f"{name}[{i}]" for i in range(len(node.outputs))]
                 self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
             else:
-                self.codegen_subgraph_common(branch, enclosing_device=device)
-                self.codegen_subgraph_call(branch, outer_inputs, name)
+                self.codegen_subgraph(
+                    branch, outer_inputs, name, enclosing_device=device
+                )
             self.writeline(ExitSubgraphLine(self))
 
         num_branches = len(node.branches)
