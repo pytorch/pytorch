@@ -9,6 +9,7 @@
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>
+#include <torch/csrc/stable/c/shim.h>
 
 #include <algorithm>
 #include <atomic>
@@ -99,14 +100,20 @@ class CudaGraphManager {
   CudaGraphManager& operator=(CudaGraphManager&&) = delete;
 
   // Calls fn(inputs, outputs, stream) eagerly or replays its capture. A
-  // manager serves one fn with a fixed number of outputs. fn borrows `inputs`,
-  // writes new references into `outputs`, enqueues all its GPU work on
-  // `stream`, and must not mutate its inputs: a replay would only mutate the
-  // graph's copies. fn may also see views over the graph's buffers, at other
-  // storage offsets than the caller's inputs, and must not use random numbers:
-  // replays advance the generator without its lock. Each output slot gets its
-  // own handle; replayed outputs never alias the inputs, nor each other unless
-  // fn wrote the same handle twice.
+  // manager serves one fn with a fixed number of outputs, and `stream` must
+  // not be capturing. fn borrows `inputs`, writes new references into
+  // `outputs`, enqueues all its GPU work on `stream`, and must not mutate its
+  // inputs: a replay would only mutate the graph's copies. fn may also see
+  // views over the graph's buffers, at other storage offsets than the caller's
+  // inputs. Graphs have no random number state, since replays would advance
+  // the generator without its lock, so a layout whose fn uses random numbers
+  // fails to capture and runs eagerly. Each output slot gets its own handle;
+  // replayed outputs never alias the inputs, nor each other unless fn wrote
+  // the same handle twice. A graph keeps reading everything else fn read at
+  // capture, e.g. constants, at the same addresses, so call reset() before
+  // replacing or freeing any of it. run(), reset() and the destructor may
+  // delete the pool, which the shim forbids while the calling thread has a
+  // capture open, or while any thread has a global-mode capture open.
   template <typename Fn>
   void run(
       Fn&& fn,
@@ -117,11 +124,9 @@ class CudaGraphManager {
       cudaStream_t stream) {
     // A null stream means the legacy default stream of the current device.
     AOTICudaGuard device_guard(device_index_);
-    if (is_stream_capturing(stream)) {
-      // The caller is capturing the whole call itself.
-      fn(inputs, outputs, stream);
-      return;
-    }
+    AOTI_RUNTIME_CHECK(
+        !is_stream_capturing(stream),
+        "CudaGraphManager can't run inside a CUDA graph capture");
 
     std::lock_guard<std::mutex> lock(mutex_);
     auto key = make_key(inputs, num_inputs);
@@ -148,8 +153,8 @@ class CudaGraphManager {
       bool thread_warm =
           options_.warmup_calls == 0 || warm_threads_.count(thread_token()) > 0;
       if (warmups < options_.warmup_calls || !thread_warm) {
+        run_eagerly(fn, inputs, outputs, num_outputs, stream);
         ++warmups;
-        run_eagerly(fn, inputs, outputs, num_outputs, stream, /*warmup=*/true);
         return;
       }
       warmup_counts_.erase(key);
@@ -229,7 +234,9 @@ class CudaGraphManager {
     std::vector<int64_t> input_extents;
     std::vector<InputCopy> input_copies;
     std::vector<CopyGroup> copy_groups;
-    std::vector<size_t> elementwise_inputs;
+    // Inputs copied one by one: gapped ones, and ones of dtypes the fused
+    // kernel can't take.
+    std::vector<size_t> separate_inputs;
     // Distinct outputs, and for each output slot its index into them, or
     // kNoOutput for a null output.
     std::vector<RAIIAtenTensorHandle> static_outputs;
@@ -287,14 +294,43 @@ class CudaGraphManager {
                                           : InputCopy::kDense;
   }
 
-  // Groups the dense and overlapping inputs by dtype for _foreach_copy_.
+  // The dtypes _foreach_copy_'s fused CUDA kernel dispatches; it throws for
+  // others, e.g. float8_e8m0fnu, instead of copying them one by one.
+  static bool fused_copy_dtype(int32_t dtype) {
+    for (int32_t fused :
+         {aoti_torch_dtype_bool(),
+          aoti_torch_dtype_uint8(),
+          aoti_torch_dtype_int8(),
+          aoti_torch_dtype_int16(),
+          aoti_torch_dtype_int32(),
+          aoti_torch_dtype_int64(),
+          aoti_torch_dtype_float16(),
+          aoti_torch_dtype_bfloat16(),
+          aoti_torch_dtype_float32(),
+          aoti_torch_dtype_float64(),
+          aoti_torch_dtype_complex64(),
+          aoti_torch_dtype_complex128(),
+          aoti_torch_dtype_float8_e4m3fn(),
+          aoti_torch_dtype_float8_e4m3fnuz(),
+          aoti_torch_dtype_float8_e5m2(),
+          aoti_torch_dtype_float8_e5m2fnuz()}) {
+      if (dtype == fused) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Groups the dense and overlapping inputs by dtype for _foreach_copy_; the
+  // others are copied one by one.
   static void group_input_copies(
       Graph& graph,
       const std::vector<int32_t>& dtypes) {
     std::map<int32_t, size_t> group_of_dtype;
     for (size_t i = 0; i < graph.input_copies.size(); ++i) {
-      if (graph.input_copies[i] == InputCopy::kElementwise) {
-        graph.elementwise_inputs.push_back(i);
+      if (graph.input_copies[i] == InputCopy::kElementwise ||
+          !fused_copy_dtype(dtypes[i])) {
+        graph.separate_inputs.push_back(i);
         continue;
       }
       auto [it, added] =
@@ -329,10 +365,21 @@ class CudaGraphManager {
         sources.push_back(block);
       }
       auto n = static_cast<int64_t>(sources.size());
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_foreach_copy_(
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__foreach_copy_(
           group.destinations.data(), n, sources.data(), n, 0));
     }
-    for (size_t i : graph.elementwise_inputs) {
+    for (size_t i : graph.separate_inputs) {
+      if (graph.input_copies[i] == InputCopy::kBlock) {
+        // Its view overlaps itself, so copy the block it covers instead.
+        int64_t stride = 1;
+        AtenTensorHandle block = nullptr;
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+            inputs[i], 1, &graph.input_extents[i], &stride, 0, &block));
+        RAIIAtenTensorHandle owned(block);
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_copy_(graph.input_buffers[i], block, 0));
+        continue;
+      }
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_copy_(graph.static_inputs[i], inputs[i], 0));
     }
@@ -369,8 +416,7 @@ class CudaGraphManager {
       AtenTensorHandle* inputs,
       AtenTensorHandle* outputs,
       size_t num_outputs,
-      cudaStream_t stream,
-      bool warmup = false) {
+      cudaStream_t stream) {
     std::fill(outputs, outputs + num_outputs, nullptr);
     try {
       fn(inputs, outputs, stream);
@@ -413,6 +459,17 @@ class CudaGraphManager {
     }
     aoti_torch_warn(
         __func__, __FILE__, static_cast<uint32_t>(__LINE__), msg.c_str());
+  }
+
+  // Unlike AOTI_TORCH_ERROR_CODE_CHECK, keeps the shim's message, which the
+  // capture-failure warning shows.
+  static void check_shim(AOTITorchError error, const char* call) {
+    if (error != AOTI_TORCH_SUCCESS) {
+      const char* what = torch_exception_get_what_without_backtrace();
+      AOTI_RUNTIME_CHECK(
+          false,
+          std::string(call) + " failed: " + (what != nullptr ? what : ""));
+    }
   }
 
   // Deleting the pool returns its memory to the device.
@@ -500,14 +557,17 @@ class CudaGraphManager {
     if (graphs_.empty()) {
       release_pool();
       CUDAMemPoolHandle pool = nullptr;
-      AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_create_cuda_mem_pool(device_index_, &pool));
+      check_shim(
+          aoti_torch_create_cuda_mem_pool(device_index_, &pool),
+          "aoti_torch_create_cuda_mem_pool");
       pool_.reset(pool);
     }
     auto graph = std::make_unique<Graph>();
     CUDAGraphHandle graph_handle = nullptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_cuda_graph(
-        /*keep_graph=*/0, /*num_rng_states=*/8, &graph_handle));
+    check_shim(
+        aoti_torch_create_cuda_graph(
+            /*keep_graph=*/0, /*num_rng_states=*/0, &graph_handle),
+        "aoti_torch_create_cuda_graph");
     graph->graph.reset(graph_handle);
 
     AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(event_, stream));
@@ -547,14 +607,17 @@ class CudaGraphManager {
       group_input_copies(*graph, dtypes);
 
       // The region's allocations come from the pool.
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_graph_capture_begin(
-          graph_handle, pool_.get(), cudaStreamCaptureModeThreadLocal));
+      check_shim(
+          aoti_torch_cuda_graph_capture_begin(
+              graph_handle, pool_.get(), cudaStreamCaptureModeThreadLocal),
+          "aoti_torch_cuda_graph_capture_begin");
       bool capturing = true;
       try {
         fn(input_handles.data(), raw_outputs.data(), capture_stream_);
         capturing = false;
-        AOTI_TORCH_ERROR_CODE_CHECK(
-            aoti_torch_cuda_graph_capture_end(graph_handle));
+        check_shim(
+            aoti_torch_cuda_graph_capture_end(graph_handle),
+            "aoti_torch_cuda_graph_capture_end");
       } catch (...) {
         // A capture must end before its graph is deleted. The region's error is
         // the one to report.
