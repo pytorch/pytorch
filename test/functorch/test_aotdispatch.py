@@ -5577,7 +5577,7 @@ class TestAOTAutocastStates(AOTTestCase):
         collect(x)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
-    def test_collect_metadata_restores_autocast_nesting(self):
+    def test_collect_metadata_detects_autocast_nesting_mutation(self):
         from torch.amp.autocast_mode import _get_autocast_nesting
 
         prior_nesting = _get_autocast_nesting()
@@ -5587,7 +5587,8 @@ class TestAOTAutocastStates(AOTTestCase):
             return [x + 1]
 
         collect, x = self._collect_metadata(f)
-        collect(x)
+        with self.assertRaisesRegex(RuntimeError, "autocast nesting"):
+            collect(x)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     def test_collect_metadata_restores_autocast_nesting_when_forward_raises(self):
@@ -5602,6 +5603,21 @@ class TestAOTAutocastStates(AOTTestCase):
         collect, x = self._collect_metadata(f)
         with self.assertRaisesRegex(RuntimeError, "forward failed after nesting bump"):
             collect(x)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_aot_function_detects_autocast_nesting_mutation(self):
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        prior_nesting = _get_autocast_nesting()
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            torch.autocast_increment_nesting()
+            return x + 1
+
+        x = torch.randn(2)
+        compiled = aot_function(f, nop)
+        with self.assertRaisesRegex(RuntimeError, "autocast nesting"):
+            compiled(x)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     @parametrize("cache_enabled", [True, False])
