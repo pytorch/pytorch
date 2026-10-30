@@ -593,6 +593,55 @@ def aten_bessel_y1(x):
 
 
 @triton.jit
+def aten_hypot(x, y):
+    # Match CUDA's FP32 hypot, including its correctly rounded square root.
+    abs_mask = tl.full([], 0x7FFFFFFF, tl.uint32)
+    x_bits = x.to(tl.uint32, bitcast=True) & abs_mask
+    y_bits = y.to(tl.uint32, bitcast=True) & abs_mask
+    lo_bits = tl.minimum(x_bits, y_bits)
+    hi_bits = tl.maximum(x_bits, y_bits)
+    lo = lo_bits.to(tl.float32, bitcast=True)
+    hi = hi_bits.to(tl.float32, bitcast=True)
+
+    exponent = hi_bits & tl.full([], 0xFE000000, tl.uint32)
+    scale_down_bits = tl.full([], 0x7E800000, tl.uint32) - exponent
+    scale_down = scale_down_bits.to(tl.float32, bitcast=True)
+    scaled_lo = lo * scale_down
+    scaled_hi = hi * scale_down
+    lo_square = scaled_lo * scaled_lo
+    square_sum = tl.inline_asm_elementwise(
+        "fma.rn.f32 $0, $1, $2, $3;",
+        constraints="=f,f,f,f",
+        args=[scaled_hi, scaled_hi, lo_square],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=1,
+    )
+    magnitude = tl.sqrt_rn(square_sum)
+    scale_up_bits = exponent | tl.full([], 0x00800000, tl.uint32)
+    scale_up = scale_up_bits.to(tl.float32, bitcast=True)
+    result = magnitude * scale_up
+
+    result = tl.where(lo_bits == 0, hi, result)
+    inf_bits = tl.full([], 0x7F800000, tl.uint32)
+    nan = abs_mask.to(tl.float32, bitcast=True)
+    result = tl.where(hi_bits > inf_bits, nan, result)
+    is_inf = (x_bits == inf_bits) | (y_bits == inf_bits)
+    return tl.where(is_inf, inf_bits.to(tl.float32, bitcast=True), result)
+
+
+@triton.jit
+def aten_log_ndtr(x):
+    t = x * 0.707106781186547524400844362104849039
+    log_term = libdevice.log(libdevice.erfcx(-t) * 0.5)
+    left = tl.fma(-t, t, log_term)
+    right = libdevice.log1p(-libdevice.erfc(t) * 0.5)
+    result = tl.where(x < -1.0, left, right)
+    negative = tl.full(x.shape, -1.0, x.dtype)
+    return tl.where(libdevice.isnan(x), result, libdevice.copysign(result, negative))
+
+
+@triton.jit
 def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()
 

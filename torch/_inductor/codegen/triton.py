@@ -2220,10 +2220,27 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def hypot(x, y):
-        return f"libdevice.hypot({x}, {y})"
+        x_needs_upcast = needs_upcast_to_float32(x)
+        y_needs_upcast = needs_upcast_to_float32(y)
+        x_upcast = ".to(tl.float32)" if x_needs_upcast else ""
+        y_upcast = ".to(tl.float32)" if y_needs_upcast else ""
+        if (
+            utils.is_strict_cuda_triton()
+            and isinstance(x, CSEVariable)
+            and isinstance(y, CSEVariable)
+            and (triton_arg_dtype(x) == torch.float32 or x_needs_upcast)
+            and (triton_arg_dtype(y) == torch.float32 or y_needs_upcast)
+        ):
+            result = f"triton_helpers.aten_hypot({x}{x_upcast}, {y}{y_upcast})"
+        else:
+            result = f"libdevice.hypot({x}{x_upcast}, {y}{y_upcast})"
+        if x_needs_upcast or y_needs_upcast:
+            result_dtype = cast(Any, get_dtype_handler()).hypot(x, y)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2555,6 +2572,7 @@ class TritonOverrides(OpOverrides):
 # Register the custom pow override after class creation so type checkers see
 # a plain callable instead of the class-body staticmethod descriptor.
 OpDtypeSupport.register_upcast(TritonOverrides.atan, True)
+OpDtypeSupport.register_upcast(TritonOverrides.hypot, True)
 OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
@@ -2613,6 +2631,12 @@ class TritonKernelOverrides(TritonOverrides):
             )
             fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
+
+    @staticmethod
+    def log_ndtr(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_log_ndtr({x})"
+        return cast(Any, TritonOverrides).log_ndtr(x)
 
     @staticmethod
     def _use_aten_fp32_special(x):
