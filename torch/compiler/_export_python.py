@@ -4,19 +4,22 @@ import contextlib
 import functools
 import logging
 import os
+import threading
 from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
 from torch._precompile import (
-    _cache_matches_artifact,
     _DynamoCapture,
+    _matching_cache,
+    _read_artifact,
+    _runnable_from_pair,
     capture,
     DynamoTracer,
-    load,
     PrecompiledRunnable,
     PrecompileError,
 )
+from torch.compiler._no_compile import is_compilation_forbidden
 
 
 log = logging.getLogger(__name__)
@@ -48,17 +51,21 @@ def export_python(
     captured variant whose guards hold, and does not trace or compile. A call no
     captured variant covers raises :class:`~torch.compiler.PrecompileError` rather than
     recompiling. Nothing hashes the function, its config or the machine, so editing
-    the function does not recapture it: delete ``path`` to recapture.
+    the function does not recapture it: delete ``path`` to recapture. Concurrent first
+    calls in one process capture once; processes that share ``path`` (the ranks of one
+    job, say) should let one of them make the first call.
 
     ``path`` is also the artifact to edit: each compiled graph's Inductor code is in
     its ``GRAPH_SOURCES`` section, and that text is what runs. An edited file is
-    served without its cache (built for the captured text), and its edited graphs
-    compile the kernels their text defines. With the inductor backend the capture
-    tunes every Triton kernel at compile time, so a graph's code carries a
-    ``KERNEL_CONFIGS`` table of the config each kernel launches with: editing a row
-    changes that kernel's launch config. A process serves one version of a
-    capture: rerun in a new process to pick up an edit, since loading the edited
-    file where an earlier version of it is loaded raises::
+    served without its cache, which was built for the captured text and stays stale
+    until a recapture replaces it, so its edited graphs compile the kernels their
+    text defines, which :func:`~torch.compiler.precompile.no_compilation` forbids.
+    With the inductor backend the capture tunes every Triton kernel at compile time
+    (it compiles as inductor does under ``triton.autotune_at_compile_time``), so a
+    graph's code carries a ``KERNEL_CONFIGS`` table of the config each kernel launches
+    with: editing a row changes that kernel's launch config. A process serves one
+    version of a capture: rerun in a new process to pick up an edit, since loading the
+    edited file where an earlier version of it is loaded raises::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
@@ -111,51 +118,61 @@ class _ExportedPython:
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic)
         self._runnable: PrecompiledRunnable | None = None
+        self._lock = threading.RLock()
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         if self._runnable is None:
-            if not os.path.exists(self._path):
-                return self._capture(*args, **kwargs)
-            self._runnable = self._load()
+            with self._lock:
+                if self._runnable is None:
+                    if not os.path.exists(self._path):
+                        return self._capture(*args, **kwargs)
+                    self._runnable = self._load()
         return self._runnable(*args, **kwargs)
 
     def _load(self) -> PrecompiledRunnable:
-        cache: str | None = self._cache_path
-        if not _cache_matches_artifact(self._path, self._cache_path):
+        python_code, _ = _read_artifact(self._path, None)
+        cache = _matching_cache(python_code, self._cache_path)
+        if cache is None:
+            stale = (
+                f"{self._path} does not match its cache {self._cache_path} (edited "
+                "after capture, or the cache is missing)"
+            )
+            if self._backend == "inductor" and is_compilation_forbidden():
+                raise PrecompileError(
+                    f"export_python: {stale}, and no_compilation() serves an inductor "
+                    "artifact only with its own cache. Serve it outside "
+                    f"no_compilation(), or delete {self._path} to recapture."
+                )
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graphs compile the kernels their text defines.
-            log.info(
-                "export_python: %s does not match its cache %s (edited after capture, "
-                "or the cache is missing); serving it without the cache",
-                self._path,
-                self._cache_path,
-            )
-            cache = None
-        return load(self._path, cache)
+            log.info("export_python: %s; serving it without the cache", stale)
+        return _runnable_from_pair(python_code, cache)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
-        with contextlib.ExitStack() as stack:
-            if self._backend == "inductor":
-                from torch._inductor import config as inductor_config
+        cap = capture(
+            self._fn,
+            artifact_path=self._path,
+            cache_path=self._cache_path,
+            tracer=self._tracer,
+            backend=self._backend,
+        )
+        try:
+            with contextlib.ExitStack() as stack:
+                if self._backend == "inductor":
+                    from torch._inductor import config as inductor_config
 
-                # Tuning at compile time writes each graph's KERNEL_CONFIGS table:
-                # the config every kernel tuned to and launches with.
-                stack.enter_context(
-                    inductor_config.patch({"triton.autotune_at_compile_time": True})
-                )
-            cap = stack.enter_context(
-                capture(
-                    self._fn,
-                    artifact_path=self._path,
-                    cache_path=self._cache_path,
-                    tracer=self._tracer,
-                    backend=self._backend,
-                )
-            )
-            result = cap(*args, **kwargs)
-        # The capture's live compile holds the names its artifact binds on load.
-        cast(_DynamoCapture, cap)._release_live_compile()
+                    # Tuning at compile time writes each graph's KERNEL_CONFIGS table:
+                    # the config every kernel tuned to and launches with.
+                    stack.enter_context(
+                        inductor_config.patch({"triton.autotune_at_compile_time": True})
+                    )
+                stack.enter_context(cap)
+                result = cap(*args, **kwargs)
+        finally:
+            # The capture's live compile holds the names its artifact binds on load,
+            # and one that raised must not stay live under the next call's capture.
+            cast(_DynamoCapture, cap)._release_live_compile()
         self._runnable = self._load()
         return result
 
