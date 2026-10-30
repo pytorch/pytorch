@@ -3567,6 +3567,32 @@ def _read_artifact(
     return python_code, cache
 
 
+def _matching_cache(
+    python_code: str, cache_path: str | os.PathLike[str]
+) -> bytes | None:
+    """The cache at ``cache_path``, or None if it is missing or was captured with
+    other text than ``python_code`` (an artifact edited after capture: the cache's
+    code_hash covers the captured text). A cache that does not read as an envelope is
+    returned as is, for the loader to report as corrupt."""
+    try:
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise PrecompileError(
+            f"precompile could not read the cache (cache_path={cache_path!r}): {e}"
+        ) from e
+    try:
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+    except Exception:
+        return cache
+    code_hash = hashlib.sha256(python_code.encode()).hexdigest()
+    if isinstance(blob, dict) and blob.get("code_hash") != code_hash:
+        return None
+    return cache
+
+
 def _verified_cache_envelope(
     cache: bytes,
     *,
