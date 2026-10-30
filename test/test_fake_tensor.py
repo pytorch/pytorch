@@ -40,6 +40,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     FakeTensorDeviceMismatchError,
     FakeTensorMode,
+    in_kernel_invocation_manager,
     is_fake_tensor,
     maybe_get_fake_constant,
     maybe_get_fake_device,
@@ -622,6 +623,36 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
+    def test_parameter_from_lazy_module_parameter(self):
+        # A lazy module's UninitializedParameter needs _make_subclass on a fake,
+        # which fails for a Python FakeTensor.
+        if not CPP_FAKETENSOR:
+            self.skipTest("lazy modules cannot be built under this fake mode")
+        with FakeTensorMode():
+            lin = torch.nn.LazyLinear(4)
+            lin(torch.randn(2, 3))
+            # The materialized weight's exact type is Parameter
+            tied = torch.nn.Parameter(lin.weight)
+        self.assertTrue(is_fake_tensor(tied))
+        self.assertIsInstance(tied, torch.nn.Parameter)
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_compile_module_with_fake_parameters(self):
+        # The parameter guards must accept the same fake parameters on later calls
+        mode = FakeTensorMode()
+        with mode:
+            m = torch.nn.Linear(4, 4)
+            x = torch.randn(2, 4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(m, backend=cnt)
+        try:
+            with mode:
+                for _ in range(3):
+                    f(x)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            torch._dynamo.reset()
+
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
@@ -973,6 +1004,22 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = torch.ops.aten.alias.default(x)
         self.assertTrue(y.is_mkldnn)
         self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
+
+    def test_fake_in_kernel_invocation_reports_meta_device(self):
+        t = torch.empty(2, device="meta")
+        torch._C._set_fake_device(t, torch.device("cpu"))
+        self.assertEqual(t.device, torch.device("cpu"))
+        fake_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        with torch._C._ExcludeDispatchKeyGuard(fake_key):
+            self.assertEqual(t.device, torch.device("cpu"))
+        with torch._C._FakeInKernelInvocation():
+            self.assertTrue(torch._C._in_kernel_invocation())
+            self.assertEqual(t.device, torch.device("meta"))
+        self.assertFalse(torch._C._in_kernel_invocation())
+        self.assertEqual(t.device, torch.device("cpu"))
+        with in_kernel_invocation_manager(FakeTensorMode()):
+            self.assertEqual(t.device, torch.device("meta"))
+        self.assertEqual(t.device, torch.device("cpu"))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     def test_mkldnn_to_dense(self):
@@ -3874,6 +3921,20 @@ class TestFakeTensorProp(TestCase):
                 # mask.nonzero() is memoized.
                 self.assertTrue(statically_known_true(sx == sy))
 
+    def test_nonzero_unique_memo_invalidation(self):
+        # The memo is reused until the input is mutated or the epoch changes
+        for op in (torch.nonzero, torch.unique, torch.unique_consecutive):
+            mode = FakeTensorMode(shape_env=ShapeEnv())
+            with self.subTest(op=op.__name__), mode:
+                x = torch.randint(0, 3, (10,))
+                n = op(x).shape[0]
+                self.assertTrue(statically_known_true(op(x).shape[0] == n))
+                x.add_(1)
+                m = op(x).shape[0]
+                self.assertFalse(statically_known_true(m == n))
+                mode.epoch += 1
+                self.assertFalse(statically_known_true(op(x).shape[0] == m))
+
 
 make_propagate_real_tensors_cls(TestFakeTensorProp)
 
@@ -5122,6 +5183,25 @@ class TestFakeTensorViewCopy(TestCase):
                     ValueError, "Cannot view a tensor with shape *"
                 ):
                     _ = yf.view(-1)
+
+
+class CppFakeTensorModeBindingsTest(TestCase):
+    class Wrapper:
+        pass
+
+    def _make_mode(self, shape_env=None):
+        wrapper = self.Wrapper()
+        mode = torch._C._CppFakeTensorMode(FakeTensorConverter(), shape_env, wrapper)
+        return mode, wrapper
+
+    def test_create(self):
+        mode, _ = self._make_mode()
+        self.assertTrue(mode.allow_meta)
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            mode, _ = self._make_mode(ShapeEnv())
+        self.assertFalse(mode.allow_meta)
+        with self.assertRaisesRegex(RuntimeError, "Expected a Python wrapper"):
+            torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
 
 
 if __name__ == "__main__":
