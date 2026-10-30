@@ -1045,7 +1045,7 @@ _nccl_impl_checked_world = False
 
 
 def _reset_nccl_impl_check() -> None:
-    # Groups re-created after WORLD is destroyed use a new store.
+    # The next WORLD may include replacement processes, so check it again.
     global _nccl_impl_checked_world
     _nccl_impl_checked_world = False
 

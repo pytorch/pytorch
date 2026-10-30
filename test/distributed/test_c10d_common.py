@@ -488,11 +488,12 @@ class BackendEntryPointTest(TestCase):
             c10d._check_nccl_impl_agreement(opts, "nccl2")
         self.assertIn("Process group pg may mix", logs.output[0])
 
-    def test_destroy_resets_nccl_impl_check(self):
+    @parametrize("teardown", ["destroy_process_group", "_abort_process_group"])
+    def test_world_teardown_resets_nccl_impl_check(self, teardown):
         dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
         self.addCleanup(lambda: dist.is_initialized() and dist.destroy_process_group())
         c10d._nccl_impl_checked_world = True
-        dist.destroy_process_group()
+        getattr(c10d, teardown)()
         self.assertFalse(c10d._nccl_impl_checked_world)
 
     @parametrize("default_pg_size", [None, 2])
