@@ -586,6 +586,7 @@ struct RendezvousRequest {
   size_t buffer_offset;
   bool has_multicast_support;
   int clique_id;
+  bool use_fabric_handle;
   char hostname[HOST_NAME_MAX + 1];
 };
 
@@ -631,6 +632,36 @@ void validate_rendezvous_requests(
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
     TORCH_CHECK(reqs[r].buffer_offset == reqs[0].buffer_offset);
   }
+}
+
+// A rank without fabric access falls back to POSIX fds, and the two handle
+// exchanges are different collectives, so a mixed group would block instead of
+// failing.
+static void validate_handle_type_agreement(
+    const std::vector<RendezvousRequest>& reqs,
+    int world_size) {
+  bool agree = true;
+  for (const auto r : c10::irange(1, world_size)) {
+    agree = agree && reqs[r].use_fabric_handle == reqs[0].use_fabric_handle;
+  }
+  if (agree) {
+    return;
+  }
+  std::ostringstream oss;
+  oss << "CUDASymmetricMemory::rendezvous: "
+      << "ranks disagree on the memory handle type. "
+      << "All ranks must use fabric handles, or all must use POSIX fds. "
+      << "Per-rank info: ";
+  for (const auto r : c10::irange(world_size)) {
+    if (r > 0) {
+      oss << ", ";
+    }
+    oss << "rank " << r << " (host: " << reqs[r].hostname
+        << ", device: " << reqs[r].device_idx
+        << ", handle: " << (reqs[r].use_fabric_handle ? "fabric" : "posix_fd")
+        << ')';
+  }
+  TORCH_CHECK(false, std::move(oss).str());
 }
 
 // All ranks must be in the same NVLink domain (same clique_id). Detect
@@ -1047,13 +1078,15 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
         .buffer_offset = block->buffer_offset,
         .has_multicast_support =
             device_has_multicast_support(block->device_idx),
-        .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
+        .clique_id = at::cuda::get_fabric_clique_id(block->device_idx),
+        .use_fabric_handle = use_fabric_handle};
 
     // Populate hostname field for host identification
     gethostname(local_req.hostname, sizeof(local_req.hostname));
     reqs = use_pg
         ? pg_all_gather(group, block->device_idx, local_req)
         : storeExchange.all_gather(store, rank, world_size, local_req);
+    validate_handle_type_agreement(reqs, world_size);
     validate_nvlink_fabric_support(reqs, world_size);
     validate_rendezvous_requests(reqs, world_size);
 
