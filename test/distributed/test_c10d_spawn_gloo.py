@@ -10,7 +10,11 @@ import torch
 import torch.distributed as c10d
 import torch.nn as nn
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_distributed import requires_gloo, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    HAS_ACCELERATOR,
+    requires_gloo,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -42,8 +46,8 @@ class DistributedDataParallelSingleProcessTest(TestCase):
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        if inp[0].is_cuda:
-            device_ids = [torch.cuda.current_device()]
+        if inp[0].device.type != "cpu":
+            device_ids = [inp[0].device.index]
         else:
             device_ids = None
 
@@ -81,7 +85,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
 
     @requires_gloo()
-    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    @skip_but_pass_in_sandcastle_if(not HAS_ACCELERATOR, "At least 1 GPU needed")
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268
@@ -112,10 +116,16 @@ class DistributedDataParallelSingleProcessTest(TestCase):
                 loss = nn.functional.mse_loss(output, y)
                 return loss
 
-        net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(0)
+        net = Net(INPUT_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS).to(
+            torch.accelerator.current_accelerator()
+        )
         inp = [
-            torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(0),
-            torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(0),
+            torch.randn((BATCH_SIZE, SEQ_LEN, INPUT_DIM)).to(
+                torch.accelerator.current_accelerator()
+            ),
+            torch.rand((BATCH_SIZE, SEQ_LEN, OUTPUT_DIM)).to(
+                torch.accelerator.current_accelerator()
+            ),
         ]
 
         # Not checking result allclose as the parameter inconsistency exist
@@ -209,7 +219,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(
+                f"{torch.accelerator.current_accelerator().type}:{self.rank}"
+            )
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
             tensors = torch.distributed.nn.gather(x, 1)
@@ -240,7 +252,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            device = torch.device(f"cuda:{self.rank}")
+            device = torch.device(
+                f"{torch.accelerator.current_accelerator().type}:{self.rank}"
+            )
             x0 = torch.ones(5, 5, device=device)
             x1 = torch.ones(5, 5, device=device) + 1
             x0.requires_grad = True
