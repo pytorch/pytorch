@@ -2761,7 +2761,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
-    @parametrize_test("packed", [False, True])
+    @parametrize_test("packed", [False, True, "unsorted"])
     @parametrize_test(
         "invalid_arg,error_type,error_regex",
         [
@@ -2772,6 +2772,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ("hidden_batch_too_large", RuntimeError, r"Expected hidden\[0\] size"),
             ("hidden_size", RuntimeError, r"Expected hidden\[0\] size"),
             ("cell_size", RuntimeError, r"Expected hidden\[1\] size"),
+            ("proj_size", RuntimeError, r"Expected hidden\[0\] size"),
         ],
     )
     def test_lstm_forward_args_check(self, packed, invalid_arg, error_type, error_regex):
@@ -2779,7 +2780,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         dtype = torch.double if invalid_arg == "input_dtype" else torch.float
         input = torch.randn(5, 3, feature_size, dtype=dtype)
         if packed:
-            input = rnn_utils.pack_padded_sequence(input, [5, 3, 2])
+            enforce_sorted = packed != "unsorted"
+            lengths = [3, 5, 2] if packed == "unsorted" else [5, 3, 2]
+            input = rnn_utils.pack_padded_sequence(
+                input, lengths, enforce_sorted=enforce_sorted
+            )
 
         hx = None
         if invalid_arg == "hidden_layers":
@@ -2792,8 +2797,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             hx = (torch.zeros(2, 3, 4), torch.zeros(2, 3, 3))
         elif invalid_arg == "cell_size":
             hx = (torch.zeros(2, 3, 3), torch.zeros(2, 3, 4))
+        elif invalid_arg == "proj_size":
+            hx = (torch.zeros(2, 3, 3), torch.zeros(2, 3, 3))
 
-        lstm = nn.LSTM(4, 3, num_layers=2)
+        proj_size = 2 if invalid_arg == "proj_size" else 0
+        lstm = nn.LSTM(4, 3, num_layers=2, proj_size=proj_size)
         with self.assertRaisesRegex(error_type, error_regex):
             lstm(input, hx)
 
@@ -3061,6 +3069,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input_shape = correct_input_shape
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
+
+        for mode in rnn_modes:
+            # Packed input with unsorted lengths: the hidden state must be validated
+            # before it is permuted, so a too-large hidden batch is rejected instead of
+            # being silently truncated to the batch size by index_select.
+            input = torch.randn(correct_input_shape)
+            packed_input = rnn_utils.pack_padded_sequence(
+                input, [2, 6, 4, 3], enforce_sorted=False
+            )
+            hidden_shape = update_shape(correct_hidden_shape, 1, bad_size)
+            hidden = torch.randn(hidden_shape)
+            if mode == 'LSTM':
+                hidden = (hidden, hidden)
+            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
+            self.assertRaisesRegex(
+                RuntimeError, "Expected hidden", lambda: model(packed_input, hidden)
+            )
 
     def test_projections_lstm_args_check(self):
         input_size = 3
