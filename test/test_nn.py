@@ -4889,6 +4889,41 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = torch.native_channel_shuffle(input_tensor, groups)
         torch.testing.assert_close(output, input_tensor)
 
+    def test_channel_shuffle_decomp_non_contiguous(self):
+        from torch._refs.nn.functional import (
+            channel_shuffle as channel_shuffle_decomp,
+        )
+        import torch._meta_registrations as meta_reg
+
+        # Non-contiguous input with groups=1 or groups=c should produce contiguous
+        # output matching eager mode so subsequent .view() succeeds under decomposition.
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for dev in devices:
+            x = torch.randn(1, 4, 2, 2, device=dev).permute(0, 3, 1, 2)
+            for groups in (1, x.shape[1]):
+                out_decomp = channel_shuffle_decomp(x, groups)
+                self.assertTrue(out_decomp.is_contiguous())
+                self.assertEqual(out_decomp.view(x.size(0), -1).shape, (1, 16))
+                if dev == "cuda":
+                    out_eager = torch.channel_shuffle(x, groups)
+                    self.assertTrue(out_eager.is_contiguous())
+                    self.assertEqual(out_decomp, out_eager)
+                    self.assertEqual(out_decomp.stride(), out_eager.stride())
+
+        # Test with device_hint returning 'cuda' to verify the CUDA branch even on non-CUDA runners
+        orig_device_hint = meta_reg.device_hint
+        try:
+            meta_reg.device_hint = lambda inp: "cuda"
+            x = torch.randn(1, 4, 2, 2).permute(0, 3, 1, 2)
+            for groups in (1, x.shape[1]):
+                out = channel_shuffle_decomp(x, groups)
+                self.assertTrue(out.is_contiguous())
+                self.assertEqual(out.view(x.size(0), -1).shape, (1, 16))
+        finally:
+            meta_reg.device_hint = orig_device_hint
+
     @set_default_dtype(torch.double)
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
