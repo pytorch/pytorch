@@ -110,6 +110,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
     // registration while nccl_comm_ still names it.
     retireComm();
     nccl_comm_ = nullptr;
+    dropMemoryRegistrations();
     throw;
   }
 

@@ -1450,6 +1450,55 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
         )
 
 
+class ProcessGroupNCCL2ReconfigureTest(_ProcessGroupNCCL2OptionsTest):
+    def _reconfigure(self, backend, store, uuid: int) -> None:
+        # Handles embed the reconfigure uuid, so fetch them afresh each time.
+        handles = dist.PrefixStore(f"handles/{uuid}", store)
+        handles.set(str(self.rank), backend.get_reconfigure_handle())
+        opts = ReconfigureOptions()
+        opts.uuid = uuid
+        opts.handles = [
+            handles.get(str(rank)).decode() for rank in range(self.world_size)
+        ]
+        opts.timeout = timedelta(seconds=30)
+        backend.reconfigure(opts).wait()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_after_failed_split(self) -> None:
+        torch.cuda.set_device(self.device)
+        store = dist.PrefixStore(
+            "zzz_reconf_split", dist.distributed_c10d._get_default_store()
+        )
+        opts = dist.ProcessGroupNCCL2.Options()
+        opts.enable_reconfigure = True
+        backend = dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+        self._reconfigure(backend, store, 1)
+        # Keeps a segment registered with the first communicator.
+        tensor = torch.full((4,), 1.0, device=self.device)
+
+        # NCCL config validation rejects the split on every rank; the backend
+        # drops (leaks) the parent comm along with its memory registrations.
+        split_opts = dist.ProcessGroupNCCL2.Options()
+        split_opts.config.blocking = 2
+        with self.assertRaisesRegex(RuntimeError, "NCCL split failed"):
+            backend.split(store, list(range(self.world_size)), split_opts)
+        self.assertEqual(backend.comm_ptr, 0)
+
+        # Registers afresh rather than reusing the dropped comm's handles.
+        self._reconfigure(backend, store, 2)
+        backend.allreduce([tensor]).wait()
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+        backend.shutdown()
+
+
 class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def opts(cls, high_priority_stream=False):

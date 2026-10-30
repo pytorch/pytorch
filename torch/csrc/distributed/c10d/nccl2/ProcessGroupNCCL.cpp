@@ -70,17 +70,18 @@ struct LiveComm {
 
 // Live communicators, keyed by owning backend. Added in publishComm() and
 // dropped in unlistComm().
+// Leaked: a process group destroyed during static destruction still unlists.
 std::mutex& liveCommsMutex() {
-  static std::mutex m;
-  return m;
+  static auto* m = new std::mutex();
+  return *m;
 }
 
 using LiveComms =
     std::unordered_map<const ProcessGroupNCCL*, std::shared_ptr<LiveComm>>;
 
 LiveComms& liveComms() {
-  static LiveComms comms;
-  return comms;
+  static auto* comms = new LiveComms();
+  return *comms;
 }
 #endif
 
@@ -378,8 +379,9 @@ void ProcessGroupNCCL::initNcclResources() {
       nccl_api_->commCount(nccl_comm_, &comm_size_),
       "NCCL Count failed");
 
-  // Attach before publishing, so a failure leaves the group-name keyed
-  // registries untouched; a shrink child shares its live parent's name.
+  // Attach before publishing, so a failure leaves the symmetric-memory
+  // registry (keyed by group name, which a shrink child shares with its live
+  // parent) untouched.
   try {
     attachMemoryHook();
   } catch (...) {
@@ -513,6 +515,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     // registration while nccl_comm_ still names it.
     retireComm();
     nccl_comm_ = nullptr;
+    dropMemoryRegistrations();
     throw;
   }
 

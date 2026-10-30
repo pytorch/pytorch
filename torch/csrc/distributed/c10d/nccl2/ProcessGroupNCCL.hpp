@@ -660,6 +660,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   void attachMemoryHook();
   void detachMemoryHook();
+  // Forgets memoryRegistrationHandles_ without NCCL calls, after a failed
+  // split/shrink dropped nccl_comm_: its handles cannot be deregistered through
+  // a later communicator.
+  void dropMemoryRegistrations();
 
   // Publish/retire nccl_comm_ to the symmetric-memory registry via the NCCL
   // comm-registration hook (NCCLCommRegistrationHook.hpp), so this class does
