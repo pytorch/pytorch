@@ -7132,6 +7132,60 @@ class GraphModule(torch.nn.Module):
             torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
         )
 
+    def test_inherited_random_method_descriptor(self):
+        draw = random.Random.random  # the descriptor belongs to `_random.Random`
+
+        def fn(x, rng):
+            return x + draw(rng)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        expected_rng = random.Random(123)
+        actual_rng = random.Random(123)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, actual_rng), fn(x, expected_rng))
+            self.assertEqual(actual_rng.getstate(), expected_rng.getstate())
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("base", (list, tuple, collections.deque, set))
+    def test_builtin_descriptor_arity_on_subclass(self, base):
+        class Container(base):
+            pass
+
+        def fn(x, obj):
+            try:
+                if base is set:
+                    obj.add()
+                else:
+                    obj.count()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.ones(1)
+        obj = Container([1])
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
+        )
+
+    def test_builtin_descriptor_arity_after_argument_mutation(self):
+        class Container(dict):
+            pass
+
+        def fn(x, obj):
+            try:
+                obj.clear(setattr(obj, "clear", None))
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no error"
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, Container()),
+            fn(x, Container()),
+        )
+
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
             def count(self, value):
