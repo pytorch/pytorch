@@ -287,6 +287,12 @@ class DtypePropagationOpsHandler:
         return upcast_compute_type(dtype) if use_compute_types else dtype
 
     @staticmethod
+    def to_dtype_rounded(
+        x: DTypeArg, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
+    ) -> torch.dtype:
+        return upcast_compute_type(dtype)
+
+    @staticmethod
     def to_dtype_bitcast(
         x: DTypeArg, dtype: torch.dtype, src_dtype: torch.dtype
     ) -> torch.dtype:

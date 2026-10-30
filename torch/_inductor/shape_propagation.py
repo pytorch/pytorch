@@ -125,6 +125,15 @@ class ShapePropagationOpsHandler:
         return value.shape
 
     @staticmethod
+    def to_dtype_rounded(
+        value: ShapeVar,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        rounding: str,
+    ) -> BlockShapeType:
+        return value.shape
+
+    @staticmethod
     def dot(a: sympy.Expr, b: sympy.Expr) -> BlockShapeType:
         from torch._inductor.codegen.triton import TritonKernel
 
