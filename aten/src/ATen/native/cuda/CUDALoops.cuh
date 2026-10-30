@@ -252,6 +252,39 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 #else // USE_ROCM
+// Trivial offsets plus a constant shift, so the remainder block of a wide
+// block_work_size can be processed with a narrower unroll policy.
+template <int NARGS>
+struct ShiftedTrivialOffsetCalculator {
+  using offset_type = std::array<uint32_t, std::max<int>(NARGS, 1)>;
+  uint32_t shift;
+
+  C10_HOST_DEVICE offset_type get(uint32_t linear_idx) const {
+    offset_type offsets;
+#pragma unroll
+    for (int arg = 0; arg < NARGS; arg++) {
+      offsets[arg] = linear_idx + shift;
+    }
+    return offsets;
+  }
+};
+
+template <int tws, typename func_t, typename array_t>
+__device__ inline void unrolled_remainder(func_t f, array_t data, int remaining, uint32_t shift) {
+  using traits = function_traits<func_t>;
+  auto input_calc = ShiftedTrivialOffsetCalculator<traits::arity>{shift};
+  auto output_calc = ShiftedTrivialOffsetCalculator<1>{shift};
+  auto policy = memory::policies::unroll<
+      array_t,
+      decltype(input_calc),
+      decltype(output_calc),
+      memory::LoadWithoutCast,
+      memory::StoreWithoutCast,
+      tws>(
+      data, remaining, input_calc, output_calc, memory::LoadWithoutCast(), memory::StoreWithoutCast());
+  elementwise_kernel_helper(f, policy);
+}
+
 template <int vec_size, int tws, typename func_t, typename array_t>
 __forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
@@ -259,7 +292,15 @@ __forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t
   constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
-  if (remaining < bws) { // if this block handles the reminder,
+  // The unroll policy guards every element, so with a large tws a short
+  // remainder pays for many empty steps. Use a narrower unroll when it fits.
+  // Not narrower than 4: with a single functor call per thread the compiler
+  // emits different floating-point code for some ops (atan2, complex pow), and
+  // results would depend on n.
+  constexpr int nt = num_threads();
+  if (tws > 4 && remaining <= 4 * nt) {
+    unrolled_remainder<4>(f, data, remaining, (bws - 4 * nt) * blockIdx.x);
+  } else if (remaining < bws) { // if this block handles the reminder,
                                        // just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
