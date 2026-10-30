@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 import weakref
+from collections import OrderedDict
 from unittest import mock
 
 import torch
@@ -15,9 +16,13 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+from torch._dynamo.guards import _ordered_dict_order
+from torch._dynamo.testing import CompileCounter
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
@@ -77,6 +82,129 @@ def less_match(x, expected):
 
 def less_match_verbose_code_parts(expected):
     return [f"expected < {expected}"]
+
+
+@instantiate_parametrized_tests
+class OrderedDictOrderGuardTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("order", [(), (0,), (0, 1, 2), (2, 0, 1)])
+    def test_ordered_dict_order_guard(self, order):
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(
+            lambda inputs: inputs["mapping"], order, ["mapping order"], None
+        )
+        clone = root.clone_manager(lambda manager: True)
+        mapping = OrderedDict.fromkeys(range(len(order)), 1)
+        for key in order:
+            mapping.move_to_end(key)
+        inputs = {"mapping": mapping}
+        self.assertTrue(root.check(inputs))
+        self.assertTrue(root.check_verbose(inputs).result)
+        self.assertTrue(clone.check(inputs))
+        self.assertFalse(root.check({}))
+        self.assertFalse(root.check({"mapping": {}}))
+        self.assertFalse(root.check({"mapping": None}))
+        self.assertFalse(
+            root.check({"mapping": OrderedDict.fromkeys(range(len(order) + 1))})
+        )
+        self.assertIsInstance(
+            root.get_epilogue_lambda_guards()[0], guards.ORDERED_DICT_ORDER_MATCH
+        )
+        if len(order) > 1:
+            mapping.move_to_end(order[0])
+            self.assertFalse(root.check(inputs))
+            self.assertFalse(clone.check(inputs))
+            self.assertEqual(
+                root.check_verbose(inputs).verbose_code_parts, ["mapping order"]
+            )
+
+    @parametrize("reordered", [False, True])
+    def test_ordered_dict_order_guard_bypasses_callbacks(self, reordered):
+        class Key:
+            fail = False
+
+            def __init__(self, value):
+                self.value = value
+
+            def __hash__(self):
+                if self.fail:
+                    raise AssertionError("guard called __hash__")
+                return self.value
+
+            def __eq__(self, other):
+                if self.fail:
+                    raise AssertionError("guard called __eq__")
+                return True
+
+        class Mapping(OrderedDict):
+            def __iter__(self):
+                raise AssertionError("guard called __iter__")
+
+            def keys(self):
+                raise AssertionError("guard called keys")
+
+            def __len__(self):
+                raise AssertionError("guard called __len__")
+
+        first, second = Key(1), Key(2)
+        mapping = Mapping([(first, 1), (second, 2)])
+        if reordered:
+            mapping.move_to_end(first)
+        Key.fail = True
+        order = _ordered_dict_order(mapping)
+        self.assertEqual(order, (1, 0) if reordered else (0, 1))
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(lambda value: value, order, [], None)
+        self.assertTrue(root.check(mapping))
+        Key.fail = False
+        mapping.move_to_end(second if reordered else first)
+        Key.fail = True
+        self.assertFalse(root.check(mapping))
+
+    def test_ordered_dict_order_guard_does_not_specialize_keys(self):
+        root = RootGuardManager()
+        root.add_ordered_dict_order_guard(lambda value: value, (1, 0), [], None)
+        for keys in ((1, 2), (11, 12)):
+            mapping = OrderedDict.fromkeys((None, *keys))
+            del mapping[None]
+            self.assertFalse(root.check(mapping))
+            mapping.move_to_end(keys[0])
+            self.assertTrue(root.check(mapping))
+
+    @parametrize("order", [(-1,), (1,), (0, 0)])
+    def test_ordered_dict_order_guard_rejects_invalid_positions(self, order):
+        root = RootGuardManager()
+        with self.assertRaisesRegex(ValueError, "permutation"):
+            root.add_ordered_dict_order_guard(lambda value: value, order, [], None)
+
+    def test_ordered_dict_order_guard_runs_after_source_guards(self):
+        def get_mapping(inputs):
+            self.fail("source guards should reject the missing mapping first")
+
+        root = RootGuardManager()
+        root.add_lambda_guard(lambda inputs: "mapping" in inputs, [], None)
+        root.add_ordered_dict_order_guard(get_mapping, (0, 1), [], None)
+        self.assertFalse(root.check({}))
+        self.assertFalse(root.check_verbose({}).result)
+
+    @parametrize("nested", [False, True])
+    def test_ordered_dict_order_guard_after_version_shortcut(self, nested):
+        def fn(x, inputs):
+            mapping = inputs["mapping"] if nested else inputs
+            return x + next(iter(mapping.values()))
+
+        mapping = OrderedDict(a=1, b=2)
+        inputs = {"mapping": mapping} if nested else mapping
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(3):
+            self.assertEqual(compiled(x, inputs), fn(x, inputs))
+        self.assertEqual(counter.frame_count, 1)
+        mapping.move_to_end("a")
+        self.assertEqual(compiled(x, inputs), fn(x, inputs))
+        self.assertEqual(counter.frame_count, 2)
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):

@@ -104,7 +104,6 @@ from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
     DictKeysVariable,
-    DictViewVariable,
     pydict_checkexact,
 )
 from .lists import (
@@ -159,12 +158,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import (
-    FrozensetVariable,
-    OrderedSetVariable,
-    pyanyset_checkexact,
-    SetVariable,
-)
+from .sets import FrozensetVariable, pyanyset_checkexact, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -3530,31 +3524,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                 sym_num=None,
             )
 
-        if isinstance(a, DictViewVariable):
-            # View truth uses guarded length, never the owner's __bool__ override.
-            return VariableTracker.build(
-                tx, not generic_is_true(tx, a).as_python_constant()
-            )
-        # Must precede the container fast path below: a user subclass now also
-        # satisfies those isinstance checks, but its __bool__/__len__ override
-        # has to win.
-        if isinstance(a, UserDefinedObjectVariable):
-            bool_result = self.call_bool(tx, a)
-            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
-        if isinstance(
-            a,
-            (
-                ListVariable,
-                ConstDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                variables.DictKeySetVariable,
-                OrderedSetVariable,
-            ),
-        ):
-            return VariableTracker.build(tx, len(a.items) == 0)
-
-        return None
+        # Mirrors PyObject_Not.
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L1921-L1929
+        result = generic_is_true(tx, a)
+        if isinstance(result, SymNodeVariable):
+            return self.call_not_(tx, result)
+        return VariableTracker.build(tx, not result.as_python_constant())
 
     def call_contains(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
