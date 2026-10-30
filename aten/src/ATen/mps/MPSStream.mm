@@ -107,9 +107,9 @@ bool MPSStream::isOnQueue() const {
 id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   // endKernelCoalescing() ends and releases the encoder, and the serial queue is the only thing that orders it
   // against a kernel that is still encoding, so an encoder fetched outside of the queue can be released mid-use
-  TORCH_INTERNAL_ASSERT(isOnQueue(),
-                        "MPSStream::commandEncoder() must be called from a block running on the stream's queue(), "
-                        "see https://github.com/pytorch/pytorch/issues/197805");
+  TORCH_CHECK(isOnQueue(),
+              "MPSStream::commandEncoder() must be called from a block running on the stream's queue(), "
+              "see https://github.com/pytorch/pytorch/issues/197805");
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
