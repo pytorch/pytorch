@@ -9473,9 +9473,10 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
-        compile_config = {"always_keep_tensor_constants": True}
-        if self.device == "cuda":
-            compile_config["aot_inductor.weight_use_caching_allocator"] = True
+        compile_config = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.weight_use_caching_allocator": True,
+        }
 
         with torch.no_grad(), config.patch(compile_config):
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -9486,10 +9487,7 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def constant_buffer_memory_used():
-            if self.device == "cuda":
-                return torch.cuda.memory_allocated(self.device)
-            free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-            return -free_memory
+            return torch.accelerator.memory_allocated(self.device)
 
         def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
