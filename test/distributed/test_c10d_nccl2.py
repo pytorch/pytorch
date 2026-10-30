@@ -2461,6 +2461,60 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full_like(t, expected))
 
 
+def _run_children(
+    test: TestCase,
+    script: str,
+    argvs: list[list[str]],
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    """Runs ``script`` in one child process per argv and returns their output.
+
+    Fails ``test`` unless every child exits cleanly within the deadline.
+    """
+    procs = []
+    outs = []
+    try:
+        for argv in argvs:
+            out = tempfile.TemporaryFile()  # noqa: SIM115, closed below
+            outs.append(out)
+            procs.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", script, *argv],
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                    env=env,
+                )
+            )
+        deadline = time.monotonic() + 300
+        timed_out = False
+        for proc in procs:
+            try:
+                proc.wait(timeout=max(deadline - time.monotonic(), 0))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                break
+        for proc in procs:
+            proc.kill()
+            proc.wait()
+        texts = []
+        for out in outs:
+            out.seek(0)
+            texts.append(out.read().decode(errors="replace"))
+        if timed_out:
+            test.fail("child process timed out:\n" + "\n---\n".join(texts))
+        for proc, text in zip(procs, texts):
+            if proc.returncode != 0:
+                test.fail(f"child process failed with:\n{text}")
+        return texts
+    finally:
+        for proc in procs:
+            proc.kill()
+            proc.wait()
+        for out in outs:
+            out.close()
+
+
 _UNINITIALIZED_CUDA_SCRIPT = """\
 import torch
 import torch.distributed as dist
@@ -2510,22 +2564,12 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
         device_id: str = 'torch.device("cuda:0")',
         child_env: dict[str, str] | None = None,
     ) -> None:
-        try:
-            subprocess.check_output(
-                [
-                    sys.executable,
-                    "-c",
-                    _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
-                ],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=child_env,
-                timeout=300,
-            )
-        except subprocess.TimeoutExpired:
-            self.fail("child process timed out")
-        except subprocess.CalledProcessError as e:
-            self.fail(f"child process failed with:\n{e.output.decode()}")
+        _run_children(
+            self,
+            _UNINITIALIZED_CUDA_SCRIPT.format(device_id=device_id, extra=extra),
+            [[]],
+            child_env,
+        )
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
@@ -2577,6 +2621,162 @@ backend.shutdown()
         # into the same allocator: without lazyInitDevice() it hits the identical
         # assert one call later.
         self._run_child("dist.barrier()")
+
+
+_TELEMETRY_PRELUDE = """\
+import sys
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+
+rank = int(sys.argv[1])
+store = dist.FileStore(sys.argv[2], 2)
+reconfigurable = sys.argv[3] == "1"
+device = torch.device("cuda", rank)
+torch.cuda.set_device(device)
+dist.init_process_group(
+    "nccl2",
+    rank=rank,
+    world_size=2,
+    store=store,
+    # Reconfigurable groups create their communicator in reconfigure().
+    device_id=None if reconfigurable else device,
+    enable_reconfigure=reconfigurable,
+)
+backend = dist.get_backend_impl(dist.group.WORLD, device)
+
+
+def warm_up():
+    # The first collective blocks the host while the communicator connects.
+    dist.all_reduce(torch.ones(1, device=device))
+    torch.cuda.synchronize()
+
+
+def reconfigure(uuid):
+    store.set("handle%d_%d" % (uuid, rank), dist._get_reconfigure_handle())
+    handles = [store.get("handle%d_%d" % (uuid, r)).decode() for r in range(2)]
+    dist._reconfigure(uuid, handles, timeout=timedelta(seconds=60)).wait()
+    warm_up()
+
+
+def pending_work():
+    # Rank 1 never joins, so the collective stays pending.
+    return dist.all_reduce(torch.ones(1, device=device), async_op=True)
+
+
+def expect_wait_error(work, *args):
+    try:
+        work.wait(*args)
+    except RuntimeError as e:
+        print("WAIT_ERROR", e, flush=True)
+    else:
+        sys.exit("wait() did not fail")
+
+
+"""
+
+# Rank 0's collective is still pending, so a graceful destroy would hang.
+_TELEMETRY_EPILOGUE = """
+store.set("done%d" % rank, "1")
+store.wait(["done0", "done1"])
+dist.distributed_c10d._abort_process_group()
+"""
+
+# Logged next to the work_nccl_exception C10dLogger record. No C10dLogger can
+# be registered from Python, and API usage only reaches stderr when
+# PYTORCH_API_USAGE_STDERR is set at process start, hence the child processes.
+_WORK_EXCEPTION_KEY = "PYTORCH_API_USAGE ProcessGroupNCCL.WorkNCCL.handleException"
+
+
+class ProcessGroupNCCL2TelemetryTest(TestCase):
+    def _run_ranks(self, body: str, reconfigurable: bool = False) -> str:
+        """Runs ``body`` on two ranks and returns rank 0's output."""
+        env = {
+            **os.environ,
+            "PYTORCH_API_USAGE_STDERR": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            store_path = os.path.join(tmp, "store")
+            return _run_children(
+                self,
+                _TELEMETRY_PRELUDE + body + _TELEMETRY_EPILOGUE,
+                [[str(rank), store_path, str(int(reconfigurable))] for rank in (0, 1)],
+                env,
+            )[0]
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_timeout_logs_work_exception(self) -> None:
+        out = self._run_ranks(
+            """
+warm_up()
+if rank == 0:
+    expect_wait_error(pending_work(), timedelta(milliseconds=1))
+"""
+        )
+        self.assertIn("PYTORCH_API_USAGE c10d.backend_nccl2", out)
+        self.assertIn(_WORK_EXCEPTION_KEY, out)
+        self.assertRegex(
+            out, r"WAIT_ERROR .*timed out: WorkNCCL\(SeqNum=\d+, OpType=all_reduce"
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_abort_does_not_log_work_exception(self) -> None:
+        out = self._run_ranks(
+            """
+warm_up()
+if rank == 0:
+    work = pending_work()
+    backend.abort()
+    expect_wait_error(work)
+"""
+        )
+        # API usage reaches the captured stderr.
+        self.assertIn("PYTORCH_API_USAGE c10d.backend_nccl2", out)
+        self.assertIn("WAIT_ERROR", out)
+        self.assertIn("communicator was aborted", out)
+        self.assertNotIn(_WORK_EXCEPTION_KEY, out)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_after_abort_logs_work_exception(self) -> None:
+        # reconfigure() must reset the abort state that suppresses the record.
+        out = self._run_ranks(
+            """
+reconfigure(1)
+if rank == 0:
+    work = pending_work()
+    backend.abort()
+    expect_wait_error(work)
+    print("ABORTED", flush=True)
+    store.set("aborted", "1")
+else:
+    # Abort after rank 0 so its pending work fails by abort, not a peer error.
+    store.wait(["aborted"])
+    backend.abort()
+reconfigure(2)
+if rank == 0:
+    expect_wait_error(pending_work(), timedelta(milliseconds=1))
+""",
+            reconfigurable=True,
+        )
+        aborted = out.index("ABORTED")
+        self.assertNotIn(_WORK_EXCEPTION_KEY, out[:aborted])
+        self.assertIn(_WORK_EXCEPTION_KEY, out[aborted:])
+        self.assertRegex(out[aborted:], r"WAIT_ERROR .*timed out")
 
 
 if __name__ == "__main__":

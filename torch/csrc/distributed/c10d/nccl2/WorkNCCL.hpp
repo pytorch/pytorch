@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -119,7 +120,7 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  void recordStart(const char* coll_name);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -145,7 +146,11 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    // reason says why a TIMEDOUT or ERROR work failed; it ends up in the
+    // work's exception. The first TIMEDOUT or ERROR transition also logs the
+    // work_nccl_exception C10dLogger record, unless the comm was aborted.
+    bool setTerminalStatus(WorkStatus status, std::string_view reason = {});
+    std::string describe() const;
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     void notifyCompletion();
@@ -162,6 +167,8 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    // Set by recordStart(); must point to static storage.
+    const char* opType{""};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;

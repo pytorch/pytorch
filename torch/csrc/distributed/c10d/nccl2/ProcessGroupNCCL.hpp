@@ -442,6 +442,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
   // another thread cannot still be inside commRevoke when the comm is aborted.
   std::mutex revoke_mutex_;
+  // Set by abort(), so the work failures it causes are not reported.
+  std::atomic<bool> aborted_{false};
+  // Failure reason for work failed by comm_state_ ERROR.
+  std::string commErrorReason();
+  std::mutex comm_error_mutex_;
+  // Why comm_state_ is ERROR, if set by an async NCCL error.
+  std::string comm_error_reason_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(

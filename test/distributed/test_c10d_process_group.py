@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
+import json
 import math
 import sys
+import time
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -20,7 +23,29 @@ from c10d_backend_common import (
 
 from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.common_utils import get_cycles_per_ms, IS_FBCODE, run_tests
+
+
+def _wait_counter_values():
+    from torch._C._distributed_c10d import _get_handler, _Request, _Response
+
+    class Request(_Request):
+        def body(self):
+            return b""
+
+        def params(self):
+            return {}
+
+    class Response(_Response):
+        def set_content(self, content, content_type):
+            self.content = content
+
+        def set_status(self, status):
+            self.status = status
+
+    resp = Response()
+    _get_handler("wait_counter_values")(Request(), resp)
+    return json.loads(resp.content)
 
 
 class AbstractProcessGroupTest(C10dBackendTestContinuous):
@@ -160,6 +185,40 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         future.wait()
         expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
         self.assertEqual(tensor, expected)
+
+    def test_check_timeout_wait_counter(self):
+        if not self.has_check_timeout_wait_counter:
+            self.skipTest(f"{self.backend_name} has no checkTimeout wait counter")
+        if IS_FBCODE:
+            self.skipTest("fbcode uses its own WaitCounter backend")
+        # The first collective blocks the host while the communicator starts.
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        name = "pytorch.wait_counter.ProcessGroupNCCL__checkTimeout"
+        store = dist.distributed_c10d._get_default_store()
+        key = f"{self.backend_name}_check_timeout_wait_counter"
+
+        if self.rank != 0:
+            # Hold back until rank 0 has seen its pending work checked.
+            store.wait([key], timedelta(seconds=120))
+            dist.all_reduce(torch.ones(1, device=self.device))
+            return
+
+        before = _wait_counter_values().get(name, {}).get("total_calls", 0)
+        work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
+        # The work stays pending until the store key is set, so every poll (and
+        # the watchdog) runs the timeout check.
+        # Below the PG timeout, so a missing count fails here.
+        deadline = time.monotonic() + 30
+        try:
+            while _wait_counter_values().get(name, {}).get("total_calls", 0) <= before:
+                self.assertFalse(work.is_completed())
+                if time.monotonic() > deadline:
+                    self.fail(f"{name} did not fire for pending work")
+        finally:
+            # Release rank 1 even on failure so the pending work completes.
+            store.set(key, "1")
+            work.wait(timedelta(seconds=120))
 
 
 instantiate_backend_tests(
