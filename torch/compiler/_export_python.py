@@ -87,6 +87,12 @@ def export_python(
     template (flex attention, say) or a user-defined kernel keeps its config in its
     own decorator instead, editable the same way.
 
+    Hill-climbing an exported kernel is an edit-and-rerun loop on ``path``: change a
+    ``KERNEL_CONFIGS`` row, a template's ``num_warps`` or ``num_stages``, or a kernel
+    body; rerun with ``TORCH_EXPORT_PYTHON_CHECK=1`` so an edit that changes the
+    numerics raises; time it; keep or revert the edit. Delete ``path`` to start over
+    from a fresh capture.
+
     The artifact is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
     loading the artifact imports the module the function was captured from.
