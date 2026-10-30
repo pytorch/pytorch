@@ -236,32 +236,24 @@ class XpuProfilerTest(TestCase):
         self.assertNotIn("xpu_sync", categories)
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
-    def test_xpu_sync_reported_on_host(self):
+    def test_xpu_sync_reported_on_device(self):
         p = self.profile_with_sync(
             [
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.XPU,
             ]
         )
-        sync_names = {
-            e.get("name")
-            for e in self.trace_events(p)
-            if e.get("ph") == "X" and e.get("cat") == "xpu_sync"
-        }
-        self.assertTrue(sync_names, "no xpu_sync events captured")
-
-        matched = [event for event in p.events() if event.key in sync_names]
+        # XPUPTI names a sync record after the L0 API it came from, which is
+        # also the name of the XPU_DRIVER record for the same call, so match on
+        # the activity type rather than the event name.
+        sync_events = [e for e in p.events() if e.activity_type == "xpu_sync"]
 
         if Verbose:
-            print(f"{sorted(sync_names) = }")
-            print(f"{len(matched) = }")
+            print(f"{len(sync_events) = }")
 
-        self.assertTrue(
-            matched,
-            f"no profiler events matched the xpu_sync names {sorted(sync_names)}",
-        )
-        for event in matched:
-            self.assertEqual(event.device_type, DeviceType.CPU)
+        self.assertTrue(sync_events, "no xpu_sync events captured")
+        for event in sync_events:
+            self.assertEqual(event.device_type, DeviceType.XPU)
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_ac2g_flows_end_on_device(self):

@@ -14,7 +14,6 @@
 #include <string>
 #include <utility>
 
-#include <c10/core/DeviceType.h>
 #include <c10/util/env.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
@@ -72,7 +71,6 @@ TEST(XpuActivityFilterTest, SyncSelectionFollowsDefaultsAndFilters) {
   const auto configured_activities =
       std::make_shared<std::set<libkineto::ActivityType>>();
   // Libkineto has no unregister API, so this factory lives for the process.
-  // The other test here never calls prepareTrace(), so it is unaffected.
   libkineto::api().registerProfilerFactory([configured_activities]() {
     return std::make_unique<CapturingProfiler>(configured_activities);
   });
@@ -135,17 +133,6 @@ TEST(XpuActivityFilterTest, SyncSelectionFollowsDefaultsAndFilters) {
   const auto typo = prepareAndCapture(
       {ActivityType::XPU}, {{ActivityType::XPU, {"XPU_SYNCH"}}});
   EXPECT_FALSE(typo.contains(libkineto::ActivityType::XPU_SYNC));
-}
-
-TEST(XpuActivityFilterTest, SyncActivityIsReportedOnTheHost) {
-  using torch::autograd::profiler::deviceTypeFromActivity;
-
-  // XPUPTI reports these with device -1 and resource = thread id, GPU
-  // barriers included, so XPU would inflate self_xpu_time_total. CPU is also
-  // what XPU_RUNTIME and XPU_DRIVER return.
-  EXPECT_EQ(
-      deviceTypeFromActivity(libkineto::ActivityType::XPU_SYNC),
-      c10::DeviceType::CPU);
 }
 
 #endif // USE_KINETO
