@@ -326,6 +326,16 @@ struct FlightRecorder {
       bool includeCollectives,
       bool onlyActive);
 
+  // dump() before pickling, so several recorders can be combined into one
+  // trace.
+  c10::Dict<c10::IValue, c10::IValue> dump_dict(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive);
+
   std::string dump(
       const std::optional<std::unordered_map<
           std::string,
@@ -387,6 +397,14 @@ TORCH_API bool recordsFlightRecorderNatively(const std::string& backend);
 // Dumps the fr traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_fr_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive,
+    const std::string& backend = kDefaultFRBackend);
+
+// dump_fr_trace before pickling, for callers combining several recorders into
+// one trace.
+TORCH_API c10::Dict<c10::IValue, c10::IValue> dump_fr_trace_dict(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive,

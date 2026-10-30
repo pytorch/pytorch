@@ -5479,6 +5479,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       Returns:
             Stringified json work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+            Includes nccl2 and nccl-lazy groups. Their record_ids are numbered separately and their pg_ids are shifted past ProcessGroupNCCL's, so pg_ids are only consistent within one dump.
       )");
   module.def(
       "_dump_nccl_trace",
@@ -5501,11 +5502,12 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         Returns:
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+            Includes nccl2 and nccl-lazy groups. Their record_ids are numbered separately and their pg_ids are shifted past ProcessGroupNCCL's, so pg_ids are only consistent within one dump.
       )");
   module.def(
       "_reset_fr_recording_nccl",
       []() { ::c10d::reset_nccl_trace(); },
-      "API to reset Flight recorder recording when it comes fault tolerance.");
+      "API to reset Flight recorder recording when it comes fault tolerance. Also resets the nccl2 and nccl-lazy recorders.");
 #endif
 
   py::class_<

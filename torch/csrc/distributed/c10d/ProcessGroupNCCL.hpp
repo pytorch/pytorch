@@ -1527,18 +1527,19 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<at::cuda::MemPool> memPool_ = nullptr;
 };
 
-// Reset the flighrecorder recordings for the current rank.
+// Reset the flighrecorder recordings for the current rank, including the nccl2
+// and nccl-lazy recorders.
 TORCH_API void reset_nccl_trace();
 
 // Dumps the NCCL comm traces and additional information about the Process
-// Group.
+// Group. Includes nccl2 and nccl-lazy groups.
 TORCH_API std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive);
 
 // Dumps the NCCL comm traces and additional information about the Process
-// Group in JSON formatted string.
+// Group in JSON formatted string. Includes nccl2 and nccl-lazy groups.
 // We don't include stack traces in JSON format as it is far too much data.
 TORCH_API std::string dump_nccl_trace_json(
     bool includeCollectives,
