@@ -5,7 +5,6 @@ import functools
 import os
 import re
 import sys
-import typing
 import unittest
 import unittest.mock as mock
 from unittest.mock import patch
@@ -151,22 +150,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with torch.compiler.set_stance("eager_on_recompile"):
             self.assertEqual(inner(x), x + 1)
             self.assertEqual(inner(x), x + 1)
-
-    def test_disable_installs_stance_callback(self):
-        # The disable wrapper checks the stance inline; it must install what
-        # _callback_from_stance(None) gives for every stance.
-        from torch._C._dynamo.eval_frame import get_eval_frame_callback
-        from torch._dynamo.eval_frame import _callback_from_stance, StanceStr
-
-        @torch._dynamo.disable
-        def callback_inside():
-            return get_eval_frame_callback()
-
-        for stance in typing.get_args(StanceStr):
-            with torch.compiler.set_stance(stance):
-                self.assertIs(
-                    callback_inside(), _callback_from_stance(None), msg=stance
-                )
 
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():

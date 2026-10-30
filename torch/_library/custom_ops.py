@@ -2,12 +2,11 @@
 import collections
 import inspect
 import logging
-import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, overload, TypeAlias, Union
+from typing import Any, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -247,15 +246,7 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        # An explicit schema need not match fn's signature, and Dynamo can't
-        # trace the class creation in _custom_op_def_class. (torch.compiler
-        # doesn't exist yet for custom ops defined while torch is imported.)
-        compiler = getattr(torch, "compiler", None)
-        if schema is not None or (compiler is not None and compiler.is_compiling()):
-            opdef_cls = CustomOpDef
-        else:
-            opdef_cls = _custom_op_def_class(fn)
-        result = opdef_cls(namespace, opname, schema_str, fn, normalized_tags)
+        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -276,35 +267,6 @@ def custom_op(
     if fn is None:
         return inner
     return inner(fn)
-
-
-def _custom_op_def_class(fn: Callable[..., object]) -> type["CustomOpDef"]:
-    """Returns a CustomOpDef subclass whose __call__ has fn's signature.
-
-    The generic CustomOpDef.__call__ forwards ``*args, **kwargs``, which costs a
-    tuple and a dict per call, and passes kwargs through to the OpOverload,
-    which knocks the call off the PyObject dispatch fast path (see [NOTE:
-    PyObject Dispatcher aka pyobj_dispatcher] in torch/_ops.py). The generated
-    __call__ passes positional parameters positionally, filling in fn's
-    defaults. Python looks up __call__ on the type, so each op needs its own
-    subclass.
-    """
-    code = utils.signature_forwarding_code(inspect.signature(fn), "_opdef_")
-    if code is None:
-        return CustomOpDef
-    params, call_args, env = code
-    src = (
-        f"def __call__(_opdef_self, {params}):\n"
-        f"    return _opdef_self._opoverload({call_args})\n"
-    )
-    # Attribute the generated code to CustomOpDef.__call__ in this file, so
-    # tracebacks point there and Dynamo applies this file's trace rules to it
-    # (code from "<string>" is treated as user code and compiled as its own frame).
-    exec(compile(src, __file__, "exec"), env)
-    call = cast(types.FunctionType, env["__call__"])
-    lineno = CustomOpDef.__call__.__code__.co_firstlineno
-    call.__code__ = call.__code__.replace(co_firstlineno=lineno)
-    return type("CustomOpDef", (CustomOpDef,), {"__call__": call})
 
 
 class CustomOpDef:
@@ -332,11 +294,6 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
-        # Runs instead of a kernel disabled with set_kernel_enabled. The lambda
-        # keeps _disable_dynamo from unwrapping fn or setting attributes on it.
-        self._init_fn_without_dynamo: Callable[..., object] = torch._disable_dynamo(
-            lambda *args, **kwargs: fn(*args, **kwargs)
-        )
 
         self._backend_fns: dict[str | None, Callable] = {}
         self._abstract_fn: Callable | None = None
@@ -432,34 +389,28 @@ class CustomOpDef:
             else:
                 self._disabled_kernel.discard(device_type)
 
-    def _kernel_stub(
+    def _make_backend_fn(
         self, device_type: str | None, fn: Callable[..., object]
     ) -> Callable[..., object]:
-        """Stands in for fn in _backend_fns until its first call, which replaces
-        it with fn wrapped to disable Dynamo. Building that wrapper needs
-        torch._dynamo, which can't be imported while torch is being imported,
-        and some custom ops are defined then.
-        """
+        """Wraps fn to choose between the default implementation or the
+        device-specific one, depending on whether device_type's kernel is
+        disabled."""
 
-        def stub(*args: object, **kwargs: object) -> object:
-            from torch._dynamo.eval_frame import _disabled_wrapper
+        @torch._disable_dynamo
+        def wrapped_fn(*args, **kwargs):
+            if device_type in self._disabled_kernel:
+                return self._init_fn(*args, **kwargs)
+            else:
+                return fn(*args, **kwargs)
 
-            wrapper = _disabled_wrapper(fn, wrapping=False, explicit_signature=True)
-            if self._backend_fns.get(device_type) is stub:
-                self._backend_fns[device_type] = wrapper
-            return wrapper(*args, **kwargs)
-
-        return stub
+        return wrapped_fn
 
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
         def backend_impl(*args, **kwargs):
-            if device_type in self._disabled_kernel:
-                result = self._init_fn_without_dynamo(*args, **kwargs)
-            else:
-                result = self._backend_fns[device_type](*args, **kwargs)
+            result = self._backend_fns[device_type](*args, **kwargs)
 
             def get_module():
                 fn = self._backend_fns[device_type]
@@ -564,7 +515,7 @@ class CustomOpDef:
                             _C._dispatch_key_for_device(device_type),
                         )
 
-                self._backend_fns[device_type] = self._kernel_stub(device_type, fn)
+                self._backend_fns[device_type] = self._make_backend_fn(device_type, fn)
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(

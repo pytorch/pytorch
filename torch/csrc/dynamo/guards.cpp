@@ -6300,7 +6300,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
     }
-    const at::Tensor& tensor = THPVariable_Unpack(obj);
+    at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -6335,7 +6335,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
     }
-    const at::Tensor& tensor = THPVariable_Unpack(obj);
+    at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
