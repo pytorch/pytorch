@@ -18,7 +18,10 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.distributed_c10d import _World
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     spawn_threads_and_init_comms,
@@ -322,12 +325,17 @@ class TestCollectivesWithBaseClass(_TestCollectivesBase):
 class TestCollectivesWithBaseClassDevice(_TestCollectivesBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     def test_collectives_issued_from_side_stream(self, device):
         # Threaded PG performs every rank's data movement on rank 0's stream, so
         # it must synchronize with the stream each rank issued the collective
         # from. FSDP2 relies on this: it all-gathers/reduce-scatters on private
         # side streams.
-        device_module = torch.get_device_module(self.device_type)
+        device_module = torch.get_device_module(device)
+        # The current device is thread-local and every rank runs in a freshly
+        # spawned thread that starts on the default device, so bind the thread
+        # to the injected device before any stream, tensor, or calibration use.
+        torch.accelerator.set_device_index(device)
         # get_cycles_per_ms() is lru_cached and calibrates by timing a sleep
         # kernel, so let one rank measure it on an otherwise idle device rather
         # than have every rank contend and cache an under-measured value.
@@ -335,34 +343,37 @@ class TestCollectivesWithBaseClassDevice(_TestCollectivesBase):
             get_cycles_per_ms(self.device_type)
         dist.barrier()
         delay_cycles = int(200 * get_cycles_per_ms(self.device_type))
-        side_stream = device_module.Stream()
-        side_stream.wait_stream(device_module.current_stream())
+        side_stream = device_module.Stream(device=device)
+        side_stream.wait_stream(device_module.current_stream(device))
         with device_module.stream(side_stream):
             if self.rank != 0:
                 # Rank 0 reads stale input unless it waits on this stream
                 device_sleep(self.device_type, delay_cycles)
-            inp = torch.full((8,), float(self.rank + 1), device=self.device_type)
-            all_gather_out = torch.empty(
-                (8 * self.world_size,), device=self.device_type
-            )
+            inp = torch.full((8,), float(self.rank + 1), device=device)
+            all_gather_out = torch.empty((8 * self.world_size,), device=device)
             dist.all_gather_single(all_gather_out, inp)
-            reduce_scatter_out = torch.empty((8,), device=self.device_type)
+            reduce_scatter_out = torch.empty((8,), device=device)
             dist.reduce_scatter_single(reduce_scatter_out, all_gather_out)
-        device_module.current_stream().wait_stream(side_stream)
+        device_module.current_stream(device).wait_stream(side_stream)
 
         expected_all_gather = torch.cat(
             [
-                torch.full((8,), float(rank + 1), device=self.device_type)
+                torch.full((8,), float(rank + 1), device=device)
                 for rank in range(self.world_size)
             ]
         )
         expected_reduce_scatter = torch.full(
-            (8,), float(self.world_size * (self.rank + 1)), device=self.device_type
+            (8,), float(self.world_size * (self.rank + 1)), device=device
         )
         self.assertEqual(all_gather_out, expected_all_gather)
         self.assertEqual(reduce_scatter_out, expected_reduce_scatter)
 
+    @onlyAccelerator
     def test_bwd_sees_fwd_pg(self, device):
+        # Bind the rank thread to the injected device: the threaded PG moves
+        # data on rank 0's current stream, which otherwise stays on the default
+        # device while the tensors below are created on the injected one.
+        torch.accelerator.set_device_index(device)
         fwd_tid = threading.current_thread().ident
 
         class MyFunc(torch.autograd.Function):
@@ -433,7 +444,7 @@ class TestThreadLocalWorld(TestCase):
 
 
 instantiate_device_type_tests(
-    TestCollectivesWithBaseClassDevice, globals(), except_for=("cpu",), allow_xpu=True
+    TestCollectivesWithBaseClassDevice, globals(), allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
