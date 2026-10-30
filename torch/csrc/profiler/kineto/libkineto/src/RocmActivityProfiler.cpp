@@ -75,6 +75,7 @@ void RocmActivityProfiler::enableGpuTracing() {
 
   roc_.setMaxEvents(config().maxEvents());
   roc_.setPerThreadBuffers(config().rocprofPerThreadBufferEnabled());
+  roc_.setDispatchRecordWait(config().rocprofDispatchRecordWait());
   roc_.enableActivities(derivedConfig_->profileActivityTypes());
 }
 
