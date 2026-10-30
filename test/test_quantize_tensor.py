@@ -258,6 +258,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             (3, 160, 160),
             (2, 1024, 2048),
         ),
+        # Keep this lambda inline because a shared helper would add indirection.
         name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
         + f"M{shape[-2]}_K{shape[-1]}",
     )
@@ -281,6 +282,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = F.quantize_tensor(
             data_hp, **_MXFP8_KWARGS, swizzle_type=swizzle_type
         )
+        # Value equality is intentional; signs of zero and NaN need not match.
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales, scales_ref)
