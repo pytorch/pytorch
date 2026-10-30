@@ -50,6 +50,11 @@ if TYPE_CHECKING:
     _PACKAGE: str = ""
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
+    # The inductor CUDA graph config the subgraphs are post-compiled under.
+    CUDAGRAPH_CONFIG: dict[str, bool] = {}
+    # The capture's normalized mode/options, which a serve-time compile uses;
+    # None when they have no literal form.
+    INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
@@ -499,10 +504,11 @@ def _build_multigraph_forward():
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
-    compiled = {
-        _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
-        for _backend_id, _artifact in backends.items()
-    }
+    with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
+        compiled = {
+            _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
+            for _backend_id, _artifact in backends.items()
+        }
     # Resume names come from a per-process counter (backend ids carry a uuid), so
     # another artifact or a live compile can hold one this artifact mints; the
     # tag hashes both channels so two artifacts of one capture differ.
@@ -826,9 +832,14 @@ def _build_installed_forward():
         # A serve-time compile is not part of the artifact: record it nowhere.
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
+        # CUDAGRAPH_CONFIG holds the capture's CUDA graph keys, ambient ones too.
+        backend: object = BACKEND
+        if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
+            options = {**(INDUCTOR_OPTIONS or {}), **CUDAGRAPH_CONFIG}
+            backend = torch._TorchCompileInductorWrapper(None, options, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
-                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
+                backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
             if not isinstance(context, OptimizeContext):
                 raise _PrecompileError(
@@ -844,7 +855,8 @@ def _build_installed_forward():
                 eager = [t for t, f in zip(targets, flagged) if f]
                 context.callback = _RefuseRecompileCallback(context.callback, eager)
             compiled = context(fn)
-        package.install(package_state["backends"])
+        with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
+            package.install(package_state["backends"])
     except _PrecompileError:
         raise
     except Exception as _e:
