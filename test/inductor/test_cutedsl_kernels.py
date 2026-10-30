@@ -367,8 +367,6 @@ def _reference_launch(host_fn, *args, **kwargs):
 
 def _add_kernel_to_table(fn, mutates_args):
     """Side-table index of the CuteDSLKernel record for ``fn``."""
-    if mutates_args != "unknown":
-        mutates_args = tuple(mutates_args)
     return cutedsl_kernel_side_table.add_kernel(CuteDSLKernel(fn, mutates_args))
 
 
@@ -688,7 +686,7 @@ class CuteDSLHOPTests(TestCase):
 
     def test_side_table_records(self):
         r1 = CuteDSLKernel(add_kernel, ("mOut",))
-        r2 = CuteDSLKernel(add_kernel, ("mOut",))
+        r2 = CuteDSLKernel(add_kernel, ["mOut", "mOut"])  # stored as ("mOut",)
         self.assertEqual(r1, r2)
         self.assertEqual(hash(r1), hash(r2))
         with self.assertRaises(dataclasses.FrozenInstanceError):
@@ -704,6 +702,21 @@ class CuteDSLHOPTests(TestCase):
         self.assertEqual(
             cutedsl_kernel_side_table.get_constant_args(cidx), {"alpha": 3}
         )
+
+    def test_side_table_record_checks_mutates_args(self):
+        # A name that is not a parameter (a typo) or is the stream would never be
+        # cloned and written back, so a write would be lost: the record refuses it.
+        # An empty write set does not parse the signature.
+        msg = (
+            r"add_kernel: mutates_args names '{}', but its parameters other than the "
+            r"stream 'stream' are \('mX', 'mY', 'mOut', 'n'\)"
+        )
+        for names, bad in ((("mout",), "mout"), (["mOut", "stream"], "stream")):
+            with self.assertRaisesRegex(ValueError, msg.format(bad)):
+                CuteDSLKernel(add_kernel, names)
+        with self.assertRaisesRegex(ValueError, 'must be "unknown" or a sequence'):
+            CuteDSLKernel(add_kernel, "mOut")
+        self.assertEqual(CuteDSLKernel(no_stream_kernel, ()).mutates_args, ())
 
     def test_cutedsl_hop_eager(self):
         # Mirrors test_triton_kernel_higher_order_func.
@@ -990,7 +1003,8 @@ def forward(self, x_1, y_1):
         # Each written argument is cloned and written back on its own, so two written
         # arguments that may overlap would lose a write: functionalization refuses the
         # same tensor twice, and views that overlap whatever their shapes, offsets and
-        # dtypes. Views of one base that do not overlap are written back correctly,
+        # dtypes. Views of one base that do not overlap, interleaved ones included
+        # (the q, k and v columns of a fused buffer), are written back correctly,
         # unless functionalization copies views (remove="mutations_and_views"): the
         # copies do not show where the views sit, so any two views are refused.
         from torch._subclasses.functional_tensor import (
@@ -1001,12 +1015,14 @@ def forward(self, x_1, y_1):
         kidx = _add_kernel_to_table(add_kernel, "unknown")
         cidx = cutedsl_kernel_side_table.add_constant_args({})
 
-        def trace(f, *args):
+        def trace(f, *args, tracing_mode="real"):
             if api == "python":
                 with FunctionalTensorMode():
-                    return make_fx(PythonFunctionalizeAPI().functionalize(f))(*args)
+                    f_func = PythonFunctionalizeAPI().functionalize(f)
+                    return make_fx(f_func, tracing_mode=tracing_mode)(*args)
             remove = "mutations_and_views" if api == "cpp_view_copies" else "mutations"
-            return make_fx(torch.func.functionalize(f, remove=remove))(*args)
+            f_func = torch.func.functionalize(f, remove=remove)
+            return make_fx(f_func, tracing_mode=tracing_mode)(*args)
 
         def in_place(x, y):
             cutedsl_kernel_wrapper_mutation(
@@ -1036,6 +1052,18 @@ def forward(self, x_1, y_1):
             )
             return x
 
+        def overlapping_columns(x, y):
+            # Rows 1 to 3 of column 2 are in both: compute_overlapping_tensors
+            # reports these two as disjoint.
+            base = x.view(10, 100)
+            out = base[1:5, 2:5]
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs=_add_kwargs(base[:4, :3], y[:12].view(4, 3), out),
+            )
+            return x
+
         def views(base, y):
             cutedsl_kernel_wrapper_mutation(
                 kernel_idx=kidx,
@@ -1044,18 +1072,98 @@ def forward(self, x_1, y_1):
             )
             return base
 
+        def columns(qkv):
+            d = qkv.shape[1] // 3
+            q, k, v = (qkv.narrow(1, i * d, d) for i in range(3))
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(q, k, v)
+            )
+            return qkv
+
+        def empty(x, y):
+            # An empty view overlaps nothing, wherever it sits.
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx,
+                constant_args_idx=cidx,
+                kwargs=_add_kwargs(x, y, x[500:500]),
+            )
+            return x
+
         x, y = _rand(1000), _rand(1000)
         msg = "'mX' and 'mOut' are the same tensor or views that may overlap"
-        for f in (in_place, reshaped, shifted, retyped):
+        for f in (in_place, reshaped, shifted, retyped, overlapping_columns):
             with self.assertRaisesRegex(RuntimeError, msg):
                 trace(f, x.clone(), y)
         base = torch.stack([x, torch.zeros_like(x)])
+        qkv = _rand(40, 75)
+        q, k = qkv[:, :25], qkv[:, 25:50]
         if api == "cpp_view_copies":
             with self.assertRaisesRegex(RuntimeError, msg):
                 trace(views, base.clone(), y)
+            with self.assertRaisesRegex(RuntimeError, "'mX' and 'mY'"):
+                trace(columns, qkv.clone())
         else:
             gm = trace(views, base.clone(), y)
             self.assertEqual(gm(base.clone(), y), torch.stack([x, x + y]))
+            gm = trace(columns, qkv.clone())
+            self.assertEqual(gm(qkv.clone()), torch.cat([q, k, q + k], dim=1))
+            # Traced with fake tensors: CUDA refuses a launch of zero blocks (n = 0).
+            trace(empty, x.clone(), y, tracing_mode="fake")
+
+    @parametrize("api", ["python", "cpp"])
+    def test_cutedsl_hop_functionalize_columns_symbolic(self, api):
+        # With symbolic sizes too, the q, k and v columns of a fused buffer are
+        # proven disjoint, without guards.
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensorMode,
+            PythonFunctionalizeAPI,
+        )
+
+        kidx = _add_kernel_to_table(add_kernel, "unknown")
+        cidx = cutedsl_kernel_side_table.add_constant_args({})
+
+        def f(x, y):
+            n, d = x.shape
+            qkv = x.new_zeros(n, 3 * d)
+            q, k, v = (qkv.narrow(1, i * d, d) for i in range(3))
+            q.copy_(x)
+            k.copy_(y)
+            cutedsl_kernel_wrapper_mutation(
+                kernel_idx=kidx, constant_args_idx=cidx, kwargs=_add_kwargs(q, k, v)
+            )
+            return qkv
+
+        if api == "python":
+            with FunctionalTensorMode():
+                f_func = PythonFunctionalizeAPI().functionalize(f)
+                gm = make_fx(f_func, tracing_mode="symbolic")(_rand(8, 4), _rand(8, 4))
+        else:
+            f_func = torch.func.functionalize(f)
+            gm = make_fx(f_func, tracing_mode="symbolic")(_rand(8, 4), _rand(8, 4))
+        self.assertEqual(gm.shape_env.guards, [])
+        for shape in ((8, 4), (5, 7)):
+            x, y = _rand(*shape), _rand(*shape)
+            self.assertEqual(gm(x, y), torch.cat([x, y, x + y], dim=1))
+
+    def test_overlap_check_adds_no_guards(self):
+        # What cannot be proven without a guard counts as an overlap: x[:n] and x[n:]
+        # are disjoint whatever n is, x[:n] and x[m:] are not when m < n, and the
+        # empty x[n:n] overlaps nothing.
+        from torch._higher_order_ops.cutedsl_kernel_wrap import _may_overlap
+
+        results = []
+
+        def f(x, y, z):
+            n, m = y.shape[0], z.shape[0]
+            pairs = ((x[:n], x[n:]), (x[:n], x[m:]), (x[n:n], x))
+            shape_env = n.node.shape_env
+            guards = len(shape_env.guards)
+            results.extend(_may_overlap(a, b) for a, b in pairs)
+            self.assertEqual(len(shape_env.guards), guards)
+            return x
+
+        make_fx(f, tracing_mode="symbolic")(_rand(100), _rand(10), _rand(20))
+        self.assertEqual(results, [False, True, False])
 
     @parametrize("case", ["e8m0", "complex", "meta", "sparse", "fp8"])
     def test_cutedsl_hop_functional_decomposed_before_type_fallback(self, case):

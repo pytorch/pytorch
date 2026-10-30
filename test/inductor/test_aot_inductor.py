@@ -2698,6 +2698,24 @@ class AOTInductorTestsTemplate:
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
 
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                output = torch.zeros_like(x, dtype=torch.int32)
+                output[1:] = x[:-1]
+                return output
+
+        inputs = [
+            (torch.arange(size, dtype=torch.int64, device=self.device),)
+            for size in (2, 0, 1, 7, 35)
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            inputs,
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        )
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
@@ -9455,9 +9473,10 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
-        compile_config = {"always_keep_tensor_constants": True}
-        if self.device == "cuda":
-            compile_config["aot_inductor.weight_use_caching_allocator"] = True
+        compile_config = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.weight_use_caching_allocator": True,
+        }
 
         with torch.no_grad(), config.patch(compile_config):
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -9468,10 +9487,7 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def constant_buffer_memory_used():
-            if self.device == "cuda":
-                return torch.cuda.memory_allocated(self.device)
-            free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-            return -free_memory
+            return torch.accelerator.memory_allocated(self.device)
 
         def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
