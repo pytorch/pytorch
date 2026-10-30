@@ -1274,8 +1274,6 @@ op_db: list[OpInfo] = [
         # autogen .out exists but is not exercised here (mirrors linalg.matrix_exp).
         supports_out=False,
         decorators=[
-            # torch-xpu-ops/issues/4169
-            skipXPU,
             skipCPUIfNoLapack,
             with_tf32_off,
         ],
