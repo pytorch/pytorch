@@ -114,6 +114,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .exception import FrameVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
@@ -1338,51 +1339,6 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
             # tracing instead of triggering a graph break.
             return self.map_fn.call_function(tx, args, kwargs)
         return leaf
-
-
-class FrameVariable(VariableTracker):
-    # PyFrame_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L1769
-    _cpython_type = types.FrameType
-
-    def __init__(
-        self, inline_tracer: "InliningGeneratorInstructionTranslator", **kwargs: Any
-    ) -> None:
-        super().__init__(**kwargs)
-        self.inline_tracer = inline_tracer
-
-    def python_type(self) -> type:
-        return types.FrameType
-
-    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # A generator frame is linked to its caller only while it is running,
-        # and a frame that outlives its generator can keep that link.
-        state = self.inline_tracer.frame_state
-        if state in {
-            FrameState.FRAME_CREATED,
-            FrameState.FRAME_SUSPENDED,
-            FrameState.FRAME_SUSPENDED_YIELD_FROM,
-        }:
-            return ConstantVariable.create(None)
-        unimplemented(
-            gb_type="Unsupported generator frame f_back",
-            context=f"{state}",
-            explanation="f_back is only modeled for created or suspended generators.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        if self.lookup_tp_getset_member(name) is None:
-            unimplemented(
-                gb_type="Unsupported generator frame attribute",
-                context=f"frame.{name}",
-                explanation=f"Dynamo does not model the frame attribute {name}.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().tp_getattro_impl(tx, name)
 
 
 class LocalGeneratorObjectVariable(VariableTracker):
