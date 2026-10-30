@@ -2101,28 +2101,25 @@ torch.cuda.synchronize()
 
     @slowTest
     @parametrize_test(
-        "path,n,scale_grad_by_freq",
+        "path,n,scale_grad_by_freq,invalid_value",
         [
             # n <= 3072 and no frequency scaling takes the feature kernel in
-            # Embedding.cu, everything else the sorted path in
-            # EmbeddingBackwardKernel.cu
-            subtest(("feature", 4, False), name="feature"),
-            subtest(("sorted", 4096, False), name="sorted"),
-            subtest(("scaled", 4, True), name="scaled"),
-        ],
-    )
-    @parametrize_test(
-        "bound,invalid_value",
-        [
-            subtest(("negative", -1), name="negative"),
-            subtest(("upper", 10), name="upper"),
-            # wraps to 3 when narrowed to int32, silently passing the bounds
-            # check on an unfixed build
-            subtest(("wrapped", 2**32 + 3), name="wrapped"),
+            # Embedding.cu; the last two cases take the sorted path in
+            # EmbeddingBackwardKernel.cu, where n > 3072 reaches
+            # compute_grad_weight_atomic_accumulate and scale_grad_by_freq
+            # reaches sum_and_scatter (use_fused_kernel heuristic,
+            # EmbeddingBackwardKernel.cu:379)
+            subtest(("feature", 4, False, 10), name="feature_upper"),
+            # 2**32 + 3 wraps to 3 when narrowed to int32, silently passing
+            # the bounds check on an unfixed build (feature kernel only)
+            subtest(("feature", 4, False, 2**32 + 3), name="feature_wrapped"),
+            subtest(("feature", 4, False, -1), name="feature_negative"),
+            subtest(("sorted", 4096, False, 10), name="atomic_accumulate_upper"),
+            subtest(("scaled", 4, True, 10), name="sum_and_scatter_upper"),
         ],
     )
     def test_embedding_dense_backward_rejects_invalid_indices(
-        self, device, path, n, scale_grad_by_freq, bound, invalid_value
+        self, device, path, n, scale_grad_by_freq, invalid_value
     ):
         script = f"""
 import torch
