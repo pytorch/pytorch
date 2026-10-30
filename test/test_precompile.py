@@ -2612,7 +2612,7 @@ class TestPrecompile(TestCase):
         # so seeding torch.manual_seed identically before the artifact run and before eager
         # makes both draw the SAME dropout mask: the artifact output is numerically EQUAL
         # to eager (a stronger check than structure-only). This runs on CPU tensors, but
-        # functionalize_rng_ops still seeds via AcceleratorRngStateHelper.get_torch_state_as_tuple,
+        # functionalize_rng_ops still seeds via CUDARngStateHelper.get_torch_state_as_tuple,
         # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
         # (mirroring test_functionalized_rng_supported). The CUDA functionalized path uses
         # different Philox offset bookkeeping than eager, so this numeric equivalence is
@@ -4061,7 +4061,7 @@ class TestPrecompileNumerics(TestCase):
     def test_functionalized_rng_supported(self, device):
         # Functionalized RNG (dropout) threads seed/offset; the AOT backend composes
         # the RNG wrapper in. The artifact runs and produces a valid dropout mask. Even
-        # for a CPU tensor the wrapper seeds from AcceleratorRngStateHelper.get_torch_state_as_tuple,
+        # for a CPU tensor the wrapper seeds from CUDARngStateHelper.get_torch_state_as_tuple,
         # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
         # rather than on the tensor's device.
         import torch._functorch.config as functorch_config

@@ -49,7 +49,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
-from torch._prims_common import AcceleratorRngStateHelper
+from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1271,7 +1271,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 raise AssertionError(
                     "fake_mode must not be None when functionalize_rng_ops is True"
                 )
-            seed, offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(fake_mode)
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
@@ -1302,8 +1302,8 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         )
         buf.bind(
             _compiled_fn_=compiled_fn,
-            _get_rng_state_=AcceleratorRngStateHelper.get_torch_state_as_tuple,
-            _set_offset_=AcceleratorRngStateHelper.set_new_offset,
+            _get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple,
+            _set_offset_=CUDARngStateHelper.set_new_offset,
         )
         with buf.indent():
             buf.writeline("seed, offset = _get_rng_state_()")
@@ -1335,7 +1335,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                     f"expected num_outputs_rng_offset == 1, got {metadata.num_outputs_rng_offset}"
                 )
             new_rng_offset = outs[offset_index]
-            AcceleratorRngStateHelper.set_new_offset(new_rng_offset)
+            CUDARngStateHelper.set_new_offset(new_rng_offset)
             if self.return_new_outs:
                 user_outs = outs[:offset_index] + outs[offset_index + 1 :]
                 return user_outs
@@ -3128,7 +3128,7 @@ def _codegen_backward_prologue(
         if num_backward_tokens > 0:
             parts.append(f"*([None] * {num_backward_tokens})")
         if is_rng_op_functionalized:
-            buf.bind(_get_rng_state_=AcceleratorRngStateHelper.get_torch_state_as_tuple)
+            buf.bind(_get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple)
             parts.append("*_get_rng_state_()")
         buf.writeline(f"all_args = [{', '.join(parts)}]")
         buf.writeline("del ctx_saved_tensors")
@@ -3223,7 +3223,7 @@ def _codegen_backward_epilogue(
                 raise AssertionError(
                     f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
                 )
-            buf.bind(_set_offset_=AcceleratorRngStateHelper.set_new_offset)
+            buf.bind(_set_offset_=CUDARngStateHelper.set_new_offset)
             buf.writeline("_oi = len(out) - 1")
             buf.writeline("_set_offset_(out[_oi])")
             buf.writeline("out = out[:_oi] + out[_oi + 1:]")

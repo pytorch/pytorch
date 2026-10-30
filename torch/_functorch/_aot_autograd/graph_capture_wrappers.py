@@ -25,7 +25,7 @@ from torch import Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._prims_common import AcceleratorRngStateHelper
+from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
@@ -578,10 +578,10 @@ def create_functionalized_rng_ops_wrapper(
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
             fake_mode
         )
-        bwd_seed, bwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+        bwd_seed, bwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
             fake_mode
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
@@ -605,7 +605,7 @@ def create_functionalized_rng_ops_wrapper(
         )
     else:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = AcceleratorRngStateHelper.get_torch_state_as_tuple(
+        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
             fake_mode
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")

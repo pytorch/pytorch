@@ -29,7 +29,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
-from torch._prims_common import AcceleratorRngStateHelper
+from torch._prims_common import CUDARngStateHelper
 from torch._prims.executor import make_traced
 from torch._subclasses.fake_tensor import FakeTensorMode
 import torch._refs as refs
@@ -520,7 +520,7 @@ class TestPrimsPhiloxOnCUDA(TestCase):
             results = []
             rng_states = []
             for _ in range(repeats):
-                rng_states.append(AcceleratorRngStateHelper.get_torch_state_as_tuple())
+                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
                 references.append(torch.rand(size, device=device, dtype=dtype))
 
             torch.cuda.manual_seed(123)
