@@ -305,6 +305,21 @@ class MetaTensorDescriber:
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc[Any]:
+        # Describe a non-fake tensor with the Fake key excluded: under a C++
+        # fake mode its metadata queries (e.g. sparse_dim) would otherwise route
+        # to the fake fallback, which rejects non-fake inputs. A C++ fake,
+        # including one inside a non-fake wrapper, is described with Fake
+        # enabled so its queries reach the fake fallback rather than backend
+        # kernels on a tensor without data. A Python fake mode only intercepts
+        # while it is on the mode stack, so this does not affect it.
+        with torch._C._SetExcludeDispatchKeyGuard(
+            torch._C.DispatchKey.Fake, not torch._C._is_fake_tensor(t)
+        ):
+            return self._describe_tensor(t, recurse=recurse, trace=trace)
+
+    def _describe_tensor(
+        self, t: torch.Tensor, *, recurse: bool, trace: bool
+    ) -> MetaTensorDesc[Any]:
         data = _unwrap_python_functional_tensor(t) if self.copy_data else None
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -2391,22 +2406,8 @@ class MetaConverter(Generic[_TensorT]):
             trace = False
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
-        # to query them when figuring out what to put in here.  The exception is
-        # a real tensor under a C++ fake mode: its metadata queries (e.g.
-        # sparse_dim) would route to the fake fallback, which rejects non-fake
-        # inputs.  Python's mode only intercepts while it is on the mode stack,
-        # so this is a no-op there.
-        from torch._subclasses.fake_tensor import is_fake_tensor
-
-        maybe_exclude_fake: contextlib.AbstractContextManager[Any] = (
-            contextlib.nullcontext()
-            if is_fake_tensor(t)
-            else torch._C._ExcludeDispatchKeyGuard(
-                torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
-            )
-        )
-        with maybe_exclude_fake:
-            t_desc = self.describer.describe_tensor(t, trace=trace)
+        # to query them when figuring out what to put in here
+        t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
             if source is None:
