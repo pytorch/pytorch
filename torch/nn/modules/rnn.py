@@ -681,6 +681,7 @@ class RNN(RNNBase):
 
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
+        hx_supplied = hx is not None
 
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -694,10 +695,6 @@ class RNN(RNNBase):
                     dtype=input.dtype,
                     device=input.device,
                 )
-            else:
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
             if input.dim() not in (2, 3):
@@ -730,14 +727,12 @@ class RNN(RNNBase):
                     dtype=input.dtype,
                     device=input.device,
                 )
-            else:
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                hx = self.permute_hidden(hx, sorted_indices)
 
         if hx is None:
             raise AssertionError("hx must not be None")
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
         if self.mode != "RNN_TANH" and self.mode != "RNN_RELU":
             raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
@@ -1087,6 +1082,7 @@ class LSTM(RNNBase):
         batch_sizes = None
         num_directions = 2 if self.bidirectional else 1
         real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
+        hx_supplied = hx is not None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
@@ -1156,7 +1152,8 @@ class LSTM(RNNBase):
         if hx is None:
             raise AssertionError("hx must not be None")
         self.check_forward_args(input, hx, batch_sizes)
-        hx = self.permute_hidden(hx, sorted_indices)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
             # pyrefly: ignore [no-matching-overload]
@@ -1379,6 +1376,7 @@ class GRU(RNNBase):
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
+        hx_supplied = hx is not None
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
@@ -1391,10 +1389,6 @@ class GRU(RNNBase):
                     dtype=input.dtype,
                     device=input.device,
                 )
-            else:
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
             if input.dim() not in (2, 3):
@@ -1428,12 +1422,14 @@ class GRU(RNNBase):
                     dtype=input.dtype,
                     device=input.device,
                 )
-            else:
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                hx = self.permute_hidden(hx, sorted_indices)
 
+        if hx is None:
+            raise AssertionError("hx must not be None")
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
         if batch_sizes is None:
             # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
