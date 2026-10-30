@@ -5313,6 +5313,20 @@ class CppFakeTensorModeBindingsTest(TestCase):
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
+    def test_suspend_for_real_tensors(self):
+        _, wrapper = self._make_mode()
+        torch._C._set_dispatch_mode(wrapper)
+        try:
+            with unset_fake_temporarily() as old:
+                self.assertIs(old, wrapper)
+                self.assertEqual(self._installed(), (None, False))
+            self.assertEqual(self._installed(), (wrapper, True))
+            with torch.utils._python_dispatch._disable_current_modes():
+                self.assertEqual(self._installed(), (None, False))
+            self.assertEqual(self._installed(), (wrapper, True))
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+
 
 if __name__ == "__main__":
     run_tests()

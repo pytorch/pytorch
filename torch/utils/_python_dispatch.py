@@ -434,10 +434,16 @@ def _disable_current_modes():
                 "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
 
+    # A C++ FakeTensorMode is not on the mode stack, but with the Python modes
+    # popped, the FAKE slot reports it.
+    cpp_fake_mode = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+
     # Manually disable proxy and fake modes, if any are active
     try:
         yield old_pre_dispatch_modes + old_modes
     finally:
+        if cpp_fake_mode is not None:
+            torch._C._set_dispatch_mode(cpp_fake_mode)
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):
