@@ -69,8 +69,8 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
-#elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
+#elif (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)) || \
+    defined(CPU_CAPABILITY_ZVECTOR) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
@@ -167,6 +167,16 @@ struct is_vec_specialized_for : std::bool_constant<false> {
 template <typename T>
 constexpr bool is_vec_specialized_for_v = is_vec_specialized_for<T>::value;
 
+// The result of comparing two Vectorized<T>. On SVE it is a predicate
+// register, which compares produce and selects consume directly; elsewhere it
+// is the Vectorized<T> itself, with every bit of a true lane set. A backend
+// makes it a predicate by specializing VecBoolType for its type.
+template <typename T>
+struct VecBoolType;
+
+template <typename T>
+using VecBool = typename VecBoolType<T>::type;
+
 // NOTE: If you specialize Vectorized on a type, you must define all
 // operations!  You must also specialize is_vec_specialized_for for
 // that type.
@@ -236,7 +246,7 @@ struct Vectorized {
       const Vectorized<T>& a,
 #endif
       const Vectorized<T>& b,
-      const Vectorized<T>& mask) {
+      const VecBool<T>& mask) {
     Vectorized vector;
     std::array<int_same_size_t<T>, size()> buffer{};
     mask.store(buffer.data());
@@ -309,7 +319,7 @@ struct Vectorized {
     }
     return mask;
   }
-  Vectorized<T> isnan() const {
+  VecBool<T> isnan() const {
     Vectorized<T> vector;
     for (int64_t i = 0; i != size(); i++) {
       if (_isnan(values[i])) {
@@ -343,27 +353,11 @@ struct Vectorized {
     }
     return ret;
   }
-  T reduce(T (*const f)(T)) const {
-    T ret = 0;
-    for (int64_t i = 0; i < size(); i++) {
-      ret = f(ret, values[i]);
-      if (++i < size())
-        ret = f(ret, values[i]);
-    }
-    return ret;
-  }
 #else
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
-    }
-    return ret;
-  }
-  T reduce(T (*const f)(T)) const {
-    T ret = 0;
-    for (int64_t i = 0; i != size(); i++) {
-      ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -375,10 +369,13 @@ struct Vectorized {
     }
     return ret;
   }
-  T reduce(T (*const f)(const T&)) const {
-    T ret = 0;
-    for (int64_t i = 0; i != size(); i++) {
-      ret = f(ret, values[i]);
+  // Seeded with lane 0 rather than an identity element, so that `op` need not
+  // have one.
+  template <typename Op>
+  T reduce(Op op) const {
+    T ret = values[0];
+    for (int64_t i = 1; i != size(); i++) {
+      ret = op(ret, values[i]);
     }
     return ret;
   }
@@ -693,8 +690,11 @@ struct Vectorized {
   T reduce_add() const {
     return reduce([](T x, T y) -> T { return x + y; });
   }
+  // Propagates NaN, matching maximum() and torch.max. A NaN accumulator has to
+  // be carried explicitly: every comparison against it is false, so the naive
+  // ternary would let the next lane displace it.
   T reduce_max() const {
-    return reduce(std::max);
+    return reduce([](T x, T y) -> T { return (_isnan(x) || x > y) ? x : y; });
   }
 
  private:
@@ -713,22 +713,22 @@ struct Vectorized {
   }
 
  public:
-  Vectorized<T> operator==(const Vectorized<T>& other) const {
+  VecBool<T> operator==(const Vectorized<T>& other) const {
     return binary_pred(other, std::equal_to<T>());
   }
-  Vectorized<T> operator!=(const Vectorized<T>& other) const {
+  VecBool<T> operator!=(const Vectorized<T>& other) const {
     return binary_pred(other, std::not_equal_to<T>());
   }
-  Vectorized<T> operator>=(const Vectorized<T>& other) const {
+  VecBool<T> operator>=(const Vectorized<T>& other) const {
     return binary_pred(other, std::greater_equal<T>());
   }
-  Vectorized<T> operator<=(const Vectorized<T>& other) const {
+  VecBool<T> operator<=(const Vectorized<T>& other) const {
     return binary_pred(other, std::less_equal<T>());
   }
-  Vectorized<T> operator>(const Vectorized<T>& other) const {
+  VecBool<T> operator>(const Vectorized<T>& other) const {
     return binary_pred(other, std::greater<T>());
   }
-  Vectorized<T> operator<(const Vectorized<T>& other) const {
+  VecBool<T> operator<(const Vectorized<T>& other) const {
     return binary_pred(other, std::less<T>());
   }
 
@@ -763,6 +763,11 @@ struct Vectorized {
   Vectorized<T> le(const Vectorized<T>& other) const {
     return binary_pred_bool(other, std::less_equal<T>());
   }
+};
+
+template <typename T>
+struct VecBoolType {
+  using type = Vectorized<T>;
 };
 
 template <class T>
@@ -1314,7 +1319,7 @@ std::
         const Vectorized<T>& src,
         T const* base_addr,
         const Vectorized<int_same_size_t<T>>& vindex,
-        Vectorized<T>& mask) {
+        const Vectorized<T>& mask) {
   static constexpr int size = Vectorized<T>::size();
   std::array<T, size> src_arr{};
   // use int type so we can logical and
@@ -1325,13 +1330,12 @@ std::
   vindex.store(index_arr.data());
   std::array<T, size> buffer{};
   for (const auto i : c10::irange(size)) {
-    if (mask_arr[i] & 0x01) { // check highest bit
+    if (mask_arr[i] < 0) { // check the sign bit
       buffer[i] = base_addr[index_arr[i] * scale / sizeof(T)];
     } else {
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>(static_cast<T>(0)); // "zero out" mask
   return Vectorized<T>::loadu(buffer.data());
 }
 
@@ -1511,8 +1515,8 @@ inline void transpose_mxn(
     int64_t ld_dst,
     int M,
     int N) {
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       dst[j * ld_dst + i] = src[i * ld_src + j];
     }
   }

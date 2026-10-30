@@ -37,6 +37,7 @@ pytree_modules = {
 }
 if not IS_FBCODE:
     import torch.utils._cxx_pytree as cxx_pytree
+    from torch._dynamo.polyfills import pytree as dynamo_pytree
 
     pytree_modules["cxx"] = cxx_pytree
 else:
@@ -937,6 +938,29 @@ if "optree" in sys.modules:
                 )
             )
 
+    @unittest.skipIf(IS_FBCODE, "optree is not enabled in fbcode")
+    def test_deregister_before_cxx_pytree_import(self):
+        script = """
+import torch.utils._pytree as pytree
+
+class Foo:
+    pass
+
+pytree.register_pytree_node(Foo, lambda f: ([1], None), lambda v, c: Foo())
+pytree._deregister_pytree_node(Foo)
+
+import torch.utils._cxx_pytree as cxx_pytree
+
+foo = Foo()
+if cxx_pytree.tree_leaves(foo) != [foo]:
+    raise RuntimeError("deregistered node was registered in optree on import")
+"""
+        subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+        )
+
     def test_treespec_equality(self):
         self.assertEqual(
             python_pytree.treespec_leaf(),
@@ -1373,6 +1397,22 @@ if "optree" in sys.modules:
         finally:
             python_pytree._deregister_pytree_node(CustomClass)
 
+    def test_deregister_then_reregister_pytree_node(self):
+        class MyDict(UserDict):
+            pass
+
+        def register():
+            python_pytree.register_pytree_node(
+                MyDict,
+                lambda d: (list(d.values()), list(d.keys())),
+                lambda values, keys: MyDict(zip(keys, values)),
+            )
+
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
@@ -1654,6 +1694,38 @@ class TestCxxPytree(TestCase):
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
+
+    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+    @parametrize(
+        "tree",
+        [
+            GlobalDummyType([1, 2], {"a": 3}),
+            GlobalDummyType(GlobalDummyType(1, None), 2),
+            [GlobalDummyType(1, None)],
+            (GlobalDummyType(1, None),),
+            {"a'b\\c": GlobalDummyType(1, None)},
+            defaultdict(list, a=GlobalDummyType(1, None)),
+            deque([GlobalDummyType(1, None)]),
+            deque([GlobalDummyType(1, None)], maxlen=2),
+            GlobalPoint(GlobalDummyType(1, None), 2),
+            GlobalDummyType([GlobalDummyType(1, None)], {"a": GlobalDummyType(2, 3)}),
+        ],
+    )
+    def test_nested_custom_spec_polyfill(self, tree):
+        # Keep the reference out of Dynamo's polyfill substitution.
+        @torch.compiler.disable
+        def eager_reference(tree):
+            leaves, spec = cxx_pytree.tree_flatten(tree)
+            return leaves, repr(spec)
+
+        leaves, expected_repr = eager_reference(tree)
+        polyfill_flatten = dynamo_pytree.tree_flatten.__torch_dynamo_polyfill__
+        polyfill_leaves, polyfill_spec = polyfill_flatten(
+            tree, none_is_leaf=True, namespace="torch"
+        )
+        self.assertEqual(polyfill_leaves, leaves)
+        self.assertEqual(repr(polyfill_spec), expected_repr)
+        self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
 
     def test_pytree_custom_type_serialize(self):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))

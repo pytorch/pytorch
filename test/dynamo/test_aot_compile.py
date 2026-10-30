@@ -39,12 +39,15 @@ import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import (
+    _AOT_COMPILE_FORMAT_VERSION,
+    _AOT_COMPILE_MAGIC,
     _GuardScope,
     _names_a_missing_global,
     _resolve_guard_scope,
     _warn_dropped_module_dispatch,
     AOTCompiledFunction,
     AOTCompiledModel,
+    AOTCompileUnpickler,
     ModelInput,
     SerializableCallable,
 )
@@ -52,6 +55,7 @@ from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallab
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.hooks import Hooks
 from torch._dynamo.package import (
     _collapse_device_types,
     DynamoCache,
@@ -74,6 +78,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     disable_gc,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1492,6 +1497,15 @@ class BottomlessReduce:
         return (BottomlessReduce, (BottomlessReduce(),))
 
 
+# On fbcode's Python 3.14 an unbounded recursion through the C pickler can run
+# past the interpreter's stack-address recursion guard and segfault the whole
+# test process instead of raising RecursionError.
+skipIfCPicklerOverflowCrashes = unittest.skipIf(
+    IS_FBCODE and sys.version_info >= (3, 14),
+    "C pickler stack overflow segfaults instead of raising RecursionError",
+)
+
+
 class WritesBackOnReduce:
     # Reducing it writes onto the function it is stashed on, while that
     # function's __dict__ is being walked.
@@ -1864,6 +1878,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("Linear", msg)
         self.assertIn("external_data", msg)
 
+    @skipIfCPicklerOverflowCrashes
     def test_save_guidance_when_a_default_overflows_the_pickler(self):
         # A value in an unpruned slot that recurses without bound in the C
         # pickler raises RecursionError; it gets the same guidance and the
@@ -1945,8 +1960,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertEqual(len([l for l in logs.output if "dropping" in l]), 2)
         self.assertTrue(any("helper.lock (lock)" in l for l in logs.output))
         self.assertTrue(any("base.lock (lock)" in l for l in logs.output))
-        if sys.version_info >= (3, 11):
-            self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
+        self.assertTrue(any("build.<locals>.helper.lock" in l for l in logs.output))
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f)
         self.assertEqual(loaded(*inputs), expected)
@@ -1954,6 +1968,101 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         rebuilt = cell.cell_contents
         self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
         self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
+
+    def test_aot_compile_basic_model(self):
+        mod = SimpleLinearModule()
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3, 3),)
+        compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+            mod,
+            [ModelInput(inputs, {}, [])],
+            Hooks(),
+            backend,
+        )
+        expected = mod(*inputs)
+        self.assertEqual(compiled_mod(*inputs), expected)
+
+        data = compiled_mod.serialize()
+        torch._dynamo.reset()
+        loaded_mod = AOTCompiledModel.deserialize(mod, data)
+        self.assertEqual(loaded_mod(*inputs), expected)
+
+    def test_compatibility_checked_after_compiled_payload(self):
+        def fn(x):
+            return x + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        compiled_fn._artifacts.system_info = dataclasses.replace(
+            compiled_fn._artifacts.system_info,
+            torch_version="incompatible",
+        )
+        data = AOTCompiledFunction.serialize(compiled_fn).serialized_data
+        original_load = AOTCompileUnpickler.load
+        decoded = False
+
+        def tracked_load(unpickler):
+            nonlocal decoded
+            decoded = True
+            return original_load(unpickler)
+
+        with patch.object(AOTCompileUnpickler, "load", tracked_load):
+            with self.assertRaisesRegex(RuntimeError, "different PyTorch version"):
+                AOTCompiledFunction.deserialize(data)
+        self.assertTrue(decoded)
+
+    @parametrize("entry_point", ["function", "model"])
+    @parametrize("format_kind", ["legacy", "newer"])
+    def test_rejects_unsupported_aot_compile_format(self, entry_point, format_kind):
+        if format_kind == "legacy":
+            function_data = pickle.dumps({})
+        else:
+            function_data = _AOT_COMPILE_MAGIC + bytes(
+                [_AOT_COMPILE_FORMAT_VERSION + 1]
+            )
+
+        if entry_point == "model":
+            data = pickle.dumps([function_data])
+            deserialize = functools.partial(
+                AOTCompiledModel.deserialize, torch.nn.Module(), data
+            )
+        else:
+            deserialize = functools.partial(
+                AOTCompiledFunction.deserialize, function_data
+            )
+
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported serialization format"
+            ):
+                deserialize()
+        load.assert_not_called()
+
+    def test_model_preflights_all_aot_compile_formats(self):
+        supported = _AOT_COMPILE_MAGIC + bytes([_AOT_COMPILE_FORMAT_VERSION])
+        future = _AOT_COMPILE_MAGIC + bytes([_AOT_COMPILE_FORMAT_VERSION + 1])
+        data = pickle.dumps([supported, future])
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported serialization format"
+            ):
+                AOTCompiledModel.deserialize(torch.nn.Module(), data)
+        load.assert_not_called()
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -2274,26 +2383,55 @@ from user code:
             return c
 
         example_inputs = (torch.ones(3), torch.ones(3))
-        expected = foo(*example_inputs)  # noqa: F841
+        expected = foo(*example_inputs)
 
         def backend(gm, example_inputs):
             return CustomCompiledFunction(gm, example_inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                PackageError,
-                "CLOSURE_MATCH guard cannot be serialized.",
-            ):
-                compiled_fn = torch.compile(  # noqa: F841
-                    foo,
-                    fullgraph=True,
-                    backend=backend,
-                    options={
-                        "guard_filter_fn": lambda guard_entries: [
-                            True for g in guard_entries
-                        ]
-                    },
-                ).aot_compile((example_inputs, {}))
+            # Keeping every guard keeps the CLOSURE_MATCH on the wrapped
+            # function, which is saved by its code and globals module.
+            compiled_fn = torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile((example_inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*example_inputs), expected)
+
+    def test_guard_filter_override_aot_refuses_a_function_no_module_owns(self):
+        namespace: dict[str, object] = {}
+        exec("def inc(x):\n    return x + 1\n", namespace)
+        inc = namespace["inc"]
+
+        def foo(x):
+            return inc(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        # A loading process has no module to find inc's globals in.
+        with self.assertRaisesRegex(
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+        ):
+            torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile(((torch.ones(3),), {}))
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):
@@ -2313,6 +2451,35 @@ from user code:
                 compiled_fn = torch.compiler.load_compiled_function(f)
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_loaded_graph_does_not_rerun_inlined_saved_tensors_hooks(self):
+        def fn(x, w):
+            return (x.sin() * w).cos().sum()
+
+        # Inlineable hooks with a lossy pack: packing twice changes the grads.
+        hooks = (
+            torch.fx.symbolic_trace(lambda x: x * 2),
+            torch.fx.symbolic_trace(lambda x: x),
+        )
+
+        def grads(f):
+            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                f(x, w).backward()
+            return x.grad, w.grad
+
+        example_args = tuple(torch.randn(4, requires_grad=True) for _ in range(2))
+        compiled = torch.compile(fn, fullgraph=True, backend="inductor")
+        with torch.autograd.graph.saved_tensors_hooks(*hooks):
+            compiled_fn = compiled.aot_compile((example_args, {}))
+        expected = grads(compiled_fn)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f)
+            self.assertEqual(grads(loaded), expected)
 
     def test_aot_compile_module(self):
         _run_in_subprocess(_subprocess_aot_compile_module)
@@ -4977,14 +5144,13 @@ from user code:
         self.assertEqual(len(logs.output), 2, warned)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
-        # A tree that THROWS out of C++ returns through
-        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
-        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
-        # tensor is one such tree: reading its strides fires a TORCH_CHECK.
-        # GuardManagerWrapper.check puts the state back before dispatch reads the
-        # throw as no answer, so the report is about the raise and not about what
-        # the raise left behind -- with the wrapper's restore removed, [0]'s line
-        # reads "GLOBAL_STATE changed: torch_function" and the advice is to add a
+        # RootGuardManager disables TorchFunction while its accessors run and
+        # restores it on scope exit, so a tree that THROWS out of C++ leaves the
+        # state as it found it. TENSOR_MATCH on a strided nested tensor is one
+        # such tree: reading its strides fires a TORCH_CHECK. Dispatch reads the
+        # throw as no answer, so the report is about the raise and not about
+        # what the raise left behind: were the state leaked, [0]'s line would
+        # read "GLOBAL_STATE changed: torch_function" and advise adding a
         # ModelInput, both of them artifacts of our own leak.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
@@ -5018,7 +5184,7 @@ from user code:
     def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
         # The test above throws out of check() in both passes, so the report
         # quotes the dispatch record and never calls check_verbose, the module
-        # path's only direct call of it, which has the same non-RAII exit. Here
+        # path's only direct call of it and the other scope-exit restore. Here
         # check() refuses cleanly and the tree throws only when the report
         # describes it: TENSOR_MATCH's verbose failure branch calls is_parameter,
         # which runs the Parameter metaclass's __instancecheck__, patched to
@@ -5052,8 +5218,8 @@ from user code:
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
-        # check evaluates the same kind of tree through the same wrapper, so a
-        # C++ throw would otherwise leave TorchFunction disabled on this thread
+        # check evaluates the same kind of tree, so a C++ throw without the
+        # scope-exit restore would leave TorchFunction disabled on this thread
         # and silently stop a __torch_function__ subclass from dispatching
         # afterwards. The throw propagates; only the state it leaves is pinned.
         self._hide_leaked_dynamo_globals()
@@ -11467,6 +11633,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.b.c(), "c!")
         self.assertFalse(hasattr(out.b.c, "a"))
 
+    @skipIfCPicklerOverflowCrashes
     def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
         # A recursion overflow inside the probe counts as unpicklable: the entry
         # is dropped with a warning and the save succeeds. The guard pickler

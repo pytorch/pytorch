@@ -1259,6 +1259,22 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
+        if func is torch._assert:
+            condition = args[0] if args else kwargs.get("condition")
+            if isinstance(condition, torch.Tensor):
+                if len(args) >= 2:
+                    return torch._assert_async, args, kwargs
+                if len(args) == 1 and "message" in kwargs:
+                    return torch._assert_async, (args[0], kwargs["message"]), {}
+                if "condition" in kwargs and "message" in kwargs:
+                    return (
+                        torch._assert_async,
+                        (
+                            kwargs["condition"],
+                            kwargs["message"],
+                        ),
+                        {},
+                    )
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:

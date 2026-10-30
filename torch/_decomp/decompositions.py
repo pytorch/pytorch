@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import math
 import numbers
 import operator
 import sys
@@ -239,6 +240,30 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, 0, grad_output)
+
+
+@register_decomposition(aten.softshrink_backward)
+@out_wrapper("grad_input")
+def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
+    # Like the ATen kernel, compute in the common dtype. The comparisons round
+    # lambd to it, as the kernel's lambd.to<scalar_t>() does.
+    dtype = torch.result_type(grad_output, self)
+    grad_output, self = grad_output.to(dtype), self.to(dtype)
+    # lambd.to<scalar_t>() also rejects finite values out of range
+    limit = torch.finfo(dtype).max
+    message = lambda: f"value cannot be converted to type {dtype} without overflow"  # noqa: E731
+    if isinstance(lambd, (torch.SymInt, torch.SymFloat)):
+        # math.isfinite would specialize lambd. Dynamo specializes inf and nan,
+        # so bounds suffice, except that an unbacked non-finite lambd (e.g.
+        # from .item()) can be rejected.
+        torch._check(lambd >= -limit, message)
+        torch._check(lambd <= limit, message)
+    else:
+        torch._check(not (math.isfinite(lambd) and abs(lambd) > limit), message)
+    if self.device.type == "cpu":
+        # Like the CPU vectorized path (but not the scalar path), NaN gets 0
+        return torch.where((self < -lambd) | (self > lambd), grad_output, 0)
+    return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
@@ -660,11 +685,18 @@ def binary_cross_entropy(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    # We cannot currently model this without introducing data-dependent control flow
-    # TORCH_CHECK(
-    #     (input_val >= 0) && (input_val <= 1),
-    #     "all elements of input should be between 0 and 1"
-    # )
+    # The ATen kernels check the [0, 1] domain per element; a pointwise
+    # decomposition has to assert on the whole tensor instead. Without this the
+    # log terms below clamp to -100 and an out-of-domain value silently returns
+    # a finite loss. _assert_async is side-effectful and won't be DCE'd.
+    aten._assert_async.msg(
+        torch.all((self >= 0) & (self <= 1)),
+        "all elements of input should be between 0 and 1",
+    )
+    aten._assert_async.msg(
+        torch.all((target >= 0) & (target <= 1)),
+        "all elements of target should be between 0 and 1",
+    )
     loss = (target - 1) * torch.maximum(
         torch.log1p(-self), self.new_full((), -100)
     ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
@@ -3595,7 +3627,26 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Note [log_sigmoid_forward buffer contract]: The buffer output is only
+    # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
+    # CUDA and MPS forward kernels allocate an empty (0,) buffer and ignore
+    # it (log_sigmoid_forward_{cuda,mps}; the same NOTE also appears in some
+    # backward and out variants, e.g. log_sigmoid_backward_cuda and
+    # log_sigmoid_forward_out_mps). PrivateUse1 backends follow the
+    # accelerator semantics (verified on the registered torch_npu backend).
+    # Meta tensors follow the CPU branch: this op has no Meta kernel, and
+    # this decomposition is what activate_meta()
+    # (torch/_meta_registrations.py) registers as its Meta kernel, so it
+    # defines its own meta behavior. Backends not listed below keep the
+    # historical full-shape buffer.
+    if self.is_cpu or self.is_meta:
+        buffer = z
+    elif (
+        self.is_cuda
+        or self.is_xpu
+        or self.is_mps
+        or self.device.type == torch._C._get_privateuse1_backend_name()
+    ):
         buffer = self.new_zeros((0,))
     else:
         buffer = z
@@ -5251,32 +5302,40 @@ def binary_cross_entropy_with_logits(
 def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
-    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+    tensor1_larger = tensor1.ndim >= tensor2.ndim
+    t2 = tensor2 if tensor1_larger else tensor1
+    # Mirror native's `tensor1_larger ? tensor1 : tensor2.mT()` on metadata.
+    # Avoid emitting dead `aten.transpose` node when tracing this decomposition.
+    if tensor1_larger:
+        t1_shape = tensor1.shape
+        t1_stride = tensor1.stride()
+    else:
+        shape, stride = tensor2.shape, tensor2.stride()
+        t1_shape = (*shape[:-2], shape[-1], shape[-2])
+        t1_stride = (*stride[:-2], stride[-1], stride[-2])
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if not (t1.ndim >= 3 and t2.ndim <= 2):
+    if not (len(t1_shape) >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(sym_numel(t1) == 0):
+    if guard_or_false(reduce(operator.mul, t1_shape, 1) == 0):
         return True
 
-    t1_shape = t1.shape
-    t1_stride = t1.stride()
+    from torch._subclasses.fake_impls import _compute_stride
 
-    # Check the contiguous, we can skip the dim with size of 1
-    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
-    expected_stride = [1]
-    for size in reversed(t1_shape[1:]):
-        expected_stride.append(size * expected_stride[-1])
-    return all(
-        guard_or_false(size == 1) or guard_or_false(left == right)
-        for left, right, size in zip(
-            t1_stride, list(reversed(expected_stride)), t1_shape
+    folded_shape = (reduce(operator.mul, t1_shape[:-1], 1), t1_shape[-1])
+    return (
+        _compute_stride(
+            t1_shape,
+            t1_stride,
+            folded_shape,
+            size_oblivious=True,
         )
+        is not None
     )
 
 
@@ -5996,10 +6055,17 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 @register_decomposition(torch.ops.aten._weight_norm_interface)
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
-    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
-    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
-    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    reduce_dims = tuple(i for i in range(len(v.shape)) if i != dim)
+    # match ATen: CPU/CUDA keep the norm in float when g is bfloat16/half, MPS keeps g.dtype
+    if g.dtype in (torch.bfloat16, torch.half) and v.device.type != "mps":
+        norm_dtype = torch.float
+    else:
+        norm_dtype = g.dtype
+    if reduce_dims:
+        norm = v.norm(2, reduce_dims, keepdim=True, dtype=norm_dtype)
+    else:
+        # dim=() reduces over all dims for any p, so a 1-D v needs per-element abs
+        norm = v.abs().to(norm_dtype)
     return v * (g / norm.to(g.dtype)), norm
 
 

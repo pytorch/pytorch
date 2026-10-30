@@ -209,6 +209,31 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        if cuda_version:
+            try:
+                # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
+                # by NVIDIA's PyPI packages on Windows.
+                from cuda.pathfinder import load_nvidia_dynamic_lib
+
+                for lib in (
+                    "cudart",
+                    "nvJitLink",
+                    "nvrtc",
+                    "cublas",
+                    "cublasLt",
+                    "cufft",
+                    "curand",
+                    "cusolver",
+                    "cusparse",
+                    "cupti",
+                    "cudnn",
+                ):
+                    load_nvidia_dynamic_lib(lib)
+            except Exception:
+                warnings.warn(
+                    "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
+                    stacklevel=2,
+                )
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -406,28 +431,15 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
-
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
+    # get_file_path follows the compiled extension, which under a redirect-mode
+    # editable install lives beside the installed distribution, not __file__.
+    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
     if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
-
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
-            )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
+        # Handing a missing path to CDLL would surface as an unrelated dlopen
+        # failure through the CUDA-dependency retry below.
+        raise OSError(
+            f"{global_deps_lib_path} is missing; torch is not fully installed"
+        )
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1811,6 +1823,15 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
+          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
+          an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1844,21 +1865,13 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
-        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
-          when called on an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
-          when attempting to differentiate an MPS tensor
-        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
-          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2063,6 +2076,12 @@ def set_float32_matmul_precision(precision: str) -> None:
         `torch.backends.cuda.matmul.allow_tf32 = True`. When "highest" (the default)
         is set then the float32 datatype is used for internal computations, equivalent
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
+
+    .. note::
+
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
 
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
@@ -2982,18 +3001,12 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         *,
         config_patches: dict[str, _Any] | None = None,
     ) -> _Any:
-        from contextlib import nullcontext
-        from unittest import mock
-
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = (
-            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-            if fake_mode
-            else nullcontext()
-        )
+        ctx = allow_non_fake_inputs_temporarily(fake_mode)
         with (
             V.set_aot_compilation(True),
             ctx,
@@ -3009,6 +3022,7 @@ class _TorchCompileWrapper:
         mode: str | None,
         options: dict[str, _Any] | None,
         dynamic: builtins.bool | None,
+        name: str | None = None,
     ) -> None:
         from torch._dynamo.backends.registry import lookup_backend
 
@@ -3019,6 +3033,7 @@ class _TorchCompileWrapper:
         else:
             self.compiler_name = str(backend)
         self.dynamic = dynamic
+        self.name = name
         self.compiler_fn = lookup_backend(backend)
         self.kwargs: dict[str, _Any] = {}
         # only pass the args if they non-empty
@@ -3026,6 +3041,8 @@ class _TorchCompileWrapper:
             self.kwargs["mode"] = mode
         if options:
             self.kwargs["options"] = options
+        if name:
+            self.kwargs["name"] = name
 
     def __eq__(self, other: object) -> builtins.bool:
         return (
@@ -3033,6 +3050,7 @@ class _TorchCompileWrapper:
             and self.compiler_fn == other.compiler_fn
             and self.kwargs == other.kwargs
             and self.dynamic == other.dynamic
+            and self.name == other.name
         )
 
     def __call__(self, model_: _Any, inputs_: _Any) -> _Any:
@@ -3222,8 +3240,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("torch.compile is not supported on Python 3.15+")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("torch.compile is not supported on Python 3.16+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -3319,7 +3337,7 @@ def compile(
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
     else:
-        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 
     return torch._dynamo.optimize(
         backend=backend,

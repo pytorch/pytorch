@@ -44,7 +44,7 @@ from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
-from torch._subclasses.fake_tensor import extract_tensor_metadata
+from torch._subclasses.fake_tensor import extract_tensor_metadata, is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -73,6 +73,7 @@ from ._activation_checkpointing.knapsack import (
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
+from ._activation_checkpointing.min_cut import minimum_cut
 from ._aot_autograd.descriptors import (
     AOTOutput,
     SavedForBackwardsAOTOutput,
@@ -1373,11 +1374,11 @@ def _extract_fwd_bwd_modules(
     # Stamp is_static_input on primal placeholders for the backward
     # compiler; see Note: [static_input_idxs semantics] in
     # torch/_inductor/compile_fx.py. This must happen here, while primals
-    # are still 1:1 with flat forward inputs, because staticness is tracked
-    # positionally (static_lifetime_input_nodes derives from
-    # fw_metadata.static_input_indices) and the backward graph's input
-    # ordering destroys that correspondence. The meta dict is shared by
-    # reference with the extracted fwd/bwd placeholder nodes
+    # are still in joint-graph input order, because staticness is tracked
+    # positionally: static_lifetime_input_indices are positions among the
+    # joint graph's primal placeholders, effect tokens included, and the
+    # backward graph's input ordering destroys that correspondence. The meta
+    # dict is shared by reference with the extracted fwd/bwd placeholder nodes
     # (_extract_graph_with_inputs_outputs), so the stamp is visible on
     # bw_module's placeholders regardless of how saving reorders them.
     #
@@ -1699,9 +1700,7 @@ def default_partition(
     distributed_enabled = torch.distributed.is_available()
 
     def is_tensor(node: fx.Node) -> bool:
-        return "tensor_meta" in node.meta or isinstance(
-            node.meta.get("val"), torch._subclasses.FakeTensor
-        )
+        return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
 
     def is_multi_output(node: fx.Node) -> bool:
         return (
@@ -2376,6 +2375,10 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     The with_effects node returns a tuple (token, result). We recursively find all
     leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
     saved, the with_effects op doesn't need to be recomputed in backward.
+
+    AOTAutograd cannot rematerialize a forward effect because the backward token
+    chain is established before partitioning. Reject an explicit MUST_RECOMPUTE
+    policy instead of emitting an invalid saved-token calling convention.
     """
 
     def mark_getitem_outputs(node: fx.Node) -> None:
@@ -2386,12 +2389,15 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     for node in joint_module.graph.nodes:
-        if (
-            is_with_effects(node)
-            and not must_recompute(node)
-            and not _has_tag_is_backward(node)
-        ):
-            mark_getitem_outputs(node)
+        if not is_with_effects(node) or _has_tag_is_backward(node):
+            continue
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+            raise RuntimeError(
+                "AOTAutograd does not support MUST_RECOMPUTE for effectful "
+                "operations because forward effects cannot join the backward "
+                "effect-token chain."
+            )
+        mark_getitem_outputs(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -2582,12 +2588,6 @@ def solve_min_cut(
             return None
         if node.target is operator.getitem:
             return None
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return "marked MUST_SAVE"
-        if config.recompute_views and op_types.is_view(node):
-            return None
-        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-            return None
         if isinstance(node.meta.get("val"), torch.device):
             # A device-valued node (e.g. the coor::current_device() node
             # compile_on_one_rank substitutes for a baked device) has no tensor to
@@ -2596,7 +2596,15 @@ def solve_min_cut(
             # leaving min-cut unable to place it at all once a backward op needs it.
             # Recomputing is both free and correct: the op only reads the current
             # accelerator, and doing so on the backward side is what makes the graph
-            # follow each rank's own device.
+            # follow each rank's own device. This precedes the MUST_SAVE check because
+            # selective AC tags the node MUST_SAVE when it is created inside a
+            # checkpointed region, and saving it is just as impossible then.
+            return None
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            return "marked MUST_SAVE"
+        if config.recompute_views and op_types.is_view(node):
+            return None
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -2659,6 +2667,8 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
+        if node.meta.get("aot_runtime_epilogue_input_mutation", False):
+            return math.inf, "input mutation replayed after forward"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
@@ -2939,7 +2949,7 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        cut_value, partition = minimum_cut(nx_graph, "source", "sink")
     except nx.NetworkXUnbounded as unbounded_exc:
         # Check if structured tracing is enabled (for production job debugging via tlparse)
         structured_tracing_enabled = bool(trace_log.handlers)
@@ -3145,9 +3155,8 @@ def _find_infinite_capacity_path(
             if neighbor in visited:
                 continue
             edge_data = nx_graph[node][neighbor]
-            capacity = edge_data.get("capacity", 0)
-            # Check for infinite capacity (either math.inf or INT_INF)
-            if capacity == math.inf or capacity == INT_INF:
+            capacity = edge_data.get("capacity", math.inf)
+            if capacity == math.inf:
                 reason = edge_data.get("reason", "unknown")
                 new_edge = (node, neighbor, reason)
                 new_path = edge_path + [new_edge]
@@ -3461,6 +3470,8 @@ def estimate_runtime(node: fx.Node) -> float:
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
             return True
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.device):
+            return x.meta["val"]
         else:
             return x
 
@@ -3519,7 +3530,10 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-    if memory_budget == 0:
+    if memory_budget == 0 and not any(
+        node.meta.get("aot_runtime_epilogue_input_mutation", False)
+        for node in node_info.inputs
+    ):
         return node_info.inputs
 
     runtime_optimized_saved_values, _ = solve_min_cut(

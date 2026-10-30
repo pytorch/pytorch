@@ -14,6 +14,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -25,7 +26,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -55,6 +56,8 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
+from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
 
 
 if TYPE_CHECKING:
@@ -248,6 +251,9 @@ def flex_attention(
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+    elif backend == "FLYDSL":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -286,6 +292,27 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
+
+    if backend == "FLYDSL":
+        return create_flydsl_flex_attention_kernel(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            subgraph_buffer=subgraph_buffer,
+            mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+        )
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
@@ -443,7 +470,11 @@ def flex_attention(
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, seq_len_q, dtype, query.get_device().type
+        head_dim,
+        seq_len_q,
+        dtype,
+        query.get_device().type,
+        V.graph.sizevars.guard_int(v_head_dim),
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -474,12 +505,6 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
@@ -491,6 +516,7 @@ def flex_attention(
             block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("BLOCK_M", block_m)
         cur_kernel_options.setdefault("BLOCK_N", block_n)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -511,6 +537,44 @@ def flex_attention(
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # Descriptor selection runs after the tile rejection above so a config
+        # that is about to be discarded cannot install descriptor range bounds.
+        #
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and query.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -633,6 +697,54 @@ flex_attention_backward_template = TritonTemplate(
 )
 
 
+def _fuse_nested_index_backward(joint_graph: torch.fx.GraphModule) -> None:
+    r"""Fuse the backward of table[i][j] into one scatter for table[i, j]."""
+    from torch._inductor.pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    patterns = PatternMatcherPass(pass_name="flex_attention_index_backward")
+
+    def same_shape(match: Match) -> bool:
+        args = match.kwargs
+        shapes = (args["shape"][len(args["indices"]) :], args["inner_shape"])
+        remaining, inner = torch.fx.map_arg(shapes, lambda n: n.meta["val"])
+        return statically_known_true(sym_eq(remaining, inner))
+
+    @register_graph_pattern(
+        CallFunction(
+            scatter,
+            KeywordArg("shape"),
+            KeywordArg("indices"),
+            CallFunction(
+                scatter,
+                KeywordArg("inner_shape"),
+                KeywordArg("inner_indices"),
+                KeywordArg("value"),
+            ),
+        ),
+        extra_check=same_shape,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+    )
+    def fuse(match: Match, shape, indices, inner_shape, inner_indices, value):
+        match.output_node().args = (shape, [*indices, *inner_indices], value)
+        match.erase_nodes()
+
+    # Matching runs backward through the graph; repeat to collapse longer chains.
+    changed = False
+    while patterns.apply(joint_graph):
+        changed = True
+    if changed:
+        joint_graph.graph.lint()
+        joint_graph.recompile()
+
+
 def validate_joint_graph(joint_graph: torch.fx.Graph):
     """We do some pre lowering graph checks in order to raise nicer error messages"""
     for node in joint_graph.nodes:
@@ -652,7 +764,10 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
+                        "Note that this solution will use additional memory.\n\n"
+                        "For chained indexing with operations in between, such as "
+                        "(table[idx] * 2)[0], apply all indices in one indexing "
+                        "expression instead: table[idx, 0] * 2."
                     )
     return
 
@@ -838,6 +953,37 @@ def flex_attention_backward(*args, **kwargs):
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
+    if backend == "FLYDSL":
+        flydsl_result = create_flydsl_flex_attention_backward_kernel(
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            scale,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+            fw_subgraph=fw_graph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            dq_accum_fp32=cast(
+                bool,
+                kernel_options.get(
+                    "bwd_FLYDSL_DQ_ACCUM_FP32",
+                    kernel_options.get("FLYDSL_DQ_ACCUM_FP32", True),
+                ),
+            ),
+        )
+        if flydsl_result is not None:
+            return flydsl_result
+
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
         for name, dtype in [
@@ -858,6 +1004,7 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+    _fuse_nested_index_backward(joint_graph.graph_module)
 
     # It is hard to raise nice errors for some joint graphs during subgraph lowering
     # This lets us do some checks before attempting to lower
@@ -1000,7 +1147,10 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
-        head_dim, dtype, query.get_device().type
+        head_dim,
+        dtype,
+        query.get_device().type,
+        V.graph.sizevars.guard_int(v_head_dim),
     )
 
     # Default config for warp specialization

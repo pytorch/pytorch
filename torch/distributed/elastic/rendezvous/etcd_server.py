@@ -99,14 +99,16 @@ class EtcdServer:
     Usage
     ::
 
-     server = EtcdServer("/usr/bin/etcd", 2379, "/tmp/default.etcd")
+     server = EtcdServer()
      server.start()
      client = server.get_client()
      # use client
      server.stop()
 
     Args:
-        etcd_binary_path: path of etcd server binary (see above for fallback path)
+        data_dir: directory for the etcd server data. If not provided, a
+            temporary directory is created with ``tempfile.mkdtemp()`` and
+            deleted when the server stops (or on process exit).
     """
 
     def __init__(self, data_dir: str | None = None):
@@ -174,7 +176,9 @@ class EtcdServer:
             try:
                 data_dir = os.path.join(self._base_data_dir, str(curr_retries))
                 os.makedirs(data_dir, exist_ok=True)
-                return self._start(data_dir, timeout, stderr)
+                self._start(data_dir, timeout, stderr)
+                atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
+                return
             except Exception as e:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
@@ -184,7 +188,6 @@ class EtcdServer:
                 if curr_retries >= num_retries:
                     shutil.rmtree(self._base_data_dir, ignore_errors=True)
                     raise
-        atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
 
     def _start(
         self, data_dir: str, timeout: int = 60, stderr: int | TextIO | None = None

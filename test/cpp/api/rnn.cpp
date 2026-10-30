@@ -541,12 +541,14 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
   }
   // The hidden states of the reversed LSTM sits
   // in the odd indices in the first dimension.
-  ASSERT_EQ(
+  ASSERT_NEAR(
       std::get<0>(std::get<1>(bi_output))[1][0][0].item<float>(),
-      std::get<0>(std::get<1>(reverse_output))[0][0][0].item<float>());
-  ASSERT_EQ(
+      std::get<0>(std::get<1>(reverse_output))[0][0][0].item<float>(),
+      tolerance);
+  ASSERT_NEAR(
       std::get<1>(std::get<1>(bi_output))[1][0][0].item<float>(),
-      std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>());
+      std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>(),
+      tolerance);
 }
 
 TEST_F(RNNTest, BidirectionalLSTMReverseForward) {

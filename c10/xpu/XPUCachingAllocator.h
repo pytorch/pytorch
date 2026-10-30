@@ -16,6 +16,47 @@ class XPUAllocator : public DeviceAllocator {
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
+  std::pair<size_t, size_t> getMemoryInfo(
+      c10::DeviceIndex device_index) override {
+    const auto& device = c10::xpu::get_raw_device(device_index);
+    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        device.get_info<sycl::info::device::name>(),
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    const size_t free =
+        device.get_info<sycl::ext::intel::info::device::free_memory>();
+
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    const auto arch = device.get_info<syclex::info::device::architecture>();
+    if (arch < syclex::architecture::intel_gpu_bmg_g21) {
+      return {free, total};
+    }
+    // See
+    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+    constexpr double kIntegratedGpuUsableFraction = 0.94;
+#ifdef _WIN32
+    constexpr double kDiscreteGpuUsableFraction = 0.98;
+#else
+    constexpr double kDiscreteGpuUsableFraction = 0.95;
+#endif
+    const double usable_fraction =
+        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
+        ? kIntegratedGpuUsableFraction
+        : kDiscreteGpuUsableFraction;
+    const size_t free_adjust =
+        free + static_cast<size_t>((1 - usable_fraction) * total);
+    TORCH_CHECK(
+        free_adjust <= total, "Calculated free memory exceeds total memory.");
+    return {free_adjust, total};
+#else
+    return {free, total};
+#endif
+  }
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
