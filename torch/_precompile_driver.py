@@ -644,6 +644,8 @@ def _build_multigraph_forward():
         if _digest != _sha256.get(_key):
             _graph.cache_key = f"e{_digest}"
             _graph.kernel_sources = {}
+            # Maps the captured text's lines to FX nodes, not the edited text's.
+            _graph.cache_linemap = None
         _graph.source_code = _source
     compiled = {
         _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
@@ -686,10 +688,10 @@ def _build_multigraph_forward():
         scope = scopes.get(module_name)
         if scope is None:
             scope = scopes[module_name] = vars(_import(module_name))
+            # Frames find a compiled graph by name in this module, so binding
+            # different code under the name would repoint every runnable that
+            # already serves it. All are checked before any is bound.
             for _backend_id, _fn in compiled.items():
-                # Frames find a compiled graph by name in this module, so binding
-                # different code under the name would repoint every runnable that
-                # already serves it.
                 held = getattr(scope.get(_backend_id), "__precompile_graph__", None)
                 if held not in (None, _fn.__precompile_graph__):
                     raise _PrecompileError(
@@ -698,6 +700,7 @@ def _build_multigraph_forward():
                         f"copy of this capture, say); a process serves one version of "
                         f"a captured graph. Load this artifact in a fresh process."
                     )
+            for _backend_id, _fn in compiled.items():
                 _seed(scope, _backend_id, _fn)
         for _alias, _module_name in frame["import_sources"].items():
             _seed(scope, _alias, _import(_module_name))
@@ -923,6 +926,7 @@ def _build_installed_forward():
     """
     import base64
     import importlib
+    import inspect
     import operator
     import pickle
     import sys as _sys
@@ -983,6 +987,16 @@ def _build_installed_forward():
             f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
             f"which is not importable here ({_e})."
         ) from _e
+    # A decorator (torch.compiler.export_python's, say) can bind a functools.wraps
+    # wrapper under the captured name: install onto the captured function it wraps.
+    root = dynamo.codes[0].python_code
+    captured = (root.co_name, root.co_firstlineno)
+
+    def _is_captured(f):
+        code = getattr(f, "__code__", None)
+        return code is not None and (code.co_name, code.co_firstlineno) == captured
+
+    fn = inspect.unwrap(fn, stop=_is_captured)
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)

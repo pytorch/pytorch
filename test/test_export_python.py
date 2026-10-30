@@ -20,6 +20,8 @@ from torch.testing._internal.common_utils import (
 # export_python serves an artifact by importing the module its function was captured
 # from, so each test writes its functions into a fresh importable module.
 _MODULE = """
+import os
+
 import torch
 
 def scaled(x, *, scale=2.0):
@@ -47,6 +49,23 @@ def breaks(x):
     print("graph break")
     return y.cos()
 
+def flaky(x, fail):
+    y = x.sin()
+    print("graph break")
+    if fail:
+        raise ValueError("first call failed")
+    return y.cos()
+
+_ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
+
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "scaled.py"))
+def decorated_scaled(x):
+    return (x * 2.0).relu()
+
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "outer.py"))
+def decorated_outer(x):
+    return inner(x * 2) + 1
+
 def shifted(x):
     return x * 7.25 + 1
 """
@@ -64,9 +83,6 @@ def _edit_graph_code(path, old, new):
 
 
 def _in_a_fresh_process(test, body):
-    # An edited file is another version of the capture, which a process that already
-    # serves the captured version refuses, so edits are checked where an agent would
-    # run them: in the next process.
     script = (
         f"import sys, torch\nsys.path.insert(0, {test.dir!r})\n"
         f"import {test.module_name} as m\n{textwrap.dedent(body)}\nprint('served')\n"
@@ -141,27 +157,50 @@ class TestExportPython(TestCase):
 
     def test_a_new_process_serves_the_file_without_compiling(self):
         path = os.path.join(self.dir, "breaks.py")
-        x = torch.randn(4)
-        self._export("breaks", path)(x)
-        script = textwrap.dedent(
+        self._export("breaks", path)(torch.randn(4))
+        _in_a_fresh_process(
+            self,
             f"""
-            import sys, torch
-            sys.path.insert(0, {self.dir!r})
-            import {self.module_name} as m
             from torch.compiler.precompile import no_compilation
             run = torch.compiler.export_python(path={path!r})(m.breaks)
-            x = torch.load({os.path.join(self.dir, "x.pt")!r})
+            x = torch.randn(4)
             with no_compilation():
                 torch.testing.assert_close(run(x), x.sin().cos())
-            print("served")
+            """,
+        )
+
+    def test_the_decorator_serves_here_and_in_a_new_process(self):
+        # The module binds export_python's wrapper under each decorated name, which
+        # loading looks the captured function up through.
+        x = torch.randn(4)
+        for fn, expected in [
+            (self.module.decorated_scaled, (x * 2.0).relu()),
+            (self.module.decorated_outer, (x * 2).sin().cos() + 1),
+        ]:
+            self.assertEqual(fn(x), expected)
+            with no_compilation():
+                self.assertEqual(fn(x), expected)
+        _in_a_fresh_process(
+            self,
             """
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            with no_compilation():
+                torch.testing.assert_close(m.decorated_scaled(x), (x * 2.0).relu())
+                torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
+            """,
         )
-        torch.save(x, os.path.join(self.dir, "x.pt"))
-        out = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("served", out.stdout)
+
+    def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
+        path = os.path.join(self.dir, "flaky.py")
+        run = self._export("flaky", path)
+        x = torch.randn(4)
+        with self.assertRaisesRegex(ValueError, "first call failed"):
+            run(x, True)
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(run(x, False), x.sin().cos())
+        with no_compilation():
+            self.assertEqual(run(x, False), x.sin().cos())
 
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
@@ -176,7 +215,10 @@ class TestExportPython(TestCase):
         path = os.path.join(self.dir, "scaled.py")
         run = self._export("scaled", path)
         run(torch.randn(8))
-        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "no captured variant"),
+        ):
             run(torch.randn(3, 3))
 
     def test_an_edited_file_runs_the_edit(self):
@@ -201,8 +243,17 @@ class TestExportPython(TestCase):
         path = os.path.join(self.dir, "shifted.py")
         x = torch.randn(8)
         self._export("shifted", path)(x)
+        with self.assertNoLogs("torch.compiler._export_python", "INFO"):
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
         os.remove(path + ".cache")
-        self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        with self.assertLogs("torch.compiler._export_python", "INFO") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("serving it without the cache", logs.output[0])
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "delete .* to recapture"),
+        ):
+            self._export("shifted", path)(x)
 
     def test_a_main_module_function_is_refused(self):
         def fn(x):
