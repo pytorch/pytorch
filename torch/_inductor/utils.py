@@ -55,7 +55,11 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
+from torch._inductor.analysis.device_info import (
+    datasheet_dram_bw_gbs,
+    datasheet_tops,
+    xpu_runtime_tops,
+)
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
@@ -3953,6 +3957,11 @@ def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
     )
     if ds_tops is not None:
         return ds_tops
+
+    if device.type == "xpu":
+        xpu_tops = xpu_runtime_tops(dtype, is_tf32=is_tf32, device=device)
+        if xpu_tops is not None:
+            return xpu_tops
 
     if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(

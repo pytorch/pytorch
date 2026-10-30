@@ -488,6 +488,68 @@ _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
 # would otherwise be credited with the whole card's throughput.
 _DEVICE_NAME_VARIANT_SUFFIXES = ("VF", "HF")
 
+# Peak FLOPs per clock per Xe core on Intel GPUs, keyed by the (major, minor)
+# IP version that `torch.xpu.get_device_properties().version` reports. Keyed on
+# the architecture rather than the SKU, so a new SKU of a listed architecture
+# needs no datasheet entry. Only rates that reproduce the Intel datasheet
+# entries above are listed; a missing architecture or dtype returns None.
+#   Xe-HPC: Max 1100 (56 cores, 1.55GHz) -> fp32 22.2, fp16 355.5, int8 711.1
+#   Xe2:    Arc Pro B70 (32 cores, 2.8GHz) -> fp32 22.94, fp16 183.5, int8 367
+_XPU_FLOPS_PER_CLOCK_PER_XE_CORE: dict[tuple[int, int], dict[torch.dtype, int]] = {
+    (12, 60): {  # Xe-HPC, Ponte Vecchio
+        torch.float32: 256,
+        torch.float16: 4096,
+        torch.bfloat16: 4096,
+        torch.int8: 8192,
+    },
+    (20, 1): {  # Xe2, Battlemage G21
+        torch.float32: 256,
+        torch.float16: 2048,
+        torch.bfloat16: 2048,
+        torch.int8: 4096,
+    },
+}
+
+
+def _xpu_core_clock_khz(index: int) -> int | None:
+    # torch.xpu does not expose the core clock; Triton's XPU driver does.
+    from triton.runtime import driver
+
+    if driver.active.get_current_target().backend != "xpu":
+        return None
+    return driver.active.utils.get_device_properties(index)["sm_clock_rate"]
+
+
+def xpu_runtime_tops(
+    dtype: torch.dtype, is_tf32: bool = False, device: torch.device | None = None
+) -> float | None:
+    """
+    Theoretical peak TFLOPS of an Intel GPU with no datasheet entry, from its
+    Xe core count, core clock and architecture. None if any of them is unknown.
+    """
+    index = 0 if device is None or device.index is None else device.index
+    props = torch.xpu.get_device_properties(index)
+    try:
+        major, minor = (int(v) for v in props.version.split(".")[:2])
+    except ValueError:
+        return None
+    rates = _XPU_FLOPS_PER_CLOCK_PER_XE_CORE.get((major, minor), {})
+    # No tf32 rate is listed yet, so tf32 matmuls stay unknown.
+    per_clock = None if dtype == torch.float32 and is_tf32 else rates.get(dtype)
+    if per_clock is None:
+        log.info("No XPU peak-FLOPS rate for %s on %s", dtype, props.version)
+        return None
+
+    try:
+        clock_khz = _xpu_core_clock_khz(index)
+    except Exception:
+        log.info("Could not read the XPU core clock", exc_info=True)
+        return None
+    if not clock_khz:
+        return None
+
+    return props.gpu_subslice_count * per_clock * clock_khz * 1e3 / 1e12
+
 
 def register_device_info(name: str, info: DeviceInfo) -> None:
     """Register backend performance information before runtime estimation."""

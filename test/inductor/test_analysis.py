@@ -5,10 +5,12 @@ import tempfile
 import unittest
 import uuid
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
+from torch._inductor.analysis import device_info
 from torch._inductor.analysis.device_info import (
     _device_mapping,
     datasheet_dram_bw_gbs,
@@ -16,6 +18,7 @@ from torch._inductor.analysis.device_info import (
     DeviceInfo,
     lookup_device_info,
     register_device_info,
+    xpu_runtime_tops,
 )
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
@@ -407,6 +410,36 @@ class TestUtils(TestCase):
             with self.subTest(name=name):
                 ratio = info.tops[torch.float32] / info.tops[torch.float64]
                 self.assertAlmostEqual(ratio, 32.0, delta=0.5)
+
+    def test_xpu_runtime_tops_matches_datasheet(self):
+        # The per-architecture rates must reproduce the Intel datasheet entries.
+        for name, version, cores, clock in (
+            ("Intel(R) Data Center GPU Max 1100", "12.60.7", 56, 1550000),
+            ("INTEL B70", "20.1.0", 32, 2800000),
+        ):
+            info = lookup_device_info(name)
+            props = SimpleNamespace(version=version, gpu_subslice_count=cores)
+            with (
+                patch("torch.xpu.get_device_properties", return_value=props),
+                patch.object(device_info, "_xpu_core_clock_khz", return_value=clock),
+            ):
+                for dtype in (torch.float32, torch.float16, torch.bfloat16, torch.int8):
+                    with self.subTest(name=name, dtype=dtype):
+                        self.assertAlmostEqual(
+                            xpu_runtime_tops(dtype), info.tops[dtype], delta=0.1
+                        )
+                # Rates not checked against Intel's figures are left unknown.
+                self.assertIsNone(xpu_runtime_tops(torch.float8_e4m3fn))
+                self.assertIsNone(xpu_runtime_tops(torch.float64))
+                self.assertIsNone(xpu_runtime_tops(torch.float32, is_tf32=True))
+
+    def test_xpu_runtime_tops_unknown_architecture(self):
+        props = SimpleNamespace(version="30.0.4", gpu_subslice_count=12)
+        with (
+            patch("torch.xpu.get_device_properties", return_value=props),
+            patch.object(device_info, "_xpu_core_clock_khz", return_value=2500000),
+        ):
+            self.assertIsNone(xpu_runtime_tops(torch.float16))
 
 
 def has_supported_gpu():
