@@ -571,16 +571,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.code_hash: str | None = None
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
-        self.is_native_matmul = False
-        if config.triton.native_matmul:
-            for node in self.features.node_schedule:
-                if (
-                    isinstance(node, scheduler.SchedulerNode)
-                    and isinstance(node.node, ir.ComputedBuffer)
-                    and node.node.get_reduction_type() == "dot"
-                ):
-                    self.is_native_matmul = True
-                    break
+        self.is_native_matmul = self.features.is_native_matmul()
 
         # define this in a closure to make cache local to object
         @functools.cache
