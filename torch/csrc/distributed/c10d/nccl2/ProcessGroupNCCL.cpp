@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -52,11 +53,11 @@ void checkSameDtype(
 }
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-// A communicator listed for dumpNcclComms(). unlistComm() clears live before
-// the communicator is aborted, revoked or destroyed, then waits (bounded) for a
-// dump holding mutex.
+// A communicator listed for dumpNcclComms(). Dumps hold mutex shared.
+// unlistComm() clears live before the communicator is aborted, revoked or
+// destroyed, then waits (bounded) for dumps to release mutex.
 struct LiveComm {
-  std::timed_mutex mutex;
+  std::shared_timed_mutex mutex;
   std::atomic<bool> live{true};
   ncclComm_t comm;
   // How long unlistComm() waits for a dump. Read at publish, as reading the
@@ -380,11 +381,16 @@ void ProcessGroupNCCL::initNcclResources() {
   // here must not leave a joinable thread behind.
   publishComm();
 
-  if (!blocking_wait_ && !shutdown_) {
-    timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
+  try {
+    if (!blocking_wait_ && !shutdown_) {
+      timeout_thread_ = std::thread(&ProcessGroupNCCL::timeoutWatchdog, this);
+    }
+    attachMemoryHook();
+  } catch (...) {
+    // init_state_ stays uninitialized, so no teardown path would retire it.
+    retireComm();
+    throw;
   }
-
-  attachMemoryHook();
 }
 
 void ProcessGroupNCCL::initFromComm(
@@ -864,7 +870,8 @@ void ProcessGroupNCCL::unlistComm() {
   // wait for it only as long as the abort path waits for a dump; past that the
   // communicator is torn down under it, as in ProcessGroupNCCL.
   entry->live = false;
-  std::unique_lock<std::timed_mutex> lock(entry->mutex, entry->unlistTimeout);
+  std::unique_lock<std::shared_timed_mutex> lock(
+      entry->mutex, entry->unlistTimeout);
   if (!lock.owns_lock()) {
     TC_LOG(WARNING, this) << "Tearing down NCCL communicator after waiting "
                           << entry->unlistTimeout.count()
@@ -890,7 +897,7 @@ void ProcessGroupNCCL::setGroupUid(const std::string& pg_uid) {
 std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
 dumpNcclComms() {
   // Snapshot under the registry lock and dump outside it, as a dump might
-  // hang. Skip communicators being torn down or dumped by another thread.
+  // hang. Skip communicators being torn down; concurrent dumps share the lock.
   std::vector<std::pair<std::shared_ptr<LiveComm>, std::string>> entries;
   {
     std::lock_guard<std::mutex> lock(liveCommsMutex());
@@ -901,7 +908,8 @@ dumpNcclComms() {
   std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
       dumps;
   for (const auto& [entry, name] : entries) {
-    std::unique_lock<std::timed_mutex> lock(entry->mutex, std::try_to_lock);
+    std::shared_lock<std::shared_timed_mutex> lock(
+        entry->mutex, std::try_to_lock);
     if (!lock.owns_lock() || !entry->live) {
       continue;
     }

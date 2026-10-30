@@ -37,7 +37,13 @@
 #include <optional>
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
-#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+namespace c10d::nccl2 {
+// Defined in nccl2/ProcessGroupNCCL.cpp; declared here to avoid including the
+// nccl2 backend header.
+TORCH_API std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>
+    dumpNcclComms();
+} // namespace c10d::nccl2
 #endif
 
 namespace c10d {
