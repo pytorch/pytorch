@@ -793,9 +793,13 @@ def register_multi_grad_hook(
                     curr_count, count[id] = count[id], count[id] + 1
 
                     if curr_count == 0:
-                        # On the first call, compute the actual nb_calls and buffer
+                        # On the first call, compute how many of these tensors will
+                        # actually have their hooks fire. Use _will_execute_tensor_hook
+                        # rather than _will_engine_execute_node: during autograd.grad()
+                        # leaf AccumulateGrad nodes are captured, not executed, but
+                        # tensor hooks on those leaves still fire (issue #131753).
                         nb_calls = sum(
-                            map(torch._C._will_engine_execute_node, grad_fns)
+                            map(torch._C._will_execute_tensor_hook, grad_fns)
                         )
 
                 buffer[id][idx] = grad
