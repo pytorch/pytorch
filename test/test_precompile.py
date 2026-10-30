@@ -10738,7 +10738,7 @@ class TestPrecompileCustomOpRecording(TestCase):
 
     def test_an_overloaded_custom_op_records_its_module_and_kernel_callers(self):
         from torch._library.custom_ops import OPDEFS
-        from torch._precompile import _custom_op_modules
+        from torch._precompile import _custom_op_modules, _warn_unregistered_ops
 
         ns = f"precompile_recording_{uuid.uuid4().hex}"
 
@@ -10758,8 +10758,11 @@ class TestPrecompileCustomOpRecording(TestCase):
         found = _custom_op_modules({(f"{ns}::f", "ovl"): ("CPU",)})
         self.assertEqual(
             (found.modules, found.unrecorded, found.untracked_kernels),
-            ((module.__name__,), (), ((f"{ns}::f", "CPU"),)),
+            ((module.__name__,), (), ((f"{ns}::f.ovl", "CPU"),)),
         )
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            _warn_unregistered_ops(found)
+        self.assertIn(f"{ns}::f.ovl (CPU)", logs.output[0])
 
     def test_custom_op_modules_reports_the_ops_no_module_registers(self):
         from torch._native import registry as native_registry
