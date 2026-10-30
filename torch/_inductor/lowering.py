@@ -8664,6 +8664,20 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
 
 
+def _with_positional_alpha(lowering, self, other, alpha=1):
+    return lowering(self, other, alpha=alpha)
+
+
+# The Scalar schemas declare alpha positionally, so make_pointwise would
+# otherwise receive it as a third operand.
+register_lowering(aten.add.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, add)
+)
+register_lowering(aten.sub.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, sub)
+)
+
+
 @register_lowering(aten.addcmul, broadcast=True)
 def addcmul(self, tensor1, tensor2, *, value=1):
     """
