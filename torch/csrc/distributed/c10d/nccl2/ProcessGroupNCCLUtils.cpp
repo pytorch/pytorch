@@ -316,6 +316,14 @@ void ProcessGroupNCCL::checkWorkQueue() {
   // the hooks are for (capture debug info about the failure, e.g.
   // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
   // called more than once per failure, since the teardown paths still fire.
+  //
+  // Under blocking wait the process survives and the failed work stays at the
+  // queue head, so once the group has failed (here, in wait(), or through
+  // abort() or a failed split/shrink) skip the state update and the hooks for
+  // every later collective.
+  if (blocking_wait_ && comm_state_ != CommState::NORMAL) {
+    return;
+  }
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
@@ -444,16 +452,22 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      TORCH_CHECK(false, "NCCL operation timed out");
     } else {
       handleWatchdogFailure("timeout - collective operation timed out");
-      TORCH_CHECK(false, "NCCL operation timed out");
     }
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        false,
+        "NCCL operation timed out on rank ",
+        rank_,
+        nccl_comm_ ? "" : "; the communicator was aborted");
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog
     // thread, so a later collective cannot query the original NCCL error.
-    TORCH_CHECK(
-        nccl_comm_, "NCCL communicator was aborted after a previous error");
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        nccl_comm_,
+        "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -466,15 +480,13 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
       revokeNcclComm();
-      // The constructor reads the communicator's last error, which the
-      // commRevoke() inside revokeNcclComm() overwrites, so the exception has
-      // to be built first. A check macro would raise before the revoke ran.
-      // @allow-raw-throw: the revoke above clobbers its last error
-      throw std::move(ncclException);
+      // The NCCLException constructor reads the communicator's last error,
+      // which the commRevoke() inside revokeNcclComm() overwrites, so its
+      // message is captured first.
+      C10_THROW_ERROR(DistBackendError, ncclException.what());
     }
     handleWatchdogFailure(std::string("error - ") + ncclException.what());
-    // @allow-raw-throw: its what() is an argument to the call above
-    throw std::move(ncclException);
+    C10_THROW_ERROR(DistBackendError, ncclException.what());
   }
 }
 

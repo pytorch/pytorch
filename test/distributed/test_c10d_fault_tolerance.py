@@ -425,7 +425,7 @@ class AbstractFaultToleranceTest:
                 ):
                     time.sleep(0.1)
                 self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
-                with self.assertRaisesRegex(RuntimeError, "timed out"):
+                with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
                     dist.all_reduce(tensor, async_op=True)
             del work
 

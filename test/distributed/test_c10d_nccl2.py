@@ -1679,6 +1679,10 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
         # Must return instead of ::abort()ing the process, like stock NCCL.
         backend.abort()
         self.assertEqual(backend.get_error(), ErrorType.COMM_ERROR)
+        with self.assertRaisesRegex(
+            dist.DistBackendError, "aborted after a previous error"
+        ):
+            dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()
@@ -1729,7 +1733,9 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
             # The next collective on the timed-out group raises rather than
             # silently proceeding on a dead communicator.
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                dist.DistBackendError, r"^NCCL operation timed out on rank 0"
+            ):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
@@ -1754,7 +1760,9 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                dist.DistBackendError, r"^NCCL operation timed out on rank 0"
+            ):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
@@ -1762,6 +1770,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce()
 
 
+@instantiate_parametrized_tests
 class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
@@ -1770,17 +1779,78 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_wait_times_out_and_process_survives(self) -> None:
-        pg = self._new_subgroup(timeout=timedelta(seconds=5))
+    @parametrize("waited", [True, False])
+    @parametrize("async_error_handling", ["0", "1", "2", "3"])
+    def test_collective_after_timeout_raises(
+        self, async_error_handling, waited
+    ) -> None:
+        # Under blocking wait the process is never ::abort()ed, whatever
+        # TORCH_NCCL_ASYNC_ERROR_HANDLING says (even TearDown=1), matching
+        # legacy.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": async_error_handling}
+        with mock.patch.dict(os.environ, env):
+            pg = self._new_subgroup(timeout=timedelta(seconds=5))
+        backend = pg._get_backend(self.device)
         self._check_all_reduce(pg)
 
         if self.rank == 0:
+            hook_calls = []
+            backend.register_abort_hook(0, lambda: hook_calls.append(1))
             dist.set_timeout(timedelta(milliseconds=1), group=pg)
             work = dist.all_reduce(
                 torch.ones(1024, device=self.device), group=pg, async_op=True
             )
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
+            if waited:
+                with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+                    work.wait()
+            else:
+                # Never completes. Poll until the 1 ms timeout has passed so
+                # the next collective's pre-check detects it.
+                deadline = time.monotonic() + 60
+                while not work.is_completed():
+                    self.assertLess(time.monotonic(), deadline)
+            for _ in range(2):
+                with self.assertRaisesRegex(
+                    dist.DistBackendError,
+                    r"^NCCL operation timed out on rank 0; "
+                    "the communicator was aborted",
+                ):
+                    dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
                 work.wait()
+            self.assertEqual(backend.comm_ptr, 0)
+            # The failed work stays at the queue head; later collectives and
+            # waits must not rerun the hooks.
+            self.assertEqual(len(hook_calls), 1)
+
+        self._wait_for_rank_zero(pg)
+        self._abort_timed_out_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_collective_after_abort_raises(self) -> None:
+        pg = self._new_subgroup()
+        backend = pg._get_backend(self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            hook_calls = []
+            backend.register_abort_hook(0, lambda: hook_calls.append(1))
+            # Unmatched, so it is still in flight at the head of the queue.
+            work = dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
+            backend.abort()
+            for _ in range(2):
+                with self.assertRaisesRegex(
+                    dist.DistBackendError, "aborted after a previous error"
+                ):
+                    dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            with self.assertRaisesRegex(dist.DistBackendError, "NCCL operation failed"):
+                work.wait()
+            # A requested abort is not a detected failure: no hooks.
+            self.assertEqual(hook_calls, [])
 
         self._wait_for_rank_zero(pg)
         self._abort_timed_out_group(pg)

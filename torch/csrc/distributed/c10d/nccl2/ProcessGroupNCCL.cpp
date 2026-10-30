@@ -658,14 +658,14 @@ void ProcessGroupNCCL::finalize() {
 void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
   retireComm();
-  if (nccl_comm_) {
+  // Drop the handle first so a failed or timed-out abort is never retried.
+  if (auto comm = std::exchange(nccl_comm_, nullptr)) {
     waitForNcclCompletion(
         *nccl_api_,
-        nccl_comm_,
-        nccl_api_->commAbort(nccl_comm_),
+        comm,
+        nccl_api_->commAbort(comm),
         options_c10d_->timeout,
         "NCCL Abort failed");
-    nccl_comm_ = nullptr;
   }
 }
 
@@ -712,6 +712,26 @@ void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
     return;
   }
 
+  // Like stock ProcessGroupNCCL, the caller gets an exception, not ::abort().
+  // The lock serializes with handleBlockingWaitFailure() on a wait() thread,
+  // which may already have aborted the communicator, and with reconfigure(),
+  // which resets comm_state_ to NORMAL, so a new communicator is never aborted
+  // here (the caller still raises the stale error).
+  if (blocking_wait_) {
+    std::lock_guard reconfigureLock(reconfigure_mutex_);
+    if (comm_state_ == CommState::NORMAL || !nccl_comm_) {
+      return;
+    }
+    try {
+      abortNcclComm();
+    } catch (const std::exception& e) {
+      // Keep the caller's original error.
+      TC_LOG(ERROR, this) << "Failed to abort NCCL communicator after "
+                          << reason << ": " << e.what();
+    }
+    return;
+  }
+
   if (SHOULD_CLEAN_UP(async_error_handling_)) {
     if (timeout_thread_.joinable() &&
         std::this_thread::get_id() == timeout_thread_.get_id()) {
@@ -739,13 +759,25 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   if (reconfigure_uuid_ != reconfigure_uuid) {
     return;
   }
-  comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT ? CommState::TIMEOUT
-                                                         : CommState::ERROR;
+  // The failure may already have been handled by a collective or an earlier
+  // wait(); keep its state and run the hooks only once.
+  const bool firstFailure = comm_state_ == CommState::NORMAL;
+  if (firstFailure) {
+    comm_state_ = status == WorkNCCL::WorkStatus::TIMEDOUT ? CommState::TIMEOUT
+                                                           : CommState::ERROR;
+  }
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
-  } else {
+    return;
+  }
+  if (firstFailure) {
     runAbortHooks();
+  }
+  try {
     abortNcclComm();
+  } catch (const std::exception& e) {
+    // Keep the work's own error.
+    TC_LOG(ERROR, this) << "Failed to abort NCCL communicator: " << e.what();
   }
 }
 
