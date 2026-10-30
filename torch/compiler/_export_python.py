@@ -57,21 +57,7 @@ def export_python(
     recompiling. Nothing hashes the function, its config or the machine, so editing
     the function does not recapture it: delete ``path`` to recapture. Concurrent first
     calls in one process capture once; processes that share ``path`` (the ranks of one
-    job, say) should let one of them make the first call.
-
-    ``path`` is also the artifact to edit: each compiled graph's Inductor code is in
-    its ``GRAPH_SOURCES`` section, and that text is what runs. An edited file is
-    served without its cache, which was built for the captured text and stays stale
-    until a recapture replaces it, so its edited graphs compile the kernels their
-    text defines, which :func:`~torch.compiler.precompile.no_compilation` forbids.
-    With the inductor backend the capture tunes its Triton kernels at compile time (it
-    compiles as inductor does under ``triton.autotune_at_compile_time``), so a graph's
-    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
-    generated launches with: editing a row changes that kernel's launch config. A
-    template (flex attention, say) or a user-defined kernel keeps its config in its own
-    decorator instead, editable the same way. A process serves one version of a
-    capture: rerun in a new process to pick up an edit, since loading the edited file
-    where an earlier version of it is loaded raises::
+    job, say) should let one of them make the first call::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
@@ -80,6 +66,26 @@ def export_python(
 
         y = step(model, x)  # first run: captures and writes artifacts/step.py
         y = step(model, x)  # served from artifacts/step.py, here or in a new process
+
+    Capture in a fresh process: a frame that something else in the process already
+    compiles or serves when the capture reaches it (a function another loaded artifact
+    serves, or one compiled with :func:`torch.compile`) is not compiled into the
+    artifact, which then runs that frame uncompiled.
+
+    ``path`` is also the artifact to edit: each compiled graph's Inductor code is in
+    its ``GRAPH_SOURCES`` section, and that text is what runs. An edited file is
+    served without its cache, which was built for the captured text, so its edited
+    graphs compile their own kernels; :func:`~torch.compiler.precompile.no_compilation`
+    refuses that. The stale cache stays until a recapture replaces it. A process
+    serves one version of a capture: run a new process to pick up an edit, since
+    loading the edited file where an earlier version of it is loaded raises.
+
+    With the inductor backend the capture tunes its Triton kernels at compile time (it
+    compiles as inductor does under ``triton.autotune_at_compile_time``), so a graph's
+    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
+    generated launches with: editing a row changes that kernel's launch config. A
+    template (flex attention, say) or a user-defined kernel keeps its config in its
+    own decorator instead, editable the same way.
 
     The artifact is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
@@ -91,7 +97,8 @@ def export_python(
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
         check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
-            too) on every served call, on copies of the tensor arguments, and raise
+            too, as during compiler-internal tracing) on every served call, on copies
+            of the tensor arguments, and raise
             :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
             arguments after any in-place writes, differ beyond
             ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
@@ -225,7 +232,7 @@ class _ExportedPython:
                     from torch._inductor import config as inductor_config
 
                     # Tuning at compile time writes each graph's KERNEL_CONFIGS table:
-                    # the config every kernel tuned to and launches with.
+                    # the config each inductor-generated kernel tuned to and launches with.
                     stack.enter_context(
                         inductor_config.patch({"triton.autotune_at_compile_time": True})
                     )

@@ -4985,6 +4985,16 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
 
+    def test_a_renamed_graph_source_key_is_refused(self):
+        with self._capture(self.mod.scaled) as cap:
+            cap(torch.randn(8))
+        with open(self.artifact) as f:
+            src = f.read()
+        with open(self.artifact, "w") as f:
+            f.write(src.replace(".fw'] = ", ".fx'] = ", 1))
+        with self.assertRaisesRegex(PrecompileError, r"missing \['.*\.fw'\]"):
+            load(self.artifact, None)
+
     def test_an_edited_backward_graph_runs(self):
         x = torch.randn(8, requires_grad=True)
         with self._capture(self.mod.scaled_backward) as cap:
