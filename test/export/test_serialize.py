@@ -2775,7 +2775,7 @@ class TestPredispatchSerialization(TestCase):
                     out.strip().splitlines()[-1], str([t.tolist() for t in expected])
                 )
 
-    def test_predispatch_flat_apply_non_torch_function_raises(self):
+    def test_predispatch_flat_apply_unloadable_function_raises(self):
         from torch._export.wrappers import allow_in_pre_dispatch_graph
         from torch.testing._internal.two_tensor import TwoTensor
 
@@ -2814,13 +2814,21 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return Scale.apply(x) + 1
 
+        # A class defined inside a function cannot be imported by name. The
+        # message depends on whether this file runs as __main__.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "cannot be used as a flat_apply"):
+        with self.assertRaisesRegex(SerializeError, "Could not import|__main__ module"):
             torch.export.save(ep, io.BytesIO())
 
-        ep = export(Bar(), (torch.randn(4),), strict=False)
-        with self.assertRaisesRegex(SerializeError, "cannot be imported by name"):
-            torch.export.save(ep, io.BytesIO())
+        # An autograd function defined in the main script runs in memory, but
+        # another process could not find it.
+        Scale.__module__, Scale.__qualname__ = "__main__", "Scale"
+        with patch.object(sys.modules["__main__"], "Scale", Scale, create=True):
+            x = torch.randn(4)
+            ep = export(Bar(), (x,), strict=False)
+            self.assertEqual(ep.module()(x), x * 2 + 1)
+            with self.assertRaisesRegex(SerializeError, "__main__ module"):
+                torch.export.save(ep, io.BytesIO())
 
     def test_predispatch_flat_apply_load_rejects_other_functions(self):
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
@@ -2842,17 +2850,18 @@ class TestPredispatchSerialization(TestCase):
         self.assertIn(cls_name, artifact.exported_program)
         deserialize(artifact)
 
-        for old, new in [
-            (func_name, b'"os.system"'),
-            (func_name, b'"torch.os.system"'),
-            (func_name, b'"torch.builtins.exec"'),
-            (func_name, b'"torch.does_not_exist.f"'),
-            (func_name, b'"torch.utils.model_dump.__main__.main"'),
-            (cls_name, b'"os.system"'),
-            (cls_name, b'"torch.os.system"'),
+        for old, new, reason in [
+            (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
+            (func_name, b'"os.system"', "Could not import"),
+            (func_name, b'"torch.os.system"', "Could not import"),
+            (func_name, b'"torch.builtins.exec"', "Could not import"),
+            (func_name, b'"torch.does_not_exist.f"', "Could not import"),
+            (func_name, b'"torch.utils.model_dump.__main__.main"', "__main__ module"),
+            (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
+            (cls_name, b'"torch.os.system"', "Could not import"),
         ]:
             payload = artifact.exported_program.replace(old, new)
-            with self.assertRaises(SerializeError, msg=new):
+            with self.assertRaisesRegex(SerializeError, reason, msg=new):
                 deserialize(
                     SerializedArtifact(
                         payload,
