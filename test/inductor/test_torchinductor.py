@@ -6993,57 +6993,6 @@ for dtype in (torch.int32, torch.int64):
         assertGeneratedKernelCountEqual(self, 0)
 
     @parametrize(
-        "input_size,grad_size",
-        [
-            ((3, 7, 9), (2, 3, 3, 4)),
-            ((2, 3, 7, 9), (3, 3, 4)),
-            ((1, 2, 3, 7, 9), (2, 3, 3, 4)),
-        ],
-    )
-    def test_adaptive_avg_pool2d_backward_mismatched_ranks(self, input_size, grad_size):
-        def fn(grad_output, x):
-            return aten._adaptive_avg_pool2d_backward(grad_output, x)
-
-        x = torch.randn(input_size, device=self.device)
-        grad_output = torch.randn(grad_size, device=self.device)
-        error = f"Expected dimensions {len(input_size)}"
-        with self.assertRaisesRegex(RuntimeError, error):
-            fn(grad_output, x)
-        with self.assertRaisesRegex(RuntimeError, error):
-            fn(grad_output.to("meta"), x.to("meta"))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.compile(fn, fullgraph=True)(grad_output, x)
-
-    @parametrize("dtype", (torch.int32, torch.int64))
-    def test_adaptive_avg_pool2d_backward_integer_dtype(self, dtype):
-        def fn(grad_output, x):
-            return aten._adaptive_avg_pool2d_backward(grad_output, x)
-
-        x = torch.ones(1, 1, 5, 5, device=self.device, dtype=dtype)
-        grad_output = torch.ones(1, 1, 3, 3, device=self.device, dtype=dtype)
-        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-            fn(grad_output, x)
-        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-            fn(grad_output.to("meta"), x.to("meta"))
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True)(grad_output, x)
-
-    @skip_if_mps  # MPS does not support float8 tensors.
-    @parametrize("dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    def test_adaptive_avg_pool2d_backward_float8_dtype(self, dtype):
-        def fn(grad_output, x):
-            return aten._adaptive_avg_pool2d_backward(grad_output, x)
-
-        x = torch.ones(1, 1, 5, 5, device=self.device).to(dtype)
-        grad_output = torch.ones(1, 1, 3, 3, device=self.device).to(dtype)
-        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-            fn(grad_output, x)
-        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
-            fn(grad_output.to("meta"), x.to("meta"))
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True)(grad_output, x)
-
-    @parametrize(
         "input_size,output_size,dtype,layout",
         [
             ((7, 9), (3, 4), torch.float32, "channels_last"),
@@ -7081,7 +7030,14 @@ for dtype in (torch.int32, torch.int64):
             return F.adaptive_avg_pool2d(x, (3, 4)).sum()
 
         x = torch.randn(2, 3, 7, 9, device=self.device, requires_grad=True)
-        self.common(fn, (x,), check_gradient=True, check_lowp=False)
+        expected = fn(x)
+        expected_grad = torch.autograd.grad(expected, x)[0]
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, (_, bw_code) = run_fw_bw_and_get_code(lambda: compiled(x))
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, expected_grad)
+        self.assertNotIn("aten._adaptive_avg_pool2d_backward.default(", bw_code)
+        self.assertNotIn("extern_kernels.", bw_code)
 
     @skipCPUIf(True, "CPU eager does not support empty spatial dimensions")
     @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.

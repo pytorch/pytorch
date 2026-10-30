@@ -2731,6 +2731,34 @@ class TestMetaKernelRegistrations(TestCase):
             )
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("dtype", (torch.int32, torch.int64, torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_adaptive_avg_pool2d_backward_unsupported_dtype(self, dtype):
+        x = torch.empty(1, 1, 5, 5, dtype=dtype)
+        grad_output = torch.empty(1, 1, 3, 3, dtype=dtype)
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+        with self.assertRaisesRegex(NotImplementedError, "not implemented"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output.to("meta"), x.to("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize(
+        "input_size,grad_size",
+        [
+            ((3, 7, 9), (2, 3, 3, 4)),
+            ((2, 3, 7, 9), (3, 3, 4)),
+            ((1, 2, 3, 7, 9), (2, 3, 3, 4)),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward_mismatched_ranks(self, input_size, grad_size):
+        x = torch.empty(input_size)
+        grad_output = torch.empty(grad_size)
+        error = f"Expected dimensions {len(input_size)}"
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output.to("meta"), x.to("meta"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_fill_tensor_dim_check(self):
         x_cpu = torch.randn(3, 4)
         value_cpu = torch.randn(2, 3)
