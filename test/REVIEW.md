@@ -35,7 +35,6 @@ the rules only to files not in the allowlist:
   - The PR also changes files outside `test/` or `torch/testing/`.
   - **Or** the PR title or description indicates that it is not a test-case
     refactoring.
-
 - Case 1: the changed file is in `tools/linter/adapters/test_linter_allowlist.json`
   - Rules: none (not yet migrated; skip checking)
 - Case 2: the changed file is not in the allowlist
@@ -54,7 +53,7 @@ Notes:
 - The rules referenced below are defined in the following sections of this
 document; apply the rules listed for a case to the files named in its Scope.
 - The scenario is decided by the PR's changed files and its stated purpose
-  in the title or description, as specified in the Conditions above.
+in the title or description, as specified in the Conditions above.
 
 ## Rule 1: One responsibility per test class
 
