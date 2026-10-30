@@ -722,13 +722,65 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     return composite_fn
 
 
+def _has_depth0_double_colon(name):
+    """
+    Returns True if the name contains a "::" outside of any bracket pair.
+
+    pytest splits selection arguments on every "::" and matches collector
+    levels exactly, so a bare "::" inside a test name makes its nodeid
+    unselectable (the test is still collected, but can never be run by
+    nodeid). "::" inside [...] is fine: pytest's selection matcher rejoins
+    bracketed parts, so ids like test_foo[aten::add] stay selectable.
+    """
+    depth = 0
+    for i, ch in enumerate(name):
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth = max(0, depth - 1)
+        elif ch == ':' and depth == 0 and name[i:i + 2] == '::':
+            return True
+    return False
+
+
+def _sanitize_name_fragment(s):
+    """
+    Sanitizes a value's string form for embedding into a test function name.
+
+    Test names become part of pytest nodeids, which are consumed far beyond
+    the defining process: pytest splits selection arguments on "::" (a bare
+    "::" makes the nodeid unselectable), and line-oriented consumers
+    (``pytest --collect-only -q``, logs, JUnit XML) cannot represent line
+    separators. str.isprintable() is False for control/format/separator
+    characters, which also covers the XML-1.0-illegal range. "::" is
+    replaced everywhere: bracket-internal colons happen to be selectable
+    via pytest's matcher rejoin, but that is an undocumented implementation
+    detail that name safety should not depend on.
+    """
+    s = "".join(ch if ch.isprintable() else "_" for ch in s)
+    s = s.replace("::", "_")
+    s = s.replace(".", "_")
+    return s.strip() or "_"
+
+
 def validate_test_name(name):
     """
-    Validates a generated test name at instantiation time. In particular, test names must
-    not contain '.': unittest.TestLoader.loadTestsFromName resolves dotted names by
-    splitting on '.' and walking with getattr, so a dotted test name is discoverable in a
-    full-suite run but breaks any attempt to load the test by name (e.g.
-    `python test_foo.py TestClass.test_name`).
+    Validates a generated test name at instantiation time. A test name
+    becomes part of the pytest nodeid and must stay usable beyond the
+    defining process: selectable by exact nodeid, printable on a single
+    line, and loadable by name. Rejected:
+
+    - ".": unittest.TestLoader.loadTestsFromName splits on "." and walks
+      with getattr, so a dotted name is discoverable in a full-suite run
+      but breaks any attempt to load the test by name (e.g.
+      `python test_foo.py TestClass.test_name`).
+    - any non-printable character (control chars, line separators such as
+      \\n, \\r, \\v, \\f, \\x1c-\\x1e, \\x85, U+2028/U+2029): such a name cannot
+      survive line-oriented consumers of nodeids (pytest --collect-only -q
+      prints one nodeid per line) and can make JUnit XML unparseable.
+    - "::" outside brackets: pytest splits selection arguments on "::", so
+      such a nodeid can never be selected individually.
+    - leading/trailing whitespace.
     """
     if '.' in name:
         raise RuntimeError(
@@ -738,6 +790,21 @@ def validate_test_name(name):
             'name that interpolates a value whose string form contains a dot (e.g. '
             'str(torch.bfloat16) == "torch.bfloat16" or a float). Use dtype_name() for '
             'dtypes, or sanitize the generated name (e.g. .replace(".", "_")).')
+    if any(not ch.isprintable() for ch in name):
+        raise RuntimeError(
+            f'Test name {name!r} is invalid: it contains a control or line-separator '
+            'character, which cannot survive line-oriented consumers of nodeids '
+            '(pytest --collect-only -q prints one nodeid per line) and can make JUnit '
+            'XML unparseable. Sanitize the generated name or use name_fn.')
+    if _has_depth0_double_colon(name):
+        raise RuntimeError(
+            f'Test name {name!r} is invalid: it contains "::" outside brackets, which '
+            'makes the nodeid unselectable (pytest splits selection arguments on '
+            '"::"). Replace it (e.g. "at::kCPU" -> "at_kCPU") or use name_fn.')
+    if name != name.strip():
+        raise RuntimeError(
+            f'Test name {name!r} is invalid: leading/trailing whitespace breaks '
+            'name-based loading and reporting. Strip the generated name.')
 
 
 def instantiate_parametrized_tests(generic_cls):
@@ -889,7 +956,7 @@ class parametrize(_TestParametrizer):
         elif type(value).__name__ in {'OpInfo', 'ModuleInfo'}:
             return value.formatted_name
         elif isinstance(value, (int, float, str)):
-            return f"{name}_{str(value).replace('.', '_')}"
+            return f"{name}_{_sanitize_name_fragment(str(value))}"
         else:
             return f"{name}{idx}"
 
