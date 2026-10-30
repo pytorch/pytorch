@@ -33,7 +33,6 @@ import io
 import itertools
 import logging
 import math
-import operator
 import pickle
 import sys
 import textwrap
@@ -209,6 +208,7 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    enumerate_items_with_dict_position,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -1459,11 +1459,7 @@ def check_closure(value: object, metadata: Any) -> bool:
 
 
 def _ordered_dict_order(value: collections.OrderedDict[Any, Any]) -> tuple[int, ...]:
-    # Most OrderedDicts retain storage order; avoid allocating a key-position map.
-    if all(map(operator.is_, dict.keys(value), collections.OrderedDict.keys(value))):
-        return tuple(range(dict.__len__(value)))
-    positions = {id(key): index for index, key in enumerate(dict.keys(value))}
-    return tuple(positions[id(key)] for key in collections.OrderedDict.keys(value))
+    return tuple(index for index, _, _ in enumerate_items_with_dict_position(value))
 
 
 def _nn_module_hook_membership(
@@ -3804,21 +3800,15 @@ class GuardBuilder(GuardBuilderBase):
         # Keep the container in the serialized guard state, even with a root leaf.
         self.get_guard_manager(guard)
         order = _ordered_dict_order(self.get(guard))
-        storage_order = order == tuple(range(len(order)))
-
-        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            if dict.__len__(value) != len(order):
-                return False
-            keys, linked = dict.keys(value), collections.OrderedDict.keys(value)
-            if storage_order:
-                return all(map(operator.is_, keys, linked))
-            return all(map(operator.is_, map(tuple(keys).__getitem__, order), linked))
-
-        code = [f"___ordered_dict_order_matches({self.arg_ref(guard)})"]
-        self.add_python_lambda_leaf_guard_to_root(
-            code,
-            get_verbose_code_parts(code, guard),
-            _get_closure_vars() | {"___ordered_dict_order_matches": guard_fn},
+        ref = self.arg_ref(guard)
+        get_value = eval(
+            f"lambda L: {ref}", _get_closure_vars() | {"G": self.runtime_global_scope}
+        )
+        code = [f"___ordered_dict_order_matches({ref})"]
+        # The root epilogue runs after source guards and cannot be skipped by
+        # ancestor dictionary-version shortcuts when only linked order changes.
+        self.guard_manager.root.add_ordered_dict_order_guard(
+            get_value, order, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, code)
 
@@ -4764,7 +4754,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # A concrete C++ backend such as ProcessGroupNCCL is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
         # alone let an unguarded one fail the whole frame with "cannot pickle".
         # The C++ Backend is also the Python backend extension point (a Python
@@ -5359,12 +5349,18 @@ class GuardsStatePickler(FunctionPicklerBase):
                 getattr(type(obj), name) is getattr(collections.OrderedDict, name)
                 for name in ("__new__", "__init__", "__setitem__", "items")
             )
+            order = _ordered_dict_order(obj)
+            if not preserve_storage and order != tuple(range(dict.__len__(obj))):
+                raise torch._dynamo.exc.PackageError(
+                    "Cannot preserve OrderedDict storage order with custom "
+                    "construction or item methods"
+                )
             reduced = obj.__reduce__()
             state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
             return (
                 reduced[0],
                 reduced[1],
-                (state, _ordered_dict_order(obj) if preserve_storage else ()),
+                (state, order if preserve_storage else ()),
                 reduced[3],
                 iter(dict.items(obj)) if preserve_storage else reduced[4],
                 type(self)._restore_ordered_dict_state,

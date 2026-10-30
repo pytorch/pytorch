@@ -27,6 +27,22 @@ def coalesced_co_lines(code):
 
 
 class BytecodeTests(torch._dynamo.test_case.TestCase):
+    def test_method_call_binding_roundtrip(self):
+        class Mapping(dict):
+            pass
+
+        def fn(obj):
+            try:
+                obj.popitem(1)
+            except TypeError as exc:
+                return str(exc)
+
+        code, _ = bytecode_transformation.transform_code_object(
+            fn.__code__, lambda instructions, options: None
+        )
+        rewritten = type(fn)(code, fn.__globals__)
+        self.assertEqual(rewritten(Mapping()), fn(Mapping()))
+
     def test_get_const_index_uses_identity(self):
         first = []
         equal_but_distinct = []
