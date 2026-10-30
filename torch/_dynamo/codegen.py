@@ -54,8 +54,10 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.lazy import ComputedLazyConstantVariable
+from .variables.lists import SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
+from .variables.sets import FrozensetVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -96,17 +98,6 @@ class GraphOutputEntry:
     variable: VariableTracker
 
 
-def _has_sourced_value(value: VariableTracker) -> bool:
-    has_source = False
-
-    def check(item: VariableTracker) -> None:
-        nonlocal has_source
-        has_source |= item.source is not None
-
-    VariableTracker.visit(check, value)
-    return has_source
-
-
 class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
@@ -140,7 +131,27 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self._constant_reconstruction_cache: dict[VariableTracker, bool] = {}
         self.pycodes = []
+
+    def _constant_requires_reconstruction(self, value: VariableTracker) -> bool:
+        if value.source is not None:
+            return True
+        if value in self._constant_reconstruction_cache:
+            return self._constant_reconstruction_cache[value]
+        if isinstance(value, (TupleVariable, SliceVariable)):
+            items = value.items
+        elif isinstance(value, FrozensetVariable):
+            items = [key.vt for key in value.set_items]
+        else:
+            # `is_safe_constant` accepts slices without checking their members.
+            # A mutable member must be rebuilt even when all its values are constants.
+            return not is_safe_constant(value.as_python_constant())
+        # Only aggregate data affects reconstruction, not tracker metadata. Cache
+        # immutable subtrees so reconstructing nested outputs visits each once.
+        result = any(self._constant_requires_reconstruction(item) for item in items)
+        self._constant_reconstruction_cache[value] = result
+        return result
 
     def add_pycode(self, pycode: str, *args):
         if not config.generate_pycode:
@@ -353,8 +364,13 @@ class PyCodegen:
             value.is_python_constant()
             and is_safe_constant(value.as_python_constant())
             # LOAD_CONST lets CPython intern aggregate elements. Reconstruct
-            # sourced children instead to preserve their input identity.
-            and not _has_sourced_value(value)
+            # sourced children and mutable members to preserve identity, except
+            # during export, which deliberately disables reconstruction by source.
+            and not (
+                self.value_from_source
+                and isinstance(value, (TupleVariable, FrozensetVariable, SliceVariable))
+                and self._constant_requires_reconstruction(value)
+            )
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
