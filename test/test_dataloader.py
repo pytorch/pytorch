@@ -3723,6 +3723,7 @@ class DeviceAwareCustomBatch:
 
     def pin_memory_with_device(self, device):
         self.device = device
+        self.data = self.data.pin_memory()
         return self
 
 
@@ -3857,6 +3858,7 @@ class TestCustomPinFn(TestCase):
                 "current_accelerator",
                 return_value=torch.device("cuda"),
             ),
+            mock.patch.object(torch.Tensor, "pin_memory", lambda tensor: tensor),
         ):
             loader = DataLoader(
                 self.dataset,
@@ -3879,6 +3881,7 @@ class TestCustomPinFn(TestCase):
         )
         for batch in loader:
             self.assertEqual(batch.device, torch.accelerator.current_accelerator().type)
+            self.assertTrue(batch.data.is_pinned())
 
     @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_batch_pin(self):
