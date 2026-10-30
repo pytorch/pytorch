@@ -1804,8 +1804,8 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
                 with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
                     work.wait()
             else:
-                # Never completes. With no watchdog under blocking wait, only
-                # this poll marks the work timed out once 1 ms has passed.
+                # Never completes. Poll until the 1 ms timeout has passed so
+                # the next collective's pre-check detects it.
                 deadline = time.monotonic() + 60
                 while not work.is_completed():
                     self.assertLess(time.monotonic(), deadline)
