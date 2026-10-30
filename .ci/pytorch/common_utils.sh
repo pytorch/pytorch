@@ -312,10 +312,6 @@ function install_torchao() {
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
 }
 
-function install_nccl4py() {
-  pip_install nccl4py==0.5.0
-}
-
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)
