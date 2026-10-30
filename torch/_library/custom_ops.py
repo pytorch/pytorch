@@ -261,6 +261,10 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
+        # The op's own kernel, not one the module running custom_op overrides it with.
+        result._backend_fn_callers = dict.fromkeys(
+            result._backend_fn_callers, fn.__module__
+        )
         result._opoverload._enable_pyobj_dispatch(True)
         return result
 
