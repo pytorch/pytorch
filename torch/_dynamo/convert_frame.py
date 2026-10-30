@@ -376,9 +376,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
-                    prior_deterministic, warn_only=prior_warn_only
-                )
+                if (
+                    torch.are_deterministic_algorithms_enabled()
+                    != prior_deterministic
+                    or torch.is_deterministic_algorithms_warn_only_enabled()
+                    != prior_warn_only
+                ):
+                    torch.use_deterministic_algorithms(
+                        prior_deterministic, warn_only=prior_warn_only
+                    )
                 torch.random.set_rng_state(torch_rng_state)
                 if torch.get_default_dtype() != prior_dtype:
                     torch.set_default_dtype(prior_dtype)
@@ -390,9 +396,13 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 if cuda_rng_state is not None:
                     with torch._C.DisableTorchFunction():
                         torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_fp32_precision_setter(
-                    "cuda", "matmul", cuda_matmul_fp32_prec
-                )
+                if (
+                    torch._C._get_fp32_precision_getter("cuda", "matmul")
+                    != cuda_matmul_fp32_prec
+                ):
+                    torch._C._set_fp32_precision_setter(
+                        "cuda", "matmul", cuda_matmul_fp32_prec
+                    )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 if not guards.check():
                     raise AssertionError(
