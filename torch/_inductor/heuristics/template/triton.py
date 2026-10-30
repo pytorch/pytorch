@@ -3046,7 +3046,12 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
-        element_size = mat2.get_dtype().itemsize
+        dtype = mat2.get_dtype()
+        element_size = dtype.itemsize
+        ieee_fp32 = dtype == torch.float32 and not mm_allow_tf32(
+            *kernel_inputs.mnk_symbolic(), kernel_inputs.device_type
+        )
+        max_shared_memory = self._max_shared_memory_per_block(mat2.get_device())
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3059,6 +3064,15 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             # does not support so no invalid config reaches codegen.
             if use_meta_ws and not self._autows_constraints_ok(
                 template_kwargs, element_size=element_size
+            ):
+                continue
+            if (
+                use_meta_ws
+                and max_shared_memory is not None
+                and self._autows_min_shared_memory(
+                    template_kwargs, element_size=element_size, ieee_fp32=ieee_fp32
+                )
+                > max_shared_memory
             ):
                 continue
             # Some Triton versions requires num_warps >= 4 for WS
@@ -3090,6 +3104,40 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             if two_ctas:
                 out["ctas_per_cga"] = (2, 1, 1)
             yield out
+
+    @staticmethod
+    def _max_shared_memory_per_block(device: torch.device | None) -> int | None:
+        if not isinstance(device, torch.device) or device.type != "cuda":
+            return None
+        try:
+            props = torch.cuda.get_device_properties(device)
+        except (AssertionError, RuntimeError):
+            return None
+        return getattr(props, "shared_memory_per_block_optin", None)
+
+    @staticmethod
+    def _autows_min_shared_memory(
+        template_kwargs: dict[str, Any], *, element_size: int, ieee_fp32: bool
+    ) -> int:
+        """Lower bound on the shared memory an autoWS config allocates.
+
+        The autoWS memory planner lowers the pipeline depth to fit, but keeps
+        at least one stage of the full A and B tiles (2CTA does not halve B's
+        buffer). Configs above the device limit even at that bound fail at
+        launch.
+        """
+        block_m = template_kwargs["BLOCK_M"]
+        block_n = template_kwargs["BLOCK_N"]
+        block_k = template_kwargs["BLOCK_K"]
+        shared_memory = element_size * block_k * (block_m + block_n)
+        if ieee_fp32:
+            # tcgen05 has no IEEE fp32 MMA; that lowering also keeps a copy of
+            # each column-major operand's tile (measured on B200).
+            if not template_kwargs["A_ROW_MAJOR"]:
+                shared_memory += element_size * block_k * block_m
+            if not template_kwargs["B_ROW_MAJOR"]:
+                shared_memory += element_size * block_k * block_n
+        return shared_memory
 
     @staticmethod
     def _autows_constraints_ok(
