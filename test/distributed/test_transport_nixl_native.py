@@ -220,10 +220,11 @@ def _dropped_peer_worker(rank, connection):
     connection.close()
 
 
-def _exit_after(worker, *args):
+def _run_worker(worker, *args):
+    # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
+    # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
+    os.environ.setdefault("UCX_MODULES", "^efa,rdmacm")
     worker(*args)
-    # NIXL 1.5 can segfault during interpreter teardown after a clean close.
-    os._exit(0)
 
 
 @instantiate_parametrized_tests
@@ -264,7 +265,7 @@ class TestNIXLNative(TestCase):
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")
         processes = [
-            context.Process(target=_exit_after, args=(worker, rank, *rank_args))
+            context.Process(target=_run_worker, args=(worker, rank, *rank_args))
             for rank, rank_args in enumerate(args)
         ]
         try:
