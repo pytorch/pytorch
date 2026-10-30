@@ -184,6 +184,10 @@ void ProcessGroup::enableCollectivesTiming() {
 }
 
 void ProcessGroup::release_resources() {
+  // Hooks may hold weak references to this group (NanCheckHook), which would
+  // otherwise keep it from being freed. Cleared before the backends.
+  preHooks_.clear();
+  postHooks_.clear();
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();

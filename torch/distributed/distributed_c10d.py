@@ -982,8 +982,10 @@ def _register_builtin_nccl_backend() -> None:
     # with what was built.
     if creator_fn is _create_nccl_process_group:
         _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+        _NAN_CHECK_HOOK_BACKENDS.discard(Backend.NCCL)
     else:
         _FR_SELF_RECORDING_BACKENDS.discard(Backend.NCCL)
+        _NAN_CHECK_HOOK_BACKENDS.add(Backend.NCCL)
     Backend.register_backend(
         Backend.NCCL,
         creator_fn,
@@ -1005,6 +1007,7 @@ def _register_builtin_nccl_legacy_backend() -> None:
 
 def _register_builtin_nccl_as_legacy() -> None:
     _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    _NAN_CHECK_HOOK_BACKENDS.discard(Backend.NCCL)
     Backend.register_backend(
         Backend.NCCL,
         _create_nccl_process_group,
@@ -2909,6 +2912,50 @@ _FR_SELF_RECORDING_BACKENDS = {
 }
 
 
+# Backends that get NanCheckHook for TORCH_NCCL_NAN_CHECK (toggled at runtime
+# by nccl2's _set_enable_nan_check): NCCL implementations without
+# ProcessGroupNCCL's native checker. Backend.NCCL is added or removed by its registrar, as for
+# _FR_SELF_RECORDING_BACKENDS.
+_NAN_CHECK_HOOK_BACKENDS = {"nccl2", "nccl-lazy"}
+
+
+def _env_bool(name: str) -> bool:
+    # Same values as getCvarBool in c10d/Utils.hpp, which ProcessGroupNCCL uses.
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    value = value.lower()
+    if value in ("y", "yes", "1", "t", "true"):
+        return True
+    if value in ("n", "no", "0", "f", "false"):
+        return False
+    raise ValueError(f"Invalid value for environment variable: {name}")
+
+
+def _maybe_attach_nan_check(
+    pg: ProcessGroup, device_backend_map: dict[str, str]
+) -> None:
+    # Backend-agnostic NaN checking. The group owns the hooks, so there is no
+    # handle to keep alive here.
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        NanCheckHook.attach(pg)
+    # Scoped to the NCCL backend's device, like the native check. Attached even
+    # when off so _set_enable_nan_check only flips a flag and never mutates the
+    # group's hooks while operations may be in flight.
+    enabled = None
+    for device, backend in device_backend_map.items():
+        if backend not in _NAN_CHECK_HOOK_BACKENDS:
+            continue
+        if enabled is None:
+            enabled = _env_bool("TORCH_NCCL_NAN_CHECK")
+        # Key the toggle to the NCCL backend, not a TORCH_DISTRIBUTED_DEBUG
+        # wrapper around it.
+        backend_impl = pg._get_backend(torch.device(device))
+        while is_gloo_available() and isinstance(backend_impl, _ProcessGroupWrapper):
+            backend_impl = backend_impl.wrapped_pg
+        NanCheckHook._attach_toggleable(pg, backend_impl, torch.device(device), enabled)
+
+
 def _maybe_attach_flight_recorder(
     pg: ProcessGroup, backend_config: BackendConfig, global_ranks: list[int]
 ) -> None:
@@ -3202,12 +3249,7 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
 
-    # Backend-agnostic NaN checking, for backends without a native checker
-    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
-    # hook, so there is no handle to keep alive here.
-    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
-        NanCheckHook.attach(pg)
-
+    _maybe_attach_nan_check(pg, backend_config.get_device_backend_map())
     HealthCheckHook.attach(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
@@ -7237,6 +7279,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    _maybe_attach_nan_check(split_pg, backend_config.get_device_backend_map())
     HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
@@ -8188,6 +8231,12 @@ def _create_shrunk_process_group(
 
     new_pg._register_backend(backend_device, backend_type, new_backend)
     new_pg._set_default_backend(backend_type)
+    backend_name = _get_backend_name_for_device(
+        metadata["backend_config"], backend_device.type
+    )
+    _maybe_attach_nan_check(
+        new_pg, {backend_device.type: backend_name} if backend_name else {}
+    )
 
     # Inherit device binding from original group if it was bound
     bound_device_id = metadata.get("bound_device_id")

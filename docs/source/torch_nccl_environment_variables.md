@@ -11,7 +11,7 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - **Variable**
   - **Description**
 * - ``TORCH_DIST_NAN_CHECK``
-  - **All backends.** If set to ``1``, attach a backend-agnostic NaN check to every new process group; input buffers of collectives are checked for NaNs. Use this with ``nccl``, which ignores ``TORCH_NCCL_NAN_CHECK``. Default: ``0``.
+  - **All backends.** If set to ``1``, attach a backend-agnostic NaN check to every new process group; input buffers of collectives are checked for NaNs. Independent of ``TORCH_NCCL_NAN_CHECK`` and ``_set_enable_nan_check``. Default: ``0``.
 * - ``TORCH_NCCL_ASYNC_ERROR_HANDLING``
   - **All NCCL backends.** Control how we perform Async Error Handling with NCCL when an exception is observed in watchdog. If set to 0, no handling of asynchronous NCCL errors. If set to 1, aborting NCCL communicator and tearing down process upon error. If set to 2, only abort NCCL communicator and if set to 3, tearing down process without aborting NCCL communicator. By default, it is set to 3; ``torchrun`` sets it to 1 for its workers if it is unset.
 * - ``TORCH_NCCL_HIGH_PRIORITY``
@@ -75,7 +75,7 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_DEBUG_INFO_PIPE_FILE``
   - **nccl-legacy only.** The pipe file to trigger debugging dump manually, write anything into the pipe would trigger the dump.
 * - ``TORCH_NCCL_NAN_CHECK``
-  - **nccl-legacy only.** Control whether to enable NAN check for the input, Error would be thrown if NAN is detected. For other backends, including ``nccl``, use ``TORCH_DIST_NAN_CHECK``. Default: ``0``.
+  - **All NCCL backends.** Control whether to enable NAN check for the input, Error would be thrown if NAN is detected. `nccl-legacy` checks natively; `nccl` and `nccl-lazy` use ``NanCheckHook`` on their CUDA operations. For other backends use ``TORCH_DIST_NAN_CHECK``. Default: ``0``.
 * - ``TORCH_NCCL2_RECONFIGURE_SHRINK_GROW``
   - **`nccl` and `nccl-lazy` only.** If set to ``1``, ``reconfigure`` uses NCCL's shrink/grow fast path (NCCL 2.29 or later) when NCCL's rank order matches c10d's; otherwise it creates a new communicator. Set the same value on every rank. Default: ``0``.
 ```

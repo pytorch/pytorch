@@ -236,6 +236,8 @@ void check_for_nan_cuda(const at::Tensor& tensor) {
       maxNumBlocks,
       (tensor.numel() + numThreadsPerBlock - 1) / numThreadsPerBlock);
 
+  // Callers such as NanCheckHook may run on another current device.
+  c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream(tensor.device().index());
 
   AT_DISPATCH_FLOATING_TYPES_AND4(
