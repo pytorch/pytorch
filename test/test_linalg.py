@@ -2018,18 +2018,24 @@ class TestLinalg(TestCase):
     @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_norm_reduced_precision_all_reduce(self, device, dtype):
-        x = torch.full((2**16, 3, 2), 2.0**-4, dtype=dtype, device=device)[:, :2]
+        x = torch.full((2**16, 3, 2), 2.0**-4, dtype=dtype, device=device)
+        # ord=0 counts the nonzeros; with one row in 8 left, their count (2**15)
+        # stays below float16's max of 65504.
+        sparse = x.clone()
+        sparse[torch.arange(2**16, device=device) % 8 != 0] = 0
+        cases = (
+            (x, torch.linalg._powsum, 1),
+            (x, torch.linalg._powsum, 2),
+            (sparse, torch.linalg.vector_norm, 0),
+            (x, torch.linalg.vector_norm, 1),
+            (x, torch.linalg.vector_norm, 2),
+        )
         num_threads = torch.get_num_threads()
         try:
             for threads in (1, 4):
                 torch.set_num_threads(threads)
-                for t, (fn, ord) in product((x, x.contiguous()), (
-                    (torch.linalg._powsum, 1),
-                    (torch.linalg._powsum, 2),
-                    (torch.linalg.vector_norm, 0),
-                    (torch.linalg.vector_norm, 1),
-                    (torch.linalg.vector_norm, 2),
-                )):
+                for (x, fn, ord), contiguous in product(cases, (False, True)):
+                    t = x[:, :2].contiguous() if contiguous else x[:, :2]
                     expected = fn(t.double(), ord).to(dtype)
                     msg = f"threads={threads}, contiguous={t.is_contiguous()}, {fn.__name__}, ord={ord}"
                     self.assertEqual(fn(t, ord), expected, atol=0, rtol=0, msg=msg)
