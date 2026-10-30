@@ -5566,8 +5566,7 @@ class TestAOTAutocastStates(AOTTestCase):
         self.assertEqual(torch.get_autocast_dtype("cpu"), prior_dtype)
 
     def test_collect_metadata_ignores_autocast_enabled_mutation(self):
-        # Enabled TLS is restored by ExcludeDispatchKeyGuard; rejecting it would
-        # newly fail previously compiling programs. Only dtype is checked.
+        # Enabled TLS is restored by ExcludeDispatchKeyGuard; only dtype is checked.
         prior_enabled = torch.is_autocast_enabled("cpu")
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
@@ -5576,18 +5575,33 @@ class TestAOTAutocastStates(AOTTestCase):
 
         collect, x = self._collect_metadata(f)
         collect(x)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
-    def test_collect_metadata_allows_balanced_cpu_autocast_context(self):
+    def test_collect_metadata_restores_autocast_nesting(self):
         from torch._functorch._aot_autograd.utils import _get_autocast_nesting
 
         prior_nesting = _get_autocast_nesting()
 
         def f(x: torch.Tensor) -> list[torch.Tensor]:
-            with torch.autocast("cpu"):
-                return [x + 1]
+            torch.autocast_increment_nesting()
+            return [x + 1]
 
         collect, x = self._collect_metadata(f)
         collect(x)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_collect_metadata_restores_autocast_nesting_when_forward_raises(self):
+        from torch._functorch._aot_autograd.utils import _get_autocast_nesting
+
+        prior_nesting = _get_autocast_nesting()
+
+        def f(x: torch.Tensor) -> list[torch.Tensor]:
+            torch.autocast_increment_nesting()
+            raise RuntimeError("forward failed after nesting bump")
+
+        collect, x = self._collect_metadata(f)
+        with self.assertRaisesRegex(RuntimeError, "forward failed after nesting bump"):
+            collect(x)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     @parametrize("cache_enabled", [True, False])
@@ -5603,8 +5617,8 @@ class TestAOTAutocastStates(AOTTestCase):
 
     def test_aot_function_allows_balanced_cpu_autocast(self):
         from torch._functorch._aot_autograd.utils import (
+            _get_autocast_dtypes,
             _get_autocast_nesting,
-            _get_autocast_states,
         )
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -5612,14 +5626,14 @@ class TestAOTAutocastStates(AOTTestCase):
                 return x + 1
 
         x = torch.randn(2)
-        prior_states = _get_autocast_states()
+        prior_dtypes = _get_autocast_dtypes()
         prior_nesting = _get_autocast_nesting()
         expected = f(x)
         compiled = aot_function(f, nop)
         out = compiled(x)
         self.assertEqual(out, expected)
         self.assertEqual(out.dtype, expected.dtype)
-        self.assertEqual(_get_autocast_states(), prior_states)
+        self.assertEqual(_get_autocast_dtypes(), prior_dtypes)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
 

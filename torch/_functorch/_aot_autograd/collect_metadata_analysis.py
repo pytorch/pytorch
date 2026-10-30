@@ -62,8 +62,8 @@ from .schemas import (
 )
 from .subclass_utils import create_subclass_meta
 from .utils import (
+    _get_autocast_dtypes,
     _get_autocast_nesting,
-    _get_autocast_states,
     _set_autocast_nesting,
     KNOWN_TYPES,
     simple_wraps,
@@ -208,7 +208,7 @@ def run_functionalized_fw_and_collect_metadata(
         output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
-        prior_autocast_states = _get_autocast_states()
+        prior_autocast_dtypes = _get_autocast_dtypes()
         prior_autocast_nesting = _get_autocast_nesting()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
@@ -226,13 +226,12 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
-        # including keys that track autocast enabled TLS. Matching pre-PR behavior,
-        # we deliberately do not reject enabled-state mutations (detecting them
-        # would newly fail previously compiling programs, e.g. graph breaks between
-        # bare _enter_autocast/_exit_autocast). Autocast dtypes are independent TLS
-        # and are checked here; nesting is restored in finally. Cache is forced off
-        # by disable_autocast_cache and restored on exit, so it is not in the snapshot.
+        # ExcludeDispatchKeyGuard restores autocast enabled TLS on exit, so enabled
+        # mutations are not checked. Autocast dtypes are independent TLS and are
+        # checked for every _autocast_supported_devices() entry; nesting is restored
+        # in finally. Cache is forced off by disable_autocast_cache and restored on
+        # exit. Note: an unbalanced _enter_autocast that also changes dtype still
+        # fails the dtype check (including across graph breaks).
         with disable_above:
             try:
                 with mode, suppress_pending, disable_autocast_cache():
@@ -262,10 +261,10 @@ def run_functionalized_fw_and_collect_metadata(
                         fake_mode.epoch += 1
                         fake_mode.reset_nt_tensor_id_counter()
 
-                current_autocast_states = _get_autocast_states()
+                current_autocast_dtypes = _get_autocast_dtypes()
                 mismatches = []
-                for device_type, (_, prior_dtype) in prior_autocast_states.items():
-                    _, cur_dtype = current_autocast_states[device_type]
+                for device_type, prior_dtype in prior_autocast_dtypes.items():
+                    cur_dtype = current_autocast_dtypes[device_type]
                     if prior_dtype != cur_dtype:
                         mismatches.append(
                             f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
@@ -280,7 +279,7 @@ def run_functionalized_fw_and_collect_metadata(
                         "the compiled region."
                     )
             finally:
-                for device_type, (_, dtype) in prior_autocast_states.items():
+                for device_type, dtype in prior_autocast_dtypes.items():
                     torch.set_autocast_dtype(device_type, dtype)
                 _set_autocast_nesting(prior_autocast_nesting)
 

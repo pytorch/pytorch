@@ -102,14 +102,11 @@ def normalize_as_list(x: object) -> list[object]:
     return [x]
 
 
-def _get_autocast_states() -> dict[str, tuple[bool, torch.dtype]]:
-    # Per-device (enabled, dtype). Autocast cache is intentionally omitted: metadata
-    # collection forces cache off via disable_autocast_cache and restores it on exit.
+def _get_autocast_dtypes() -> dict[str, torch.dtype]:
+    # Per-device autocast dtype. Enabled TLS is restored by ExcludeDispatchKeyGuard
+    # and is not snapshotted. Cache is forced off by disable_autocast_cache.
     return {
-        device_type: (
-            torch.is_autocast_enabled(device_type),
-            torch.get_autocast_dtype(device_type),
-        )
+        device_type: torch.get_autocast_dtype(device_type)
         for device_type in torch._C._autocast_supported_devices()
     }
 
