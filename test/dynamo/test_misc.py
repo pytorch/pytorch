@@ -10144,8 +10144,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             def forward(self, x):
                 a_entered.set()
                 release_a.wait(60)
-                # B is parked inside export while A's compile session exits;
-                # A's exit must not restore or clear B's own session flags.
                 flags_from_export_thread["is_exporting"] = torch.compiler.is_exporting()
                 flags_from_export_thread["is_compiling"] = torch.compiler.is_compiling()
                 return x + 1
