@@ -13388,6 +13388,7 @@ op_db: list[OpInfo] = [
            aliases=('clip',),
            ref=_clamp_numpy,
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfXPU=all_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
            sample_inputs_func=sample_inputs_clamp,
            reference_inputs_func=partial(reference_inputs_elementwise_ternary, sample_inputs_func=sample_inputs_clamp),
