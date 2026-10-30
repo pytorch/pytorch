@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/cuspy/cuspy_native.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -70,7 +71,7 @@ std::vector<CuptiRecordLayout> cuspyParseRecordLayouts(void* complete_info) {
     parsed.kind = static_cast<uint32_t>(kind);
     parsed.record_size = layout->recordSize;
     parsed.fields.reserve(layout->numFields);
-    for (size_t f = 0; f < layout->numFields; ++f) {
+    for (const auto f : c10::irange(layout->numFields)) {
       const AbiFieldLayoutEntry& e = layout->pEntries[f];
       parsed.fields.push_back({e.fieldId, e.offset, e.size});
     }
@@ -420,7 +421,7 @@ double cuspyBenchDecode(
     by_kind[l.kind] = &l;
   }
   auto t0 = std::chrono::steady_clock::now();
-  for (size_t it = 0; it < iters; ++it) {
+  for ([[maybe_unused]] const auto _ : c10::irange(iters)) {
     // Fresh columns each iter, matching decode_buffer's per-buffer `local`.
     std::map<uint32_t, std::map<int, CuptiColumn>> cols;
     size_t pos = 0;

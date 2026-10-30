@@ -115,12 +115,11 @@ lib = torch.library.Library("fsdp", "FRAGMENT")
 lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
 
-@torch.library.impl(lib, "copy_", "Meta")
-@torch.library.impl(lib, "copy_", "CUDA")
-@torch.library.impl(lib, "copy_", "XPU")
-@torch.library.impl(lib, "copy_", "HPU")
-@torch.library.impl(lib, "copy_", "CPU")
-@torch.library.impl(lib, "copy_", "MTIA")
+# Like the ops in _fsdp_collectives.py, this registers once to
+# CompositeExplicitAutograd so that it covers every backend without listing
+# them. Not CompositeImplicitAutograd: that would decompose it into aten.copy_,
+# skipping copy__functionalize below and Inductor's fsdp.copy_ lowering.
+@torch.library.impl(lib, "copy_", "CompositeExplicitAutograd")
 def copy_(tensor, data):
     tensor.copy_(data)
 

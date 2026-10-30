@@ -165,6 +165,21 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
          gpu_kernel(iter, [] GPU_LAMBDA(Float8_e8m0fnu x) { return x; });
          break;
     }
+  } else if (dtype == kFloat8_e5m3fnu) {
+    switch (other_dtype) {
+      case kFloat:
+         converting_copy_kernel_cuda<float, Float8_e5m3fnu>(iter);
+         break;
+      case kHalf:
+         converting_copy_kernel_cuda<Half, Float8_e5m3fnu>(iter);
+         break;
+      case kBFloat16:
+         converting_copy_kernel_cuda<BFloat16, Float8_e5m3fnu>(iter);
+         break;
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m3fnu x) { return x; });
+         break;
+    }
   } else {
     TORCH_CHECK(false, "This supposed to be called only for Float8 types");
   }
