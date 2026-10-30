@@ -41,11 +41,12 @@ constexpr auto kMemHandleTypeFabric = hipMemHandleTypeFabric;
 // Unreachable: get_fabric_access() is false below this ROCm version, so
 // handle_type_ never becomes FABRIC_HANDLE. Defined only so that the
 // use_fabric_handle=true instantiation of make_peer_alloc_info still compiles;
-// rendezvous() instantiates both branches unconditionally.
+// rendezvous() instantiates both branches unconditionally. None, not a real
+// type, so that reaching it anyway fails in the HIP runtime.
 struct FabricHandleType {
   unsigned char data[64];
 };
-constexpr auto kMemHandleTypeFabric = hipMemHandleTypePosixFileDescriptor;
+constexpr auto kMemHandleTypeFabric = hipMemHandleTypeNone;
 #endif
 constexpr auto kMemHandleTypePosixFd = hipMemHandleTypePosixFileDescriptor;
 #else
