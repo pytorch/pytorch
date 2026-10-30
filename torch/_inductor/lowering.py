@@ -7850,7 +7850,19 @@ def pow(a, b):
         loader = a.make_loader()
 
         def fn(idx):
-            return pow_recursive(loader(idx), b, a.get_dtype())
+            dtype = a.get_dtype()
+            if (
+                b == 3
+                and dtype in (torch.float16, torch.bfloat16)
+                and is_strict_cuda_triton(a.get_device())
+            ):
+                # PowKernel's cube specialization rounds the intermediate in scalar_t.
+                value = loader(idx)
+                square = ops.to_dtype(
+                    ops.mul(value, value), dtype, use_compute_types=False
+                )
+                return ops.mul(ops.to_dtype(square, dtype), value)
+            return pow_recursive(loader(idx), b, dtype)
 
         return Pointwise.create(
             device=a.get_device(),
