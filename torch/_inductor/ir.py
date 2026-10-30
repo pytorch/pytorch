@@ -11527,8 +11527,6 @@ class Switch(ExternKernel):
         """Create a sequence of IRNodes from a switch/cond statement."""
         # pyrefly: ignore [bad-assignment]
         selector = cls.realize_input(selector)
-        # pyrefly: ignore [bad-assignment]
-        operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         if not isinstance(fx_operands, Sequence):
@@ -11543,6 +11541,23 @@ class Switch(ExternKernel):
             else:
                 # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
+
+        # The branches are compiled for the operands' fake strides, so pin each
+        # realized operand to them (free for a FlexibleLayout producer; a fixed
+        # layout that differs gets a copy). The TensorBox is for require_strides'
+        # path that keeps an expand, which slices its input.
+        realized = [cls.realize_input(x) for x in operands]
+        # pyrefly: ignore [bad-assignment]
+        operands = [
+            cls.realize_input(
+                ExternKernel.require_exact_strides(
+                    TensorBox(x), fake.stride(), allow_padding=False
+                )
+            )
+            if isinstance(fake, torch.Tensor)
+            else x
+            for x, fake in zip(realized, fake_operands)
+        ]
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(
@@ -11688,6 +11703,13 @@ class Switch(ExternKernel):
             MutationOutput(operands[idx].layout, operands[idx], switch)  # type: ignore[union-attr]
             for idx in sorted(mutated_operand_indices)
         ]
+        # A branch that mutates an operand pinned through a copy mutated the
+        # copy; write it back to the original.
+        for idx in sorted(mutated_operand_indices):
+            if operands[idx].get_name() != realized[idx].get_name():
+                torch._inductor.lowering.copy_(
+                    TensorBox(realized[idx]), TensorBox(operands[idx])
+                )
 
         return outputs
 
