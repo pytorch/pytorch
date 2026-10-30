@@ -1179,6 +1179,11 @@ class CacheableAOTConfig:
     # this is always false outside of export.
     pre_dispatch: bool = False
     precompile_backend_id: str | None = None
+    input_mutation_barriers: tuple[
+        tuple[int, int | torch.device, int | None, str], ...
+    ] = ()
+    input_mutation_barrier_input_indices: tuple[tuple[int, ...] | None, ...] = ()
+    input_mutation_barrier_backward: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
         if self.pre_dispatch and not self.is_export:
@@ -1220,6 +1225,11 @@ class AOTConfig:
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
     disable_functionalization: bool = False
+    input_mutation_barriers: tuple[
+        tuple[int, int | torch.device, int | None, str], ...
+    ] = ()
+    input_mutation_barrier_input_indices: tuple[tuple[int, ...] | None, ...] = ()
+    input_mutation_barrier_backward: tuple[bool, ...] = ()
     # If True, disable TorchFunctionMetadataMode during make_fx tracing.
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
@@ -1238,6 +1248,9 @@ class AOTConfig:
             enable_log=self.enable_log,
             pre_dispatch=self.pre_dispatch,
             precompile_backend_id=self.precompile_backend_id,
+            input_mutation_barriers=self.input_mutation_barriers,
+            input_mutation_barrier_input_indices=self.input_mutation_barrier_input_indices,
+            input_mutation_barrier_backward=self.input_mutation_barrier_backward,
         )
 
     def __post_init__(self) -> None:

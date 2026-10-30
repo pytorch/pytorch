@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -91,7 +92,12 @@ from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _pop_mode_temporarily,
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
@@ -4215,6 +4221,111 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+class _InputMutationDispatchMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
+    def __init__(self, tx: InstructionTranslatorBase, node: torch.fx.Node) -> None:
+        super().__init__()
+        self.tx = tx
+        self.node = node
+        self.pending_mutation = False
+
+    def _refresh_mutation_versions(self) -> None:
+        if self.pending_mutation:
+            for node in self.tx.output._last_checked_input_versions:
+                value = node.meta.get("example_value")
+                if isinstance(value, torch.Tensor):
+                    self.tx.output._last_checked_input_versions[node] = value._version
+            self.pending_mutation = False
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self._refresh_mutation_versions()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def __torch_dispatch__(
+        self,
+        func: Any,
+        types: Any,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        kwargs = kwargs or {}
+        self._refresh_mutation_versions()
+        metadata_mutation = (
+            isinstance(func, OpOverload) and torch.Tag.inplace_view in func.tags
+        )
+        if metadata_mutation:
+            self.tx.output.check_input_mutation_on_current_stream(self.tx)
+        if isinstance(func, HigherOrderOperator):
+            mode_ctx = (
+                _pop_mode_temporarily()
+                if _get_current_dispatch_mode() is not None
+                else contextlib.nullcontext(self.tx.fake_mode)
+            )
+            # Keep observation enabled while the next mode executes HOP bodies.
+            with mode_ctx as mode, self:
+                mode = cast(TorchDispatchMode, mode)
+                handler = func.python_key_table[type(mode)]
+                result = handler(mode, *args, **kwargs)
+        else:
+            result = func(*args, **kwargs)
+        # Autograd bumps mutation versions after this dispatch returns.
+        self.pending_mutation = metadata_mutation
+        # Batch norm's implicit running-stat writes do not bump fake versions.
+        batch_norm = isinstance(func, OpOverload) and func._overloadpacket in (
+            torch.ops.aten.batch_norm,
+            torch.ops.aten.native_batch_norm,
+            torch.ops.aten._native_batch_norm_legit,
+            torch.ops.aten.cudnn_batch_norm,
+            torch.ops.aten.miopen_batch_norm,
+            torch.ops.aten._batch_norm_impl_index,
+            torch.ops.aten._batch_norm_with_update,
+        )
+        if batch_norm:
+            training = (
+                func._overloadpacket is torch.ops.aten._batch_norm_with_update
+                or kwargs.get("training", args[5] if len(args) > 5 else False)
+            )
+            if training:
+                for index, name in ((3, "running_mean"), (4, "running_var")):
+                    stat = args[index] if len(args) > index else kwargs.get(name)
+                    if isinstance(stat, torch.Tensor):
+                        self.tx.output.record_input_mutation_on_current_stream(
+                            self.tx, stat, self.node
+                        )
+        if isinstance(func, OpOverload) and not metadata_mutation:
+            for index, argument in enumerate(func._schema.arguments):
+                if argument.alias_info is None or not argument.alias_info.is_write:
+                    continue
+                if batch_norm and argument.name in ("running_mean", "running_var"):
+                    continue
+                self.pending_mutation = True
+                value = args[index] if len(args) > index else kwargs.get(argument.name)
+                for tensor in torch.utils._pytree.tree_leaves(value):
+                    if isinstance(tensor, torch.Tensor):
+                        self.tx.output.record_input_mutation_on_current_stream(
+                            self.tx, tensor, self.node
+                        )
+        elif isinstance(func, HigherOrderOperator):
+            from torch._higher_order_ops.triton_kernel_wrap import (
+                get_mutated_tensors,
+                triton_kernel_wrapper_mutation,
+            )
+
+            if func is triton_kernel_wrapper_mutation:
+                tensor_args = kwargs["kwargs"]
+                for name in get_mutated_tensors(
+                    kwargs["kernel_idx"],
+                    kwargs["constant_args_idx"],
+                    tensor_args,
+                    kwargs["tma_descriptor_metadata"],
+                ):
+                    self.tx.output.record_input_mutation_on_current_stream(
+                        self.tx, tensor_args[name], self.node
+                    )
+        return result
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4311,7 +4422,22 @@ def _get_fake_value_impl(
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
-        with fake_mode, enable_python_dispatcher(), _use_eager_on_nested_compile():
+        mutation_ctx = contextlib.nullcontext()
+        if tx.symbolic_stream_state.in_stream_context():
+            if isinstance(node.target, HigherOrderOperator) and any(
+                isinstance(arg, torch.fx.GraphModule)
+                for arg in pytree.tree_leaves(args)
+            ):
+                # GraphModule bodies carry mutations from their original trace.
+                mutation_ctx = tx.output.ignore_speculative_input_mutations(tx)
+            else:
+                mutation_ctx = _InputMutationDispatchMode(tx, node)
+        with (
+            mutation_ctx,
+            fake_mode,
+            enable_python_dispatcher(),
+            _use_eager_on_nested_compile(),
+        ):
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -5782,11 +5908,16 @@ def nn_module_proxy(mod: Any) -> Any:
 
 class GmWrapper(torch.nn.Module):
     def __init__(
-        self, gm: torch.fx.GraphModule, unflatten_fn: Callable[[list[Any]], Any]
+        self,
+        gm: torch.fx.GraphModule,
+        unflatten_fn: Callable[[list[Any]], Any],
+        flat_input_indices: tuple[tuple[int, ...], ...] | None = None,
     ) -> None:
         super().__init__()
         self.gm = gm
         self.unflatten_fn = unflatten_fn
+        # Map each original graph argument to its flattened input positions.
+        self.flat_input_indices = flat_input_indices
 
     def forward(self, *args: Any) -> Any:
         # pyrefly: ignore [redefinition]
@@ -5827,12 +5958,24 @@ def flatten_graph_inputs(
         def unflatten_fn(flat_args: Any) -> Any:
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
 
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+        flat_inputs = flatten_fn(inputs)
+        indices = (
+            tuple(range(boxed_inputs_count)),
+            *((i,) for i in range(boxed_inputs_count, len(flat_inputs))),
+        )
+        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn, indices), flat_inputs)
     else:
         # slow path, don't know inputs structure
         flat_inputs, spec = pytree.tree_flatten(inputs)
         unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
+        offset = 0
+        indices = []
+        for child in spec.children_specs:
+            indices.append(tuple(range(offset, offset + child.num_leaves)))
+            offset += child.num_leaves
+        compiled_fn = compile_gm(
+            GmWrapper(gm, unflatten_fn, tuple(indices)), flat_inputs
+        )
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
 

@@ -64,6 +64,7 @@ from torch._guards import (
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
+    InputMutationBarrier,
     Source,
     tracing,
     TracingContext,
@@ -134,6 +135,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    CurrentStreamSource,
     DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
@@ -905,13 +907,20 @@ class OutputGraph(OutputGraphCommon):
         # and restore_graphstate
         self.timestamp = 0
 
-        # Maps stream id (id(stream_value)) → user stack trace for input
-        # mutations on that stream.  Used to error when an event records on a
-        # stream that already has an input mutation (the epilogue copy_()
-        # wouldn't be captured).  We key by id() of the underlying
-        # torch.Stream so we can peek lazy variables without realizing them.
-        self._input_mutation_streams: dict[int, traceback.StackSummary] = {}
-        self._last_checked_input_versions: dict[int, int] | None = None
+        # Retain mutation streams until the backend reads their registry entries.
+        # A current stream on another device may have no VariableTracker owner.
+        self._input_mutation_streams: dict[
+            int, tuple[torch.Stream, traceback.StackSummary]
+        ] = {}
+        self._input_mutation_stream_indices: OrderedSet[int] = OrderedSet()
+        self._input_mutation_barriers: list[
+            tuple[int, int | torch.device, int | None, str]
+        ] = []
+        self._last_checked_input_versions: dict[fx.Node, int] = {}
+        self._input_mutation_provenance_complete = True
+        self._input_mutation_tracking_enabled = True
+        self._input_mutation_provenance_enabled = True
+        self._next_input_mutation_origin = 0
 
         # A list of register_finalizer_fns to apply to the output graph module
         self.register_finalizer_fns: list[Callable[[fx.GraphModule], None]] = []
@@ -1351,35 +1360,227 @@ class OutputGraph(OutputGraphCommon):
         self, tx: "InstructionTranslatorBase"
     ) -> None:
         """Record which stream index has input mutations by comparing current
-        tensor versions against the versions captured at graph input creation."""
+        tensor versions against the versions captured at tensor creation."""
         if not hasattr(tx, "symbolic_stream_state"):
             return
         if not tx.symbolic_stream_state.in_stream_context():
             return
 
-        tracer = self.root_tracer
-        if self._last_checked_input_versions is None:
-            self._last_checked_input_versions = dict(
-                enumerate(tracer._input_versions_at_beginning)
-            )
-
-        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
-        input_idx = 0
-        for node in tracer.graph.nodes:
-            if node.op != "placeholder":
-                break
+        mutated_ids: set[int] = set()
+        for node, prev_version in self._last_checked_input_versions.items():
             example_value = node.meta.get("example_value")
             if not isinstance(example_value, torch.Tensor):
                 continue
-            prev_version = self._last_checked_input_versions.get(input_idx)
             cur_version = example_value._version
-            if prev_version is not None and cur_version > prev_version:
-                if cur_stream_index not in self._input_mutation_streams:
-                    self._input_mutation_streams[cur_stream_index] = (
-                        TracingContext.extract_stack()
+            if cur_version > prev_version:
+                tensor_id = id(example_value)
+                if tensor_id not in mutated_ids:
+                    mutated_ids.add(tensor_id)
+                    self.record_input_mutation_on_current_stream(tx, example_value)
+                self._last_checked_input_versions[node] = cur_version
+
+    @contextlib.contextmanager
+    def ignore_speculative_input_mutations(
+        self, tx: "InstructionTranslatorBase", *, backward: bool = False
+    ) -> Generator[None, None, None]:
+        self.check_input_mutation_on_current_stream(tx)
+        enabled = self._input_mutation_tracking_enabled
+        provenance_enabled = self._input_mutation_provenance_enabled
+        self._input_mutation_tracking_enabled = False
+        self._input_mutation_provenance_enabled = backward
+        try:
+            yield
+        finally:
+            self._input_mutation_tracking_enabled = enabled
+            self._input_mutation_provenance_enabled = provenance_enabled
+            for node in self._last_checked_input_versions:
+                value = node.meta.get("example_value")
+                if isinstance(value, torch.Tensor):
+                    self._last_checked_input_versions[node] = value._version
+
+    def record_input_mutation_on_current_stream(
+        self,
+        tx: "InstructionTranslatorBase",
+        example_value: torch.Tensor,
+        mutation_node: fx.Node | None = None,
+    ) -> None:
+        """Record an input write that fake-tensor versions cannot observe."""
+        if not self._input_mutation_provenance_enabled:
+            return
+        if not isinstance(example_value, torch.Tensor):
+            return
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is None or example_value.device.type != accelerator.type:
+            return
+        if not tx.symbolic_stream_state.in_stream_context():
+            return
+        input_aliases: list[Any] = []
+        inputs = itertools.chain(
+            self.root_tracer.graph.find_nodes(op="placeholder"),
+            self.root_tracer.graph.find_nodes(op="get_attr"),
+        )
+        for node in inputs:
+            for origin, input_value, _ in variables.streams._input_mutation_leaves(
+                node
+            ):
+                if isinstance(input_value, torch.Tensor) and (
+                    input_value is example_value
+                    or torch._C._is_alias_of(  # pyrefly: ignore[missing-attribute]
+                        input_value, example_value
                     )
-                self._last_checked_input_versions[input_idx] = cur_version
-            input_idx += 1
+                ):
+                    input_aliases.append(origin)
+        if mutation_node is not None:
+            targets = input_aliases.copy()
+            for node in mutation_node.all_input_nodes:
+                for origin, value, _ in variables.streams._input_mutation_leaves(node):
+                    if isinstance(
+                        value, torch.Tensor
+                    ) and torch._C._is_alias_of(  # pyrefly: ignore[missing-attribute]
+                        value, example_value
+                    ):
+                        targets.append(origin)
+            if targets:
+                index = self._record_input_mutation_on_current_stream(
+                    tx, example_value, root_input=False
+                )
+                if index is not None:
+                    mutation_node.meta.setdefault("input_mutation_streams", []).append(
+                        (index, tuple(OrderedSet(targets)))
+                    )
+                    mutation_node.meta["input_mutation_stack"] = "".join(
+                        TracingContext.extract_stack().format()
+                    )
+        if input_aliases and self._input_mutation_tracking_enabled:
+            self._record_input_mutation_on_current_stream(tx, example_value)
+            if mutation_node is None:
+                self._input_mutation_provenance_complete = False
+
+    def _record_input_mutation_on_current_stream(
+        self,
+        tx: "InstructionTranslatorBase",
+        example_value: torch.Tensor,
+        *,
+        root_input: bool = True,
+    ) -> int | None:
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None and example_value.device.type == accelerator.type:
+            stream = tx.symbolic_stream_state.cur_stream(example_value.device)
+            stream_value = (
+                cast(torch.Stream, stream.peek_value())
+                if isinstance(stream, variables.LazyVariableTracker)
+                and not stream.is_realized()
+                else stream.value
+            )
+            for candidate in reversed(tx.symbolic_stream_state.cur_stream_stack):
+                candidate_value = (
+                    cast(torch.Stream, candidate.peek_value())
+                    if isinstance(candidate, variables.LazyVariableTracker)
+                    and not candidate.is_realized()
+                    else candidate.value
+                )
+                if candidate.source and not isinstance(
+                    candidate.source, CurrentStreamSource
+                ):
+                    device_source = AttrSource(candidate.source, "device")
+                    current = torch.accelerator.current_stream().device
+                    guard_fn = (
+                        GuardBuilder.CURRENT_DEVICE_MATCH
+                        if self.compile_on_one_rank
+                        and candidate_value.device == example_value.device == current
+                        else GuardBuilder.EQUALS_MATCH
+                    )
+                    install_guard(device_source.make_guard(guard_fn))
+                    if self.compile_on_one_rank and candidate_value.device != current:
+                        install_guard(
+                            device_source.make_guard(
+                                GuardBuilder.CURRENT_DEVICE_NOT_MATCH
+                            )
+                        )
+                if candidate_value.device == example_value.device:
+                    break
+            if stream_value.device == example_value.device:
+                stream_index = stream.user_object_index
+            else:
+                from .graph_bytecode_inputs import register_user_object
+
+                stream_value = torch.accelerator.current_stream(example_value.device)
+                source = CurrentStreamSource(example_value.device)
+                stream_index = register_user_object(stream_value, source)
+            if stream_index is None:
+                raise AssertionError("Mutation stream must have a registry index")
+            first_root_write = (
+                root_input and stream_index not in self._input_mutation_stream_indices
+            )
+            if root_input:
+                self._input_mutation_stream_indices.add(stream_index)
+            if id(stream_value) not in self._input_mutation_streams:
+                from .graph_bytecode_inputs import stash_graph_created_object
+
+                # Fullgraph capture releases OutputGraph before calling AOT.
+                stash_graph_created_object(stream_value)
+                self._input_mutation_streams[id(stream_value)] = (
+                    stream_value,
+                    TracingContext.extract_stack(),
+                )
+            elif first_root_write:
+                self._input_mutation_streams[id(stream_value)] = (
+                    stream_value,
+                    TracingContext.extract_stack(),
+                )
+            return stream_index
+        return None
+
+    _INPUT_MUTATION_BARRIER_ERROR = (
+        "Cannot safely place an input mutation write-back after a user "
+        "stream barrier inside torch.compile. Move the join after "
+        "the compiled forward or backward call that mutates the input, "
+        "or avoid side-stream input mutation."
+    )
+
+    def check_stream_barrier_after_input_mutation(
+        self,
+        stream: "variables.streams.StreamVariable",
+        node: fx.Node,
+        waiter_index: int | None = None,
+    ) -> None:
+        if not self._input_mutation_provenance_enabled:
+            return
+        node.meta["input_mutation_barrier"] = (
+            cast(int, stream.user_object_index),
+            waiter_index,
+            self._INPUT_MUTATION_BARRIER_ERROR,
+            False,
+        )
+        if not self._input_mutation_tracking_enabled:
+            return
+        for mutation_index in self._input_mutation_stream_indices:
+            self._input_mutation_barriers.append(
+                (
+                    mutation_index,
+                    cast(int, stream.user_object_index),
+                    waiter_index,
+                    self._INPUT_MUTATION_BARRIER_ERROR,
+                )
+            )
+
+    def check_device_barrier_after_input_mutation(
+        self, device: torch.device, node: fx.Node
+    ) -> None:
+        if not self._input_mutation_provenance_enabled:
+            return
+        node.meta["input_mutation_barrier"] = (
+            device,
+            None,
+            self._INPUT_MUTATION_BARRIER_ERROR,
+            False,
+        )
+        if not self._input_mutation_tracking_enabled:
+            return
+        for mutation_index in self._input_mutation_stream_indices:
+            self._input_mutation_barriers.append(
+                (mutation_index, device, None, self._INPUT_MUTATION_BARRIER_ERROR)
+            )
 
     _EVENT_INPUT_MUTATION_FIX = (
         "To fix this, either:\n"
@@ -1393,28 +1594,51 @@ class OutputGraph(OutputGraphCommon):
         "  4. Record the event on a stream that has no input mutations."
     )
 
-    def check_event_record_after_input_mutation(self, stream_index: int) -> None:
+    def check_event_record_after_input_mutation(
+        self, stream: "variables.streams.StreamVariable", node: fx.Node
+    ) -> None:
         """Error if an event is being recorded on a stream that already has
         an input mutation. Called at record time so ordering is naturally
         respected — records before mutations won't trigger this."""
-        if stream_index not in self._input_mutation_streams:
+        if not self._input_mutation_provenance_enabled:
             return
-
-        mutation_stack = self._input_mutation_streams[stream_index]
         record_stack = TracingContext.extract_stack()
-
+        fix = self._EVENT_INPUT_MUTATION_FIX
+        if not self._input_mutation_tracking_enabled:
+            fix = (
+                "Record the event outside the compiled backward, "
+                "after the backward call returns."
+            )
         msg = (
             "An event was recorded on a stream where a graph input was "
             "previously mutated. The input mutation is applied via copy_() "
             "in the runtime epilogue after the graph executes, so the event "
             "would not capture the mutation, leading to incorrect "
             "synchronization.\n\n"
-            "Input mutation occurred here:\n"
-            f"{''.join(mutation_stack.format())}\n"
             "Event record occurred here:\n"
-            f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
+            f"{''.join(record_stack.format())}\n" + fix
         )
-        raise RuntimeError(msg)
+        node.meta["input_mutation_barrier"] = (
+            cast(int, stream.user_object_index),
+            None,
+            msg,
+            True,
+        )
+        if not self._input_mutation_tracking_enabled:
+            return
+        from .graph_bytecode_inputs import get_external_object_by_index
+
+        for mutation_index in self._input_mutation_stream_indices:
+            mutation_stream = get_external_object_by_index(mutation_index)
+            mutation_stack = self._input_mutation_streams[id(mutation_stream)][1]
+            error = (
+                msg
+                + "\nInput mutation occurred here:\n"
+                + "".join(mutation_stack.format())
+            )
+            self._input_mutation_barriers.append(
+                (mutation_index, cast(int, stream.user_object_index), None, error)
+            )
 
     @property
     def graph(self) -> torch.fx.Graph:
@@ -3002,6 +3226,22 @@ class OutputGraph(OutputGraphCommon):
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
             gm.meta["backend_id"] = name
+            # AOT enforces these checks before deferring graph-input writes.
+            # Entries use the stream registry populated by pre-graph bytecode:
+            # Candidates retain their inputs for AOT mutation classification.
+            # Runtime checks also cover graph-created streams whose handles vary.
+            if self._input_mutation_barriers:
+                gm.meta["input_mutation_barriers"] = tuple(
+                    InputMutationBarrier(*barrier, None)
+                    for barrier in self._input_mutation_barriers
+                )
+            gm.meta["input_mutation_barrier_provenance"] = (
+                self._input_mutation_provenance_complete
+            )
+            if self._input_mutation_provenance_complete:
+                from .variables.streams import collect_input_mutation_barriers
+
+                gm.meta["input_mutation_barriers"] = collect_input_mutation_barriers(gm)
 
             if self.cudagraph_annotation is not None:
                 gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
@@ -3323,7 +3563,10 @@ class OutputGraph(OutputGraphCommon):
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, example_inputs)
+            with TracingContext.patch(
+                input_mutation_barriers=gm.meta.get("input_mutation_barriers", ())
+            ):
+                compiled_fn = compiler_fn(gm, example_inputs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")

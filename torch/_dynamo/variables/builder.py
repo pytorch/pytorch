@@ -4675,6 +4675,23 @@ def construct_tensor_variable(
     # tensor, the stored example value will update too!)
     example_value = _clone_input(example_value, tx.fake_mode)
     set_example_value(proxy.node, example_value)
+    if tx.output.is_root_tracer():
+        accelerator = torch.accelerator.current_accelerator()
+        if (
+            proxy.node.op in ("placeholder", "get_attr")
+            and accelerator is not None
+            and example_value.device.type == accelerator.type
+            and not example_value.is_inference()
+        ):
+            tx.output._last_checked_input_versions.setdefault(
+                proxy.node, example_value._version
+            )
+        # Origins must be unique across nested graphs and survive graph copies.
+        if "input_mutation_origin" not in proxy.node.meta:
+            proxy.node.meta["input_mutation_origin"] = (
+                tx.output._next_input_mutation_origin
+            )
+            tx.output._next_input_mutation_origin += 1
     # We bind the unbacked symints in sizes/trdies of tensor lazily.
     # So that subgraphs can access the unbacked symbol's proxy in parent graph
     # when lifting unbacked symbols of input tensors to subgraph inputs.

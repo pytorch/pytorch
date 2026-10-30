@@ -899,6 +899,9 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 cacheable.enable_log,
                 cacheable.pre_dispatch,
                 cacheable.precompile_backend_id,
+                cacheable.input_mutation_barriers,
+                cacheable.input_mutation_barrier_input_indices,
+                cacheable.input_mutation_barrier_backward,
             ),
         )
 
@@ -1258,9 +1261,18 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
 
         if result is not None:
             (entry, pickled_content) = result
+            from torch._dynamo.variables.streams import check_input_mutation_barriers
+
+            cached_config = dataclasses.replace(
+                aot_config,
+                input_mutation_barriers=entry.sanitized_aot_config.input_mutation_barriers,
+                input_mutation_barrier_input_indices=(),
+                input_mutation_barrier_backward=(),
+            )
+            check_input_mutation_barriers(cached_config.input_mutation_barriers)
             try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
-                compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
+                compiled_fn = entry.wrap_post_compile(args, cached_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
                 compiled_fn = SerializableCompiledFunction(
@@ -1285,6 +1297,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             # needs the two caches to disagree with each other.
             if not sync_cache_decision_cross_ranks(compiled_fn is not None):
                 compiled_fn = None
+
+            if compiled_fn is not None:
+                aot_config = cached_config
 
             # Reported only once the hit is final, so a rank whose hit was rejected falls
             # through to the miss tail instead: no autograd_cache_hit, no time saved in

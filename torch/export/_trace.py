@@ -2224,6 +2224,23 @@ def _export_to_aten_ir_make_fx(
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
 
+            # Preserve input origins when make_fx creates fresh placeholders.
+            placeholders = list(gm.graph.find_nodes(op="placeholder"))
+            names = tuple(fake_params_buffers)
+            attrs = {str(n.target): n for n in mod.graph.find_nodes(op="get_attr")}
+            for node, name in zip(placeholders, names):
+                if name in attrs and "input_mutation_origin" in attrs[name].meta:
+                    node.meta["input_mutation_origin"] = attrs[name].meta[
+                        "input_mutation_origin"
+                    ]
+            for node, original in zip(
+                placeholders[len(names) :], mod.graph.find_nodes(op="placeholder")
+            ):
+                if "input_mutation_origin" in original.meta:
+                    node.meta["input_mutation_origin"] = original.meta[
+                        "input_mutation_origin"
+                    ]
+
     # See comment in _export_to_aten_ir()
     if produce_guards_callback:
         try:

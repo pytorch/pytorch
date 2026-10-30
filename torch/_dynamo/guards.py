@@ -3154,6 +3154,34 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: value
+        == torch.accelerator.current_stream().device,
+    )
+    def CURRENT_DEVICE_MATCH(self, guard: Guard) -> None:
+        code = f"{self.arg_ref(guard)} == torch.accelerator.current_stream().device"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda value: value == torch.accelerator.current_stream().device,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: None,
+        eval_fn=lambda value, metadata: value
+        != torch.accelerator.current_stream().device,
+    )
+    def CURRENT_DEVICE_NOT_MATCH(self, guard: Guard) -> None:
+        code = f"{self.arg_ref(guard)} != torch.accelerator.current_stream().device"
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda value: value != torch.accelerator.current_stream().device,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )

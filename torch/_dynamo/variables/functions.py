@@ -4221,6 +4221,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         }
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            get_mutated_tensors,
             kernel_side_table,
             triton_kernel_wrapper_mutation,
         )
@@ -4266,7 +4267,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
         constant_args_idx = kernel_side_table.add_constant_args(constant_args)
         meta = ConstDictVariable(non_constant_args)
-        tx.output.create_proxy(
+        proxy = tx.output.create_proxy(
             "call_function",
             triton_kernel_wrapper_mutation,
             (),
@@ -4279,6 +4280,22 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "launch_kwargs": launch_kwargs,
             },
         )
+
+        # Triton mutation HOPs do not update fake tensor versions.
+        from ..utils import get_fake_values_from_nodes
+
+        fake_args = get_fake_values_from_nodes(
+            tx, proxy.node.kwargs["kwargs"], allow_non_graph_fake=False
+        )
+        for name in get_mutated_tensors(
+            cast(int, variable.kernel_idx),
+            constant_args_idx,
+            fake_args,
+            tma_descriptor_metadata,
+        ):
+            tx.output.record_input_mutation_on_current_stream(
+                tx, fake_args[name], proxy.node
+            )
 
         return VariableTracker.build(
             tx,

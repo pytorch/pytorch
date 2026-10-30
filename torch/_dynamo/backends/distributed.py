@@ -19,6 +19,7 @@ of compilation.
 import logging
 import traceback
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
@@ -249,10 +250,19 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             ],
         )
 
-        wrapper = WrapperModule(
-            self.compiler(input_mod, args, **self.compiler_configs),
-            unwrap_singleton_tuple,
+        from torch._functorch.aot_autograd import _get_input_mutation_barriers
+        from torch._guards import TracingContext
+
+        context = (
+            TracingContext.patch(
+                input_mutation_barriers=_get_input_mutation_barriers(input_mod)
+            )
+            if TracingContext.try_get() is not None
+            else nullcontext()
         )
+        with context:
+            compiled = self.compiler(input_mod, args, **self.compiler_configs)
+        wrapper = WrapperModule(compiled, unwrap_singleton_tuple)
         return wrapper
 
     # Note:

@@ -27,6 +27,7 @@ from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -733,6 +734,7 @@ class <lambda>(torch.nn.Module):
             s1 = torch.Stream(device=device)
             with s1:
                 z1 = torch.add(x, y)
+            s2.wait_stream(s1)
             with s2:
                 z = torch.add(x, y)
                 y = z + 2 + z1
@@ -740,6 +742,7 @@ class <lambda>(torch.nn.Module):
             return y
 
         inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
+        torch.accelerator.synchronize()
         expected = fn(*inp)
         (
             actual,
@@ -747,6 +750,7 @@ class <lambda>(torch.nn.Module):
             fw_graphs,
             _,
         ) = extract_graph(fn, *inp)
+        torch.accelerator.synchronize()
         self.assertEqual(len(fw_graphs), 1)
         self.assertEqual(expected, actual)
         self.assertExpectedInline(
@@ -757,13 +761,28 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 2}
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
 
+        # No stacktrace found for following nodes
+        subgraph_wait_stream = self.subgraph_wait_stream
+        control_deps = torch.ops.higher_order.control_deps((add, arg0_1, arg1_1), subgraph_wait_stream, add, arg0_1, arg1_1);  add = arg0_1 = arg1_1 = subgraph_wait_stream = None
+        getitem_2: "f32[2, 2]" = control_deps[3]
+        getitem_1: "f32[2, 2]" = control_deps[2]
+
+        # Annotation: {'stream': 2}
+        getitem: "f32[2, 2]" = control_deps[1];  control_deps = None
+
         # Annotation: {'stream': 1}
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
 
         # Annotation: {'stream': 1}
         add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, getitem);  add_2 = getitem = None
         return (add_3,)
+
+    class subgraph_wait_stream(torch.nn.Module):
+        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]", dep_2: "f32[2, 2]"):
+            #
+            wait_stream_default = torch.ops.streams.wait_stream.default(1, 2)
+            return (wait_stream_default, dep_0, dep_1, dep_2)
 """,
         )
 
@@ -2170,12 +2189,13 @@ class GraphModule(torch.nn.Module):
             @torch.compile()  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 e = torch.Event(device=device)
+                x = x.clone()
                 x += x + 1
                 e.record()
                 return x
 
             inp = (torch.ones(2, 2, device=device),)
-            fn(*inp)
+            self.assertEqual(fn(*inp), torch.full_like(inp[0], 3))
 
     def test_backward_sync_control_deps_e2e(self, device) -> None:
         """
@@ -2255,7 +2275,7 @@ class GraphModule(torch.nn.Module):
             return e
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device)
             )
 
@@ -2269,7 +2289,7 @@ class GraphModule(torch.nn.Module):
             return e
 
         try:
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device)
             )
             self.fail("Expected RuntimeError")
@@ -2289,7 +2309,7 @@ class GraphModule(torch.nn.Module):
             return e
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device)
             )
 
@@ -2304,7 +2324,7 @@ class GraphModule(torch.nn.Module):
             return e
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device)
             )
 
@@ -2317,12 +2337,13 @@ class GraphModule(torch.nn.Module):
             return x
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device),
                 torch.Event(device=device),
             )
 
-    def test_event_record_before_input_mutation_no_error(self, device):
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_event_record_before_input_mutation_no_error(self, device, backend):
         def fn(x):
             s = torch.Stream(device=device)
             e = torch.Event(device=device)
@@ -2331,11 +2352,14 @@ class GraphModule(torch.nn.Module):
                 x.add_(1)
             return e
 
-        torch.compile(fn, backend="eager", fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        x = torch.ones(2, 2, device=device)
+        torch.accelerator.synchronize()
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        torch.accelerator.synchronize()
+        self.assertEqual(x, torch.full_like(x, 2))
 
-    def test_event_record_on_different_stream_no_error(self, device):
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_event_record_on_different_stream_no_error(self, device, backend):
         def fn(x):
             s0 = torch.Stream(device=device)
             s1 = torch.Stream(device=device)
@@ -2346,9 +2370,11 @@ class GraphModule(torch.nn.Module):
                 e.record()
             return e
 
-        torch.compile(fn, backend="eager", fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        x = torch.ones(2, 2, device=device)
+        torch.accelerator.synchronize()
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        torch.accelerator.synchronize()
+        self.assertEqual(x, torch.full_like(x, 2))
 
     def test_event_not_returned_no_error(self, device):
         def fn(x):
@@ -2360,7 +2386,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(
                 torch.ones(2, 2, device=device)
             )
 
@@ -2731,6 +2757,7 @@ class <lambda>(torch.nn.Module):
             return z0, z
 
         inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        torch.accelerator.synchronize()
         expected = fn(*inp)
         (
             actual,
@@ -2981,6 +3008,22 @@ class <lambda>(torch.nn.Module):
 instantiate_device_type_tests(
     TestStreams, globals(), allow_xpu=True, except_for=("cpu",)
 )
+
+
+class TestStreamsCPUSpecific(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_synchronize_cpu_stream(self, backend) -> None:
+        def fn(x):
+            stream = torch.Stream(device="cpu")
+            stream.synchronize()
+            return x + 1
+
+        x = torch.ones(8)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(result, torch.full_like(x, 2))
+
+
+instantiate_parametrized_tests(TestStreamsCPUSpecific)
 
 
 @requires_cuda
@@ -3277,6 +3320,48 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("wait_stream", "stream_sync", "device_sync"))
+    def test_input_mutation_writeback_after_user_join_errors(
+        self, backend, barrier
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            if barrier == "wait_stream":
+                torch.cuda.current_stream().wait_stream(side)
+            elif barrier == "stream_sync":
+                side.synchronize()
+            else:
+                torch.cuda.synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros(8, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    def test_side_stream_join_without_input_mutation(self) -> None:
+        def fn(x):
+            side = torch.cuda.Stream()
+            with side:
+                y = x + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return y * 2
+
+        x = torch.zeros(8, device="cuda")
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(result, torch.full_like(x, 2))
+
+
+instantiate_parametrized_tests(TestStreamsCUDASpecific)
 
 
 @requires_xpu

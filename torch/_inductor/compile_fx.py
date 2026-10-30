@@ -3518,6 +3518,14 @@ def _compile_fx_main(
                             node.meta["val"] = target
 
             unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+            if "input_mutation_barriers" in model_.meta:
+                unlifted_gm.meta["input_mutation_barriers"] = model_.meta[
+                    "input_mutation_barriers"
+                ]
+            if "input_mutation_barrier_provenance" in model_.meta:
+                unlifted_gm.meta["input_mutation_barrier_provenance"] = model_.meta[
+                    "input_mutation_barrier_provenance"
+                ]
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
