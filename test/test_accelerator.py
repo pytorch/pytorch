@@ -340,7 +340,8 @@ class TestAccelerator(TestCase):
             old_state = torch.accelerator.random.get_rng_state(device_idx)
             old_offset = torch.accelerator.random.get_rng_offset(device_idx)
             self.assertIsInstance(old_state, torch.Tensor)
-            torch.accelerator.random.manual_seed(12345, device_idx)
+            with torch.accelerator.device_index(device_idx):
+                torch.accelerator.random.manual_seed(12345)
             new_state = torch.accelerator.random.get_rng_state(device_idx)
             self.assertNotEqual(old_state, new_state)
             self.assertEqual(12345, torch.accelerator.random.initial_seed(device_idx))
@@ -354,7 +355,8 @@ class TestAccelerator(TestCase):
             self.assertEqual(
                 old_offset, torch.accelerator.random.get_rng_offset(device_idx)
             )
-            torch.accelerator.random.seed(device_idx)
+            with torch.accelerator.device_index(device_idx):
+                torch.accelerator.random.seed()
             self.assertNotEqual(
                 old_state, torch.accelerator.random.get_rng_state(device_idx)
             )
