@@ -169,12 +169,17 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                      */
                     using opmath_t = at::opmath_type<input_t>;
 
-                    pos = static_cast<int64_t>((static_cast<opmath_t>(elt) - static_cast<opmath_t>(leftmost_edge[dim]))
-                            * (static_cast<opmath_t>(num_bin_edges[dim]) - 1)
-                            / (static_cast<opmath_t>(rightmost_edge[dim]) - static_cast<opmath_t>(leftmost_edge[dim])));
+                    opmath_t temp_pos = (static_cast<opmath_t>(elt) - static_cast<opmath_t>(leftmost_edge[dim]))
+                            * (static_cast<opmath_t>(num_bin_edges[dim] - 1))
+                            / (static_cast<opmath_t>(rightmost_edge[dim]) - static_cast<opmath_t>(leftmost_edge[dim]));
 
-                    /* limit position if it still overflows. it should not */
-                    pos = std::clamp<int64_t>(pos, 0, num_bin_edges[dim] - 1);
+                    if (!(temp_pos >= 0)) {
+                        temp_pos = 0;
+                    }
+
+                    temp_pos = std::clamp<opmath_t>(temp_pos, 0, num_bin_edges[dim] - 1);
+
+                    pos = static_cast<int64_t>(temp_pos);
 
                     /* Ensures consistency with bin_edges by checking the bins to the left and right
                      * of the selected position. Necessary for cases in which an element very close
