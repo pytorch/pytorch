@@ -11,7 +11,7 @@ import operator
 import types
 import typing
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
@@ -27,10 +27,12 @@ from torch._higher_order_ops.user_kernel_hop import (
     functionalize_functional_hop,
     functionalize_mutation_hop,
     KernelSideTable,
+    register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
     store_non_graphable_args,
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
+    UserKernelHOPInfo,
     UserKernelWrapperHOP,
 )
 from torch._higher_order_ops.utils import register_fake
@@ -2000,6 +2002,31 @@ register_user_kernel_hop_dispatch(
     triton_kernel_wrapper_mutation, triton_kernel_wrapper_functional
 )
 
+
+def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    from torch._inductor import config
+
+    kernel = kernel_side_table.get_kernel(hop_kwargs["kernel_idx"])
+    if isinstance(kernel, JITFunction):
+        return kernel.fn.__name__
+    elif isinstance(kernel, Autotuner):
+        if config.is_fbcode():
+            # Autotuner has different implementations for AMD and NV
+            import torch
+
+            if torch.version.hip is None:
+                return kernel.base_fn.__name__
+            else:
+                return kernel.fn.__name__
+        else:
+            return kernel.base_fn.__name__
+    else:
+        raise AssertionError("Unknown triton kernel type")
+
+
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
@@ -2894,3 +2921,27 @@ class TraceableTritonKernelWrapper:
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
         return arg
+
+
+# Imported after every definition: importing torch._dynamo imports TritonHOPifier and
+# other names from this module.
+from torch._dynamo.utils import ReInplaceTrigger
+
+
+register_user_kernel_hop(
+    UserKernelHOPInfo(
+        dsl="triton",
+        mutation=triton_kernel_wrapper_mutation,
+        functional=triton_kernel_wrapper_functional,
+        get_mutated_tensors=lambda hop_kwargs, kwargs: get_mutated_tensors(
+            hop_kwargs["kernel_idx"],
+            hop_kwargs["constant_args_idx"],
+            kwargs,
+            hop_kwargs["tma_descriptor_metadata"],
+        ),
+        get_kernel_name=get_triton_kernel_name,
+        functional_dense=triton_kernel_wrapper_functional_dense,
+        reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
+        serializable=True,
+    )
+)
