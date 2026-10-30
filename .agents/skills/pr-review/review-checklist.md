@@ -177,17 +177,12 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 
 ## Testing
 
-### Test Existence
-
-- [ ] **Tests exist** - New functionality has corresponding tests
-- [ ] **Regression tests for bug fixes** - Bug fixes must include a test that reproduces the bug before the fix
-- [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
-- [ ] **New test file is rare** - New test file should only be added when new major features are added
-
 ### Test Patterns
 
+- [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
+- [ ] **New test file is rare** - New test file should only be added when new major features are added
 - [ ] **Proper module ownership** - Test files must have a real `# Owner(s): ["module: ..."]` label, not `"module: unknown"`. The author should create a new module label if needed and add themselves as owner
-- [ ] **Use OpInfo** - Any testing for an operator or a cross-cutting feature must be done via OpInfo. Flag manual tests (e.g., `assertEqual(a + b, expected)`) for operators that already have OpInfo entries — these are redundant and will rot. When a PR adds dtype/device support to an operator, the testing should come from existing OpInfo infrastructure automatically (e.g., by adding the dtype to the operator's OpInfo `dtypes`), not from new manual tests. Likewise, a test checking a specific behavior for a single operator should not be a standalone test — the OpInfo infrastructure for that test category should be updated to cover the behavior across all applicable operators
+- [ ] **Use OpInfo** - Any testing for an operator or a cross-cutting feature must be done via OpInfo. Flag manual tests (e.g., `assertEqual(a + b, expected)`) for operators that already have OpInfo entries — these are redundant and will rot. When a PR adds dtype/device support to an operator, the testing should come from existing OpInfo infrastructure automatically (e.g., by adding the dtype to the operator's OpInfo `dtypes`), not from new manual tests
 - [ ] **Use ModuleInfo** - Manual forward/backward tests for `nn.Module` subclasses should use `ModuleInfo` from `torch/testing/_internal/common_modules.py` and the `@modules` decorator instead of hand-written per-module tests
 - [ ] **Use TestCase** - Tests inherit from `torch.testing._internal.common_utils.TestCase`
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
@@ -206,8 +201,7 @@ When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runn
 
 ### Test Quality
 
-- [ ] **Edge cases covered** - Tests include boundary conditions, empty inputs, error cases
-- [ ] **Error conditions tested** - Expected exceptions are tested with `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason. Bare `assertRaises` should be flagged — always require a message pattern match
+- [ ] **Use assertRaisesRegex for expected exceptions** - When a test checks for an exception, it uses `assertRaisesRegex`, not bare `assertRaises`. `assertRaisesRegex` verifies both the exception type and message, catching cases where the right exception is raised for the wrong reason
 - [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
 - [ ] **Prefer xfail over skip** - PR disables a test on a platform/config with `skip` (e.g. `@skipIf`, `@unittest.skip`, `self.skipTest`, `DecorateInfo(unittest.skip, ...)`) when the test merely fails rather than crashing. Prefer expected-failure (`@unittest.expectedFailure`, `DecorateInfo(unittest.expectedFailure, ...)`, or PyTorch's `xfailIf`/`expectedFailure*` helpers) instead. A skip silently hides the test forever — once the underlying bug is fixed or the platform gains support, the test stays disabled and the new coverage is lost. An xfail flips to a hard failure the moment the test starts passing, forcing the author to remove the marker and re-enable the test. Only accept a `skip` when the test would hard-crash the process (segfault, fatal abort that takes down the whole test binary), hang, or is genuinely flaky (non-deterministic pass/fail); in those cases the author should say so explicitly. A plain deterministic assertion failure or unsupported-op error is always an xfail, never a skip
 - [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile

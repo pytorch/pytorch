@@ -10,6 +10,7 @@ import inspect
 import io
 import itertools
 import pickle
+import re
 import subprocess
 import sys
 import unittest
@@ -738,6 +739,32 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                     )
                     out = x[idx]
                 self.checkType(out, "cpu", [4])
+
+    def test_index_tensor_types_match_eager(self):
+        # index and index_put reject the same index dtypes as eager, with the
+        # same error
+        ops = (
+            lambda x, index, value: torch.ops.aten.index(x, [index]),
+            lambda x, index, value: torch.ops.aten.index_put(x, [index], value),
+            lambda x, index, value: torch.ops.aten.index_put_(x, [index], value),
+            lambda x, index, value: torch.ops.aten._unsafe_index_put(x, [index], value),
+        )
+        for i, op in enumerate(ops):
+            for dtype in (torch.int8, torch.int16, torch.float):
+                with self.subTest(op=i, dtype=dtype):
+                    args = (
+                        torch.zeros(4),
+                        torch.tensor([1, 0, 1, 0], dtype=dtype),
+                        torch.tensor(1.0),
+                    )
+                    with self.assertRaises(IndexError) as eager:
+                        op(*args)
+                    # Under dynamo, the message continues with where it was raised
+                    message = str(eager.exception).splitlines()[0]
+                    with FakeTensorMode() as mode:
+                        fake_args = [mode.from_tensor(a) for a in args]
+                        with self.assertRaisesRegex(IndexError, re.escape(message)):
+                            op(*fake_args)
 
     @skipIfCppFakeTensor("exercises Python FakeTensor item memo internals")
     def test_static_scalar_tensor_with_shape_env_has_no_concrete_item_memo(self):
@@ -4750,11 +4777,31 @@ class TestFakeTensorDispatchCache(TestCase):
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
 
-            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
+            # uint8 is a (deprecated) mask, like bool
+            idx_tensor1 = torch.tensor([1, 1, 0, 1], dtype=torch.uint8)
             self.assertRaises(
                 DynamicOutputShapeException,
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
+
+            # int8 is not a valid index dtype; eager raises too
+            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
+            self.assertRaises(
+                IndexError,
+                lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
+            )
+
+        # With a ShapeEnv, indexing with a mask succeeds with an unbacked size,
+        # and is not cached because its output shape depends on the mask's data.
+        with FakeTensorMode(shape_env=ShapeEnv()):
+            x = torch.randn(4, 4, 4)
+            for dtype in (torch.bool, torch.uint8):
+                mask = torch.tensor([1, 1, 0, 1], dtype=dtype)
+                FakeTensorMode.cache_clear()
+                torch.ops.aten.index(x, [None, mask])
+                # Both index and the nonzero it calls on the mask
+                self.assertBypasses("dynamic output shape", 2)
+                self.assertBypasses("unrepresented symbol in output", 0)
 
     def test_cache_output_synthesis_ignores_proxy_tracing(self):
         shape_env = ShapeEnv()
