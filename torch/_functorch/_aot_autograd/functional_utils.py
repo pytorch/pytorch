@@ -16,6 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -33,6 +34,15 @@ aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 def has_lazy_neg_bit(t: object) -> bool:
     # See Note [Resolving lazy negative inputs at the backend boundary]
     return isinstance(t, Tensor) and not is_traceable_wrapper_subclass(t) and t.is_neg()
+
+
+def resolve_neg_preserving_strides(t: Tensor) -> Tensor:
+    # resolve_neg() returns a dense copy. Keep t's strides, as Inductor's
+    # clone_preserve_strides() does, so that gen_alias_from_base() can rebuild
+    # outputs aliasing the copy on the user's tensor.
+    needed = compute_required_storage_length(t.size(), t.stride(), 0)
+    buffer = torch.as_strided(t, (needed,), (1,)).resolve_neg()
+    return torch.as_strided(buffer, t.size(), t.stride())
 
 
 def to_fun(t: object) -> Any:

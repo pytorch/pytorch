@@ -63,7 +63,7 @@ from .autograd_cache import (
 )
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
-from .functional_utils import has_lazy_neg_bit
+from .functional_utils import has_lazy_neg_bit, resolve_neg_preserving_strides
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -2373,7 +2373,10 @@ def _resolve_neg_example_inputs(
     # See Note [Resolving lazy negative inputs at the backend boundary]
     if not any(info.is_neg for info in fw_metadata.input_info):
         return example_inputs
-    return [t.resolve_neg() if has_lazy_neg_bit(t) else t for t in example_inputs]
+    return [
+        resolve_neg_preserving_strides(t) if has_lazy_neg_bit(t) else t
+        for t in example_inputs
+    ]
 
 
 def _aot_stage2b_bw_compile(

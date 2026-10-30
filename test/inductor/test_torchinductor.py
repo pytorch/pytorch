@@ -8674,6 +8674,20 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(out, out_ref)
         self.assertEqual(base, base_ref)
 
+    def test_neg_view_input_strided_alias(self):
+        # The resolved copy of a lazy negative input keeps its strides, so an
+        # output aliasing it is rebuilt on the right elements of the user's
+        # tensor when dynamic shapes rule out view replay.
+        def fn(x):
+            return x[: x.shape[0] // 2], x * 2
+
+        x = torch.randn(16, device=self.device)[::2]._neg_view()
+        outs = torch.compile(fn, dynamic=True)(x)
+        outs_ref = fn(x)
+        self.assertEqual(outs, outs_ref)
+        self.assertEqual(outs[0].stride(), outs_ref[0].stride())
+        self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
+
     def test_complex_conv2d_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that complex convolution works on conjugated inputs when compiled.

@@ -723,6 +723,28 @@ class TestAOTAutograd(_TestAOTAutogradBase):
             self.assertTrue(outs[0].is_neg())
             self.assertEqual(outs[0].data_ptr(), base[1:].data_ptr())
 
+    def test_neg_view_input_strided_alias_output(self):
+        # Dynamic shapes, or turning view replay off, rebuild an output that
+        # aliases an input from the output's strides and offset, which are
+        # relative to the resolved copy; it must still land on the user's
+        # elements.
+        def f(x):
+            return x[: x.shape[0] // 2], x * 2
+
+        for replay_views in (True, False):
+            base = torch.arange(20.0)
+            x = base[3::2]._neg_view()
+            outs_ref = f(x)
+            compiled_f = aot_function(f, self._no_neg_input_compiler, dynamic=True)
+            with torch._functorch.config.patch(
+                view_replay_for_aliased_outputs=replay_views
+            ):
+                outs = compiled_f(x)
+            self.assertEqual(outs, outs_ref)
+            self.assertTrue(outs[0].is_neg())
+            self.assertEqual(outs[0].stride(), outs_ref[0].stride())
+            self.assertEqual(outs[0].data_ptr(), outs_ref[0].data_ptr())
+
     def test_neg_view_input_mutated_in_training_graph(self):
         # x doesn't require grad, so its mutation stays in the training graph
         # and the resolved copy is copied back to the user's tensor.

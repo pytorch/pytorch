@@ -70,7 +70,7 @@ from .descriptors import (
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
-from .functional_utils import gen_alias_from_base
+from .functional_utils import gen_alias_from_base, resolve_neg_preserving_strides
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
@@ -557,15 +557,24 @@ class _FirstInvocationContext:
 # compilers like Inductor read the storage directly and ignore the bit, so they
 # compute on the un-negated values (#145093).
 #
-# The runtime wrapper therefore hands the compiled graph resolve_neg() copies of
+# The runtime wrapper therefore hands the compiled graph resolved copies of
 # these inputs, and the backend compiles against resolved example inputs. The
-# mutation epilogue and output alias replay keep using the user's original
+# copies keep the inputs' strides (resolve_neg_preserving_strides), so the
+# output alias replay can rebuild a graph output that views a copy on the
+# user's tensor even when it falls back to the output's strides and offset.
+# The mutation epilogue and output alias replay keep using the user's original
 # tensors, which are captured before the call. A data mutation the graph
 # performs in place lands on the copy, so it is copied back after the call.
 # An in-graph set_() or resize_() of such an input can't be replayed onto the
 # user's tensor that way and is rejected. Only inputs that carried the bit
 # when the graph was traced are resolved, so graphs without such inputs are
 # unchanged.
+#
+# One aliasing difference remains: a view of such an input returned by a custom
+# autograd.Function in a training graph (OutputType.custom_function_view) is
+# returned as is, so it views the copy rather than the user's tensor. Its
+# values and gradients are correct; rebuilding it on the user's tensor would
+# bypass the compiled backward.
 #
 # Conjugate-bit inputs are left alone: tracing already records their
 # conjugation as explicit ops (e.g. Tensor.imag emits _conj), so resolving them
@@ -582,7 +591,7 @@ def _resolve_neg_inputs(
     """
     originals = [args[i] for i in neg_inputs_mutated_in_graph]
     for i in neg_input_indices:
-        args[i] = args[i].resolve_neg()
+        args[i] = resolve_neg_preserving_strides(args[i])
     return [(orig, args[i]) for orig, i in zip(originals, neg_inputs_mutated_in_graph)]
 
 
