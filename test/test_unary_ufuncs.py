@@ -1893,6 +1893,33 @@ class TestUnaryUfuncs(TestCase):
         expected = torch.from_numpy(scipy.special.erfinv(x.cpu().numpy()))
         self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
 
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    @parametrize("eps", [None, 1e-6, 0.2])
+    def test_logit_backward_nan_propagation(self, device, dtype, eps):
+        # Repeat across multiple vector widths plus a partial tail to exercise
+        # both the full-vector loop and masked tail in CPU vectorized kernels.
+        x = (
+            torch.tensor([float("nan"), 0.5, 0.0], dtype=dtype, device=device)
+            .repeat(17)
+            .requires_grad_()
+        )
+        grad_out = torch.tensor(
+            [1.0, 1.0, float("nan")], dtype=dtype, device=device
+        ).repeat(17)
+        out = torch.logit(x, eps=eps)
+        (grad_x,) = torch.autograd.grad(out, x, grad_out)
+        grad_x_3 = grad_x.view(17, 3)
+        self.assertTrue(torch.isnan(grad_x_3[:, 0]).all())
+        self.assertEqual(
+            grad_x_3[:, 1], torch.full((17,), 4.0, dtype=dtype, device=device)
+        )
+        if eps is None:
+            self.assertTrue(torch.isnan(grad_x_3[:, 2]).all())
+        else:
+            self.assertEqual(
+                grad_x_3[:, 2], torch.zeros(17, dtype=dtype, device=device)
+            )
+
 
 class TestUnaryUfuncsCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
