@@ -104,6 +104,25 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             compiled = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(compiled(mapping), fn(mapping))
 
+    def test_sourced_dict_key_in_constant_aggregates(self):
+        def fn(x, mapping):
+            key = next(iter(mapping.copy()))
+            return x + 1, ((key,),), frozenset((key,)), slice(key, None)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        keys = [b"layer0weight".decode() for _ in range(2)]
+        self.assertIsNot(keys[0], keys[1])
+        x = torch.ones(1)
+        for key in keys:
+            mapping = collections.OrderedDict.fromkeys([key], 1)
+            result = compiled(x, mapping)
+            self.assertEqual(result, fn(x, mapping))
+            self.assertIs(result[1][0][0], key)
+            self.assertIs(next(iter(result[2])), key)
+            self.assertIs(result[3].start, key)
+        self.assertEqual(counter.frame_count, 1)
+
     def _compile_and_capture_side_effects(self, fn, *args):
         """Compile fn and return side-effect metadata from bytecode hooks."""
         captured = {}
