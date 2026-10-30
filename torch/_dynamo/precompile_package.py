@@ -1864,6 +1864,8 @@ class PrecompileSession(Generic[_P, _R]):
         self._compiled: Callable[_P, _R] | None = None
         self._entered = False
         self._finished = False
+        # What earlier snapshots warned about, so a save() warns only when it is new.
+        self._warned_ops: set[tuple[str, object]] = set()
 
     def _recording_filter(
         self,
@@ -2263,7 +2265,11 @@ class PrecompileSession(Generic[_P, _R]):
             served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
         wanted = {*found.modules, *served}
         modules = tuple(m for m in sys.modules if m in wanted)
-        _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
+        fields = ("lazy", "unrecorded", "untracked_kernels")
+        warned = {(f, x) for f in fields for x in getattr(found, f)}
+        if not warned <= self._warned_ops:
+            self._warned_ops |= warned
+            _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, **sections
