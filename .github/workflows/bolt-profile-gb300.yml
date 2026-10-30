@@ -164,6 +164,7 @@ jobs:
         timeout-minutes: 200
         shell: bash
         run: |
+          export PIP_CACHE_DIR="${RUNNER_TEMP}/pip-cache"
           failed=()
           for wheel in wheels/*.whl; do
             # torch-<version>-<python tag>-<abi tag>-<platform>.whl

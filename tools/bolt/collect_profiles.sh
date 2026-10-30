@@ -108,7 +108,7 @@ profile_stem() {
 }
 
 build_id() {
-  readelf -n "$1" | awk '/Build ID/ {print $3}'
+  readelf -n "$1" 2> /dev/null | awk '/Build ID/ {print $3}'
 }
 
 setup_llvm() {
@@ -181,17 +181,22 @@ cmd_run() {
   rm -f "${fdata_dir}"/*.fdata
 
   # The libraries that do not depend on Python and this Python's libtorch_python.
-  local -a libs
+  local -a libs rpath_args
   mapfile -t libs < <(cd "${instrumented_dir}/lib" && find . -maxdepth 1 -name 'lib*.so' -printf '%P\n' | sort)
   libs+=("${soabi}/libtorch_python.so")
   for rel in "${libs[@]}"; do
     name="$(basename "${rel}")"
     if [[ "$(build_id "${TORCH_LIB_DIR}/${name}")" != "$(build_id "${instrumented_dir}/lib/${rel}")" ]]; then
-      log "WARNING: the installed ${name} and the instrumented ${rel} have different build IDs; are they from the same build?"
+      log "WARNING: the installed ${name} and the instrumented ${rel} have different build IDs"
     fi
     cp "${TORCH_LIB_DIR}/${name}" "${WORK_DIR}/original/${name}"
     RESTORE_LIBS+=("${name}")
     cp "${instrumented_dir}/lib/${rel}" "${TORCH_LIB_DIR}/${name}"
+    # The build tree's libraries keep the build's RPATH; the wheel build sets
+    # its own (.ci/wheel/linux/repair_wheel.py), as DT_RPATH for CUDA wheels.
+    rpath_args=(--set-rpath "$(patchelf --print-rpath "${WORK_DIR}/original/${name}")")
+    [[ "$(readelf -d "${WORK_DIR}/original/${name}")" != *"(RPATH)"* ]] || rpath_args+=(--force-rpath)
+    patchelf "${rpath_args[@]}" "${TORCH_LIB_DIR}/${name}"
   done
 
   log "Running the synthetic workload on the instrumented libraries"
