@@ -1125,9 +1125,10 @@ class TestPreparePermissions(unittest.TestCase):
 class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
     """Every host the review job actually talks to must be allowlisted.
 
-    The trace upload is this job's single write capability. It is best-effort
-    (`|| echo ::warning::`), so a blocked endpoint costs a silent, permanent
-    loss of every transcript plus a reasoning_uri pointing at nothing.
+    The job's S3 writes (the traces and the review inputs) are its only write
+    capability. They are best-effort (a failure is a `::warning::`), so a
+    blocked endpoint costs a silent, permanent loss of every transcript and
+    snapshot, plus a reasoning_uri pointing at nothing.
     """
 
     def setUp(self):
@@ -4850,6 +4851,112 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
             "the conversation is fetched after the `started` row, so a fetch "
             "failure leaves a started row with no review behind it.",
         )
+
+
+class TestTheReviewInputsAreKept(unittest.TestCase):
+    """The review job uploads the files the model is handed, best-effort.
+
+    The review role may write only `pr_review_traces/`, so another prefix loses
+    every snapshot silently; and a snapshot failure must never fail the review.
+    """
+
+    NAME = "Upload the review inputs to S3"
+    INPUTS = ("pr-diff.txt", "pr-files.txt", "pr-comments.json")
+
+    def setUp(self):
+        self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        (self.step,) = [
+            s
+            for s in re.split(r"(?m)^      -(?: |$)", self.review)
+            if s.startswith(f"name: {self.NAME}\n")
+        ]
+
+    def test_every_s3_write_in_the_review_job_is_under_the_traces_prefix(self):
+        targets = re.findall(r"s3://\$\{S3_BUCKET\}/(\S*)", self.review)
+        self.assertGreaterEqual(len(targets), 4, targets)
+        for t in targets:
+            self.assertTrue(t.startswith("pr_review_traces/"), t)
+
+    def test_it_runs_on_credentials_after_every_input_is_written_and_before_the_model(
+        self,
+    ):
+        self.assertEqual(
+            uncommented(re.search(r"(?m)^        if: (.*)$", self.step).group(1)),
+            "steps.aws.outcome == 'success'",
+        )
+        model_step(self.review, "aws")
+        self.assertNotIn("continue-on-error", self.step)
+        names = re.findall(r"(?m)^      - name: (.+)$", self.review)
+        here = names.index(self.NAME)
+        self.assertLess(names.index("Build the diff and apply the size gate"), here)
+        self.assertLess(names.index("Write the PR conversation"), here)
+        self.assertLess(here, names.index('"Stage A: pr-review"'))
+
+    def _run(self, aws_exit: int, present=INPUTS):
+        # Sliced from the raw job with its indentation, the way `run_step` does.
+        raw = job_block(STAGE2.read_text(), "review")
+        rest = raw[raw.index(f"      - name: {self.NAME}\n") :]
+        nxt = re.search(r"(?m)^      - ", rest[1:])
+        rest = rest if nxt is None else rest[: nxt.start() + 1]
+        body = textwrap.dedent(scalar_block(rest, "run"))
+        body = re.sub(r"\$\{\{[^}]*\}\}", "CTX", body)
+        with tempfile.TemporaryDirectory() as td:
+            body = body.replace("/tmp/", f"{td}/")
+            for f in present:
+                Path(td, f).write_text(f"content of {f}")
+            bin_dir = Path(td) / "bin"
+            bin_dir.mkdir()
+            log = Path(td) / "argv.log"
+            # Records what it was ASKED to upload: the source must be the
+            # staging directory, and each file is logged with its content.
+            (bin_dir / "aws").write_text(
+                f'#!/bin/bash\nprintf "%s\\n" "$*" >> {log}\n'
+                f'[ "$4" = "{td}/pr-review-input" ] || exit 3\n'
+                f'for f in "$4"/*; do printf "%s=%s\\n" "${{f##*/}}" "$(head -1 "$f")"; done >> {log}\n'
+                f"exit {aws_exit}\n"
+            )
+            (bin_dir / "aws").chmod(0o755)
+            proc = subprocess.run(
+                ["bash", "-c", body],
+                capture_output=True,
+                text=True,
+                cwd=td,
+                env={
+                    "PATH": f"{bin_dir}:/usr/bin:/bin",
+                    "S3_BUCKET": "b",
+                    "HEAD_SHA": "h" * 40,
+                    "BASE_SHA": "b" * 40,
+                    "MERGE_BASE_SHA": "m" * 40,
+                },
+            )
+            staged = Path(td, "pr-review-input")
+            manifest = json.loads((staged / "manifest.json").read_text())
+            uploaded = sorted(p.name for p in staged.iterdir())
+            recorded = log.read_text() if log.exists() else ""
+        return proc, manifest, uploaded, recorded
+
+    def test_it_uploads_the_inputs_and_a_manifest(self):
+        proc, manifest, uploaded, recorded = self._run(0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(uploaded, sorted([*self.INPUTS, "manifest.json"]))
+        self.assertIn("s3 cp --recursive", recorded.splitlines()[0] if recorded else "")
+        self.assertIn("s3://b/pr_review_traces/CTX/CTX_CTX_input/", recorded)
+        for f in self.INPUTS:
+            self.assertIn(f"{f}=content of {f}\n", recorded)
+        self.assertIn("manifest.json={\n", recorded)
+        self.assertEqual(
+            (manifest["head_sha"], manifest["base_sha"], manifest["merge_base_sha"]),
+            ("h" * 40, "b" * 40, "m" * 40),
+        )
+        self.assertNotIn("::warning::", proc.stdout)
+
+    def test_a_missing_input_is_skipped_and_a_failed_upload_only_warns(self):
+        proc, _, uploaded, _ = self._run(0, present=("pr-diff.txt",))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(uploaded, ["manifest.json", "pr-diff.txt"])
+        proc, _, _, _ = self._run(1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::review input upload failed", proc.stdout)
 
 
 class TestPublishMovesNoLabels(unittest.TestCase):
