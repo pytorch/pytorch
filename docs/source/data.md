@@ -399,6 +399,15 @@ elements) without pinning the memory. To enable memory pinning for custom
 batch or data type(s), define a {meth}`pin_memory` method on your custom
 type(s).
 
+If a custom type needs to know which accelerator is used for pinning, it can
+instead define `pin_memory_with_device(self, device)`. This opt-in method
+receives the accelerator type as a string (such as `"cuda"` or `"xpu"`)
+when called by DataLoader. It may receive `None` when pinning is invoked
+without a selected device. If both methods are defined,
+`pin_memory_with_device` takes precedence. The existing no-argument
+`pin_memory(self)` method remains supported. The selected device should not
+be forwarded to `Tensor.pin_memory()`, whose device argument is deprecated.
+
 See the example below.
 
 Example:
