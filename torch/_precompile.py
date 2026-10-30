@@ -207,18 +207,8 @@ it.
 # calling convention out of python_code, primes the inductor kernel caches from the bundle
 # (torch.compiler.load_cache_artifacts), then execs python_code -- so its kernels load
 # from the precompiled binaries instead of JIT. With the cache you skip JIT; with only
-# python_code you JIT -- same results either way. One caveat: an artifact whose graph
-# calls custom ops first imports the modules recorded in CUSTOM_OP_MODULES (a failed
-# import only warns, unless the module is in CUSTOM_OP_OVERRIDE_MODULES: its kernel
-# the graph ran at capture overrode another for the same key), then refuses to load
-# unless every op in CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is
-# registered, and every overriding kernel is still the active one, registered from
-# the same module's file. The caller must
-# import, before load, what the artifact cannot record: C++ extension ops, ops from
-# torch.library.define or __main__, and kernels registered through
-# @torch.library.impl, register_kernel or another module's Library. The
-# eager backend has no kernels to accelerate, so the eager cache carries no compiled
-# artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
+# python_code you JIT -- same results either way. The eager backend has no kernels
+# to accelerate, so the eager cache carries no compiled artifact (artifact=None) but is still a full integrity-tagged envelope, and load()
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
@@ -230,10 +220,10 @@ it.
 # custom_op) or, for a Dynamo artifact, in SERVED_MODULES (it serves
 # the artifact's frames); then the load fails. The load then refuses unless every op in
 # CUSTOM_OPS and every kernel key CUSTOM_OP_KERNELS lists for it is registered, and
-# every overriding kernel is still the active one, registered from the same file.
-# make_fx case: before load, the caller must import C++ extension ops, ops defined
-# from __main__ or outside a module's import, and kernels registered through
-# @torch.library.impl, register_kernel or another module's Library. Dynamo case: if an
+# every overriding kernel is still the active one, registered from the same file or
+# by the same recorded calling module. make_fx case: before load, the caller must
+# import C++ extension ops, and ops and kernels registered from __main__ or outside
+# a module's import. Dynamo case: if an
 # op or kernel has no recorded module or a recorded module is outside torch, the
 # artifact also imports its served frames' modules, all in the order their imports
 # finished, so the caller must import only those registered outside every served
