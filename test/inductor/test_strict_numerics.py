@@ -14,6 +14,7 @@ os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
+from torch._higher_order_ops import foreach_map
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -656,6 +657,88 @@ class StrictNumericsCompileTest(TestCase):
                 tuple(x.view(_BIT_VIEW[dtype]) for x in actual),
                 tuple(x.view(_BIT_VIEW[dtype]) for x in expected),
             )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_fused_mul_nan_payload(self, device, dtype, numerics, upcast):
+        values = _min_max_specials(dtype, device)
+        nans = values[-4:]
+        a = nans.repeat_interleave(values.numel())
+        b = values.repeat(nans.numel())
+
+        def fn(a, b):
+            computed = -b.rsqrt()
+            return a * computed, computed * a
+
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )
+        result, codes = run_and_get_code(compiled, a, b)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(
+            tuple(t.view(torch.int64) for t in result),
+            tuple(t.view(torch.int64) for t in fn(a, b)),
+        )
+        for scalar in (float("nan"), -float("nan"), 0.7):
+            self.assertEqual(
+                tuple(t.view(torch.int64) for t in compiled(scalar, nans)),
+                tuple(t.view(torch.int64) for t in fn(scalar, nans)),
+            )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("scalar_left", (False, True))
+    @parametrize("scalar_dtype", (torch.float32, torch.float64))
+    @parametrize("foreach", (False, True))
+    def test_mul_cpu_scalar_nan_payload(
+        self, device, dtype, numerics, scalar_left, scalar_dtype, foreach
+    ):
+        x = _min_max_specials(dtype, device)
+        scalars = _min_max_specials(scalar_dtype, "cpu")
+
+        def fn(x, scalar):
+            if foreach:
+                return (
+                    foreach_map(torch.mul, scalar, [x])[0]
+                    if scalar_left
+                    else foreach_map(torch.mul, [x], scalar)[0]
+                )
+            return scalar * x if scalar_left else x * scalar
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        for scalar in scalars:
+            self.assertEqual(
+                compiled(x, scalar).view(torch.int64),
+                fn(x, scalar).view(torch.int64),
+            )
+
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_acos_nan_gradients(self, device, dtype, numerics, upcast):
+        endpoints = torch.tensor([-1, 0, 1], dtype=dtype, device=device)
+        values = torch.cat(
+            (
+                _min_max_specials(dtype, device),
+                endpoints,
+                torch.nextafter(endpoints, torch.full_like(endpoints, float("inf"))),
+                torch.nextafter(endpoints, torch.full_like(endpoints, -float("inf"))),
+            )
+        )
+        upstream = _min_max_specials(dtype, device)
+        x = values.repeat_interleave(upstream.numel()).requires_grad_()
+        grad = upstream.repeat(values.numel())
+        compiled = torch.compile(
+            torch.acos,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )
+        expected = torch.autograd.grad(torch.acos(x), x, grad)[0]
+        actual = torch.autograd.grad(compiled(x), x, grad)[0]
+        self.assertEqual(actual.view(torch.int64), expected.view(torch.int64))
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
