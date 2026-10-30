@@ -62,12 +62,14 @@ def export_python(
     served without its cache, which was built for the captured text and stays stale
     until a recapture replaces it, so its edited graphs compile the kernels their
     text defines, which :func:`~torch.compiler.precompile.no_compilation` forbids.
-    With the inductor backend the capture tunes every Triton kernel at compile time
-    (it compiles as inductor does under ``triton.autotune_at_compile_time``), so a
-    graph's code carries a ``KERNEL_CONFIGS`` table of the config each kernel launches
-    with: editing a row changes that kernel's launch config. A process serves one
-    version of a capture: rerun in a new process to pick up an edit, since loading the
-    edited file where an earlier version of it is loaded raises::
+    With the inductor backend the capture tunes its Triton kernels at compile time (it
+    compiles as inductor does under ``triton.autotune_at_compile_time``), so a graph's
+    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
+    generated launches with: editing a row changes that kernel's launch config. A
+    template (flex attention, say) or a user-defined kernel keeps its config in its own
+    decorator instead, editable the same way. A process serves one version of a
+    capture: rerun in a new process to pick up an edit, since loading the edited file
+    where an earlier version of it is loaded raises::
 
         @torch.compiler.export_python(path="artifacts/step.py")
         def step(model, x):
