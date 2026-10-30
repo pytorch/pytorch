@@ -3037,18 +3037,23 @@ class ConstructorMoverPass:
             return True
 
         if (
-            node.target == aten.div.Tensor_mode
-            and node.kwargs.get("rounding_mode") == "trunc"
-            and (device := self.get_node_device(node)) is not None
-            and is_strict_cuda_triton(device)
-            and isinstance(divisor := get_arg_value(node, 1, "other"), fx.Node)
-            and self.is_cpu_scalar_tensor(divisor)
+            node.target != aten.div.Tensor_mode
+            or node.kwargs.get("rounding_mode") != "trunc"
         ):
-            # For strict mode, match eager use of reciprocal multiplication
-            # for CPU scalar divisors.
-            return True
+            return False
 
-        return False
+        val = node.meta.get("val")
+        divisor = node.args[1]
+        # For strict mode, match eager use of reciprocal multiplication
+        # for CPU scalar divisors.
+        return (
+            isinstance(val, torch.Tensor)
+            and is_strict_cuda_triton(val.device)
+            and val.dtype
+            in (torch.bfloat16, torch.float16, torch.float32, torch.float64)
+            and isinstance(divisor, fx.Node)
+            and self.is_cpu_scalar_tensor(divisor)
+        )
 
     def get_node_device(self, node: fx.Node) -> torch.device | None:
         """

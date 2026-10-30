@@ -7953,15 +7953,16 @@ def _floor_div_floating(a, b):
 def _div_trunc_cuda_scalar(
     a: TensorBox | IRNode, b: TensorBox | IRNode | int | float
 ) -> TensorBox:
-    # Match eager CUDA: reciprocal and product in FP32, round after truncation.
+    # Match eager CUDA: use the accumulation dtype, then round after truncation.
+    compute_dtype = get_computation_dtype(a.get_dtype())
     if isinstance(b, (int, float)):
-        b = ir.Constant(value=b, dtype=torch.float32, device=a.get_device_or_error())
+        b = ir.Constant(value=b, dtype=compute_dtype, device=a.get_device_or_error())
     b = expand(b, a.get_size())
 
     def fn(value, divisor):
-        value = ops.to_dtype(value, torch.float32)
+        value = ops.to_dtype(value, compute_dtype)
         reciprocal = ops.div_rn(
-            ops.constant(1.0, torch.float32), ops.to_dtype(divisor, torch.float32)
+            ops.constant(1.0, compute_dtype), ops.to_dtype(divisor, compute_dtype)
         )
         return ops.trunc(ops.mul(value, reciprocal))
 
@@ -8007,7 +8008,8 @@ def div_mode(a, b, rounding_mode=None):
             and (device := a.get_device()) is not None
             and is_strict_cuda_triton(device)
             and scalar_divisor is not None
-            and a.get_dtype() in (torch.bfloat16, torch.float16, torch.float32)
+            and a.get_dtype()
+            in (torch.bfloat16, torch.float16, torch.float32, torch.float64)
         ):
             return _div_trunc_cuda_scalar(a, scalar_divisor)
         return trunc(div(a, b))

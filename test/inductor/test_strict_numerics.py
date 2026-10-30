@@ -448,6 +448,21 @@ class StrictNumericsCompileTest(TestCase):
         )
         self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
+    @config.patch({"numerics": "strict_pointwise", "graph_partition": True})
+    @dtypes(torch.float64)
+    @parametrize("tensor_divisor", (False, True))
+    def test_div_trunc_fp64_scalar_reciprocal(self, device, dtype, tensor_divisor):
+        # Cover fp64 scalar reciprocals and movement; the generic sweep excludes fp64.
+        # Non-strict returns 1 for CPU tensors; Python scalars already use a reciprocal.
+        x = torch.tensor(49.0, device=device, dtype=dtype)
+        divisor = torch.tensor(49.0, dtype=dtype) if tensor_divisor else 49.0
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
