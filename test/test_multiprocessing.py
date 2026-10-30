@@ -638,9 +638,10 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_device_bad_call(self, device):
         # Initialize device
         t = torch.zeros(5, 5).to(device).cpu()
-        inq = mp.Queue()
-        outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(device, inq, outq))
+        ctx = mp.get_context("fork")
+        inq = ctx.Queue()
+        outq = ctx.Queue()
+        p = ctx.Process(target=queue_get_exception, args=(device, inq, outq))
         p.start()
         inq.put(t)
         p.join()
