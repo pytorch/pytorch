@@ -1812,12 +1812,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given.
+        are consulted in the order given. A table may be a property of the
+        instance, for a VT that wraps several Python types.
         """
         for klass in type(self).__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
+                if isinstance(table, property):
+                    table = table.fget(self)
                 if table is not None and name in table:
                     return table[name]
         return None
