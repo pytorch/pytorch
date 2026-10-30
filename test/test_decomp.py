@@ -1721,6 +1721,19 @@ class DecompOneOffTests(TestCase):
                 )
             )
 
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    def test_logit_backward_nan_propagation(self, device, dtype):
+        x = torch.tensor([float("nan"), 0.5, 0.0], dtype=dtype, device=device)
+        grad_out = torch.tensor([1.0, 1.0, float("nan")], dtype=dtype, device=device)
+
+        for eps in (None, 1e-6, 0.2):
+            ref = torch.ops.aten.logit_backward(grad_out, x, eps)
+            res = torch._decomp.decompositions.logit_backward(grad_out, x, eps)
+            self.assertTrue(torch.isnan(res[0]))
+            self.assertEqual(res, ref, equal_nan=True)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
