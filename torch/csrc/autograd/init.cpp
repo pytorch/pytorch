@@ -12,10 +12,8 @@
 #include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SafePyObject.h>
-#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
@@ -1639,20 +1637,9 @@ static PyObject* get_dispatch_stack_at(
   END_HANDLE_TH_ERRORS
 }
 
-// A C++ FakeTensorMode lives in FakeTensorModeTLS rather than the FAKE infra
-// mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
-// its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
-// set, so callers can enter, suspend and restore either kind the same way.
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
-
-  if (PyObject_HasAttrString(mode, "_cpp_mode")) {
-    auto cpp_mode = py::cast<std::shared_ptr<c10::FakeTensorMode>>(
-        py::handle(mode).attr("_cpp_mode"));
-    c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
-    Py_RETURN_NONE;
-  }
 
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
@@ -1677,12 +1664,6 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
   if (!maybe_mode.has_value()) {
-    if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
-      return torch::fake_tensor::getCppFakeTensorModePyObj(
-                 c10::impl::FakeTensorModeTLS::get_state())
-          .release()
-          .ptr();
-    }
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
@@ -1697,14 +1678,6 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
   if (!maybe_mode.has_value()) {
-    if (mode_key == c10::impl::TorchDispatchModeKey::FAKE) {
-      auto cpp_mode = c10::impl::FakeTensorModeTLS::get_state();
-      if (cpp_mode != nullptr) {
-        auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
-        c10::impl::FakeTensorModeTLS::reset_state();
-        return py_mode.release().ptr();
-      }
-    }
     Py_RETURN_NONE;
   }
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
