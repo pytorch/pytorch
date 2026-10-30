@@ -44,7 +44,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
     _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -6833,8 +6833,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
-        if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
-            self.skipTest("_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later, or RDNA3 or later")
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
+            self.skipTest("_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later")
 
         q_group = 32
         inner_k_tiles = 2
@@ -6902,8 +6905,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
-        if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
-            self.skipTest("_convert_weight_to_int4pack_cuda supported only for CDNA2 or later, or RDNA3 or later")
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
+            self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
+
+        if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
+            self.skipTest("_convert_weight_to_int4pack_cuda supported only for CDNA2 or later")
 
         q_group = 32
         inner_k_tiles = 2
@@ -12038,19 +12044,61 @@ class TestLinalgCudaOnly(TestCase):
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16, torch.float64])
     def test_ck_blas_library_mm(self, dtype):
         if dtype == torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
             self.skipTest("bfloat16 case skipped on gfx90a")
         device = 'cuda'
         shapes = [(7168, 8192, 1280), (1280, 8192, 7168), (8192, 8192, 1280)]
         for M, K, N in shapes:
-            a = torch.randint(2, 5, (M, K), device=device, dtype=torch.float32).to(dtype)
-            b = torch.randint(2, 5, (K, N), device=device, dtype=torch.float32).to(dtype)
-            cpu_out = torch.mm(a.cpu(), b.cpu())
+            # Small integers keep every partial sum exact, even in float16.
+            a = torch.randint(-2, 3, (M, K), device=device, dtype=torch.float32).to(dtype)
+            b = torch.randint(-2, 3, (K, N), device=device, dtype=torch.float32).to(dtype)
+            cpu_out = torch.mm(a.cpu().double(), b.cpu().double()).to(dtype)
             with blas_library_context("ck"):
                 ck_out = torch.mm(a, b)
             self.assertEqual(ck_out, cpu_out)
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_addmm(self, dtype):
+        a = torch.randint(-2, 3, (256, 64), device="cuda").to(dtype)
+        b = torch.randint(-2, 3, (64, 512), device="cuda").to(dtype)
+        for bias_shape in [(256, 512), (512,)]:
+            bias = torch.randint(-2, 3, bias_shape, device="cuda").to(dtype)
+            for alpha, beta in [(1, 0), (2, 0), (1, 1), (2, 0.5)]:
+                expected = torch.addmm(bias.cpu().double(), a.cpu().double(), b.cpu().double(), alpha=alpha, beta=beta)
+                with blas_library_context("ck"):
+                    out = torch.addmm(bias, a, b, alpha=alpha, beta=beta)
+                self.assertEqual(out, expected.to(dtype))
+
+    @skipIfRocmArch(NAVI_ARCH)
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_ck_blas_library_unsupported_falls_back(self, dtype):
+        def check(fn, *args, **kwargs):
+            expected = fn(*(t.cpu().double() for t in args), **kwargs).to(dtype)
+            with blas_library_context("ck"):
+                self.assertEqual(fn(*args, **kwargs), expected)
+
+        def make(*shape):
+            return torch.randint(-2, 3, shape, device="cuda").to(dtype)
+
+        # No CK GEMM instance accepts these shapes.
+        for m, n, k in [(77, 129, 63), (128, 128, 130)]:
+            check(torch.mm, make(m, k), make(k, n))
+            check(torch.mm, make(k, m).t(), make(n, k).t())
+        a, b, c = make(4, 128, 512), make(4, 96, 512).mT, make(4, 128, 96)
+        for a_, b_ in [(a, b), (a.contiguous(), b.contiguous()), (a.mT.contiguous().mT, b)]:
+            check(torch.bmm, a_, b_)
+            # Batch strides that are not the packed m * k and k * n.
+            check(torch.bmm, a_[:, :, :256], b_[:, :256])
+            check(torch.baddbmm, c, a_, b_, alpha=0.5, beta=2)
 
 
 _GROUPED_MM_CASES = [

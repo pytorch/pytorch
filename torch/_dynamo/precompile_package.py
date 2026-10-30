@@ -30,6 +30,7 @@ import functools
 import hashlib
 import importlib.machinery
 import itertools
+import logging
 import os
 import re
 import site
@@ -80,6 +81,8 @@ if TYPE_CHECKING:
     from .variables.builder import FrameStateSizeEntry
 
 
+log = logging.getLogger(__name__)
+
 # Built once: config.patch() allocates a class and a ContextVar each time it is
 # called, and this runs on every frame Dynamo compiles for a package.
 _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
@@ -87,8 +90,38 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 )
 
 
+def _frozen_kernel_config() -> dict[str, object]:
+    """The Triton config both precompile tracers lower under.
+
+    A frozen DynamoTracer artifact replays each kernel with one recorded
+    config, so every kernel is tuned before replay. A nonzero
+    ``triton.multi_kernel`` is turned off: a multi-kernel picks its sub-kernel
+    when the loaded module runs, by benchmarking at first launch or from the
+    serving process's ``triton.multi_kernel``, which a frozen artifact cannot
+    record. Warns once for each user value overridden.
+    """
+    import torch._inductor.config as inductor_config
+
+    if inductor_config.triton.autotune_at_compile_time is False:
+        torch._logging.warning_once(
+            log,
+            "precompile capture overrides triton.autotune_at_compile_time=False: "
+            "every kernel is tuned during capture, before the artifact is written",
+        )
+    frozen: dict[str, object] = {"triton.autotune_at_compile_time": True}
+    if multi_kernel := inductor_config.triton.multi_kernel:
+        torch._logging.warning_once(
+            log,
+            f"precompile capture overrides triton.multi_kernel={multi_kernel} to 0: "
+            "a frozen artifact cannot record which sub-kernel a multi-kernel "
+            "picks when it first runs",
+        )
+        frozen["triton.multi_kernel"] = 0
+    return frozen
+
+
 @contextlib.contextmanager
-def _capture_config() -> Iterator[None]:
+def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
@@ -100,6 +133,22 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
+    Triton kernels autotune while their graph lowers, on generated example
+    inputs, as standalone_compile does: a backward no captured call runs would
+    otherwise keep every candidate config, and the artifact can only freeze a
+    kernel tuned down to one. This covers forward kernels too, which tune on
+    synthetic inputs at capture rather than on first launch: replay runs
+    frozen configs, so every kernel's config must be chosen before replay
+    anyway. Each kernel's synthetic arguments are allocated while the captured
+    forward's tensors are still live, so peak device memory during capture
+    grows by roughly the backward's working set.
+    ``triton.multi_kernel`` is off (see _frozen_kernel_config). These Triton
+    overrides, and their warnings, apply only when ``lowers_kernels``: an
+    eager-backend capture lowers no kernels.
+    Under ``cpp_wrapper`` the forced flag also turns off
+    ``triton.autotune_cublasLt`` (``get_cpp_wrapper_config``). Captured graphs
+    keep ``aten.repeat_interleave.Tensor`` as an aten fallback rather than
+    decomposing it, since its output depends on the data in ``repeat``.
     The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
     bundle per compile context, left open on a remote-cache miss until the
     first compiled call, but eager lowering compiles the forward and the
@@ -148,7 +197,12 @@ def _capture_config() -> Iterator[None]:
     # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
-        inductor_config.patch(bundled_autotune_remote_cache=False),
+        inductor_config.patch(
+            {
+                "bundled_autotune_remote_cache": False,
+                **(_frozen_kernel_config() if lowers_kernels else {}),
+            }
+        ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
@@ -1864,6 +1918,8 @@ class PrecompileSession(Generic[_P, _R]):
         self._compiled: Callable[_P, _R] | None = None
         self._entered = False
         self._finished = False
+        # What earlier snapshots warned about, so a save() warns only when it is new.
+        self._warned_ops: set[tuple[str, object]] = set()
 
     def _recording_filter(
         self,
@@ -1962,7 +2018,7 @@ class PrecompileSession(Generic[_P, _R]):
         )
         try:
             with (
-                _capture_config(),
+                _capture_config(lowers_kernels=self._backend == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
             ):
                 return self._compiled(*args, **kwargs)
@@ -2214,6 +2270,7 @@ class PrecompileSession(Generic[_P, _R]):
             _KERNEL_KEYS,
             _multigraph_frames,
             _served_modules,
+            _warn_unregistered_ops,
         )
 
         summary = self._gated_summary(
@@ -2251,15 +2308,22 @@ class PrecompileSession(Generic[_P, _R]):
             n: _device_kernel_keys(op_devices[n]) if op_devices[n] else _KERNEL_KEYS
             for n in ops
         }
-        modules, unmapped = _custom_op_modules(keys)
-        if unmapped or any(m.partition(".")[0] != "torch" for m in modules):
+        found = _custom_op_modules(keys)
+        served: set[str] = set()
+        mapped = any(m.partition(".")[0] != "torch" for m in found.modules)
+        if found.unrecorded or found.unrecorded_kernels or mapped:
             # A module the frames run in, which the driver imports only after the ops
             # are checked, may register a kernel over an override's, or an op or kernel
-            # with no known module (torch.library.define, any custom_op's kernels,
-            # which torch's helpers register, a C++ extension). Torch's ops skip this.
-            served = _served_modules(_multigraph_frames(entry))
-            wanted = {*modules, *served} - {"__main__"}
-            modules = tuple(m for m in sys.modules if m in wanted)
+            # with no known module (one registered from __main__, a C++ extension).
+            # Torch's own ops skip this.
+            served = _served_modules(_multigraph_frames(entry)) - {"__main__"}
+        wanted = {*found.modules, *served}
+        modules = tuple(m for m in sys.modules if m in wanted)
+        fields = ("lazy", "unrecorded", "untracked_kernels")
+        warned = {(f, x) for f in fields for x in getattr(found, f)}
+        if not warned <= self._warned_ops:
+            self._warned_ops |= warned
+            _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         return _build_multigraph_artifact(
             entry, backends, summary, self._backend, self._fn, **sections
