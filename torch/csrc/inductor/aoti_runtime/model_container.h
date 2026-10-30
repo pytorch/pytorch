@@ -610,10 +610,10 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AtenTensorHandle tensor;
+        AtenTensorHandle tensor = nullptr;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
