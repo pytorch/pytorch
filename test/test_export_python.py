@@ -74,6 +74,9 @@ def bump(x):
     x.mul_(2)
     return x + 1
 
+def grad_aware(x):
+    return x * 2 if x.requires_grad else x * 3
+
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
 
 @torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "scaled.py"))
@@ -201,6 +204,10 @@ class TestExportPython(_ExportPythonTestCase):
         with no_compilation():
             self.assertEqual(run(x), expected)
             self.assertEqual(self.module.decorated_outer(x), expected)
+        # The first artifact served inner during the second capture, which therefore
+        # did not compile it: the second artifact is standalone, inner left to Python.
+        with open(os.path.join(self.dir, "decorated", "outer.py")) as f:
+            self.assertIn('SERVING_MODE = "standalone"', f.read())
         _in_a_fresh_process(
             self,
             """
@@ -362,6 +369,12 @@ class TestExportPython(_ExportPythonTestCase):
             torch.testing.assert_close((out, y), (x * 2 + 1, x * 2))
             """,
         )
+
+    def test_check_copies_keep_requires_grad(self):
+        path = os.path.join(self.dir, "grad_aware.py")
+        x = torch.randn(4, requires_grad=True)
+        self._export("grad_aware", path)(x)
+        self.assertEqual(self._export("grad_aware", path, check=True)(x), x * 2)
 
     def test_check_defaults_to_the_environment_variable(self):
         path = os.path.join(self.dir, "shifted.py")
