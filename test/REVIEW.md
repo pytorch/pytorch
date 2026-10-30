@@ -91,8 +91,7 @@ responsibilities map to HardwareClassification values as follows:
     - `@skipCPUIf`, `@skipCUDAIf`, `@skipXPUIf`, `@skipGPUIf`,
       `@skipMPSIf`, `@skipPRIVATEUSE1If`
     - `@onlyCPU`, `@onlyCUDA`, `@onlyMPS`, `@onlyXPU`, `onlyOn`
-      `@onlyAccelerator`, `@onlyPRIVATEUSE1`,
-      `@onlyNativeDeviceTypes`, `@onlyNativeDeviceTypesAnd`
+      `@onlyAccelerator`, `@onlyPRIVATEUSE1`, `@onlyNativeDeviceTypes`
     - `@dtypesIfCPU`, `@dtypesIfCUDA`, `@dtypesIfXPU`, `@dtypesIfMPS`,
       `@dtypesIfPRIVATEUSE1`
   - No accelerator APIs:
