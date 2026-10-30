@@ -3544,7 +3544,7 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_unique(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S), (S, 2 * L))
 
     for shape, sorted, return_inverse, return_counts, dim in \
             product(sizes, [False, True], [False, True], [False, True], [None, -2, -1, 0, 1, 2]):
