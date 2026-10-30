@@ -644,7 +644,7 @@ void ProcessGroupNCCL::finalize() {
 
   event_pool_->clear();
 
-  barrier_buffer_.clear();
+  barrier_buffer_.reset();
 
   dependency_event_.reset();
   internal_stream_.reset();
@@ -824,7 +824,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("send");
+  work->recordStart("send", tensor);
 
   // Wrap in ncclGroupStart/End so the kernel is enqueued on the stream before
   // we record the end event. Without the group wrapper, a non-blocking NCCL
@@ -882,7 +882,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   auto work = createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("recv");
+  work->recordStart("recv", tensor);
 
   // Wrap in ncclGroupStart/End -- see sendImpl comment for rationale.
   // (TorchComms fix D109625550.)
@@ -960,7 +960,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("batch_op_issue");
+  work->recordStart("coalesced", input_tensors);
 
   // Start NCCL group for batched operations
   NCCL_CHECK(
@@ -1034,7 +1034,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("broadcast");
+  work->recordStart("broadcast", tensor);
 
   waitForNcclOperation(
       nccl_api_->bcast(
@@ -1062,7 +1062,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
     const ::c10d::ReduceOp& op,
     bool async_op,
     std::chrono::milliseconds timeout,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
@@ -1077,7 +1078,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_reduce");
+  work->recordStart(profiling_title, tensor);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1123,7 +1124,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduce");
+  work->recordStart("reduce", tensor);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1154,7 +1155,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     const at::Tensor& tensor,
     bool async_op,
     std::chrono::milliseconds timeout,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   TORCH_CHECK(
@@ -1178,7 +1180,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   checkTensorDevice(tensor);
   checkSameDtype(tensor, tensor_list);
   if (canFlatten(tensor_list, tensor)) {
-    return allGatherFlat(tensor_list, tensor, async_op, timeout, native_config);
+    return allGatherFlat(
+        tensor_list, tensor, async_op, timeout, native_config, profiling_title);
   }
 
   // Mixed-device outputs are staged on the communicator's device.
@@ -1218,7 +1221,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
 
-  work->recordStart("all_gather");
+  work->recordStart(profiling_title, tensor);
 
   // Use multiple broadcast operations for all_gather
   NCCL_CHECK(
@@ -1273,7 +1276,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherFlat(
     const at::Tensor& tensor,
     bool async_op,
     std::chrono::milliseconds timeout,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   TracingGuard tracingGuard(
       name_,
       comm_size_,
@@ -1290,7 +1294,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherFlat(
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
 
-  work->recordStart("all_gather");
+  work->recordStart(profiling_title, tensor);
 
   {
     // Temporaries are allocated on the operation stream, so no recordStream.
@@ -1329,7 +1333,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
     const at::Tensor& input,
     bool async_op,
     std::chrono::milliseconds timeout,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1356,7 +1361,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
 
-  work->recordStart("allGatherSingleImpl");
+  work->recordStart(profiling_title, input);
 
   waitForNcclOperation(
       nccl_api_->allGather(
@@ -1425,7 +1430,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   auto work = async_op ? createWork(stream, timeout, input_list)
                        : createWork(stream, timeout);
 
-  work->recordStart("reduce_scatter");
+  work->recordStart("reduce_scatter", input_list);
 
   // Use multiple reduce operations for reduce_scatter
   NCCL_CHECK(
@@ -1508,7 +1513,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterFlat(
   auto work = async_op ? createWork(stream, timeout, input_list)
                        : createWork(stream, timeout);
 
-  work->recordStart("reduce_scatter");
+  work->recordStart("reduce_scatter", input_list);
 
   {
     // Temporaries are allocated on the operation stream, so no recordStream.
@@ -1553,7 +1558,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
     const ::c10d::ReduceOp& op,
     bool async_op,
     std::chrono::milliseconds timeout,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1581,7 +1587,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduceScatterSingleImpl");
+  work->recordStart(profiling_title, input);
 
   const auto dataType = getNcclDataType(input);
   waitForNcclOperation(
@@ -1643,7 +1649,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("allToAllSingleImpl");
+  work->recordStart("all_to_all", input);
 
   size_t chunk_size = input.numel() / comm_size_;
   const auto data_type = getNcclDataType(input);
@@ -1757,7 +1763,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_to_all_v_single");
+  work->recordStart("all_to_all", input);
 
   // Convert split sizes to arrays and calculate displacements
   std::vector<size_t> sendcounts(comm_size_);
@@ -1871,7 +1877,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("all_to_all");
+  work->recordStart("all_to_all", input_tensor_list);
 
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
@@ -1931,13 +1937,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   // before anything has initialized CUDA (init_process_group(device_id=...) on
   // a process that has made no torch.cuda call), and the allocator is brought
   // up lazily, so allocating there tripped "Allocator not initialized for
-  // device N". lazyInitDevice() is what ATen's own allocating paths call, and
-  // is a no-op once CUDA is up.
-  if (!barrier_buffer_) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-    c10::cuda::CUDAGuard gpuGuard(device_);
+  // device N". at::empty lazily initializes CUDA first. Shape [1], like stock
+  // ProcessGroupNCCL's barrier tensor, which the profiler records.
+  if (!barrier_buffer_.defined()) {
     barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+        at::empty({1}, at::TensorOptions().device(device_).dtype(at::kFloat));
   }
 
   TracingGuard tracingGuard(
@@ -1951,13 +1955,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
-  work->recordStart("barrier");
+  work->recordStart("all_reduce_barrier", barrier_buffer_);
 
   // Use pre-allocated CUDA buffer for barrier
   waitForNcclOperation(
       nccl_api_->allReduce(
-          barrier_buffer_.get(),
-          barrier_buffer_.get(),
+          barrier_buffer_.data_ptr(),
+          barrier_buffer_.data_ptr(),
           1,
           ncclFloat32,
           ncclSum,
@@ -2020,7 +2024,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("scatter");
+  // Stock ProcessGroupNCCL records the output on every rank.
+  work->recordStart("scatter", output_tensor);
 
   // Implement scatter using point-to-point operations
   if (rank_ == root) {
@@ -2101,7 +2106,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     bool async_op,
     std::chrono::milliseconds timeout,
     bool contiguous_output,
-    const MaterializedCollectiveConfig& native_config) {
+    const MaterializedCollectiveConfig& native_config,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(input_tensor);
@@ -2142,7 +2148,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("gather");
+  work->recordStart(profiling_title, input_tensor);
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
   if (contiguous_output) {

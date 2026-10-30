@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -46,6 +47,30 @@ class NCCLEventPool {
   const bool event_cache_enabled_;
   const size_t max_event_pool_size_;
   std::atomic<bool> timing_enabled_;
+};
+
+// Hides the dist.record_comm name while it lives. c10d::Work's constructor
+// would otherwise open a second profiler event, without inputs; nccl2 applies
+// the name in WorkNCCL::recordStart instead.
+class ScopedHideCommProfilingName {
+ public:
+  ScopedHideCommProfilingName() : name_(get_comm_profiling_name()) {
+    if (!name_.empty()) {
+      set_comm_profiling_name("");
+    }
+  }
+  ~ScopedHideCommProfilingName() {
+    if (!name_.empty()) {
+      set_comm_profiling_name(name_);
+    }
+  }
+
+  ScopedHideCommProfilingName(const ScopedHideCommProfilingName&) = delete;
+  ScopedHideCommProfilingName& operator=(const ScopedHideCommProfilingName&) =
+      delete;
+
+ private:
+  const std::string name_;
 };
 
 // Work object for the NCCL TorchComms backend. Ported from torchcomms'
@@ -119,7 +144,12 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  // Starts the `nccl:<coll_name>` (or dist.record_comm) profiler event, named
+  // like stock ProcessGroupNCCL's, and records the start CUDA event. An empty
+  // coll_name starts no profiler event.
+  void recordStart(
+      std::string_view coll_name,
+      c10::ArrayRef<at::Tensor> inputs = {});
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -127,6 +157,15 @@ class WorkNCCL : public c10d::Work {
   friend class WindowNCCL;
 
  private:
+  // The public constructors delegate here; the temporary hide outlives the
+  // c10d::Work base constructor.
+  WorkNCCL(
+      ScopedHideCommProfilingName&& /*hidden*/,
+      ProcessGroupNCCL* comm,
+      cudaStream_t stream,
+      std::chrono::milliseconds timeout_ms,
+      std::vector<at::Tensor> inputTensors);
+
   struct Events;
   struct InputTensorShelf {
     explicit InputTensorShelf(std::vector<at::Tensor> tensors);
@@ -179,7 +218,9 @@ class WorkNCCL : public c10d::Work {
   // Poll the CUDA events and advance status; used by the GC queue + watchdog.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-  void recordFunctionStart(std::string_view coll_name);
+  void recordFunctionStart(
+      std::string_view coll_name,
+      c10::ArrayRef<at::Tensor> inputs);
   // Make the current stream wait on the work's end event (the c10d "wait"
   // semantics for CUDA work: order subsequent current-stream ops after this).
   void synchronizeInternal();
@@ -189,6 +230,23 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> outputs_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
+};
+
+// Profiles a coalesced op as one event spanning this scope, like stock
+// ProcessGroupNCCL. The op's per-tensor works are issued with an empty
+// profiling title so they add no events of their own.
+class CoalescedProfilerEvent {
+ public:
+  CoalescedProfilerEvent(
+      std::string_view coll_name,
+      c10::ArrayRef<at::Tensor> inputs);
+
+  CoalescedProfilerEvent(const CoalescedProfilerEvent&) = delete;
+  CoalescedProfilerEvent& operator=(const CoalescedProfilerEvent&) = delete;
+
+ private:
+  // Its destructor ends the event.
+  at::RecordFunction recordFunction_{at::RecordScope::USER_SCOPE};
 };
 
 class WorkNCCLQueue {

@@ -958,6 +958,132 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         with self.assertRaises((RuntimeError, TypeError, ValueError)):
             dist.all_to_all_single(output, input)
 
+    def _profiled_events(self, fn):
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            fn()
+            torch.cuda.synchronize(self.device)
+        return [e for e in prof.function_events if e.is_async]
+
+    def test_profiler_op_events(self):
+        # Each op emits one async "<prefix><op>" event recording its inputs,
+        # matching stock ProcessGroupNCCL.
+        if self.profiler_prefix is None:
+            self.skipTest(f"{self.backend_name} has no profiler event names")
+        ws, rank = self.world_size, self.rank
+        legacy = self.profiler_legacy_events
+        t = torch.ones(4, device=self.device)
+        t2 = torch.ones(4, device=self.device)
+        gathered = [torch.empty_like(t) for _ in range(ws)]
+        flat = torch.empty(ws * 4, device=self.device)
+        a2a_in = torch.ones(ws, 2, device=self.device)
+        a2a_out = torch.empty_like(a2a_in)
+        # Uneven splits: every rank sends dst + 1 rows to rank dst.
+        in_splits = [dst + 1 for dst in range(ws)]
+        out_splits = [rank + 1] * ws
+        a2a_uneven_in = torch.ones(sum(in_splits), 2, device=self.device)
+        a2a_uneven_out = torch.empty(sum(out_splits), 2, device=self.device)
+        shape = list(t.shape)
+
+        def coalesced_all_reduce():
+            with dist._coalescing_manager(device=self.device):
+                dist.all_reduce(t)
+                dist.all_reduce(t2)
+
+        def batch_p2p():
+            ops = [
+                dist.P2POp(dist.isend, t, (rank + 1) % ws),
+                dist.P2POp(dist.irecv, t2, (rank - 1) % ws),
+            ]
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
+
+        def send_recv():
+            if rank == 0:
+                dist.send(t, 1)
+            elif rank == 1:
+                dist.recv(t, 0)
+
+        # Stock names send/recv with the peer.
+        p2p_name = {0: "send", 1: "recv"}.get(rank)
+        if legacy and p2p_name:
+            p2p_name += {0: " 0->1", 1: " 1<-0"}[rank]
+        cases = [
+            ("all_reduce", lambda: dist.all_reduce(t), [shape]),
+            ("all_reduce", lambda: dist.all_reduce(t, async_op=True).wait(), [shape]),
+            ("broadcast", lambda: dist.broadcast(t, src=0), [shape]),
+            ("reduce", lambda: dist.reduce(t, dst=0), [shape]),
+            ("all_reduce_barrier", dist.barrier, [[1]]),
+            ("all_gather", lambda: dist.all_gather(gathered, t), [shape]),
+            ("_all_gather_base", lambda: dist.all_gather_into_tensor(flat, t), [shape]),
+            (
+                "_reduce_scatter_base",
+                lambda: dist.reduce_scatter_tensor(t, flat),
+                [list(flat.shape)],
+            ),
+            (
+                "all_to_all",
+                lambda: dist.all_to_all_single(a2a_out, a2a_in),
+                [list(a2a_in.shape)],
+            ),
+            (
+                "all_to_all",
+                lambda: dist.all_to_all_single(
+                    a2a_uneven_out, a2a_uneven_in, out_splits, in_splits
+                ),
+                [list(a2a_uneven_in.shape)],
+            ),
+            (
+                "scatter",
+                lambda: dist.scatter(t, gathered if rank == 0 else None, src=0),
+                [shape],
+            ),
+            (
+                "gather",
+                lambda: dist.gather(t, gathered if rank == 0 else None, dst=0),
+                [shape],
+            ),
+            # One event for the whole batch. Stock adds an input-less one from
+            # endCoalescing.
+            ("allreduce_coalesced", coalesced_all_reduce, [shape, shape]),
+            # batch_isend_irecv: one event, send tensors only. Stock records none.
+            ("coalesced", batch_p2p, [] if legacy else [shape]),
+            (p2p_name, send_recv, [shape]),
+        ]
+        dist.all_reduce(t)
+        torch.cuda.synchronize(self.device)
+        for i, (name, fn, inputs) in enumerate(cases):
+            with self.subTest(case=i, op=name):
+                expected = [] if name is None else [(name, inputs)]
+                if legacy and name == "allreduce_coalesced":
+                    expected.append(("coalesced", []))
+                events = self._profiled_events(fn)
+                self.assertEqual(
+                    [
+                        (e.name, e.input_shapes)
+                        for e in events
+                        if e.name.startswith(self.profiler_prefix)
+                    ],
+                    [(self.profiler_prefix + n, s) for n, s in expected],
+                )
+
+        # dist.record_comm renames the single event.
+        with self.subTest(op="record_comm"):
+
+            def record_comm():
+                with dist.record_comm("custom_comm"):
+                    dist.all_reduce(t)
+
+            events = self._profiled_events(record_comm)
+            self.assertEqual(
+                [e.input_shapes for e in events if e.name == "custom_comm"],
+                # Stock's WorkNCCL copy also opens an input-less renamed event.
+                [[shape], []] if legacy else [[shape]],
+            )
+            self.assertEqual(
+                [e.name for e in events if e.name.startswith(self.profiler_prefix)],
+                [],
+            )
+
 
 class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
     """Tests that use another rank's device or call a collective on only some

@@ -2485,6 +2485,169 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
                 self.assertIn((sizes[rank], sum(sizes)), nelems)
                 self.assertNotIn((sum(sizes), sizes[rank]), nelems)
 
+    def _nccl_events(self, fn, record_shapes=True) -> list:
+        with torch.autograd.profiler.profile(record_shapes=record_shapes) as prof:
+            fn()
+            torch.cuda.synchronize()
+        return [
+            (e.name, e.input_shapes)
+            for e in prof.function_events
+            if e.is_async and (e.name.startswith("nccl:") or e.name == "custom_comm")
+        ]
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_coalesced_and_list_ops(self) -> None:
+        # nccl2-specific paths: one event per *_coalesced op (none for its
+        # per-tensor ops), aliased/uneven all_gather and list
+        # reduce_scatter/all_to_all.
+        ws, rank = self.world_size, self.rank
+        t = torch.ones(4, device=self.device)
+        t2 = torch.ones(4, device=self.device)
+        flat = torch.empty(ws * 4, device=self.device)
+        flat2 = torch.empty_like(flat)
+        shape, flat_shape = list(t.shape), list(flat.shape)
+        sizes = [r + 1 for r in range(ws)]
+
+        def all_gather_coalesced():
+            outputs = [[torch.empty_like(t) for _ in range(ws)] for _ in range(2)]
+            dist.all_gather_coalesced(outputs, [t, t2])
+
+        def all_gather_into_tensor_coalesced():
+            with dist._coalescing_manager(device=self.device):
+                dist.all_gather_into_tensor(flat, t)
+                dist.all_gather_into_tensor(flat2, t2)
+
+        def reduce_scatter_tensor_coalesced():
+            with dist._coalescing_manager(device=self.device):
+                dist.reduce_scatter_tensor(t, flat)
+                dist.reduce_scatter_tensor(t2, flat2)
+
+        def record_comm_coalesced():
+            with dist.record_comm("custom_comm"):
+                with dist._coalescing_manager(device=self.device):
+                    dist.all_reduce(t)
+                    dist.all_reduce(t2)
+
+        def record_comm_empty_batch():
+            with dist.record_comm("custom_comm"):
+                with dist._coalescing_manager(device=self.device):
+                    pass
+
+        def aliased_all_gather():
+            buf = torch.empty_like(t)
+            dist.all_gather([buf] * ws, t)
+
+        def uneven_all_gather():
+            input = torch.ones(sizes[rank], device=self.device)
+            dist.all_gather([torch.empty(s, device=self.device) for s in sizes], input)
+
+        def uneven_reduce_scatter():
+            output = torch.empty(sizes[rank], device=self.device)
+            dist.reduce_scatter(
+                output, [torch.ones(s, device=self.device) for s in sizes]
+            )
+
+        cases = [
+            ("allgather_coalesced", all_gather_coalesced, [[shape, shape]]),
+            (
+                "all_gather_into_tensor_coalesced",
+                all_gather_into_tensor_coalesced,
+                [[shape, shape]],
+            ),
+            (
+                "reduce_scatter_tensor_coalesced",
+                reduce_scatter_tensor_coalesced,
+                [[flat_shape, flat_shape]],
+            ),
+            (
+                "gather_single",
+                lambda: dist.gather_into_tensor(t, flat if rank == 0 else None, dst=0),
+                [[shape]],
+            ),
+            ("all_gather", aliased_all_gather, [[shape]]),
+            # Stock emits per-rank _broadcast_oop events plus
+            # ALLGATHER_coalesced here.
+            ("all_gather", uneven_all_gather, [[[sizes[rank]]]]),
+            # Stock records the flattened input here.
+            (
+                "reduce_scatter",
+                lambda: dist.reduce_scatter(t, [torch.ones_like(t)] * ws),
+                [[shape] * ws],
+            ),
+            # Stock emits per-rank _reduce_oop events plus
+            # REDUCE_SCATTER_coalesced here.
+            ("reduce_scatter", uneven_reduce_scatter, [[[s] for s in sizes]]),
+            (
+                "all_to_all",
+                lambda: dist.all_to_all(
+                    [torch.empty(2, device=self.device) for _ in range(ws)],
+                    [torch.ones(2, device=self.device) for _ in range(ws)],
+                ),
+                [[[2]] * ws],
+            ),
+            ("custom_comm", record_comm_coalesced, [[shape, shape]]),
+            (None, record_comm_empty_batch, []),
+        ]
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        for i, (name, fn, shapes) in enumerate(cases):
+            with self.subTest(case=i, op=name):
+                if name is not None and name != "custom_comm":
+                    name = "nccl:" + name
+                self.assertEqual(self._nccl_events(fn), [(name, s) for s in shapes])
+
+        # A window of several works adds an input-less coalesced event, as in
+        # stock.
+        def multi_work_coalesced():
+            with dist._coalescing_manager(device=self.device):
+                dist.broadcast(t, src=0)
+                dist.broadcast(t2, src=0)
+
+        with self.subTest(op="multi_work_coalesced"):
+            self.assertEqual(
+                self._nccl_events(multi_work_coalesced),
+                [
+                    ("nccl:broadcast", [shape]),
+                    ("nccl:broadcast", [shape]),
+                    ("nccl:coalesced", []),
+                ],
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_record_comm_and_no_shapes(self) -> None:
+        # dist.record_comm renames the op's single event, as in stock
+        # ProcessGroupNCCL; nccl2 used to add an input-less one.
+        ws, rank = self.world_size, self.rank
+        t = torch.ones(4, device=self.device)
+        t2 = torch.empty_like(t)
+        p2p_ops = [
+            dist.P2POp(dist.isend, t, (rank + 1) % ws),
+            dist.P2POp(dist.irecv, t2, (rank - 1) % ws),
+        ]
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            with dist.record_comm("custom_comm"):
+                dist.all_reduce(t)
+                for work in dist.batch_isend_irecv(p2p_ops):
+                    work.wait()
+            torch.cuda.synchronize()
+        names = [e.name for e in prof.function_events]
+        custom = [e for e in prof.function_events if e.name == "custom_comm"]
+        shape = list(t.shape)
+        self.assertEqual([e.input_shapes for e in custom], [[shape], [shape]])
+        self.assertNotIn("nccl:all_reduce", names)
+        self.assertNotIn("nccl:coalesced", names)
+
+        with torch.autograd.profiler.profile(record_shapes=False) as prof:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+        events = [e for e in prof.function_events if e.name == "nccl:all_reduce"]
+        self.assertEqual([e.input_shapes for e in events], [[]])
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_split_group_child_global_ranks(self) -> None:

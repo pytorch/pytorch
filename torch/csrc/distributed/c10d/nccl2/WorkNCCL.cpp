@@ -21,6 +21,24 @@ namespace c10d::nccl2 {
 
 namespace {
 std::atomic<uint64_t> nextCompletionKey{1};
+// Starts an async event named like stock ProcessGroupNCCL's: the
+// dist.record_comm name if set, else `nccl:<coll_name>`.
+void startProfilerEvent(
+    at::RecordFunction& recordFunction,
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  recordFunction._setAsync();
+  const auto& customName = get_comm_profiling_name();
+  const auto name =
+      customName.empty() ? c10::str("nccl:", coll_name) : customName;
+  if (!recordFunction.needsInputs()) {
+    recordFunction.before(name);
+    return;
+  }
+  std::vector<c10::IValue> args(inputs.begin(), inputs.end());
+  recordFunction.before(
+      name, c10::ArrayRef<const c10::IValue>(args.data(), args.size()));
+}
 } // namespace
 
 NCCLEventPool::NCCLEventPool(
@@ -141,43 +159,53 @@ WorkNCCL::WorkNCCL(
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     const std::vector<at::Tensor>& inputTensors)
-    : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensors_(std::make_shared<InputTensorShelf>(inputTensors)) {}
+    : WorkNCCL(
+          ScopedHideCommProfilingName(),
+          comm,
+          stream,
+          timeout_ms,
+          inputTensors) {}
 
 WorkNCCL::WorkNCCL(
     ProcessGroupNCCL* comm,
     cudaStream_t stream,
     std::chrono::milliseconds timeout_ms,
     at::Tensor inputTensor)
+    : WorkNCCL(
+          ScopedHideCommProfilingName(),
+          comm,
+          stream,
+          timeout_ms,
+          std::vector<at::Tensor>{std::move(inputTensor)}) {}
+
+WorkNCCL::WorkNCCL(
+    ScopedHideCommProfilingName&& /*hidden*/,
+    ProcessGroupNCCL* comm,
+    cudaStream_t stream,
+    std::chrono::milliseconds timeout_ms,
+    std::vector<at::Tensor> inputTensors)
     : state_(std::make_shared<State>(comm, stream, timeout_ms)),
-      inputTensors_(std::make_shared<InputTensorShelf>(
-          std::vector<at::Tensor>{std::move(inputTensor)})) {}
+      inputTensors_(
+          std::make_shared<InputTensorShelf>(std::move(inputTensors))) {}
 
 WorkNCCL::~WorkNCCL() = default;
 
-void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
-  recordFunction_.emplace(at::RecordScope::USER_SCOPE);
-  if (!recordFunction_->isActive()) {
+void WorkNCCL::recordFunctionStart(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  if (coll_name.empty()) {
     return;
   }
-
-  std::lock_guard<std::mutex> lock(inputTensors_->mutex);
-  if (!inputTensors_->tensors.empty()) {
-    std::vector<c10::IValue> inputs;
-    inputs.reserve(inputTensors_->tensors.size());
-    for (const auto& tensor : inputTensors_->tensors) {
-      inputs.emplace_back(tensor);
-    }
-    recordFunction_->before(
-        coll_name,
-        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-  } else {
-    recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
+  recordFunction_.emplace(at::RecordScope::USER_SCOPE);
+  if (recordFunction_->isActive()) {
+    startProfilerEvent(*recordFunction_, coll_name, inputs);
   }
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
-  recordFunctionStart(coll_name);
+void WorkNCCL::recordStart(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  recordFunctionStart(coll_name, inputs);
   state_->events->start->record(state_->stream);
 }
 
@@ -186,6 +214,14 @@ void WorkNCCL::recordEnd() {
 
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
+  }
+}
+
+CoalescedProfilerEvent::CoalescedProfilerEvent(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  if (recordFunction_.isActive()) {
+    startProfilerEvent(recordFunction_, coll_name, inputs);
   }
 }
 

@@ -91,7 +91,7 @@ std::vector<uint64_t> normalizeSplitSizes(
 class CompletedWork : public ::c10d::Work {
  public:
   explicit CompletedWork(std::vector<at::Tensor> outputs = {})
-      : outputs_(std::move(outputs)) {}
+      : CompletedWork(ScopedHideCommProfilingName(), std::move(outputs)) {}
   bool isCompleted() override {
     return true;
   }
@@ -107,6 +107,11 @@ class CompletedWork : public ::c10d::Work {
   }
 
  private:
+  CompletedWork(
+      ScopedHideCommProfilingName&& /*hidden*/,
+      std::vector<at::Tensor> outputs)
+      : outputs_(std::move(outputs)) {}
+
   std::vector<at::Tensor> outputs_;
 };
 
@@ -556,6 +561,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
   const auto config = materializeConfig(opts.config);
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent("allreduce_coalesced", tensors);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -564,7 +570,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
         opts.reduceOp,
         opts.asyncOp,
         operationTimeout(opts.timeout),
-        config));
+        config,
+        /*profiling_title=*/{}));
   }
   return coalesceWorks(std::move(works), tensors);
 }
@@ -631,8 +638,13 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   auto staging = at::empty(
       {static_cast<int64_t>(getSize()) * input.numel()},
       input.options().memory_format(at::MemoryFormat::Contiguous));
-  auto work =
-      allGatherSingleImpl(staging, input, opts.asyncOp, timeout, config);
+  auto work = allGatherSingleImpl(
+      staging,
+      input,
+      opts.asyncOp,
+      timeout,
+      config,
+      /*profiling_title=*/"all_gather");
   work->setOutputs(outputList);
   auto rows = staging.view({getSize(), input.numel()});
   work->wait();
@@ -651,6 +663,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent("allgather_coalesced", inputTensors);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   std::vector<at::Tensor> outputs;
   works.reserve(inputTensors.size());
@@ -660,7 +673,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
         inputTensors.at(i),
         opts.asyncOp,
         operationTimeout(opts.timeout),
-        config));
+        config,
+        /*profiling_title=*/{}));
     outputs.insert(
         outputs.end(),
         outputTensorLists.at(i).begin(),
@@ -679,6 +693,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent(
+      "all_gather_into_tensor_coalesced", inputs);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
@@ -687,7 +703,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         inputs.at(i),
         opts.asyncOp,
         operationTimeout(opts.timeout),
-        config));
+        config,
+        /*profiling_title=*/{}));
   }
   return coalesceWorks(std::move(works), outputs);
 }
@@ -789,7 +806,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       operationTimeout(opts.timeout),
       // ncclGather needs NCCL 2.28.3; only require it when a config is set.
       /*contiguous_output=*/opts.config.has_value(),
-      config);
+      config,
+      /*profiling_title=*/"gather_single");
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
 }
@@ -857,6 +875,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent(
+      "reduce_scatter_tensor_coalesced", inputs);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(outputs.size());
   for (const auto i : c10::irange(outputs.size())) {
@@ -866,7 +886,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         opts.reduceOp,
         opts.asyncOp,
         operationTimeout(opts.timeout),
-        config));
+        config,
+        /*profiling_title=*/{}));
   }
   return coalesceWorks(std::move(works), outputs);
 }

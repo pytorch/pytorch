@@ -175,6 +175,38 @@ class AbstractWindowTest:
         win_b.tensor_deregister()
         win_a.tensor_deregister()
 
+    def test_profiler_events(self):
+        # Window ops emit async "nccl:<op>" events like collectives.
+        self._init_backend()
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        with torch.cuda.use_mem_pool(pool):
+            win_buf = torch.zeros(self.world_size, device=self.device)
+        win = dist._new_window(win_buf)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
+        src = win_buf[self.rank : self.rank + 1]
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            win.put(src, next_rank, self.rank, False)
+            win.wait_signal(prev_rank, False)
+            win.signal(next_rank, False)
+            win.wait_signal(prev_rank, False)
+            torch.cuda.synchronize()
+        events = sorted(
+            (e for e in prof.function_events if e.name.startswith("nccl:")),
+            key=lambda e: e.time_range.start,
+        )
+        self.assertEqual(
+            [(e.name, e.input_shapes, e.is_async) for e in events],
+            [
+                ("nccl:put", [[1]], True),
+                ("nccl:wait_signal", [], True),
+                ("nccl:signal", [], True),
+                ("nccl:wait_signal", [], True),
+            ],
+        )
+        win.tensor_deregister()
+
     def test_symmetric_mem_pool_teardown(self):
         # register_mem_pool(symm=True) gives the pool's existing and new
         # segments symmetric windows; deregister_mem_pool tears them down.

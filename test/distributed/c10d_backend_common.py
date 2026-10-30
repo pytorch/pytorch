@@ -54,6 +54,11 @@ class BackendConfig:
     supports_uneven_all_gather: bool = False
     # Uneven all_gather with an output on another rank's device.
     supports_uneven_all_gather_mixed_devices: bool = False
+    # Prefix of the per-op async profiler events, or None if not checked.
+    profiler_prefix: str | None = None
+    # Stock ProcessGroupNCCL profiler events: extra input-less coalesced and
+    # record_comm events, no batch_isend_irecv inputs, peer-suffixed send/recv.
+    profiler_legacy_events: bool = False
     # Test methods that fail deterministically on this backend. They pass while
     # the failure persists and fail once the backend is fixed. Every rank must
     # fail with an AssertionError, or the other ranks hang or error. Names are
@@ -165,6 +170,8 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
+        profiler_prefix="nccl:",
+        profiler_legacy_events=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
         # Reduces into a contiguous copy of a channels_last output and never
@@ -186,6 +193,7 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         supports_uneven_all_gather=True,
         supports_uneven_all_gather_mixed_devices=True,
+        profiler_prefix="nccl:",
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -208,6 +216,7 @@ C10D_BACKENDS = (
         supports_gather_single=True,
         supports_uneven_all_gather=True,
         supports_uneven_all_gather_mixed_devices=True,
+        profiler_prefix="nccl:",
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -356,6 +365,8 @@ def instantiate_backend_tests(
                 "supports_uneven_all_gather_mixed_devices": (
                     backend.supports_uneven_all_gather_mixed_devices
                 ),
+                "profiler_prefix": backend.profiler_prefix,
+                "profiler_legacy_events": backend.profiler_legacy_events,
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
