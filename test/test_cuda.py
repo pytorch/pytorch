@@ -2985,6 +2985,18 @@ raise RuntimeError("device assert did not fire")
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
+    def test_mixed_dtype_binary_low_precision_out(self):
+        # The float input must not be rounded to the output dtype before the op.
+        for dtype in (torch.bfloat16, torch.half):
+            for n in (1, 16383, 16384, 65537):
+                a = torch.randn(n, device="cuda").to(dtype)
+                b = torch.randn(n, device="cuda")
+                out = torch.empty(n, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out)
+                self.assertEqual(
+                    out, (a.cpu().float() + b.cpu()).to(dtype), atol=0, rtol=0
+                )
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
     @serialTest()
