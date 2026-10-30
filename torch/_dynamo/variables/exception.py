@@ -9,7 +9,6 @@ Key classes include:
 - FrameSummaryVariable: Tracks frame summary objects
 """
 
-import os
 import traceback
 import types
 from typing import Any, TYPE_CHECKING, Union
@@ -456,30 +455,6 @@ class ExceptionVariable(VariableTracker):
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/exceptions.c#L118-L129
-        exc_str = self.exc_type.__str__
-        if exc_str is KeyError.__str__ and len(self.args) == 1:
-            # KeyError_str reprs a single arg, otherwise falls back to BaseException_str
-            return generic_repr(tx, self.args[0])
-        if exc_str is SyntaxError.__str__:
-            result = self._syntax_error_str(tx)
-            if result is not None:
-                return VariableTracker.build(tx, result)
-        # AttributeError and NameError set tp_str to BaseException_str explicitly.
-        # A Python-level __str__ means a user subclass reached here through
-        # super().__str__(), which already resolved to BaseException.__str__.
-        if isinstance(exc_str, types.WrapperDescriptorType) and exc_str not in (
-            BaseException.__str__,
-            AttributeError.__str__,
-            NameError.__str__,
-            KeyError.__str__,
-        ):
-            unimplemented(
-                gb_type="Unsupported exception __str__",
-                context=f"str() of {self.python_type_name()}",
-                explanation=f"Dynamo does not model {self.python_type_name()}.__str__, "
-                "which formats differently from BaseException.__str__.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
@@ -489,43 +464,6 @@ class ExceptionVariable(VariableTracker):
 
             tuple_var = TupleVariable(list(self.args))
             return generic_str(tx, tuple_var)
-
-    def _syntax_error_str(self, tx: "InstructionTranslatorBase") -> str | None:
-        """
-        SyntaxError_str, with msg/filename/lineno as SyntaxError_init unpacks
-        them from args. Returns None when they cannot be known at trace time.
-        https://github.com/python/cpython/blob/v3.13.0/Objects/exceptions.c#L2742-L2790
-        """
-        side_effects = tx.output.side_effects
-        if any(
-            side_effects.has_pending_mutation_of_attr(self, name)
-            for name in ("msg", "filename", "lineno")
-        ) or not all(arg.is_python_constant() for arg in self.args):
-            return None
-        args = [arg.as_python_constant() for arg in self.args]
-        msg = args[0] if args else None
-        filename = lineno = None
-        if len(args) == 2:
-            try:
-                info = tuple(args[1])
-            except TypeError:
-                return None
-            if not 4 <= len(info) <= 6:
-                return None
-            filename, lineno = info[:2]
-        if isinstance(filename, str):
-            filename = filename.rpartition(os.sep)[2]
-        else:
-            filename = None
-        if type(lineno) is not int:
-            lineno = None
-        if filename is not None and lineno is not None:
-            return f"{msg} ({filename}, line {lineno})"
-        if filename is not None:
-            return f"{msg} ({filename})"
-        if lineno is not None:
-            return f"{msg} (line {lineno})"
-        return str(msg)
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"
@@ -547,17 +485,6 @@ class ExceptionVariable(VariableTracker):
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
         from . import TupleVariable
 
-        exc_repr = self.exc_type.__repr__
-        if isinstance(exc_repr, types.WrapperDescriptorType) and (
-            exc_repr is not BaseException.__repr__
-        ):
-            unimplemented(
-                gb_type="Unsupported exception __repr__",
-                context=f"repr() of {self.python_type_name()}",
-                explanation=f"Dynamo does not model {self.python_type_name()}.__repr__, "
-                "which formats differently from BaseException.__repr__.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
         name = self.python_type_name()
         if len(self.args) == 1:
             return VariableTracker.build(
@@ -565,6 +492,27 @@ class ExceptionVariable(VariableTracker):
             )
         return VariableTracker.build(
             tx, name + tracked_repr(tx, TupleVariable(list(self.args)))
+        )
+
+
+class KeyErrorVariable(ExceptionVariable):
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: KeyError_str in CPython Objects/exceptions.c
+        if len(self.args) == 1:
+            return generic_repr(tx, self.args[0])
+        return super().tp_str_impl(tx)
+
+
+class UnmodeledStrExceptionVariable(ExceptionVariable):
+    """A builtin exception whose C __str__ formats state Dynamo does not track."""
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="Unsupported exception __str__",
+            context=f"str() of {self.python_type_name()}",
+            explanation=f"Dynamo does not model {self.python_type_name()}.__str__, "
+            "which formats differently from BaseException.__str__.",
+            hints=[*graph_break_hints.SUPPORTABLE],
         )
 
 
