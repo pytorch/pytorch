@@ -340,6 +340,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = True,
 ) -> ExportedProgram:
     """
 
@@ -363,6 +364,11 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only (bool): If True (default), block opaque/custom pickle
+         payloads inside the ``.pt2`` and load pickled tensors with
+         ``torch.load(..., weights_only=True)``. Set False only for trusted
+         archives that embed non-tensor pickled objects.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -398,6 +404,7 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
