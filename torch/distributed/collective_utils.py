@@ -298,7 +298,7 @@ def _check_philox_rng_sync(
     return seed_offset_ranks, "(Seed, Offset)"
 
 
-def _check_cpu_rng_sync(
+def _check_full_state_rng_sync(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
     # seed is returned as uint64_t from C impl, so may not fit in torch int64 tensor directly.
@@ -307,8 +307,10 @@ def _check_cpu_rng_sync(
     torch.distributed.all_gather(all_state_tensors, state_tensor)
     state_ranks = defaultdict(set)
     for rank, state_tensor in enumerate(all_state_tensors):
-        # Summarize the state vector of the CPU rng.
-        # The properties that matter most are (1) it's different if there is a state difference, (2) it's printable
+        # Summarize the state vector of the RNG via its hash, which works for any
+        # generator whose ``get_state()`` returns a tensor (cpu and most
+        # third-party accelerators). The properties that matter most are
+        # (1) it's different if there is a state difference, (2) it's printable
         # (see desync table- not viable to print whole state vector of size 5k)
         state_ranks[torch.hash_tensor(state_tensor).item()].add(rank)
     return state_ranks, "Generator state hash"
@@ -318,13 +320,15 @@ def _check_rng_sync_internal(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
     if generator.device.type in {"cuda", "xpu"}:
+        # Counter-based RNGs (Philox) whose 16-byte state can be interpreted
+        # as a (seed, offset) pair.
         return _check_philox_rng_sync(generator, group)
-    elif generator.device.type == "cpu":
-        return _check_cpu_rng_sync(generator, group)
     else:
-        raise NotImplementedError(
-            f"Unsupported generator device: {generator.device.type}"
-        )
+        # All other devices (cpu and out-of-tree accelerators) fall back to
+        # comparing the full generator state tensors instead of raising
+        # NotImplementedError, keeping this check usable by any backend whose
+        # ``get_state()`` returns a tensor.
+        return _check_full_state_rng_sync(generator, group)
 
 
 def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
