@@ -728,7 +728,7 @@ def _import_flat_apply_func(name: str) -> Any:
     """
     Import a function that export passes to flat_apply. Only what export
     produces is accepted: tensor subclasses, and the helper that calls custom
-    autograd functions. This keeps load from calling anything else.
+    autograd functions. Note that this imports the module the name points to.
     """
     func = _import_by_name(name)
     if not (
@@ -742,19 +742,26 @@ def _import_flat_apply_func(name: str) -> Any:
     return func
 
 
-def _check_flat_apply_autograd_function(cls_name: object) -> None:
+def _check_flat_apply_autograd_function(
+    in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
+) -> None:
     """
-    The custom autograd function helper gets its class by name and imports it
-    when the program runs. Check that the name imports an autograd function.
+    The custom autograd function helper gets its class by name, as its first
+    argument, and imports it when the program runs. Check that this name
+    imports an autograd function.
     """
-    if not isinstance(cls_name, str):
-        raise SerializeError(f"Expected an autograd function name, got {cls_name}")
-    function_cls = _import_by_name(cls_name)
+    try:
+        args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)
+    except Exception as e:
+        raise SerializeError("flat_apply inputs do not match its input spec") from e
+    if not args or "function_cls_name" in kwargs or not isinstance(args[0], str):
+        raise SerializeError("Expected an autograd function name as the first input")
+    function_cls = _import_by_name(args[0])
     if not (
         isinstance(function_cls, type)
         and issubclass(function_cls, torch.autograd.Function)
     ):
-        raise SerializeError(f"{cls_name} is not a torch.autograd.Function")
+        raise SerializeError(f"{args[0]} is not a torch.autograd.Function")
 
 
 @final
@@ -1336,6 +1343,13 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: expected its function "
                 "and input spec to be TreeSpec graph attributes"
             )
+        try:
+            in_spec_str = self.serialize_treespec(in_spec_value)
+        except Exception as e:
+            raise SerializeError(
+                f"Cannot serialize flat_apply node {node.name}: its input spec "
+                "cannot be saved, for example because an input is a pytree constant"
+            ) from e
         constant_func = pytree._retrieve_constant(func_spec).func
         func_name = ".".join(
             getattr(constant_func, attr, "") for attr in ("__module__", "__qualname__")
@@ -1349,7 +1363,7 @@ class GraphModuleSerializer(metaclass=Final):
             constant_func
             is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
         ):
-            _check_flat_apply_autograd_function(flat_args[0])
+            _check_flat_apply_autograd_function(in_spec_value, flat_args)
         return [
             NamedArgument(
                 name="",
@@ -1358,7 +1372,7 @@ class GraphModuleSerializer(metaclass=Final):
             ),
             NamedArgument(
                 name="",
-                arg=Argument.create(as_string=self.serialize_treespec(in_spec_value)),
+                arg=Argument.create(as_string=in_spec_str),
                 kind=ArgumentKind.POSITIONAL,
             ),
             *self.serialize_hoo_inputs(flat_args, node.kwargs),
@@ -3232,10 +3246,8 @@ class GraphModuleDeserializer(metaclass=Final):
         func_input, in_spec_input, *flat_inputs = serialized_node.inputs
         func_name = func_input.arg.as_operator
         func = _import_flat_apply_func(func_name)
-        specs = {
-            "func_spec": func_to_graphable(func)[1],
-            "in_spec": treespec_loads(in_spec_input.arg.as_string),
-        }
+        in_spec = treespec_loads(in_spec_input.arg.as_string)
+        specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         spec_nodes = []
         for suffix, spec in specs.items():
             attr_name = base_name = f"{serialized_node.name}_{suffix}"
@@ -3252,7 +3264,7 @@ class GraphModuleDeserializer(metaclass=Final):
             func
             is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
         ):
-            _check_flat_apply_autograd_function(args[0] if args else None)
+            _check_flat_apply_autograd_function(in_spec, args)
         return (*spec_nodes, *args), kwargs
 
     def deserialize_input(self, inp: Argument) -> Any:

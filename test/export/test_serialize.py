@@ -6,6 +6,7 @@ with test_sym_bool)
 # Owner(s): ["oncall: export"]
 import copy
 import io
+import json
 import math
 import os
 import subprocess
@@ -2814,10 +2815,35 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return Scale.apply(x) + 1
 
+        @dataclass(frozen=True)
+        class Config:
+            factor: int
+
+        pytree.register_constant(Config)
+        self.addCleanup(pytree._deregister_pytree_node, Config)
+
+        class ScaleBy(Scale):
+            @staticmethod
+            def forward(x, config):
+                return x * config.factor
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                return ScaleBy.apply(x, Config(3))
+
         # A class defined inside a function cannot be imported by name. The
         # message depends on whether this file runs as __main__.
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
         with self.assertRaisesRegex(SerializeError, "Could not import|__main__ module"):
+            torch.export.save(ep, io.BytesIO())
+
+        # A pytree constant input cannot be stored in a treespec string.
+        ep = export(Baz(), (torch.randn(4),), strict=False)
+        with self.assertRaisesRegex(SerializeError, "pytree constant"):
             torch.export.save(ep, io.BytesIO())
 
         # An autograd function defined in the main script runs in memory, but
@@ -2850,6 +2876,16 @@ class TestPredispatchSerialization(TestCase):
         self.assertIn(cls_name, artifact.exported_program)
         deserialize(artifact)
 
+        def load(payload):
+            return deserialize(
+                SerializedArtifact(
+                    payload,
+                    artifact.state_dict,
+                    artifact.constants,
+                    artifact.example_inputs,
+                )
+            )
+
         for old, new, reason in [
             (func_name, b'"builtins.exec"', "cannot be used as a flat_apply function"),
             (func_name, b'"os.system"', "Could not import"),
@@ -2860,16 +2896,20 @@ class TestPredispatchSerialization(TestCase):
             (cls_name, b'"builtins.exec"', "is not a torch.autograd.Function"),
             (cls_name, b'"torch.os.system"', "Could not import"),
         ]:
-            payload = artifact.exported_program.replace(old, new)
             with self.assertRaisesRegex(SerializeError, reason, msg=new):
-                deserialize(
-                    SerializedArtifact(
-                        payload,
-                        artifact.state_dict,
-                        artifact.constants,
-                        artifact.example_inputs,
-                    )
-                )
+                load(artifact.exported_program.replace(old, new))
+
+        # The input spec decides which input the helper gets as the class name.
+        program = json.loads(artifact.exported_program)
+        (node,) = [
+            n
+            for n in program["graph_module"]["graph"]["nodes"]
+            if n["target"] == "torch.ops.higher_order.flat_apply"
+        ]
+        spec = pytree.tree_flatten(((), {"function_cls_name": 0, "x": 0, "i": 0}))[1]
+        node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(spec)
+        with self.assertRaisesRegex(SerializeError, "name as the first input"):
+            load(json.dumps(program).encode())
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
