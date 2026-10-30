@@ -622,6 +622,36 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
+    def test_parameter_from_lazy_module_parameter(self):
+        # A lazy module's UninitializedParameter needs _make_subclass on a fake,
+        # which fails for a Python FakeTensor.
+        if not CPP_FAKETENSOR:
+            self.skipTest("lazy modules cannot be built under this fake mode")
+        with FakeTensorMode():
+            lin = torch.nn.LazyLinear(4)
+            lin(torch.randn(2, 3))
+            # The materialized weight's exact type is Parameter
+            tied = torch.nn.Parameter(lin.weight)
+        self.assertTrue(is_fake_tensor(tied))
+        self.assertIsInstance(tied, torch.nn.Parameter)
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_compile_module_with_fake_parameters(self):
+        # The parameter guards must accept the same fake parameters on later calls
+        mode = FakeTensorMode()
+        with mode:
+            m = torch.nn.Linear(4, 4)
+            x = torch.randn(2, 4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        f = torch.compile(m, backend=cnt)
+        try:
+            with mode:
+                for _ in range(3):
+                    f(x)
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            torch._dynamo.reset()
+
     @skipIfCppFakeTensor("exercises Python FakeTensor parameter reconstruction")
     def test_parameter_state_reconstruction_from_dict(self):
         with FakeTensorMode():
