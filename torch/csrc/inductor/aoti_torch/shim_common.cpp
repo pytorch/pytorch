@@ -977,7 +977,7 @@ AOTITorchError aoti_torch_copy_(
   });
 }
 
-AOTITorchError aoti_torch_foreach_copy_(
+AOTITorchError aoti_torch__foreach_copy_(
     const AtenTensorHandle* dst,
     int64_t dst_len,
     const AtenTensorHandle* src,
@@ -986,14 +986,14 @@ AOTITorchError aoti_torch_foreach_copy_(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(
         dst_len == src_len,
-        "aoti_torch_foreach_copy_: ",
+        "aoti_torch__foreach_copy_: ",
         dst_len,
         " dst tensors but ",
         src_len,
         " src tensors");
     TORCH_CHECK(
         dst != nullptr && src != nullptr,
-        "aoti_torch_foreach_copy_: null tensor handle array");
+        "aoti_torch__foreach_copy_: null tensor handle array");
     at::_foreach_copy_(
         pointer_to_list<at::Tensor>(dst, dst_len),
         pointer_to_list<at::Tensor>(src, src_len),
