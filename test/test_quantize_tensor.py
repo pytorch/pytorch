@@ -825,7 +825,22 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
             data_hp, dim, square, swizzled
         )
-        if layout == "trailing_singleton":
+        # Protect current no-copy fast paths, not a public API guarantee.
+        expected_view = layout in {
+            "leading",
+            "leading_short_tile",
+            "trailing_singleton",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "permuted",
+        } or (
+            layout in {"transposed", "transposed_interleaved_batch"}
+            and mode in {"k_swizzled", "m_swizzled"}
+        )
+        if expected_view:
             from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
                 _canonicalize_matrix_input,
             )
@@ -945,11 +960,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
 
-    @parametrize("invalid", ("dtype", "size", "alignment"))
+    @parametrize(
+        "invalid",
+        ("dtype", "size", "alignment", "grid_z", "folded_grid_z", "tma_dim", "grid_y"),
+    )
     @skipIfNoCuteDSL
     def test_to_mx_invalid_input_before_materialization(self, invalid, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        dim = (0, 1)
         from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
             _blockscaled_tma_impl,
         )
@@ -962,6 +981,27 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 1:
             ].view(64, 48)
             error = "quantized axis 1 must be divisible by 32; got size 48"
+        elif invalid == "grid_z":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                64, 128, 65536
+            )
+            error = r"batch axes \(2,\) have sizes \(65536,\); product 65536 exceeds CUDA grid.z limit 65535"
+        elif invalid == "folded_grid_z":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                300, 64, 300, 128
+            )
+            dim = (1, 3)
+            error = r"batch axes \(0, 2\) have sizes \(300, 300\); product 90000 exceeds CUDA grid.z limit 65535"
+        elif invalid == "tma_dim":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                64, 2**32 + 32, 2
+            )
+            error = "input axis 1 has size 4294967328; maximum TMA dimension size is 4294967296"
+        elif invalid == "grid_y":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                65536 * 128, 32, 2
+            )
+            error = r"grid=\(1, 65536, 2\)"
         else:
             data_hp = torch.empty((64, 128), dtype=torch.float64, device=device)[:, ::2]
             error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
@@ -974,7 +1014,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             ),
         ):
             with self.assertRaisesRegex(ValueError, error):
-                _blockscaled_tma_impl(data_hp, (0, 1), False, True)
+                _blockscaled_tma_impl(data_hp, dim, False, True)
 
     @skipIfNoCuteDSL
     def test_to_mx_rceil_nd_unaligned_fallback(self, device):
@@ -1450,19 +1490,6 @@ class TestQuantizeTensorMeta(TestCase):
             F.quantize_tensor_dual(
                 input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
             )
-
-    def test_meta_launch_limits(self):
-        kwargs = {**_MXFP8_KWARGS, "swizzle_type": SwizzleType.SWIZZLE_32_4_4}
-        oversized_batch = torch.empty(
-            (65536, 32, 32), dtype=torch.bfloat16, device="meta"
-        )
-        with self.assertRaisesRegex(ValueError, "grid.z limit"):
-            F.quantize_tensor(oversized_batch, **kwargs)
-        oversized_matrix = torch.empty(
-            (2**32 + 32, 32), dtype=torch.bfloat16, device="meta"
-        )
-        with self.assertRaisesRegex(ValueError, "nonempty input dimension"):
-            F.quantize_tensor(oversized_matrix, **kwargs)
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")

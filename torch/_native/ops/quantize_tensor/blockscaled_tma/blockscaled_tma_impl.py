@@ -10,7 +10,6 @@ from .blockscaled_tma_layout import (
     _BlockscaledTmaSpec,
     _build_blockscaled_tma_spec,
     _canonicalize_matrix_input,
-    _checked_blockscaled_tma_plan,
     _restore_matrix_output,
     _SingleQuantDim,
 )
@@ -42,10 +41,9 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
 def _prepare_blockscaled_tma_launch(
     input: torch.Tensor,
     spec: _BlockscaledTmaSpec,
+    plan: BlockscaledTmaPlan | None,
 ) -> _PreparedBlockscaledTmaLaunch:
-    """Select the launch plan and allocate its output storage."""
-
-    plan = _checked_blockscaled_tma_plan(input, spec)
+    r"""Allocate output storage for a prevalidated launch plan."""
 
     output_m = scale_m = None
     if spec.do_dim_m:
@@ -189,7 +187,12 @@ def _blockscaled_tma_impl_on_current_device(
     dual: bool,
 ) -> _BlockscaledTmaOutput:
     canonical = _canonicalize_matrix_input(
-        input, dim, is_square_scaling, is_scale_swizzled, dual=dual
+        input,
+        dim,
+        is_square_scaling,
+        is_scale_swizzled,
+        dual=dual,
+        check_launch_limits=True,
     )
     spec = _build_blockscaled_tma_spec(
         canonical.input,
@@ -201,7 +204,7 @@ def _blockscaled_tma_impl_on_current_device(
     input = canonical.input
     if input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
         input = input.clone()
-    launch = _prepare_blockscaled_tma_launch(input, spec)
+    launch = _prepare_blockscaled_tma_launch(input, spec, canonical.plan)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
@@ -311,6 +314,11 @@ def _blockscaled_tma_impl(
     Swizzled scaling also copies in that orientation if the faster matrix
     axis has size not divisible by 16. Canonical storage with an unaligned
     pointer is cloned to meet the 16-byte alignment requirement.
+
+    .. note::
+        These copy conditions describe the current kernel. Whether an input
+        uses a view or is materialized is an implementation detail, not a
+        public API guarantee. The output properties below apply to either path.
 
     Args:
         input (Tensor): CUDA tensor with at least two dimensions on an SM100+

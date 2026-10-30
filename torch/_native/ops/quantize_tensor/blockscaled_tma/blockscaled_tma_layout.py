@@ -101,37 +101,47 @@ def _build_blockscaled_tma_spec(
     )
 
 
-def _checked_blockscaled_tma_plan(
-    input: torch.Tensor, spec: _BlockscaledTmaSpec
+def _plan_blockscaled_tma_launch(
+    input: torch.Tensor,
+    batch_axes: tuple[int, ...],
+    matrix_axes: _SingleQuantDim,
+    quant_orientation_id: int,
+    is_square_scaling: bool,
 ) -> BlockscaledTmaPlan | None:
-    """Enforce launch limits and select a plan for nonempty inputs."""
-    plan = None
-    if spec.B_product != 0 and spec.M != 0 and spec.K != 0:
-        if spec.B_product > _CUDA_GRID_Z_MAX:
-            raise ValueError(
-                f"blockscaled TMA batch size exceeds CUDA grid.z limit: "
-                f"B={spec.B_product}, maximum={_CUDA_GRID_Z_MAX}"
-            )
-        if spec.M > _CUDA_TMA_MAX_DIM or spec.K > _CUDA_TMA_MAX_DIM:
-            raise ValueError(
-                "blockscaled TMA requires each nonempty input dimension to be at most "
-                f"{_CUDA_TMA_MAX_DIM}; got shape ({spec.M}, {spec.K})"
-            )
-        plan = select_blockscaled_tma_plan(
-            spec.M,
-            spec.K,
-            input_dtype=input.dtype,
-            quant_orientation_id=spec.quant_orientation_id,
-            is_square_scaling=spec.is_square_scaling,
-        )
-    if plan is not None and (
-        # K <= 2**32 and tile_k_size >= 32 keep grid_k below the X limit.
-        # Large M can still exceed the Y limit.
-        plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX
-    ):
+    r"""Validate the selected TMA launch using caller axes before copying input."""
+
+    if input.numel() == 0:
+        return None
+
+    caller_batch_axes = tuple(sorted(batch_axes))
+    batch_sizes = tuple(input.shape[axis] for axis in caller_batch_axes)
+    batch_count = prod(batch_sizes)
+    if batch_count > _CUDA_GRID_Z_MAX:
         raise ValueError(
-            "blockscaled TMA launch grid exceeds CUDA limits: "
-            f"grid=({plan.grid_k}, {plan.grid_m}, {spec.B_product}), "
+            f"blockscaled TMA batch axes {caller_batch_axes} have sizes {batch_sizes}; "
+            f"product {batch_count} exceeds CUDA grid.z limit {_CUDA_GRID_Z_MAX}"
+        )
+    for axis in matrix_axes:
+        size = input.shape[axis]
+        if size > _CUDA_TMA_MAX_DIM:
+            raise ValueError(
+                f"blockscaled TMA input axis {axis} has size {size}; "
+                f"maximum TMA dimension size is {_CUDA_TMA_MAX_DIM}"
+            )
+
+    M, K = (input.shape[axis] for axis in matrix_axes)
+    plan = select_blockscaled_tma_plan(
+        M,
+        K,
+        input_dtype=input.dtype,
+        quant_orientation_id=quant_orientation_id,
+        is_square_scaling=is_square_scaling,
+    )
+    if plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX:
+        raise ValueError(
+            f"blockscaled TMA launch grid exceeds CUDA limits for input matrix axes "
+            f"{matrix_axes} with sizes ({M}, {K}): "
+            f"grid=({plan.grid_k}, {plan.grid_m}, {batch_count}), "
             f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, {_CUDA_GRID_Z_MAX})"
         )
     return plan
@@ -171,6 +181,8 @@ class _CanonicalMatrixInput(NamedTuple):
           original logical axis order after the batch axes are unfolded.
         swap_dual_outputs (bool): Whether the physical matrix-axis order
           reversed the two dual-quantization result pairs.
+        plan (BlockscaledTmaPlan, optional): Launch plan validated before any
+          input materialization; ``None`` for empty input or meta inference.
     """
 
     input: torch.Tensor
@@ -178,6 +190,7 @@ class _CanonicalMatrixInput(NamedTuple):
     batch_shape: tuple[int, ...]
     inverse_permutation: tuple[int, ...]
     swap_dual_outputs: bool
+    plan: BlockscaledTmaPlan | None
 
 
 def _validate_blockscaled_tma_input(
@@ -220,6 +233,7 @@ def _canonicalize_matrix_input(
     is_scale_swizzled: bool,
     *,
     dual: bool,
+    check_launch_limits: bool = False,
 ) -> _CanonicalMatrixInput:
     r"""Arrange matrix and batch axes for the 2D or 4D TMA kernel.
 
@@ -241,6 +255,8 @@ def _canonicalize_matrix_input(
         is_square_scaling (bool): Whether square-block scaling is requested.
         is_scale_swizzled (bool): Whether swizzled scale storage is requested.
         dual (bool): Whether to quantize both matrix axes.
+        check_launch_limits (bool): Check CUDA launch limits before copying for
+          eager execution; meta inference does not impose device launch limits.
     """
 
     ndim = input.ndim
@@ -303,6 +319,22 @@ def _canonicalize_matrix_input(
         # Dim-m kernel currently requires K % 16 == 0
         and (physical_dim_k or input.shape[fast_axis] % 16 == 0)
     )
+    plan = None
+    if check_launch_limits:
+        kernel_axes = (
+            (physical_matrix_axes[0], physical_matrix_axes[1])
+            if use_tma_view
+            else normalized
+        )
+        if dual:
+            orientation = _QUANT_ORIENTATION_DIM_KM
+        elif use_tma_view and not physical_dim_k:
+            orientation = _QUANT_ORIENTATION_DIM_M
+        else:
+            orientation = _QUANT_ORIENTATION_DIM_K
+        plan = _plan_blockscaled_tma_launch(
+            input, batch_axes, kernel_axes, orientation, is_square_scaling
+        )
 
     if use_tma_view:
         # No-copy fast path, TMA tiles the two matrix axes; batch axes between
@@ -354,6 +386,7 @@ def _canonicalize_matrix_input(
         batch_shape,
         inverse,
         swap_dual_outputs,
+        plan,
     )
 
 
@@ -424,7 +457,6 @@ def infer_blockscaled_tma_outputs(
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
-    _checked_blockscaled_tma_plan(canonical.input, spec)
     batch = (spec.B_product,) if spec.is_batched else ()
     result_k = result_m = None
     if spec.do_dim_k:
