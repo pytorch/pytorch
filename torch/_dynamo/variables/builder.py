@@ -66,6 +66,12 @@ from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.cutedsl import (
+    is_cutedsl_current_stream,
+    is_cutedsl_from_dlpack,
+    is_cutedsl_jit_function,
+    is_traceable_cutedsl_wrapper,
+)
 from torch._library.opaque_object import (
     is_custom_class,
     is_opaque_constant_type,
@@ -1938,6 +1944,47 @@ class VariableBuilder:
                 None,  # No kernel idx provided
                 None,  # No grid provided
                 source=self.source,
+            )
+        elif is_cutedsl_jit_function(value):
+            from .cutedsl import CuteDSLKernelVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CuteDSLKernelVariable(
+                value,
+                None,  # Not wrapped: no write set
+                None,  # No kernel idx provided
+                source=self.source,
+            )
+        elif is_cutedsl_from_dlpack(value):
+            from .cutedsl import CuteDSLFromDlpackVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CuteDSLFromDlpackVariable(value, source=self.source)
+        elif is_cutedsl_current_stream(value):
+            from .cutedsl import CuteDSLCurrentStreamFunctionVariable
+
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return CuteDSLCurrentStreamFunctionVariable(value, source=self.source)
+        elif is_traceable_cutedsl_wrapper(value):
+            from .cutedsl import CuteDSLKernelVariable
+
+            # Guard on what the wrapper holds rather than on its identity, so that
+            # equal wrappers (e.g. one made per call) share the compiled code.
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            kernel_source = AttrSource(self.source, "kernel")
+            install_guard(kernel_source.make_guard(GuardBuilder.ID_MATCH))
+            install_guard(
+                AttrSource(self.source, "mutates_args").make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                )
+            )
+            return CuteDSLKernelVariable(
+                value.kernel,  # type: ignore[attr-defined]
+                value.mutates_args,  # type: ignore[attr-defined]
+                None,
+                source=self.source,
+                kernel_source=kernel_source,
+                wrapper_type=type(value),
             )
         elif value is create_1d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=1)

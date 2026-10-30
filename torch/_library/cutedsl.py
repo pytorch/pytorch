@@ -1,4 +1,5 @@
 import inspect
+import sys
 from collections.abc import Callable, Iterable
 from typing import Any, Literal, TYPE_CHECKING
 
@@ -35,6 +36,40 @@ def is_cutedsl_jit_function(obj: object) -> bool:
     return issubclass(dsl_cls, CuTeDSL) and _jit_executor_name(obj) != "_kernel_helper"
 
 
+def is_traceable_cutedsl_wrapper(obj: object) -> bool:
+    """Whether ``obj`` is what wrap_cutedsl returns, or an instance of a subclass that
+    keeps its ``__call__`` (Dynamo traces one that overrides it as any object),
+    without importing the HOP module (an instance implies it is imported)."""
+    module = sys.modules.get("torch._higher_order_ops.cutedsl_kernel_wrap")
+    if module is None:
+        return False
+    cls = module.TraceableCuteDSLKernelWrapper
+    return isinstance(obj, cls) and type(obj).__call__ is cls.__call__
+
+
+def _is_dsl_function(obj: object, module: str, qualname: str) -> bool:
+    # The DSL's own function, not a replacement stored under its name: a mock, or a
+    # wrapper made with functools.wraps (which copies __module__ and __qualname__).
+    return (
+        inspect.isfunction(obj)
+        and obj.__module__ == module
+        and obj.__qualname__ == qualname
+        and not hasattr(obj, "__wrapped__")
+    )
+
+
+def is_cutedsl_from_dlpack(obj: object) -> bool:
+    """Whether ``obj`` is ``cutlass.cute.runtime.from_dlpack``, which makes the cute
+    tensors of a raw host-function call."""
+    return _is_dsl_function(obj, "cutlass.cute.runtime", "from_dlpack")
+
+
+def is_cutedsl_current_stream(obj: object) -> bool:
+    """Whether ``obj`` is ``cutlass.torch.current_stream``, which makes the stream
+    argument of a raw host-function call."""
+    return _is_dsl_function(obj, "cutlass.torch", "current_stream")
+
+
 def wrap_cutedsl(
     host_fn: Callable[..., Any],
     /,
@@ -43,7 +78,10 @@ def wrap_cutedsl(
 ) -> "TraceableCuteDSLKernelWrapper":
     """Allows capture of a CuTeDSL kernel launch into a graph via make_fx or
     non-strict ``torch.export``: the counterpart of :func:`torch.library.wrap_triton`
-    for ``@cute.jit`` host functions.
+    for ``@cute.jit`` host functions. These trace through ``__torch_dispatch__`` and
+    cannot see a raw call of a host function. Dynamo (``torch.compile``, strict
+    ``torch.export``) captures a call of the wrapper as well as a raw call written as
+    for eager, with ``from_dlpack(t)`` tensors and ``cutlass.torch.current_stream()``.
 
     ``host_fn`` must have exactly one parameter annotated ``cuda.CUstream``; callers
     of the returned wrapper do not pass it, because the kernel is launched on the
@@ -51,6 +89,16 @@ def wrap_cutedsl(
     with ``cutlass.cute.runtime.from_dlpack``). ``mutates_args`` names the tensor
     parameters the kernel writes, or is ``"unknown"`` to treat every tensor argument
     as written; PT2 uses it to functionalize the launch.
+
+    Dynamo captures a raw call as the call of ``wrap_cutedsl(host_fn,
+    mutates_args="unknown")``: every tensor argument counts as written, read-only
+    ones included. Each is cloned in the functionalized graph; a graph input passed
+    to the call becomes a mutated input, copied back after the graph runs and listed
+    in ``graph_signature.user_inputs_to_mutate`` by strict ``torch.export``; and the
+    same tensor passed for two parameters, or views that may overlap, graph-break
+    (two written arguments that share memory cannot be functionalized), although
+    eager runs the call. To give the precise write set, call the kernel through
+    ``wrap_cutedsl(host_fn, mutates_args=[...])`` instead.
 
     Examples:
 
