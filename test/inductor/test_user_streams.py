@@ -2591,7 +2591,7 @@ class TestStreamIdentity(InductorTestCase):
 
         self.assertEqual(result, fn(x))
         self.assertIn("_get_stream_by_index", code)
-        self.assertNotIn("torch.Stream(device=", code)
+        self.assertNotIn("torch.cuda.Stream(device=", code)
 
     @onlyAccelerator
     @xfailIfNoAcceleratorTriton
@@ -2621,7 +2621,7 @@ class TestStreamIdentity(InductorTestCase):
         matches = re.findall(r"_get_stream_by_index\((\d+)\)", code)
         self.assertEqual(len(matches), 2)
         self.assertNotEqual(matches[0], matches[1])
-        self.assertNotIn("torch.Stream(device=", code)
+        self.assertNotIn("torch.cuda.Stream(device=", code)
 
 
 class TestPDLWithMultiStream(InductorTestCase):
@@ -3201,9 +3201,7 @@ instantiate_device_type_tests(TestUserStreamCompile, globals())
 instantiate_device_type_tests(TestStreamOrderingStress, globals())
 instantiate_device_type_tests(TestGenericStreamCompile, globals())
 instantiate_device_type_tests(TestStreamIdentity, globals())
-instantiate_device_type_tests(
-    TestStreamExternalObjectRestore, globals()
-)
+instantiate_device_type_tests(TestStreamExternalObjectRestore, globals())
 instantiate_device_type_tests(TestPDLWithMultiStream, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestAOTIUserStreams, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
