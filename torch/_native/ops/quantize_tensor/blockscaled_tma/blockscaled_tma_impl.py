@@ -171,12 +171,31 @@ def _canonicalize_matrix_input(
         input, normalized, is_square_scaling, is_scale_swizzled, dual=dual
     )
     physical_axes = tuple(sorted(range(ndim), key=lambda axis: -input.stride(axis)))
+    physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
+    fast_axis = physical_matrix_axes[-1]
+    fast_pos = physical_axes.index(fast_axis)
+    trailing_batch_axes = physical_axes[fast_pos + 1 :]
+    if trailing_batch_axes and all(
+        input.shape[axis] == 1 for axis in trailing_batch_axes
+    ):
+        # Move trailing singletons before the fast matrix axis without
+        # changing their order relative to the other batch axes. This lets
+        # a shape such as (M, K, B) with B == 1 take the fast path.
+        before_fast = physical_axes[:fast_pos]
+        insert_at = 1 + max(
+            (pos for pos, axis in enumerate(before_fast) if axis not in matrix_axes),
+            default=-1,
+        )
+        physical_axes = (
+            *before_fast[:insert_at],
+            *trailing_batch_axes,
+            *before_fast[insert_at:],
+            fast_axis,
+        )
     physical_input = (
         input if physical_axes == tuple(range(ndim)) else input.permute(physical_axes)
     )
-    physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
     batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
-    fast_axis = physical_matrix_axes[-1]
     quant_axis = normalized[-1]
     physical_dim_k = quant_axis == fast_axis
 
