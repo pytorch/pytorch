@@ -1216,12 +1216,13 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True: registers the input's pointer arg in
-        host_tma_descriptor_args so the launcher replaces it with a
-        TensorDescriptor. Emits an alias so the template can use desc_name.
+        When HOST_SIDE_TMA is True and the input's sizes and strides are all
+        static: registers the input's pointer arg in host_tma_descriptor_args
+        so the launcher replaces it with a TensorDescriptor. Emits an alias so
+        the template can use desc_name.
 
-        When HOST_SIDE_TMA is False: emits device-side descriptor creation
-        using tl.make_tensor_descriptor().
+        Otherwise (HOST_SIDE_TMA False, or an input with a dynamic dim):
+        emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
             transposes a 2D tensor so the contiguous dim is last. If None,

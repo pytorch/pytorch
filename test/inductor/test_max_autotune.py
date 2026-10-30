@@ -568,6 +568,45 @@ class TestMaxAutotune(TestCase):
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
+    @parametrize("concat", (False, True))
+    def test_max_autotune_persistent_tma_epilogue_load_guards_alignment(self, concat):
+        # With the TMA store off, can_use_tma never checks N, so the epilogue
+        # TMA load of c is the only thing relying on N being aligned. Its
+        # alignment must be guarded: an unaligned N recompiles to a non-TMA load.
+        # With concat, N is 2 * s0, which codegen precomputes into its own symbol.
+        def f(a, b, c):
+            if concat:
+                b, c = torch.cat([b, b]), torch.cat([c, c], 1)
+            return a @ b.t() + c
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn = torch.compile(f, backend=cnt)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": False,
+                "triton.enable_tma_load_for_template_epilogue": True,
+                "benchmark_epilogue_fusion": False,
+                "triton.native_matmul": False,
+                "triton.tlx_mode": None,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            for n in (32, 33) if concat else (64, 65):
+                a = torch.randint(-2, 3, (512, 256), device=GPU_TYPE).half()
+                b = torch.randint(-2, 3, (n, 256), device=GPU_TYPE).half()
+                c = torch.randint(-2, 3, (512, n), device=GPU_TYPE).half()
+                torch._dynamo.mark_dynamic(b, 0)
+                torch._dynamo.mark_dynamic(c, 1)
+                self.assertEqual(fn(a, b, c), f(a, b, c), atol=0, rtol=0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     def test_max_autotune_persistent_tma_rejection_guards_only_failure(self):
         # An aligned K passes before an unaligned N rejects TMA. Only the N
         # requirement may be guarded: a later unaligned K gets the same non-TMA
