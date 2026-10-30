@@ -3871,6 +3871,31 @@ class TestReductionsOnCPU(TestCase):
             self.assertEqual(torch.tensor([0, 2, 1, 0], dtype=dtype), actual)
             self.assertEqual(actual.dtype, dtype)
 
+    # Test histc with large number of bins for low precision types
+    # and compare with float computation
+    def test_histc_lowp_overflow(self):
+        bins = 8193
+
+        for dtype in (torch.half, torch.bfloat16):
+            # Get dtype-specific min/max values
+            finfo = torch.finfo(dtype)
+            min_val = finfo.min
+            max_val = finfo.max
+
+            # Create test data in target dtype with edge cases
+            x = torch.cat([
+                torch.randn(800, dtype=dtype) * (max_val / 4),  # Random values in range
+                torch.rand(50, dtype=dtype) * (min_val * 0.1) + min_val,  # Random near min
+                torch.rand(50, dtype=dtype) * (max_val * 0.1) + max_val * 0.9,  # Random near max
+                torch.randn(100, dtype=dtype) * 2,  # Random around zero
+            ])
+
+            expected = torch.histc(x.float(), bins=bins, min=min_val, max=max_val)
+            actual = torch.histc(x, bins=bins, min=min_val, max=max_val)
+            self.assertEqual(actual.dtype, dtype)
+            self.assertEqual(actual.float(), expected, atol=1e-2, rtol=1e-2)
+
+
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
