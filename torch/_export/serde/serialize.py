@@ -4,6 +4,7 @@ import copy
 import copyreg
 import dataclasses
 import heapq
+import importlib
 import inspect
 import io
 import json
@@ -1313,6 +1314,25 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: its function "
                 f"{func_name} cannot be imported from torch, so it could not be loaded back"
             )
+        if (
+            constant_func
+            is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
+        ):
+            # The autograd function class is passed by name and looked up the
+            # same way when the loaded program runs.
+            cls_name = flat_args[0]
+            module_name, _, class_name = str(cls_name).rpartition(".")
+            try:
+                found = module_name != "__main__" and hasattr(
+                    importlib.import_module(module_name), class_name
+                )
+            except (ImportError, ValueError):
+                found = False
+            if not found:
+                raise SerializeError(
+                    f"Cannot serialize flat_apply node {node.name}: autograd function "
+                    f"{cls_name} cannot be imported by name, so the loaded program could not run"
+                )
         return [
             NamedArgument(
                 name="",

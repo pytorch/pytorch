@@ -2718,12 +2718,17 @@ class TestPredispatchSerialization(TestCase):
         actual_out = loaded_ep.module()(*inp)
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
-    def test_predispatch_vmap_index_serialize_roundtrip(self):
-        """Test that indexing inside vmap, recorded as flat_apply, can be saved and loaded in a new process."""
+    def test_predispatch_flat_apply_serialize_roundtrip(self):
+        """Test that flat_apply calls can be saved and then loaded in a new process."""
         from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+        from torch.testing._internal.two_tensor import TwoTensor
 
-        class IndexInVmap(torch.nn.Module):
-            def forward(self, types):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(TwoTensor(torch.ones(4), torch.ones(4)))
+
+            def forward(self, types, x):
                 q = torch.arange(types.shape[1])
                 rows = torch.vmap(
                     torch.vmap(
@@ -2732,16 +2737,18 @@ class TestPredispatchSerialization(TestCase):
                     in_dims=(0, None),
                 )
                 with TransformGetItemToIndex():
-                    return rows(q, q)
+                    mask = rows(q, q)
+                return mask, (x + TwoTensor(x, x * 2) + self.buffer).b
 
-        m = IndexInVmap()
-        inp = (torch.tensor([[True, False, True, True]]),)
+        m = M()
+        inp = (torch.tensor([[True, False, True, True]]), torch.arange(4.0))
         expected = m(*inp)
         ep = export(m, inp, strict=False)
+        # Two indexing calls that share one function spec, and one constructor.
         flat_apply_nodes = [
             n for n in ep.graph.nodes if n.target is torch.ops.higher_order.flat_apply
         ]
-        self.assertEqual(len(flat_apply_nodes), 2)
+        self.assertEqual(len(flat_apply_nodes), 3)
 
         with TemporaryFileName(suffix=".pt2") as path:
             torch.export.save(ep, path)
@@ -2753,20 +2760,42 @@ class TestPredispatchSerialization(TestCase):
             script = (
                 "import torch;"
                 f"ep = torch.export.load(r'{path}');"
-                "print(ep.module()(torch.tensor([[True, False, True, True]])).tolist())"
+                "out = ep.module()(torch.tensor([[True, False, True, True]]), torch.arange(4.0));"
+                "print([t.tolist() for t in out])"
             )
             out = subprocess.check_output(
                 [sys.executable, "-c", script],
-                cwd=os.path.dirname(os.path.realpath(__file__)),
+                cwd=os.path.dirname(path),
                 text=True,
             )
-        self.assertEqual(out.strip().splitlines()[-1], str(expected.tolist()))
+        self.assertEqual(
+            out.strip().splitlines()[-1], str([t.tolist() for t in expected])
+        )
 
     def test_predispatch_flat_apply_non_torch_function_raises(self):
+        from torch._export.wrappers import allow_in_pre_dispatch_graph
         from torch.testing._internal.two_tensor import TwoTensor
 
         class LocalTwoTensor(TwoTensor):
             pass
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+            @classmethod
+            @allow_in_pre_dispatch_graph
+            def apply(cls, *args, **kwargs):
+                return super().apply(*args, **kwargs)
 
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2778,8 +2807,16 @@ class TestPredispatchSerialization(TestCase):
             def forward(self, x):
                 return (x + LocalTwoTensor(x, x) + self.buffer).a
 
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return Scale.apply(x) + 1
+
         ep = export(Foo(), (torch.randn(4, 4),), strict=False)
         with self.assertRaisesRegex(SerializeError, "cannot be imported from torch"):
+            torch.export.save(ep, io.BytesIO())
+
+        ep = export(Bar(), (torch.randn(4),), strict=False)
+        with self.assertRaisesRegex(SerializeError, "cannot be imported by name"):
             torch.export.save(ep, io.BytesIO())
 
 
