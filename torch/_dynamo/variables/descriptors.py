@@ -214,9 +214,12 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
-        return self.owner.call_method(
-            tx, self.descriptor.__name__, [obj, *rest], kwargs
-        )
+        sd = obj.lookup_slotdefs(self.descriptor.__name__)
+        if sd is None:
+            return self.owner.call_method(
+                tx, self.descriptor.__name__, [obj, *rest], kwargs
+            )
+        return sd(obj, tx, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -232,6 +235,18 @@ class WrapperDescriptorVariable(DescriptorVariable):
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyWrapperDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -423,7 +438,7 @@ class MethodDescriptorVariable(DescriptorVariable):
             result = method(obj, tx, name, rest, kwargs)
             if result is not None:
                 return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+        return obj.call_method(tx, name, rest, kwargs)
 
     def tp_descr_get_impl(
         self,
@@ -647,7 +662,9 @@ class BoundBuiltinMethodVariable(VariableTracker):
         if not isinstance(descriptor, types.MethodDescriptorType):
             # METH_STATIC C functions stored directly in a type dict, e.g.
             # tuple.__new__; the receiver is the class itself.
+            # return obj.call_method(tx, name, args, kwargs)
             return obj.call_method(tx, name, args, kwargs)
+
         if is_torch_class(descriptor.__objclass__):
             # TorchInGraphFunctionVariable records the descriptor itself in the
             # graph, so a tensor subclass override never runs.
