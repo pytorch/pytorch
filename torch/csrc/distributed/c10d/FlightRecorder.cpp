@@ -109,10 +109,13 @@ FlightRecorder<c10::Event>* getFlightRecorder(const std::string& backend) {
   if (backend.empty() || backend == kDefaultFRBackend) {
     return FlightRecorder<c10::Event>::get();
   }
-  static std::mutex mutex;
-  static std::unordered_map<std::string, FlightRecorder<c10::Event>*> registry;
-  std::lock_guard<std::mutex> lock(mutex);
-  auto& instance = registry[backend];
+  // Leaked: detached threads such as the nccl2 heartbeat monitor may call
+  // this during static destruction.
+  static auto* mutex = new std::mutex();
+  static auto* registry =
+      new std::unordered_map<std::string, FlightRecorder<c10::Event>*>();
+  std::lock_guard<std::mutex> lock(*mutex);
+  auto& instance = (*registry)[backend];
   if (instance == nullptr) {
     // Intentionally leaked on exit, like FlightRecorder::get(): entries hold
     // Python state that may already have been destructed.

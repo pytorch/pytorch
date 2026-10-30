@@ -3,7 +3,7 @@
 
 These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Each entry below states which backends read it: **nccl-legacy only**, **All NCCL backends**, or the backends it applies to.
 
-`nccl-legacy` records into the flight recorder natively and dumps it itself. For `nccl`, `nccl-lazy` and other backends without native support, `FlightRecorderHook` records and dumps the trace. The recorder reads the buffer size, C++ stack and dump file variables; the dump-on-failure variables are read by `nccl-legacy` or by `FlightRecorderHook`, as noted per entry. Where both are read, the `TORCH_FR_*` name takes precedence over its `TORCH_NCCL_*` alias. When a `nccl` or `nccl-lazy` watchdog gets stuck, the heartbeat monitor writes one dump holding both backends' entries, at most once per process.
+`nccl-legacy` records into the flight recorder natively and dumps it itself. For `nccl`, `nccl-lazy` and other backends without native support, `FlightRecorderHook` records and dumps the trace. The recorder reads the buffer size, C++ stack and dump file variables; the dump-on-failure variables are read by `nccl-legacy` or by `FlightRecorderHook`, as noted per entry. Where both are read, the `TORCH_FR_*` name takes precedence over its `TORCH_NCCL_*` alias. When a `nccl` or `nccl-lazy` watchdog gets stuck, the heartbeat monitor writes one dump holding both backends' entries, at most once per process. The monitor reads its variables once per process, when the first ``nccl`` or ``nccl-lazy`` group is created, and a malformed value fails that group's creation. With ``TORCH_NCCL_BLOCKING_WAIT=1``, ``nccl`` and ``nccl-lazy`` groups have no watchdog, so there is no heartbeat monitor, stall dump or ``TORCH_NCCL_DEBUG_INFO_PIPE_FILE`` pipe.
 
 ```{list-table}
 :header-rows: 1
@@ -37,9 +37,9 @@ These variables configure the `nccl`, `nccl-lazy` and `nccl-legacy` backends. Ea
 * - ``TORCH_NCCL_ENABLE_TIMING``
   - **All NCCL backends.** If set to ``1``, enable recording start-events for all ProcessGroupNCCL collectives, and compute accurate collective timing per-collective. Default: ``0``.
 * - ``TORCH_NCCL_ENABLE_MONITORING``
-  - **All NCCL backends.** If set to ``1``, enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources. Default: ``1``.
+  - **All NCCL backends.** If set to ``1``, enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources. ``nccl`` groups in reconfigurable mode are never aborted; their stuck watchdog is only reported. Default: ``1``.
 * - ``TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC``
-  - **All NCCL backends.** Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process. ``nccl`` and ``nccl-lazy`` dump the flight recorder once the watchdog misses this timeout and abort one more timeout later; a value of 0 or less disables the check. Default: ``480``.
+  - **All NCCL backends.** Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process. ``nccl`` and ``nccl-lazy`` dump the flight recorder once the watchdog misses this timeout and abort one more timeout later. For ``nccl`` and ``nccl-lazy``, a value of 0 or less disables the check. Default: ``480``.
 * - ``TORCH_NCCL_PROPAGATE_ERROR``
   - **nccl-legacy only.** If set to ``1``, propagate NCCL errors to all ranks through the store. Default: ``0``.
 * - ``TORCH_NCCL_RETHROW_CUDA_ERRORS``

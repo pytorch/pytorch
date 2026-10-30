@@ -344,8 +344,10 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
     c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
+    // Like abortProcess(), never terminates in reconfigurable mode.
     HeartbeatRegistration heartbeat(
-        "[TC]" + getRankPrefix(this) + getCommNamePrefix(this) + " ");
+        "[TC]" + getRankPrefix(this) + getCommNamePrefix(this) + " ",
+        /*may_terminate=*/!options_c10d_->enable_reconfigure);
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);

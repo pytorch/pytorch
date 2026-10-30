@@ -2653,9 +2653,13 @@ _HEARTBEAT_ENV = (
     "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC",
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC",
     "TORCH_INCLUDE_STACK_TRACE",
+    "NCCL_BLOCKING_WAIT",
+    "TORCH_FR_DUMP_DYNAMIC_FILE_NAME",
+    "TORCH_CPP_LOG_LEVEL",
 )
 
 
+@instantiate_parametrized_tests
 class ProcessGroupNCCL2HeartbeatMonitorTest(TestCase):
     """The monitor is process-wide and reads its env once, and its job is to
     kill the process, so each case runs in fresh children."""
@@ -2832,6 +2836,83 @@ class ProcessGroupNCCL2HeartbeatMonitorTest(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
+    def test_stalled_watchdogs_dump_once(self) -> None:
+        # Two stalled groups: one report each, one merged dump.
+        body = """\
+sub = dist.new_group()
+dist.all_reduce(torch.ones(4, device=device), group=sub)
+torch.cuda.synchronize()
+backend._stall_watchdog_for_testing()
+sub._get_backend(device)._stall_watchdog_for_testing()
+"""
+        state = {"reports": 0}
+
+        def on_line(line: str) -> bool:
+            if "would have terminated the process" not in line:
+                return False
+            state["reports"] += 1
+            return state["reports"] == 2
+
+        returncode, output = self._run_child(
+            body,
+            {
+                "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "2",
+                "TORCH_NCCL_ENABLE_MONITORING": "0",
+                "TORCH_CPP_LOG_LEVEL": "INFO",
+            },
+            on_line=on_line,
+        )
+        self.assertEqual(returncode, 0, msg=output)
+        self.assertEqual(output.count("watchdog got stuck"), 2, msg=output)
+        self.assertEqual(
+            output.count("Finished writing Flight Recorder debug info to"),
+            1,
+            msg=output,
+        )
+        self.assertEqual(
+            output.count("a stall dump was already attempted in this process"),
+            1,
+            msg=output,
+        )
+        self._assert_traced(0)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @skip_if_lt_x_gpu(1)
+    def test_reconfigurable_group_is_not_terminated(self) -> None:
+        body = """\
+from datetime import timedelta
+from torch._C._distributed_c10d import ReconfigureOptions
+opts = dist.ProcessGroupNCCL2.Options()
+opts.enable_reconfigure = True
+reconf = dist.ProcessGroupNCCL2(dist.PrefixStore("reconf", store), rank, world_size, opts)
+reconfigure_opts = ReconfigureOptions()
+reconfigure_opts.uuid = 1
+reconfigure_opts.handles = [reconf.get_reconfigure_handle()]
+reconfigure_opts.timeout = timedelta(seconds=30)
+reconf.reconfigure(reconfigure_opts).wait()
+reconf._stall_watchdog_for_testing()
+"""
+        returncode, output = self._run_child(
+            body,
+            {"TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "2"},
+            on_line=lambda line: "would have terminated the process" in line,
+        )
+        self.assertEqual(returncode, 0, msg=output)
+        self.assertEqual(output.count("watchdog got stuck"), 1, msg=output)
+        self.assertIn("ProcessGroupNCCL is in reconfigurable mode", output)
+        self.assertNotIn("Terminating the process", output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
     def test_recovered_watchdog_is_not_terminated(self) -> None:
         # The idle default and nccl-lazy groups keep beating while the
         # subgroup's watchdog is parked, then unparked.
@@ -2863,33 +2944,40 @@ sub_backend._stall_watchdog_for_testing(False)
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
-    def test_invalid_env_fails_group_creation(self) -> None:
-        returncode, output = self._run_child(
-            "", {"TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "abc"}
-        )
+    @parametrize(
+        "var", ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC", "TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC"]
+    )
+    def test_invalid_env_fails_group_creation(self, var: str) -> None:
+        returncode, output = self._run_child("", {var: "abc"})
         self.assertNotEqual(returncode, 0, msg=output)
-        self.assertIn(
-            "Invalid value for environment variable: TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC",
-            output,
-        )
+        self.assertIn(f"Invalid value for environment variable: {var}", output)
 
     def _run_pipe_test(self, world_size: int, setup: str = _DEFAULT_SETUP) -> None:
+        # The pipe can open before setup's collectives are recorded, so each
+        # rank's dump waits for both.
+        pending = [{"opened", "ready"} for _ in range(world_size)]
+
         def on_line(rank: int, line: str) -> int | None:
             if "has been opened, write to it" in line:
-                pipe = f"{self.pipe_prefix}{rank}.pipe"
-                self.assertIn(pipe, line)
+                self.assertIn(f"{self.pipe_prefix}{rank}.pipe", line)
                 self.assertFalse(os.path.exists(self.trace_prefix + str(rank)))
-                with open(pipe, "w") as f:
+                pending[rank].discard("opened")
+            elif line.strip() == "ready":
+                pending[rank].discard("ready")
+            elif "Finished writing Flight Recorder debug info to" in line:
+                self.assertIn(self.trace_prefix + str(rank), line)
+                self._assert_traced(rank)
+                return rank
+            else:
+                return None
+            if not pending[rank]:
+                pending[rank].add("written")
+                with open(f"{self.pipe_prefix}{rank}.pipe", "w") as f:
                     f.write("1")
-                return None
-            if "Finished writing Flight Recorder debug info to" not in line:
-                return None
-            self.assertIn(self.trace_prefix + str(rank), line)
-            self._assert_traced(rank)
-            return rank
+            return None
 
         results = self._run_children(
-            "",
+            'print("ready", flush=True)',
             {
                 "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": self.pipe_prefix,
                 "TORCH_CPP_LOG_LEVEL": "INFO",
@@ -2960,7 +3048,11 @@ sub_backend._stall_watchdog_for_testing(False)
         self.assertEqual(state["dumps"], 3, msg=output)
         self.assertNotIn("watchdog got stuck", output)
 
-    def _run_split_test(self, nonblocking: str) -> None:
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("nonblocking", ["0", "1"])
+    def test_split_does_not_stall_watchdog(self, nonblocking: str) -> None:
         # Rank 0 waits in a comm split on the shared NcclApi until rank 1
         # joins, which happens only once rank 0's stalled witness group would
         # have been killed, at least two timeouts later. Meanwhile rank 0's
@@ -3003,18 +3095,6 @@ print("split done", flush=True)
             self.assertEqual(
                 output.count("would have terminated the process"), 1 - rank, msg=output
             )
-
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_blocking_split_does_not_stall_watchdog(self) -> None:
-        self._run_split_test("0")
-
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_nonblocking_split_does_not_stall_watchdog(self) -> None:
-        self._run_split_test("1")
 
 
 if __name__ == "__main__":

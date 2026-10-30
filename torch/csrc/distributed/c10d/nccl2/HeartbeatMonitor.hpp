@@ -19,10 +19,11 @@ void initHeartbeatMonitor();
 // lifetime of this object. If beat() is not called for
 // TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, the monitor dumps the flight recorder and,
 // TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC later, terminates the process if still not
-// called, like stock ProcessGroupNCCL's HeartbeatMonitor.
+// called, like stock ProcessGroupNCCL's HeartbeatMonitor. With
+// may_terminate=false (reconfigurable mode) it only dumps and logs.
 class HeartbeatRegistration {
  public:
-  explicit HeartbeatRegistration(std::string log_prefix);
+  HeartbeatRegistration(std::string log_prefix, bool may_terminate);
   ~HeartbeatRegistration();
   HeartbeatRegistration(const HeartbeatRegistration&) = delete;
   HeartbeatRegistration& operator=(const HeartbeatRegistration&) = delete;

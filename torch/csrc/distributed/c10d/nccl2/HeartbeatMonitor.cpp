@@ -32,11 +32,12 @@ namespace c10d::nccl2 {
 using Clock = std::chrono::steady_clock;
 
 struct Heartbeat {
-  explicit Heartbeat(std::string log_prefix)
-      : log_prefix(std::move(log_prefix)) {}
+  Heartbeat(std::string log_prefix, bool may_terminate)
+      : log_prefix(std::move(log_prefix)), may_terminate(may_terminate) {}
 
   std::atomic<uint64_t> beats{0};
   const std::string log_prefix;
+  const bool may_terminate;
   // Monitor thread only.
   uint64_t seen_beats{0};
   Clock::time_point seen_at{Clock::now()};
@@ -303,7 +304,13 @@ class HeartbeatMonitor {
   // whose symbolization may need the GIL, and leak attempts that time out
   // since ~future would join them.
   void dumpOnStall(const std::string& log_prefix) {
-    if (!dump_on_timeout_ || dumped_) {
+    if (!dump_on_timeout_) {
+      return;
+    }
+    if (dumped_) {
+      LOG(ERROR) << log_prefix
+                 << "Not dumping the flight recorder: a stall dump was already "
+                    "attempted in this process.";
       return;
     }
     dumped_ = true;
@@ -385,13 +392,13 @@ class HeartbeatMonitor {
     heartbeat.terminate_at.reset();
     constexpr const char* kReason =
         "after attempting to dump debug info, due to ProcessGroupNCCL watchdog hang.";
-    if (terminate_) {
+    if (terminate_ && heartbeat.may_terminate) {
       LOG(FATAL) << prefix << "Terminating the process " << kReason;
     }
     LOG(ERROR) << prefix
-               << "ProcessGroupNCCL monitor thread is disabled, but would have "
-                  "terminated the process "
-               << kReason;
+               << (terminate_ ? "ProcessGroupNCCL is in reconfigurable mode"
+                              : "ProcessGroupNCCL monitor thread is disabled")
+               << ", but would have terminated the process " << kReason;
   }
 
   const std::chrono::seconds timeout_;
@@ -423,8 +430,11 @@ void initHeartbeatMonitor() {
   HeartbeatMonitor::get();
 }
 
-HeartbeatRegistration::HeartbeatRegistration(std::string log_prefix)
-    : heartbeat_(std::make_shared<Heartbeat>(std::move(log_prefix))) {
+HeartbeatRegistration::HeartbeatRegistration(
+    std::string log_prefix,
+    bool may_terminate)
+    : heartbeat_(
+          std::make_shared<Heartbeat>(std::move(log_prefix), may_terminate)) {
   HeartbeatMonitor::get().add(heartbeat_);
 }
 
