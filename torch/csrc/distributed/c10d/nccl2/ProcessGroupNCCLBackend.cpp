@@ -11,14 +11,19 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <optional>
 #include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -110,6 +115,128 @@ class CompletedWork : public ::c10d::Work {
   std::vector<at::Tensor> outputs_;
 };
 
+// Warns once per process, at the first nccl2 construction, about legacy
+// ProcessGroupNCCL settings nccl2 ignores. Variables set later are not
+// reported.
+void warnIgnoredLegacyEnvOnce() {
+  static const bool warned [[maybe_unused]] = [] {
+    struct Knob {
+      const char* name;
+      // nccl2's behavior for a bool knob; matching values are not reported.
+      // Non-bool knobs are reported whenever set.
+      std::optional<bool> nccl2Value;
+      const char* hint;
+      // Legacy reads this alias only when the preferred name is unset.
+      const char* preferred;
+    };
+    // Not listed: TORCH_NCCL_ENABLE_MONITORING,
+    // TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK,
+    // TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN and
+    // TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, because nccl2
+    // already behaves as their non-default values request;
+    // TORCH_NCCL_TEARDOWN_ON_TIMEOUT, because nccl2 tears down on timeout as
+    // =1 requests and =0 only matters with TORCH_NCCL_RETHROW_CUDA_ERRORS=0,
+    // which is reported; TORCH_NCCL_EXTRA_DUMP_ON_EXEC, because
+    // FlightRecorderHook already dumps on detected failures (lost: legacy's
+    // extra dump and cross-rank dump signal on abort(), on destroying a group
+    // that was never shut down, and on watchdog exceptions not tied to a
+    // work); and
+    // TORCH_NCCL_ABORT_IN_DESTROY_PG, which no backend reads.
+    constexpr const char* kTimingHint =
+        "for timing set TORCH_NCCL_ENABLE_TIMING=1";
+    // Parses like getCvarBool, but never throws.
+    auto parseBool = [](const std::string& val) -> std::optional<bool> {
+      auto lower = val;
+      std::transform(
+          lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+          });
+      if (lower == "y" || lower == "yes" || lower == "1" || lower == "t" ||
+          lower == "true") {
+        return true;
+      }
+      if (lower == "n" || lower == "no" || lower == "0" || lower == "f" ||
+          lower == "false") {
+        return false;
+      }
+      return std::nullopt;
+    };
+    // The timing hint is shown at most once, and not when timing is on (the
+    // first set name wins, as in getCvarBool).
+    bool timingHintNeeded = true;
+    for (const auto& name : ::c10d::TORCH_NCCL_ENABLE_TIMING) {
+      if (auto v = c10::utils::get_env(name.c_str()); v.has_value()) {
+        timingHintNeeded = parseBool(*v) != std::optional<bool>(true);
+        break;
+      }
+    }
+    constexpr Knob kKnobs[] = {
+        {"TORCH_NCCL_RETHROW_CUDA_ERRORS", true, nullptr, nullptr},
+        {"TORCH_NCCL_PROPAGATE_ERROR", false, nullptr, nullptr},
+        {"TORCH_NCCL_DESYNC_DEBUG", false, kTimingHint, nullptr},
+        {"NCCL_DESYNC_DEBUG", false, kTimingHint, "TORCH_NCCL_DESYNC_DEBUG"},
+        {"TORCH_NCCL_NAN_CHECK", false, "use TORCH_DIST_NAN_CHECK=1", nullptr},
+        {"TORCH_NCCL_BCAST_UNIQUEID", true, nullptr, nullptr},
+        {"TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC", std::nullopt, nullptr, nullptr},
+        {"TORCH_NCCL_COORD_CHECK_MILSEC", std::nullopt, nullptr, nullptr},
+        {"TORCH_NCCL_DEBUG_INFO_PIPE_FILE", std::nullopt, nullptr, nullptr},
+        {"TORCH_NCCL_NONBLOCKING_TIMEOUT",
+         std::nullopt,
+         "nccl2 uses the PG timeout",
+         nullptr},
+    };
+    std::vector<std::string> ignored;
+    for (const auto& knob : kKnobs) {
+      if (knob.preferred != nullptr && c10::utils::has_env(knob.preferred)) {
+        continue;
+      }
+      // Read raw rather than with getCvarBool: a malformed value must not fail
+      // construction, and the name reported must be the one actually set.
+      auto val = c10::utils::get_env(knob.name);
+      if (!val.has_value() || val->empty()) {
+        continue;
+      }
+      if (knob.nccl2Value.has_value() && parseBool(*val) == knob.nccl2Value) {
+        continue;
+      }
+      auto entry = c10::str(knob.name, "=", *val);
+      const char* hint = knob.hint;
+      if (hint == kTimingHint) {
+        hint = timingHintNeeded ? hint : nullptr;
+        timingHintNeeded = false;
+      }
+      if (hint != nullptr) {
+        entry = c10::str(entry, " (", hint, ")");
+      }
+      ignored.push_back(std::move(entry));
+    }
+    std::string msg;
+    if (!ignored.empty()) {
+      msg = c10::str(
+          "nccl2 ignores these legacy ProcessGroupNCCL (nccl-legacy) settings: ",
+          c10::Join(", ", ignored),
+          ". Use backend \"nccl-legacy\" (or TORCH_DIST_USE_NCCL2=0 with backend "
+          "\"nccl\") if you need their behavior; otherwise unset them.");
+    }
+    // DETAIL still has effects under nccl2, so it is not something to unset.
+    if (::c10d::debug_level() >= ::c10d::DebugLevel::Detail) {
+      msg = c10::str(
+          msg,
+          msg.empty() ? "" : " ",
+          "At debug level DETAIL, nccl-legacy also enables desync debug and "
+          "timing; nccl2 does not (for desync debug use backend "
+          "\"nccl-legacy\"",
+          timingHintNeeded ? c10::str("; ", kTimingHint) : "",
+          ").");
+    }
+    if (msg.empty()) {
+      return false;
+    }
+    TORCH_WARN(msg);
+    return true;
+  }();
+}
+
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -129,6 +256,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           ::c10d::SkipCleanUp))),
       blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
+  warnIgnoredLegacyEnvOnce();
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 
