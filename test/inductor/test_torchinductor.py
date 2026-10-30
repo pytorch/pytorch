@@ -47,6 +47,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
+    expectedFailureDynamic,
     rand_strided,
     reset_rng_state,
     same,
@@ -6954,7 +6955,8 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @expectedFailureCodegenDynamic  # Symbolic sizes cannot prove divisibility.
+    @expectedFailureDynamic  # Symbolic sizes cannot prove divisibility.
+    @expectedFailureCodegenDynamic
     def test_adaptive_avg_pool2d_backward_upsampling_shortcut(self):
         def fn(grad_output, x):
             return aten._adaptive_avg_pool2d_backward(grad_output, x)
@@ -6966,7 +6968,6 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d_backward_non_divisible(self):
         def fn(grad_output, x):
             return aten._adaptive_avg_pool2d_backward(grad_output, x)
@@ -6991,7 +6992,6 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @xfail_if_mps_unimplemented
     @parametrize("dtype", (torch.int32, torch.int64))
     def test_adaptive_avg_pool2d_backward_integer_dtype(self, dtype):
         def fn(grad_output, x):
@@ -7004,7 +7004,6 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(RuntimeError, "not implemented"):
             torch.compile(fn, fullgraph=True)(grad_output, x)
 
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     @parametrize(
         "input_size,output_size,dtype,layout",
         [
@@ -7038,7 +7037,6 @@ for dtype in (torch.int32, torch.int64):
             exact_stride=True,
         )
 
-    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d_backward_training(self):
         def fn(x):
             return F.adaptive_avg_pool2d(x, (3, 4)).sum()
