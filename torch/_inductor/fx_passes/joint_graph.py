@@ -15,10 +15,13 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch._inductor.fx_utils import get_node_storage
+from torch._inductor.fx_utils import (
+    get_node_storage,
+    rank_agnostic_device,
+    rank_agnostic_passes,
+)
 from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
-from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
@@ -473,7 +476,7 @@ class UniformValueConstantFolder(ConstantFolder):
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
-        # handle device_put op
+        # handle device_put, and current_device since it feeds constructors' device
         if node.target in (
             prims.device_put.default,
             torch.ops.coor.current_device.default,
@@ -625,7 +628,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         node_replacements_shapes = cf.node_replacements_shapes
 
         graph = gm.graph
-        current_device = torch.ops.coor.current_device.default
 
         zeros = OrderedSet[Any]()
         ones = OrderedSet[Any]()
@@ -694,13 +696,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 if _has_self_referential_shape(shapes, node):
                     continue
 
-                # Under compile-on-one-rank, don't bake the compiling rank's device.
-                device = fake_tensor.device
-                if _coor_device_index_is_current(device):
-                    with graph.inserting_before(node):
-                        device = graph.call_function(current_device)
-                        device.meta["val"] = fake_tensor.device
-
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
                     aten.full.default,
@@ -708,7 +703,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     kwargs={
                         "dtype": fake_tensor.dtype,
                         "layout": torch.strided,
-                        "device": device,
+                        "device": rank_agnostic_device(graph, fake_tensor.device),
                         "pin_memory": node.kwargs.get("pin_memory", False),
                     },
                 )
@@ -809,6 +804,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
     canonicalize_quant_mapping(gm)
 
 
+@rank_agnostic_passes()
 def joint_graph_passes(
     graph: torch.fx.GraphModule,
     input_device: torch.device | None = None,
@@ -921,7 +917,8 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
 
     if len(user_devices) == 1 and "val" in node.meta:
         (user_device,) = user_devices
-        if device.type != user_device.type:
+        # Under compile-on-one-rank, device may be a current_device() node.
+        if node.meta["val"].device.type != user_device.type:
             repl = match.graph.call_function(
                 torch.ops.prims.iota.default,
                 (length,),
@@ -929,7 +926,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
                     "start": start,
                     "step": step,
                     "dtype": dtype,
-                    "device": user_device,
+                    "device": rank_agnostic_device(match.graph, user_device),
                     "requires_grad": requires_grad,
                 },
             )
