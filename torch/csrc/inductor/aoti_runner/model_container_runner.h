@@ -192,8 +192,11 @@ class TORCH_API AOTIModelContainerRunner {
 
  private:
   const char* get_aoti_runtime_error() const;
-  // Calls a model run function, which steals the input handles, as
-  // run_func(output_handles, num_outputs), and returns the outputs it writes.
+  // Calls a model run function as run_func(inputs, num_inputs, outputs,
+  // num_outputs) and returns the outputs it writes. The model steals the input
+  // handles; the ones it didn't steal are freed on every exit. name labels the
+  // call, e.g. "run_func_(...)", in the error thrown when the runtime reports
+  // no message.
   template <typename RunFunc>
   std::vector<at::Tensor> call_run_func(
       std::vector<AtenTensorHandle>& input_handles,

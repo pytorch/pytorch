@@ -3040,6 +3040,8 @@ class xpu(cutlass):
 
 
 class rocm:
+    """ROCm-specific inductor configuration (arch list, CK, origami, etc.)."""
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
@@ -3115,9 +3117,13 @@ class rocm:
     # When True, the rocm-origami pip package is consulted at GEMM compile time
     # to pre-select a top-K of Triton configs from the DEFAULT search space,
     # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
-    # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at heuristics/template/triton.py load time.
+    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI.
+    #
+    # config.patch behaviour:
+    #   patching to False  -- disables origami at call time (_origami_enabled()).
+    #   patching to True   -- no effect; the rocm-origami import is cached at
+    #                         heuristics/template/triton.py load time and cannot
+    #                         be re-triggered by a runtime patch.
     #
     # Active only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
@@ -3125,7 +3131,6 @@ class rocm:
     #   - config.rocm.origami (this knob)
     #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    #   - ROCm version < 10.0 (origami not supported on 10.0+)
     # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
     # one-time warning; the regular config generator runs instead.
     #

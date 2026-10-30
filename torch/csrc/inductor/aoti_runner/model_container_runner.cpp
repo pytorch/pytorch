@@ -333,10 +333,11 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
     const char* name,
     RunFunc&& run_func) {
   // The model steals each input handle and nulls its slot (see
-  // steal_from_raw_handles_to_raii_handles). If run_func throws before the
-  // steal (e.g. a failed input runtime check), the un-stolen handles would
-  // leak, keeping their input storage alive. Free whatever the model did not
-  // steal on every exit; on success all slots are null so this is a no-op.
+  // steal_from_raw_handles_to_raii_handles). If run_func fails or throws
+  // before the steal (e.g. a failed input runtime check), the un-stolen
+  // handles would leak, keeping their input storage alive. Free whatever the
+  // model did not steal on every exit; on success all slots are null so this
+  // is a no-op.
   auto free_unstolen_input_handles = c10::make_scope_exit([&input_handles]() {
     torch::aot_inductor::free_unstolen_handles(input_handles);
   });
@@ -350,8 +351,10 @@ std::vector<at::Tensor> AOTIModelContainerRunner::call_run_func(
 
   torch::aot_inductor::set_last_error(nullptr);
   if (std::forward<RunFunc>(run_func)(
-          output_handles.data(), output_handles.size()) !=
-      AOTI_RUNTIME_SUCCESS) {
+          input_handles.data(),
+          input_handles.size(),
+          output_handles.data(),
+          output_handles.size()) != AOTI_RUNTIME_SUCCESS) {
     if (const char* error = get_aoti_runtime_error()) {
       TORCH_CHECK(false, error);
     }
@@ -368,11 +371,14 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
   return call_run_func(
       input_handles,
       "run_func_(...)",
-      [&](AtenTensorHandle* output_handles, size_t num_outputs) {
+      [&](AtenTensorHandle* inputs,
+          size_t num_inputs,
+          AtenTensorHandle* output_handles,
+          size_t num_outputs) {
         return run_func_(
             container_handle_,
-            input_handles.data(),
-            input_handles.size(),
+            inputs,
+            num_inputs,
             output_handles,
             num_outputs,
             reinterpret_cast<AOTInductorStreamHandle>(stream_handle),

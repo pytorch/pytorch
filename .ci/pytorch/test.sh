@@ -887,10 +887,11 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
-  # CUDA graph capture must fail cleanly under the async allocator backend.
-  /usr/bin/env "${TEST_ENVS[@]}" PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync \
-    "${BUILD_BIN_DIR}/test_shim" --gtest_filter='*CudaMallocAsync*'
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile &&
+    # CUDA graph capture must fail cleanly under the async allocator backend.
+    /usr/bin/env "${TEST_ENVS[@]}" PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync \
+      "${BUILD_BIN_DIR}/test_shim" --gtest_filter='*CudaMallocAsync*' \
+      --gtest_output=xml:test/test-reports/cpp/test_shim_cuda_malloc_async.xml
 }
 
 test_inductor_aoti_fallback_shard() {
