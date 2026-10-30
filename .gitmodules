@@ -58,6 +58,10 @@
     ignore = dirty
     path = third_party/ideep
     url = https://github.com/intel/ideep
+[submodule "third_party/oneDNN"]
+    ignore = dirty
+    path = third_party/oneDNN
+    url = https://github.com/uxlfoundation/oneDNN.git
 [submodule "third_party/gemmlowp/gemmlowp"]
     ignore = dirty
     path = third_party/gemmlowp/gemmlowp
