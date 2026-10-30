@@ -55,6 +55,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
 )
@@ -880,8 +881,9 @@ def _descriptor_load_pattern(operand):
 
 def _pointer_load_pattern(operand):
     # load_checked_2d is defined unconditionally in every generated kernel, so
-    # only an operand-qualified call establishes the fallback.
-    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+    # only an operand-qualified call establishes the fallback. A kernel defined at
+    # module level calls it by a name suffixed with the kernel's own.
+    return rf"\bload_checked_2d(?:_\w+)?\(\s*{operand.upper()}\s*,"
 
 
 def _check_int64_decode_narrows_coordinates(
@@ -4789,6 +4791,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
+    @skip_on_cpu
+    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
+    @common_utils.parametrize("qk_head_dim", [64, 512])
+    def test_head_dim_512_default_configs(self, device, qk_head_dim):
+        # https://github.com/triton-lang/triton/issues/10309
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, qk_head_dim, V_D=512)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
