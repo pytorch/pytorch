@@ -490,7 +490,8 @@ def _kl_pareto_pareto(p, q):
 
 @register_kl(Poisson, Poisson)
 def _kl_poisson_poisson(p, q):
-    return p.rate * (p.rate.log() - q.rate.log()) - (p.rate - q.rate)
+    # xlogy gives 0 at p.rate == 0, so zero rates no longer produce NaN
+    return _x_log_x(p.rate) - torch.special.xlogy(p.rate, q.rate) - (p.rate - q.rate)
 
 
 @register_kl(TransformedDistribution, TransformedDistribution)
