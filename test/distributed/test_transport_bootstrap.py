@@ -83,7 +83,7 @@ def _bootstrap_worker(rank, port, path, implicit):
                 store=None if implicit else store,
                 rank=None if implicit else 10 + rank,
             )
-            if transport.peers != [(bytes([1 - rank, 0, 255]), 30.0)]:
+            if transport.peers != [(bytes([1 - rank, 0, 255]), None)]:
                 raise AssertionError(f"incorrect peer endpoint: {transport.peers}")
         if implicit:
             # Rank 2 does not bootstrap, proving there is no collective in it.
@@ -243,6 +243,10 @@ class TestRankBootstrap(TestCase):
                     transport.connect_rank(5, store=store, rank=10, timeout=timeout)
             with self.assertRaisesRegex(TypeError, "tag"):
                 transport.connect_rank(5, store=store, rank=10, tag=1)
+            transport._default_timeout = 0.0
+            with self.assertRaisesRegex(ValueError, "got 0.0 s"):
+                transport.connect_rank(5, store=store, rank=10)
+            transport._default_timeout = None
             self.assertEqual(store.num_keys(), keys)
             with self.assertRaisesRegex(RuntimeError, "bind stopped"):
                 transport.connect_rank(5, store=store, rank=10, tag="other")
@@ -261,6 +265,8 @@ class TestRankBootstrap(TestCase):
     def test_implicit_rank_lookup(self):
         store = _hash_store()
         transport = _Transport()
+        # timeout=None resolves to the transport's default.
+        transport._default_timeout = 5.0
         with (
             patch("torch.distributed.get_rank", return_value=4) as get_rank,
             patch.object(
@@ -269,7 +275,7 @@ class TestRankBootstrap(TestCase):
             self.assertRaisesRegex(RuntimeError, "bind stopped"),
         ):
             transport.connect_rank(8, store=store)
-        bind.assert_called_once_with(timeout=30.0)
+        bind.assert_called_once_with(timeout=5.0)
         get_rank.assert_called_once_with()
         self.assertEqual(store.get(f"{_PREFIX}/4/8/attempts/4"), b"1")
 
