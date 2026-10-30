@@ -6931,6 +6931,10 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     # test type promotion
     yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
+    # scalar min/max; .item() keeps the input's kind (e.g. Python bool for torch.bool)
+    yield SampleInput(make_arg(shape), args=(make_arg(()).item(), make_arg(()).item()))
+    yield SampleInput(make_arg(shape), args=(make_arg(()).item(), None))
+    yield SampleInput(make_arg(shape), args=(None, make_arg(()).item()))
 
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)

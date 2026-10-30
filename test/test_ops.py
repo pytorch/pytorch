@@ -142,6 +142,8 @@ aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
     xfail("bucketize"),
+    # scalar min/max overloads reject a mismatched out dtype on CPU, meta allows it
+    xfail("clamp"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
