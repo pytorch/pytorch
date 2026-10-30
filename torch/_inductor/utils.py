@@ -753,14 +753,16 @@ def do_bench_using_profiling(
     # But that's not trivial due to so many call sites in and out of pytorch.
 
     from torch._inductor.runtime.benchmarking import (
+        _triton_benchmarking_context,
         gpu_benchmark_lock,
         may_distort_benchmarking_result,
     )
 
     locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
-    return may_distort_benchmarking_result(locked_bench)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
+    with _triton_benchmarking_context()():
+        return may_distort_benchmarking_result(locked_bench)(
+            fn, warmup, rep, is_vetted_benchmarking
+        )
 
 
 def _get_do_bench_profile_result(
