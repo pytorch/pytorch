@@ -61,7 +61,14 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
+from .utils import (
+    _get_autocast_nesting,
+    _get_autocast_states,
+    _set_autocast_nesting,
+    KNOWN_TYPES,
+    simple_wraps,
+    strict_zip,
+)
 
 
 if TYPE_CHECKING:
@@ -202,6 +209,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
+        prior_autocast_nesting = _get_autocast_nesting()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -219,12 +227,12 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # ExcludeDispatchKeyGuard restores the excluded dispatch-key set on exit,
-        # which includes the keys tracking autocast enabled state (not dtype), so
-        # the comparison has to run before the guard restores those keys.
-        # Compare after disable_autocast_cache exits: that CM temporarily forces
-        # cache=False and restores the prior cache flag, so cache need not be in
-        # the snapshot. Autocast dtypes are independent TLS and are restored in
-        # finally on every exit.
+        # which includes the keys tracking autocast enabled state (not dtype or
+        # nesting), so the comparison has to run before the guard restores those
+        # keys. Compare after disable_autocast_cache exits: that CM temporarily
+        # forces cache=False and restores the prior cache flag, so cache need not
+        # be in the snapshot. Autocast dtypes and nesting are independent TLS and
+        # are restored in finally on every exit.
         with disable_above:
             try:
                 with mode, suppress_pending, disable_autocast_cache():
@@ -256,14 +264,17 @@ def run_functionalized_fw_and_collect_metadata(
 
                 if _get_autocast_states() != prior_autocast_states:
                     raise RuntimeError(
-                        "AOTAutograd does not support tracing graphs that mutate the autocast state. "
-                        "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
-                        "which will unwind all of their mutations to autocast state before the graph exits. "
-                        "If you encounter this error while using torch.compile, please file a bug."
+                        "AOTAutograd detected that the traced graph left the autocast state "
+                        "changed (enabled flag and/or dtype). This often means an unbalanced "
+                        "torch.autocast / _enter_autocast/_exit_autocast, or a graph break "
+                        "between enter and exit that splits the context across graphs. "
+                        "Keep autocast enter/exit in the same graph, or avoid mutating "
+                        "autocast state inside the compiled region."
                     )
             finally:
                 for device_type, (_, dtype) in prior_autocast_states.items():
                     torch.set_autocast_dtype(device_type, dtype)
+                _set_autocast_nesting(prior_autocast_nesting)
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version

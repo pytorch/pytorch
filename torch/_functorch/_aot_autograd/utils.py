@@ -114,6 +114,26 @@ def _get_autocast_states() -> dict[str, tuple[bool, torch.dtype]]:
     }
 
 
+def _get_autocast_nesting() -> int:
+    # No public getter; peek via increment/decrement (TLS, single-threaded).
+    nesting = torch.autocast_increment_nesting() - 1
+    torch.autocast_decrement_nesting()
+    return nesting
+
+
+def _set_autocast_nesting(target: int) -> None:
+    while True:
+        current = _get_autocast_nesting()
+        if current == target:
+            return
+        if current > target:
+            # Match autocast.__exit__: clear the cast cache when leaving nesting 0.
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+        else:
+            torch.autocast_increment_nesting()
+
+
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
     @simple_wraps(f)
     def g(args: list[Any]) -> Any:
