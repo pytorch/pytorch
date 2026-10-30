@@ -11112,7 +11112,6 @@ from user code:
             This ensures reproducible results across eager and compiled runs.
             """
             torch.manual_seed(seed)
-            torch.accelerator.random.manual_seed(seed)
             for name, param in module.named_parameters():
                 if param.requires_grad:
                     local_param = (
