@@ -64,9 +64,28 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
 class _MatrixInputLayout(NamedTuple):
     r"""Planned canonical shape, axis order, and output restoration metadata.
 
-    ``matrix_axes`` are in caller coordinates and ordered as the kernel's M/K
-    axes. ``input_permutation`` keeps interleaved batches in place for a TMA
-    view, but moves batches ahead of the matrix axes for a copy.
+    A view-compatible batched input keeps batch axes around the matrix axes in
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
+    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
+    axes ahead of ``(M, K)`` in physical stride order and folds them into
+    ``(B_product, M, 1, K)`` after materialization.
+
+    Attributes:
+        shape (tuple[int, ...]): Shape of the planned 2D or 4D TMA input.
+        dim (_SingleQuantDim): Ordered quantization axes in canonical kernel
+          coordinates, not in the caller's tensor.
+        matrix_axes (_SingleQuantDim): Ordered kernel M/K axes in caller
+          coordinates.
+        input_permutation (tuple[int, ...]): Caller axes ordered to keep
+          interleaved batches in a view, or move them ahead for a copy.
+        use_tma_view (bool): Whether the input admits a TMA view before pointer
+          alignment; otherwise the input must be materialized.
+        batch_shape (tuple[int, ...]): Sizes of the caller's batch axes in the
+          planner's physical batch-axis order.
+        inverse_permutation (tuple[int, ...]): Restores the caller's axis order
+          after unfolding the batch axes ahead of the matrix axes.
+        swap_dual_outputs (bool): Whether to swap the two result pairs to return
+          the caller's requested quantization pair first.
     """
 
     shape: tuple[int, ...]
@@ -77,25 +96,6 @@ class _MatrixInputLayout(NamedTuple):
     batch_shape: tuple[int, ...]
     inverse_permutation: tuple[int, ...]
     swap_dual_outputs: bool
-
-
-class _CanonicalMatrixInput(NamedTuple):
-    r"""TMA input and metadata for returning results in the caller's axis order.
-
-    A view-compatible batched input keeps batch axes around the matrix axes in
-    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
-    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
-    axes ahead of ``(M, K)`` in physical stride order and folds them into
-    ``(B_product, M, 1, K)`` after materialization.
-
-    Attributes:
-        input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
-        layout (_MatrixInputLayout): Metadata for restoring the input's logical
-          axis order after quantization.
-    """
-
-    input: torch.Tensor
-    layout: _MatrixInputLayout
 
 
 def _validate_blockscaled_tma_input(
@@ -325,7 +325,7 @@ def _plan_matrix_input(
 
 def _canonicalize_matrix_input(
     input: torch.Tensor, layout: _MatrixInputLayout
-) -> _CanonicalMatrixInput:
+) -> torch.Tensor:
     r"""Apply a planned TMA view or copy and align its input pointer."""
 
     matrix_input = (
@@ -342,11 +342,11 @@ def _canonicalize_matrix_input(
             matrix_input = matrix_input.view(layout.shape)
     if matrix_input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
         matrix_input = matrix_input.clone()
-    return _CanonicalMatrixInput(matrix_input, layout)
+    return matrix_input
 
 
 def _restore_matrix_output(
-    output: _BlockscaledTmaOutput, canonical: _CanonicalMatrixInput
+    output: _BlockscaledTmaOutput, layout: _MatrixInputLayout
 ) -> _BlockscaledTmaOutput:
     r"""Restore result axes after quantizing the canonical matrix input.
 
@@ -361,10 +361,9 @@ def _restore_matrix_output(
 
     Args:
         output (_BlockscaledTmaOutput): Results with folded batch dimensions.
-        canonical (_CanonicalMatrixInput): Input and layout metadata to restore.
+        layout (_MatrixInputLayout): Axis order and batch shape to restore.
     """
 
-    layout = canonical.layout
     if (
         len(layout.batch_shape) <= 1
         and layout.inverse_permutation == tuple(range(len(layout.inverse_permutation)))
@@ -600,15 +599,14 @@ def _blockscaled_tma_impl_on_current_device(
         is_scale_swizzled=is_scale_swizzled,
     )
     plan = _plan_blockscaled_tma_launch(input, layout, spec)
-    canonical = _canonicalize_matrix_input(input, layout)
-    input = canonical.input
+    input = _canonicalize_matrix_input(input, layout)
     launch = _prepare_blockscaled_tma_launch(input, spec, plan)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
     if launch.plan is None:
         return _restore_matrix_output(
-            _format_blockscaled_tma_output(spec, launch), canonical
+            _format_blockscaled_tma_output(spec, launch), layout
         )
 
     fn = _compile_blockscaled_tma(
@@ -648,9 +646,7 @@ def _blockscaled_tma_impl_on_current_device(
         launch.plan.grid_m,
         launch.plan.grid_k,
     )
-    return _restore_matrix_output(
-        _format_blockscaled_tma_output(spec, launch), canonical
-    )
+    return _restore_matrix_output(_format_blockscaled_tma_output(spec, launch), layout)
 
 
 def _run_blockscaled_tma(
