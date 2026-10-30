@@ -24,18 +24,15 @@ from . import cute_dsl_mlir_threading
 cute_dsl_elf_fix.patch()
 cute_dsl_mlir_threading.patch()
 
-# PyTorch-owned CuTeDSL sources are hashed into the disk-cache fingerprint with
-# this package. The fingerprint is memoized on first jit_cache use anywhere in
-# the process, so register these sources before any caller can compute it.
+# PyTorch-owned EpiOps (torch/_inductor/kernel/flex_gemm/quack_ops) are hashed
+# into the disk-cache fingerprint with this package. The fingerprint is memoized
+# on first jit_cache use anywhere in the process, so register here, before any
+# caller (RMSNorm, symmetric GEMM, FlexGEMM) can compute it.
 from pathlib import Path as _Path
 from .cache import EXTRA_SOURCE_DIRS as _EXTRA_SOURCE_DIRS
 
-_torch_src_dir = _Path(__file__).resolve().parents[2]
 _EXTRA_SOURCE_DIRS.append(
-    _torch_src_dir / "_inductor" / "kernel" / "flex_gemm" / "quack_ops"
-)
-_EXTRA_SOURCE_DIRS.append(
-    _torch_src_dir / "_native" / "ops" / "quantize_tensor" / "blockscaled_tma"
+    _Path(__file__).resolve().parents[2] / "_inductor" / "kernel" / "flex_gemm" / "quack_ops"
 )
 
 def __getattr__(name):
