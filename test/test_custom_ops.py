@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import collections
-import inspect
 import io
 import itertools
 import os
@@ -715,53 +714,6 @@ class TestCustomOp(CustomOpTestCaseBase):
         x = torch.ones(2)
         self.assertEqual(f(x), x + 1)
         self.assertEqual(calls, ["custom"])
-
-    @skipIfTorchDynamo("PyObject dispatch test is eager-only")
-    def test_pyobject_dispatch_records_profiler_events(self):
-        @torch.library.custom_op(
-            f"{self.test_ns}::pyobject_dispatch_profiled", mutates_args=()
-        )
-        def f(x: Tensor) -> Tensor:
-            return x.clone()
-
-        op = self.ns().pyobject_dispatch_profiled.default
-        self.assertTrue(op._is_pyobj_dispatcher_enabled())
-        with torch.profiler.profile() as prof:
-            f(torch.randn(3))
-        names = {e.name for e in prof.events()}
-        self.assertIn(f"{self.test_ns}::pyobject_dispatch_profiled", names)
-
-    def test_custom_op_call_has_fn_signature(self):
-        @torch.library.custom_op(f"{self.test_ns}::call_signature", mutates_args=())
-        def f(x: Tensor, y: Tensor, n: int = 2, *, scale: float = 1.0) -> Tensor:
-            return (x + y) * n * scale
-
-        @f.register_fake
-        def _(x, y, n=2, *, scale=1.0):
-            return torch.empty_like(x)
-
-        self.assertEqual(
-            list(inspect.signature(f).parameters), ["x", "y", "n", "scale"]
-        )
-        x, y = torch.randn(3), torch.randn(3)
-        self.assertEqual(f(x, y), (x + y) * 2)
-        self.assertEqual(f(x, y=y, n=3), (x + y) * 3)
-        self.assertEqual(f(y=y, x=x, scale=0.5), (x + y))
-        with self.assertRaisesRegex(
-            TypeError, "missing 1 required positional argument: 'y'"
-        ):
-            f(x)
-
-        # An explicit schema keeps the generic (*args, **kwargs) __call__.
-        @torch.library.custom_op(
-            f"{self.test_ns}::call_explicit_schema",
-            mutates_args=(),
-            schema="(Tensor x, int n) -> Tensor",
-        )
-        def g(*args):
-            return args[0] * args[1]
-
-        self.assertEqual(g(x, 3), x * 3)
 
     @skipIfTorchDynamo("PyObject dispatch test is eager-only")
     def test_pyobject_dispatch_custom_op_autograd(self):
@@ -5600,6 +5552,22 @@ Please use `add.register_fake` to add an fake impl.""",
         with f.set_kernel_enabled("cpu", enabled=False):
             self.assertEqual(f(x), x + 1)
 
+        # One function registered for several devices at once: each device
+        # must check whether its own kernel is enabled.
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x + 1
+
+        @g.register_kernel(("cpu", "cuda"))
+        def _(x):
+            return x + 2
+
+        self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cuda", enabled=False):
+            self.assertEqual(g(x), x + 2)
+        with g.set_kernel_enabled("cpu", enabled=False):
+            self.assertEqual(g(x), x + 1)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_overloading(self):
         called_f = 0
@@ -5652,6 +5620,18 @@ Please use `add.register_fake` to add an fake impl.""",
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             numpy_sin_inplace(x)
+
+    def test_triton_op_function_is_the_users(self):
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        op = torch.library.triton_op("_torch_testing::triton_module", mutates_args=())(
+            f
+        )
+        # Not torch._library.triton's wrapper, so precompile imports this module.
+        self.assertEqual(op._init_fn.__module__, __name__)
+        self.assertIs(op._init_fn.__wrapped__, f)
+        self.assertEqual(op._init_fn.__qualname__, f.__qualname__)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_factory_function(self):

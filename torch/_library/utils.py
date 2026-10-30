@@ -33,39 +33,6 @@ class RegistrationHandle:
         self._on_destroy()
 
 
-def signature_forwarding_code(
-    sig: inspect.Signature, prefix: str
-) -> tuple[str, str, dict[str, object]] | None:
-    """Source for generating a function that takes sig's parameters and passes
-    them on, avoiding the cost of forwarding ``*args, **kwargs``.
-
-    Returns ``(params, call_args, env)``: ``params`` declares sig's parameters,
-    with defaults bound to names in ``env``, and ``call_args`` passes them on,
-    positionally except for keyword-only ones. Generated code can use names
-    starting with ``prefix``. Returns None if sig has ``*args``, ``**kwargs``,
-    positional-only parameters, or a parameter named with ``prefix``.
-    """
-    params: list[str] = []
-    call_args: list[str] = []
-    env: dict[str, object] = {}
-    for p in sig.parameters.values():
-        if p.name.startswith(prefix) or p.kind not in (
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        ):
-            return None
-        kwarg_only = p.kind is inspect.Parameter.KEYWORD_ONLY
-        if kwarg_only and "*" not in params:
-            params.append("*")
-        if p.default is inspect.Parameter.empty:
-            params.append(p.name)
-        else:
-            env[f"{prefix}default_{p.name}"] = p.default
-            params.append(f"{p.name}={prefix}default_{p.name}")
-        call_args.append(f"{p.name}={p.name}" if kwarg_only else p.name)
-    return ", ".join(params), ", ".join(call_args), env
-
-
 def get_source(stacklevel: int) -> str:
     """Get a string that represents the caller.
 

@@ -1159,9 +1159,10 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
 template <bool skip_tensors_in_non_tensorlist>
 static bool visit(
     PyObject* o,
-    const std::function<bool(const at::Tensor&)>& visit_tensor) {
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
   if (THPVariable_Check(o)) {
-    if (visit_tensor(THPVariable_Unpack(o))) {
+    auto t = THPVariable_Unpack(o);
+    if (visit_tensor(t)) {
       return true;
     }
   } else if (PyList_Check(o)) {
@@ -1191,7 +1192,7 @@ template <bool skip_tensors_in_non_tensorlist>
 static void visit_tensors(
     PyObject* args,
     PyObject* kwargs,
-    const std::function<bool(const at::Tensor&)>& visit_tensor) {
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
   if (args && PyTuple_Check(args)) {
     for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
       if (visit<skip_tensors_in_non_tensorlist>(
@@ -1219,7 +1220,7 @@ static PyObject* any_requires_grad(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   bool has_requires_grad = false;
-  visit_tensors<true>(args, kwargs, [&has_requires_grad](const at::Tensor& t) {
+  visit_tensors<true>(args, kwargs, [&has_requires_grad](at::Tensor& t) {
     if (t.requires_grad()) {
       has_requires_grad = true;
       return true;
@@ -1249,7 +1250,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
   std::unordered_set<void*> s;
-  visit_tensors<false>(inps, inps_kwargs, [&s](const at::Tensor& t) {
+  visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
     if (!t.has_storage()) {
       return false;
     }
@@ -1260,7 +1261,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     return false;
   });
   bool ret = false;
-  visit_tensors<false>(outs, nullptr, [&s, &ret](const at::Tensor& t) {
+  visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
     if (!t.has_storage()) {
       return false;
     }
@@ -1702,7 +1703,7 @@ static PyObject* THPModule_increment_version(
     TORCH_CHECK(
         THPVariable_Check(item),
         "increment_version expects each element of the iterable to be a tensor");
-    const auto& t = THPVariable_Unpack(item);
+    auto t = THPVariable_Unpack(item);
     if (!t.is_inference()) {
       torch::autograd::increment_version(t);
     }
