@@ -259,7 +259,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     def define_user_defined_cutedsl_kernel(
         self,
         kernel: Any,
-        arg_names: tuple[str, ...],
         constant_args: dict[str, Any],
         runtime_args: dict[str, Any],
     ) -> str:

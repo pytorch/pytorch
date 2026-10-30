@@ -1538,31 +1538,46 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
+            from torch._library.cutedsl import is_cutedsl_jit_function
+
             from .cutedsl import CuteDSLKernelVariable
 
-            # Unlike wrap_triton this is not a no-op: the result carries the write set.
-            if (
-                len(args) == 1
-                and isinstance(args[0], CuteDSLKernelVariable)
-                # a @cute.jit function, not a wrapper, as in eager
-                and not args[0].is_wrapper
-                and set(kwargs) == {"mutates_args"}
-                and kwargs["mutates_args"].is_python_constant()
-            ):
-                return args[0].with_mutates_args(
-                    kwargs["mutates_args"].as_python_constant()
+            if len(args) != 1 or set(kwargs) != {"mutates_args"}:
+                unimplemented(
+                    gb_type="wrap_cutedsl: improper arguments",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="wrap_cutedsl takes the host function as its only "
+                    "positional argument and the keyword argument mutates_args.",
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
-
-            unimplemented(
-                gb_type="unsupported torch._library.cutedsl.wrap_cutedsl call",
-                context=f"args={args}, kwargs={kwargs}",
-                explanation="Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) "
-                "where host_fn is a @cute.jit function and mutates_args is a constant.",
-                hints=[
-                    "Pass a @cute.jit function and a constant mutates_args.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+            host_fn = args[0]
+            fn = host_fn.as_python_constant() if host_fn.is_python_constant() else None
+            if is_cutedsl_jit_function(fn):
+                # Read without a source (a staticmethod of an object made in the region,
+                # say), so VariableBuilder did not make it a CuteDSLKernelVariable.
+                host_fn = CuteDSLKernelVariable(fn, None, None)
+            if not isinstance(host_fn, CuteDSLKernelVariable) or host_fn.is_wrapper:
+                unimplemented(
+                    gb_type="wrap_cutedsl: host_fn is not a @cute.jit function",
+                    context=f"host_fn={host_fn}",
+                    explanation="wrap_cutedsl only works on host functions decorated "
+                    "with @cute.jit, not on a wrapper that wrap_cutedsl returned.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            mutates_args = kwargs["mutates_args"]
+            if not mutates_args.is_python_constant():
+                unimplemented(
+                    gb_type="wrap_cutedsl: non-constant mutates_args",
+                    context=f"mutates_args={mutates_args}",
+                    explanation="Dynamo supports wrap_cutedsl(host_fn, "
+                    "mutates_args=...) only where mutates_args is a constant.",
+                    hints=[
+                        "Pass mutates_args as a list or tuple of parameter names.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            # Unlike wrap_triton this is not a no-op: the result carries the write set.
+            return host_fn.with_mutates_args(mutates_args.as_python_constant())
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(
