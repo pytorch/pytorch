@@ -75,6 +75,15 @@ except ImportError as e:
     log.warning(e)
 
 try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxModelsAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxModelsAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
