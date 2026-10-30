@@ -108,6 +108,9 @@ def _use_provider(test, install):
 
 
 class TestCuDNNPythonSDPALifecycle(TestCase):
+    # Calls torch.nn.attention._cudnn directly: the torch.backends.cuda wrappers
+    # only forward to it and are covered by TestCuDNNPythonSDPA, and GENERIC
+    # classes may not call torch.backends.cuda.* (test linter: accelerator_api).
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -118,40 +121,40 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         # A None entry in sys.modules is how a missing package looks to import.
         _use_provider(self, None)
         with mock.patch.dict(sys.modules, {_PROVIDER: None}):
-            self.assertFalse(torch.backends.cuda.is_cudnn_sdp_python_available())
+            self.assertFalse(_cudnn.is_available())
             with self.assertRaises(ImportError):
-                torch.backends.cuda.enable_cudnn_sdp_python(True)
-        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
-        torch.backends.cuda.enable_cudnn_sdp_python(False)
+                _cudnn.enable()
+        self.assertFalse(_cudnn.is_enabled())
+        _cudnn.disable()
 
     def test_old_provider_names_the_required_version(self):
         _use_provider(self, None)
         with self.assertRaisesRegex(RuntimeError, "nvidia-cudnn-frontend>="):
-            torch.backends.cuda.enable_cudnn_sdp_python(True)
-        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+            _cudnn.enable()
+        self.assertFalse(_cudnn.is_enabled())
 
     def test_install_without_a_handle_is_rejected(self):
         _use_provider(self, lambda: None)
         with self.assertRaisesRegex(TypeError, "no remove"):
-            torch.backends.cuda.enable_cudnn_sdp_python(True)
-        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+            _cudnn.enable()
+        self.assertFalse(_cudnn.is_enabled())
 
     def test_enable_then_disable(self):
         _use_provider(self, _fake_install(self.live, "cudnn"))
-        torch.backends.cuda.enable_cudnn_sdp_python(True)
-        self.assertTrue(torch.backends.cuda.cudnn_sdp_python_enabled())
+        _cudnn.enable()
+        self.assertTrue(_cudnn.is_enabled())
         self.assertEqual(self.live, ["cudnn"])
-        torch.backends.cuda.enable_cudnn_sdp_python(False)
-        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+        _cudnn.disable()
+        self.assertFalse(_cudnn.is_enabled())
         self.assertEqual(self.live, [])
-        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        _cudnn.disable()
 
     def test_enable_is_idempotent(self):
         _use_provider(self, _fake_install(self.live, "cudnn"))
-        torch.backends.cuda.enable_cudnn_sdp_python(True)
-        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        _cudnn.enable()
+        _cudnn.enable()
         self.assertEqual(self.live, ["cudnn"])
-        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        _cudnn.disable()
         self.assertEqual(self.live, [])
 
     def test_independent_of_the_flash_attention_registry(self):
@@ -164,13 +167,13 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
             and attention.restore_flash_attention_impl()
         )
 
-        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        _cudnn.enable()
         attention.activate_flash_attention_impl("_TEST_FLASH")
-        self.assertTrue(torch.backends.cuda.cudnn_sdp_python_enabled())
+        self.assertTrue(_cudnn.is_enabled())
         self.assertEqual(sorted(self.live), ["cudnn", "flash"])
         attention.restore_flash_attention_impl()
         self.assertEqual(self.live, ["cudnn"])
-        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        _cudnn.disable()
         self.assertEqual(self.live, [])
 
     def test_env_var(self):
