@@ -41,6 +41,12 @@ struct TORCH_CUDA_CPP_API MemPool {
   bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
+  bool routes_pinned_ = false;
+
+ public:
+  // Lets threads route pinned allocations to a host pool with this pool's id
+  // (use_mem_pool(pool, pinned=True)). The host pool lives as long as this.
+  void enable_pinned();
 };
 
 // HostMemPool is a pool of pinned host memory in the CUDA host caching
