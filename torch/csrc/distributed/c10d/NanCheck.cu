@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <torch/library.h>
 #include <algorithm>
+#include <c10/util/irange.h>
 
 namespace c10d {
 namespace {
@@ -155,12 +156,12 @@ __device__ __forceinline__ void checkChunk(BytePack* ptr) {
   int nWorkers = blockDim.x * gridDim.x;
 // First load values from global memory into tmp buffer
 #pragma unroll 8
-  for (int j = 0; j < UNROLL; j++) {
+  for (const auto j : c10::irange(UNROLL)) {
     tmp[j] = ptr[nWorkers * j];
   }
 // Then check each BytePack in the tmp buffer
 #pragma unroll 8
-  for (int j = 0; j < UNROLL; j++) {
+  for (const auto j : c10::irange(UNROLL)) {
     CheckBytePack<T, sizeof(BytePack) / sizeof(T)>::check(tmp + j);
   }
   // Note: we separate the check from the load for efficient loading
@@ -235,6 +236,8 @@ void check_for_nan_cuda(const at::Tensor& tensor) {
       maxNumBlocks,
       (tensor.numel() + numThreadsPerBlock - 1) / numThreadsPerBlock);
 
+  // Callers such as NanCheckHook may run on another current device.
+  c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream(tensor.device().index());
 
   AT_DISPATCH_FLOATING_TYPES_AND4(

@@ -13,4 +13,4 @@
   * - ``TORCH_LOGS``
     -  For a more in depth explanation of this environment variable, see {doc}`/logging`.
   * - ``TORCH_DIST_NAN_CHECK``
-    - If set to ``1``, checks the input (send) buffers of every ``torch.distributed`` collective for NaNs, for any backend. Unlike ``TORCH_NCCL_NAN_CHECK``, which is implemented natively by the NCCL backend, this is driven by the backend-agnostic ``ProcessGroup`` collective hooks.
+    - If set to ``1``, checks the input (send) buffers of every ``torch.distributed`` collective for NaNs, for any backend. It is driven by the backend-agnostic ``ProcessGroup`` collective hooks, which also implement ``TORCH_NCCL_NAN_CHECK`` for the ``nccl`` (nccl2) and ``nccl-lazy`` backends.

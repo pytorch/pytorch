@@ -7,6 +7,10 @@
 #include <optional>
 #endif
 
+// Full threadgroups per core before the gather backward folds the remaining
+// (n, c) planes into per-thread loops; measured knee on M-series GPUs.
+C10_METAL_CONSTEXPR uint32_t GATHER_BACKWARD_TGS_PER_CORE = 16;
+
 template <unsigned N = 5>
 struct UpsampleParams {
   ::c10::metal::array<int64_t, N> input_strides;
