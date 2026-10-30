@@ -142,8 +142,24 @@ measure TP scaling.
 Both phases support `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
 `Qwen/Qwen3.5-0.8B`.
 
-Launch it with torchrun, one worker per GPU. `--only` is required and
-`WORLD_SIZE` must equal `N` on one node:
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --nopython --disable-cudagraphs --hf-inference-mode=decode \
+  --tp-size=2 --prompt-length=1000 --decode-length=128 --batch-size=1 \
+  --only=Qwen/Qwen3-0.6B
+```
+
+Without torchrun, the script launches one `torchrun --standalone
+--nproc-per-node=N` worker group for each selected model (`--only`, or every
+supported model that passes `--filter`). A failed group gets a failure row if
+it did not already write a result; performance failures have zero metrics.
+The driver continues through the remaining models, then exits unsuccessfully
+if any group crashed, timed out, or produced missing or invalid results.
+Completed accuracy results are evaluated by `check_accuracy.py` against the
+expected CSV, so known accuracy failures can be recorded in the baseline.
+Performance results require positive speedup and latency values.
+It can also run as a torchrun worker directly, which
+requires `--only` and `WORLD_SIZE == N` on one node:
 
 ```
 torchrun --nproc-per-node=2 benchmarks/dynamo/huggingface.py --performance \
