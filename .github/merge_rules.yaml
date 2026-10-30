@@ -542,6 +542,7 @@
   approved_by:
   - jeffdaily
   - jithunnair-amd
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
