@@ -1149,12 +1149,28 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 # Legacy device-specific autocast entry points (e.g. torch.cuda.amp.autocast)
 # that omit device_type from their signature, mapped to their device_type.
 # Third-party backends (e.g. PrivateUse1 devices) extend this through
-# torch._dynamo.variables.torch.register_device_autocast_entry at import time.
+# torch.utils.register_device_autocast_entry at import time.
 _autocast_entries: dict[Any, str | None] = {
     torch.amp.autocast_mode.autocast: None,
     torch.cuda.amp.autocast: "cuda",
     torch.cpu.amp.autocast: "cpu",
 }
+
+
+def _autocast_signature(func: Any) -> inspect.Signature:
+    """Signature AutocastModeVariable binds against when tracing func.
+
+    Registration validates and tracing binds the ``__init__`` signature rather
+    than ``inspect.signature(func)``: on Python < 3.13 a class decorated with
+    ``typing_extensions.deprecated`` is reported as ``(*args, **kwargs)``
+    (torch/cuda/amp/autocast_mode.py works around this with an explicit
+    ``__new__``), so a backend that mirrors only the deprecated alias would
+    otherwise fail registration and trace.
+    """
+    signature = inspect.signature(func.__init__)
+    return signature.replace(
+        parameters=[p for p in signature.parameters.values() if p.name != "self"]
+    )
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -1170,7 +1186,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        bound_args = inspect.signature(func).bind(*args, **kwargs)
+        bound_args = _autocast_signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
         kwargs.clear()
