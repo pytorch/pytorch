@@ -17,17 +17,19 @@ using namespace torch::cuda::nccl::detail;
 
 static constexpr const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
-PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version(PyObject* /*self*/, PyObject* /*args*/) {
   return PyLong_FromUnsignedLongLong(version());
 }
 
-PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version_suffix(
+    PyObject* /*self*/,
+    PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   return PyBytes_FromString(version_suffix());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_unique_id(PyObject* /*self*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
   get_unique_id(id);
@@ -90,7 +92,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   return comms;
 }
 
-PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_init_rank(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   int nranks = 0;
   const char* id = nullptr;
@@ -120,7 +122,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -153,7 +155,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -186,7 +188,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_broadcast(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_streams = nullptr, *_comms = nullptr;
   int root = 0;
@@ -217,7 +219,7 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_gather(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -249,7 +251,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce_scatter(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;

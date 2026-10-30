@@ -157,12 +157,17 @@ void dump_fr_trace_file(
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
-  // Serialize writes so concurrent dumps cannot interleave into the same
-  // file, but take the trace before locking: dump() can block on device APIs
-  // and must not hold up an unrelated caller.
+  // Take the trace before locking: dump() can block on device APIs and must
+  // not hold up an unrelated caller.
+  write_fr_trace_file(
+      rank,
+      dump_fr_trace(
+          includeCollectives, includeStackTraces, onlyActive, backend));
+}
+
+void write_fr_trace_file(int rank, const std::string& trace) {
+  // Serialize writes so concurrent dumps cannot interleave into the same file.
   static std::mutex writeDebugInfoMutex;
-  auto trace = dump_fr_trace(
-      includeCollectives, includeStackTraces, onlyActive, backend);
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
   LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();
