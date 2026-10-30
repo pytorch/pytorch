@@ -159,9 +159,13 @@ def _test_addmm_addmv(
             return mat
 
     if mode == "all_sparse":
-        res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        t_sparse, m_sparse, v_sparse = map(convert_layout, (t, m, v))
+        res1 = f(t_sparse, m_sparse, v_sparse, alpha=alpha, beta=beta)
         test_case.assertEqual(res1.layout, layout)
         res1 = res1.to_dense()
+        # in-place
+        res_inplace = getattr(t_sparse.clone(), f.__name__ + "_")(m_sparse, v_sparse, alpha=alpha, beta=beta)
+        test_case.assertEqual(res_inplace.to_dense(), res1)
     elif mode == "dense_result":
         res1 = f(t, convert_layout(m), convert_layout(v), alpha=alpha, beta=beta)
     else:
@@ -2092,19 +2096,8 @@ class TestSparseCSR(TestCase):
         m2 = torch.randn(50, 25, device=device).to(dtype)
         _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
 
-        # Preexisting issue: a CSC result whose number of specified elements (nnz) changes is broken,
-        # independently of beta. addmm_out_sparse_csr (CUDA and MKL) writes a CSC result through
-        # result.transpose(-2, -1), whose index and value tensors are aliases of the result's:
-        # they share storage, but not sizes. These ops change nnz on the view only:
-        #   CUDA spgemm: indices_to_32_bit_inplace and col_indices_and_values_resize_ (beta == 0),
-        #     C.resize_as_sparse_(res) (beta != 0);
-        #   MKL add_out_sparse_csr, via result.add_ in addmm_sparse_result: indices_to_mkl_compatible_inplace,
-        #     col_indices_and_values_resize_ (in mkl_result_copy_) and set_member_tensors.
-        # So the result keeps its old nnz and gets wrong values. Where the new compressed indices are
-        # also copied into it in place (copy_ after resize_as_sparse_, the crow backup in MKL), it is
-        # invalid as well: on CPU, to_dense segfaults.
-        # TODO: enable for CSC once this is fixed.
-        if layout == torch.sparse_csr:
+        # TODO: enable on CPU once CSC results whose number of specified elements changes are fixed there
+        if self.device_type == 'cuda':
             # Test beta != 0 and sp(C) != sp(A @ B), where sp denotes a sparse pattern
             # Here, m1 is lower-triangular, while m1 @ m2 is not
             m1 = torch.randn(10, 10, device=device).to(dtype).tril()
