@@ -71,10 +71,10 @@ static void softmax_mps_impl(const std::string& kernel,
                              int64_t dim,
                              const Tensor& out,
                              const std::optional<Tensor>& aux = std::nullopt) {
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
   if (self.numel() == 0) {
     return;
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(self), kernel, " not implemented on MPS for ", self.scalar_type());
 
   const auto self_ = self.dim() == 0 ? self.view(1) : self;
   const auto wrapped_dim = maybe_wrap_dim(dim, self_.dim());
