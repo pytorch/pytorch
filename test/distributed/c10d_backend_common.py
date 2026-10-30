@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import os
 import unittest
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import Backend as C10dBackend
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_CUDA
 
@@ -50,13 +52,87 @@ class BackendConfig:
     supports_work_result: bool = False
     supports_gather_single: bool = False
     supports_uneven_all_gather: bool = False
-    # reduce_scatter reduces logical values for channels_last tensors, even when
-    # ranks use different memory formats.
-    supports_channels_last_reduce_scatter: bool = False
+    # Uneven all_gather with an output on another rank's device.
+    supports_uneven_all_gather_mixed_devices: bool = False
+    # Test methods that fail deterministically on this backend. They pass while
+    # the failure persists and fail once the backend is fixed. Every rank must
+    # fail with an AssertionError, or the other ranks hang or error. Names are
+    # "<base class>.<test>".
+    expected_failures: tuple[str, ...] = ()
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
     complex_dtypes: tuple[torch.dtype, ...] = COMPLEX_DTYPES
+
+
+class PythonGlooBackend(C10dBackend):
+    """Python Backend that forwards to gloo to exercise the PyBackend trampoline."""
+
+    def __init__(self, gloo):
+        super().__init__(gloo.rank(), gloo.size())
+        self._gloo = gloo
+
+    @classmethod
+    def create(cls, store, rank, world_size, timeout):
+        return cls(dist.ProcessGroupGloo(store, rank, world_size, timeout))
+
+    def getBackendName(self):
+        return "python-gloo"
+
+    @property
+    def options(self):
+        return self._gloo.options
+
+    @property
+    def supports_splitting(self):
+        return self._gloo.supports_splitting
+
+    def split(self, store, ranks, opts):
+        child = self._gloo.split(store, ranks, opts)
+        return None if child is None else PythonGlooBackend(child)
+
+
+def _forward_to_gloo(name):
+    def method(self, *args, **kwargs):
+        return getattr(self._gloo, name)(*args, **kwargs)
+
+    method.__name__ = name
+    return method
+
+
+# Collectives, p2p and sequence numbers; other trampoline lookups use Backend defaults.
+for _name in (
+    "broadcast",
+    "allreduce",
+    "allreduce_sparse",
+    "allreduce_coalesced",
+    "reduce",
+    "allgather",
+    "all_gather_single",
+    "allgather_coalesced",
+    "all_gather_single_coalesced",
+    "gather",
+    "gather_single",
+    "scatter",
+    "reduce_scatter",
+    "reduce_scatter_single",
+    "reduce_scatter_single_coalesced",
+    "all_to_all_single",
+    "alltoall",
+    "send",
+    "recv",
+    "recv_anysource",
+    "barrier",
+    "monitored_barrier",
+    "_get_sequence_number_for_group",
+    "_set_sequence_number_for_group",
+):
+    setattr(PythonGlooBackend, _name, _forward_to_gloo(_name))
+
+if dist.is_gloo_available():
+    dist.Backend.register_backend(
+        "python-gloo", PythonGlooBackend.create, devices=["cpu"]
+    )
 
 
 C10D_BACKENDS = (
@@ -65,6 +141,19 @@ C10D_BACKENDS = (
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        # Reduces raw memory, so mixed memory formats reduce the wrong values.
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
+    ),
+    BackendConfig(
+        "python-gloo",
+        "cpu",
+        supports_bitwise_reductions=True,
+        supports_work_sequence_number=True,
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
     ),
     BackendConfig(
         "nccl-legacy",
@@ -78,6 +167,12 @@ C10D_BACKENDS = (
         supports_uneven_all_gather=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
+        # Reduces into a contiguous copy of a channels_last output and never
+        # copies it back.
+        expected_failures=(
+            "AbstractCollectivesTest.test_reduce_scatter_channels_last",
+            "AbstractCollectivesTest.test_reduce_scatter_mixed_memory_formats",
+        ),
     ),
     BackendConfig(
         "nccl2",
@@ -90,7 +185,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
-        supports_channels_last_reduce_scatter=True,
+        supports_uneven_all_gather_mixed_devices=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -112,7 +207,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
-        supports_channels_last_reduce_scatter=True,
+        supports_uneven_all_gather_mixed_devices=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -204,6 +299,37 @@ class C10dBackendTestContinuous:
         super()._run_test_given_id(test_id, **kwargs)
 
 
+def _expect_failure(fn):
+    # Expects an AssertionError on every rank. unittest.expectedFailure would
+    # act in the main process, which would also mask rank crashes and timeouts,
+    # and MultiProcContinuousTest skips the rest of the class after a rank fails.
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            fn(self, *args, **kwargs)
+        except AssertionError:
+            return
+        raise AssertionError(
+            f"{fn.__name__} passed on {self.backend_name}; remove it from "
+            "expected_failures"
+        )
+
+    return wrapper
+
+
+def _expected_failures(backend, base_class):
+    prefix = f"{base_class.__name__}."
+    names = [
+        name.removeprefix(prefix)
+        for name in backend.expected_failures
+        if name.startswith(prefix)
+    ]
+    for name in names:
+        if not hasattr(base_class, name):
+            raise AssertionError(f"{backend.name}: unknown expected failure {name}")
+    return names
+
+
 def instantiate_backend_tests(
     namespace, suite_name, base_class, backends, *, harness=MultiProcessTestCase
 ):
@@ -227,13 +353,17 @@ def instantiate_backend_tests(
                 "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
-                "supports_channels_last_reduce_scatter": (
-                    backend.supports_channels_last_reduce_scatter
+                "supports_uneven_all_gather_mixed_devices": (
+                    backend.supports_uneven_all_gather_mixed_devices
                 ),
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
                 "complex_dtypes": backend.complex_dtypes,
+                **{
+                    name: _expect_failure(getattr(base_class, name))
+                    for name in _expected_failures(backend, base_class)
+                },
             },
         )
         test_class = unittest.skipIf(

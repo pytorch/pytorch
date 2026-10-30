@@ -21,6 +21,9 @@ bool scaled_mm_arch_allowed(bool /*sm90_only*/, bool /*sm100_only*/) {
 #if ROCM_VERSION >= 71400
       "gfx1250",
 #endif
+#if ROCM_VERSION >= 100300
+      "gfx1170", "gfx1171",
+#endif
   };
   return at::detail::getCUDAHooks().isGPUArch(archs);
 }
