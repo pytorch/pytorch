@@ -38,8 +38,9 @@ bool isAsyncKernel(const rocprofAsyncRow& async) {
 } // namespace
 
 RocprofActivityApi& RocprofActivityApi::singleton() {
-  static RocprofActivityApi instance;
-  return instance;
+  // Intentionally leaky singleton
+  static auto* instance = new RocprofActivityApi{};
+  return *instance;
 }
 
 RocprofActivityApi::RocprofActivityApi() : d(&RocprofLogger::singleton()) {}
