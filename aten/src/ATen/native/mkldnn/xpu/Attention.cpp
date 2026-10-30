@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
@@ -57,29 +58,27 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   return true;
 }
 
-bool input_require_grad(
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value,
-    const std::optional<at::Tensor>& attn_mask) {
-  return at::GradMode::is_enabled() &&
-      (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
-       (attn_mask.has_value() && attn_mask.value().requires_grad()));
-}
-
-bool check_grad(sdp::sdp_params const& params, bool debug) {
-  if (!input_require_grad(
-          params.query, params.key, params.value, params.attn_mask))
+bool check_mask_grad(sdp::sdp_params const& params, bool debug) {
+  if (!params.attn_mask.has_value()) {
     return true;
+  }
 
-  bool attn_mask_needs_grad =
-      params.attn_mask.has_value() && params.attn_mask.value().requires_grad();
-  if (debug && attn_mask_needs_grad) {
+  const at::Tensor* attn_mask = &params.attn_mask.value();
+  // Captured masks can have grad wrappers with separate autograd metadata.
+  while (!attn_mask->requires_grad()) {
+    const auto* wrapper = at::functorch::maybeGetTensorWrapper(*attn_mask);
+    if (wrapper == nullptr) {
+      return true;
+    }
+    attn_mask = &wrapper->value();
+  }
+
+  if (debug) {
     TORCH_WARN(
         "scaled_dot_product_attention on xpu is not supported when attn_mask.requires_grad() == True.");
   }
 
-  return !attn_mask_needs_grad;
+  return false;
 }
 
 bool check_deterministic(const sdp::sdp_params& params, bool debug) {
@@ -112,7 +111,7 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
            sdp::check_last_dim_stride_equals_1_dense<
                false /*ignore_singleton_dim*/>,
            check_head_dim_size_xpu,
-           check_grad,
+           check_mask_grad,
            check_deterministic});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
