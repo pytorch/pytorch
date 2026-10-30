@@ -459,6 +459,156 @@ partial_fn = functools.partial(fn, scale=2)
         compiled_fn = torch.compile(module.partial_fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled_fn(x), module.partial_fn(x))
 
+    def test_functools_partial_nested_flattened(self):
+        # functools.partial(partial(f, *a, **k), ...) is flattened into a
+        # single partial of f, as in CPython's partial_new.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "asdf"), bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(
+            opt_fn(1),
+            (True, ("asdf",), {"bar": True}, (("asdf", 1), {"bar": True})),
+        )
+
+    def test_functools_partial_nested_global_flattened(self):
+        def fn(x):
+            p = functools.partial(global_partial_capture_args, bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertTrue(opt_fn(1)[0])
+        # Guarding must not create the inner partial's __dict__, which would
+        # stop eager from flattening it.
+        self.assertIsNone(global_partial_capture_args.__reduce__()[2][3])
+
+    def test_functools_partial_nested_with_attribute_not_flattened(self):
+        # A partial with an instance __dict__ is wrapped, not flattened.
+        def fn(inner, x):
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p.args, p.keywords, p(x.sin())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "asdf")
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertFalse(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 1)
+
+        inner.attr = "spam"
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_functools_partial_nested_with_attribute_then_without(self):
+        # The flatten decision is guarded both ways: code compiled for an inner
+        # partial with an instance dict is not reused for one without.
+        def fn(inner, x):
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p.args, p.keywords, p(x.sin())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "asdf")
+        inner.attr = "spam"
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 1)
+
+        fresh = functools.partial(capture_args, "asdf")
+        self.assertEqual(opt_fn(fresh, x), fn(fresh, x))
+        self.assertFalse(opt_fn(fresh, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
+        other = functools.partial(capture_args, "asdf")
+        other.attr = "eggs"
+        self.assertEqual(opt_fn(other, x), fn(other, x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_functools_partial_nested_subclass_flattened(self):
+        # CPython also flattens a partial subclass instance without an instance
+        # dict; before 3.13 only if the subclass keeps partial's __call__.
+        class PartialSubclass(functools.partial):
+            pass
+
+        class PartialSubclassWithCall(functools.partial):
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs)
+
+        def fn(inner, x):
+            p = functools.partial(inner, "b")
+            return p.func is capture_args, p.args, x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        for cls in (PartialSubclass, PartialSubclassWithCall):
+            inner = cls(capture_args, "a")
+            self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(PartialSubclass(capture_args, "a"), x)[0])
+
+    @unittest.skipIf(sys.version_info < (3, 14), "functools.Placeholder is 3.14+")
+    def test_functools_partial_nested_placeholder_not_flattened(self):
+        # CPython fills the inner partial's Placeholder slots with the outer
+        # args. Dynamo does not model Placeholder, so the inner partial is left
+        # wrapped instead of being merged into (Placeholder, 1, 2).
+        def fn(inner, x):
+            p = functools.partial(inner, 2)
+            return p.func is inner, p.args, x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        inner = functools.partial(capture_args, functools.Placeholder, 1)
+        res = opt_fn(inner, torch.randn(3))
+        self.assertTrue(res[0])
+        self.assertEqual(res[1], (2,))
+
+    def test_functools_partial_nested_merge_order(self):
+        # Inner args come before outer args; outer keywords override inner ones.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "a"), "b")
+            q = functools.partial(functools.partial(capture_args, k=1), k=2)
+            return p.args, q.keywords, p(x), q(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(opt_fn(1)[:2], (("a", "b"), {"k": 2}))
+
+    def test_functools_partial_nested_flattened_returned(self):
+        # Reconstructing a flattened partial gives the same object shape as eager.
+        def fn(x):
+            return functools.partial(
+                functools.partial(capture_args, "a", k=1), "b", k=2
+            ), x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        ref, _ = fn(x)
+        res, _ = opt_fn(x)
+        self.assertIs(ref.func, capture_args)
+        self.assertIs(res.func, capture_args)
+        self.assertEqual(res.args, ref.args)
+        self.assertEqual(res.keywords, ref.keywords)
+        self.assertEqual(res(1), ref(1))
+
+    def test_functools_partial_traced_setattr_graph_breaks(self):
+        # Flattening partials created while tracing relies on setattr on them
+        # graph breaking, so their instance dict is never set.
+        def fn(x):
+            inner = functools.partial(capture_args, "a")
+            inner.attr = "spam"
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p(x.sin())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported, r"setattr\(\) is not supported on type partial"
+        ):
+            opt_fn(torch.randn(3))
+
     @make_test
     def test_itertools_product(a, b):
         v = a
@@ -7490,6 +7640,13 @@ def udf_mul2(x, y, z):
 
 def udf_add(x, y):
     return x + y
+
+
+def capture_args(*args, **kwargs):
+    return args, kwargs
+
+
+global_partial_capture_args = functools.partial(capture_args, "asdf")
 
 
 class SmallNN(torch.nn.Module):
