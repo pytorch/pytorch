@@ -2698,6 +2698,45 @@
       "Hints": []
     }
   ],
+  "GB3719": [
+    {
+      "Gb_type": "wrap_cutedsl: improper arguments",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "wrap_cutedsl takes the host function as its only positional argument and the keyword argument mutates_args.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB6625": [
+    {
+      "Gb_type": "wrap_cutedsl: host_fn is not a @cute.jit function",
+      "Context": "host_fn={host_fn}",
+      "Explanation": "wrap_cutedsl only works on host functions decorated with @cute.jit, not on a wrapper that wrap_cutedsl returned.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3795": [
+    {
+      "Gb_type": "wrap_cutedsl: non-constant mutates_args",
+      "Context": "mutates_args={mutates_args}",
+      "Explanation": "Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) only where mutates_args is a constant.",
+      "Hints": [
+        "Pass mutates_args as a list or tuple of parameter names.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9356": [
+    {
+      "Gb_type": "CuTeDSL kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Encountered CuTeDSL kernel unsupported feature: {msg}",
+      "Hints": []
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",

@@ -2,21 +2,29 @@
 """Tests for user-defined CuTeDSL kernels (``@cute.jit`` host functions) in PT2.
 
 Mirrors test/inductor/test_triton_kernels.py (the reference suite for user-defined
-Triton kernels): direct HOP use, the eager launch and wrap_cutedsl tracing (make_fx,
-non-strict export).
+Triton kernels): direct HOP use, the eager launch, wrap_cutedsl tracing (make_fx,
+non-strict export) and Dynamo.
 """
 
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
 import inspect
 import logging
 import re
+import types
 import unittest
 from unittest import mock
 
 import torch
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+)
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_functional,
@@ -33,6 +41,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 HAS_CUDA = torch.cuda.is_available() and torch.version.hip is None
@@ -44,6 +53,7 @@ try:
     import cuda.bindings.driver as cuda
     import cutlass
     import cutlass.cute as cute
+    import cutlass.torch as cutlass_torch
     from cutlass.cute.runtime import from_dlpack
 
     HAS_CUTLASS = True
@@ -305,10 +315,27 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
+    # A Constexpr config object read on the host: out = x * cfg.alpha.
+    @cute.jit
+    def cfg_scale_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        cfg: cutlass.Constexpr,
+        stream: cuda.CUstream,
+    ):
+        _mul_const_k(mX, mOut, n, cfg.alpha).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
 
 DEVICE = "cuda"
 
 if HAS_CUTEDSL:
+    # Module-level (global) wrappers: Dynamo must handle a global
+    # TraceableCuteDSLKernelWrapper, and they are reused across tests, between which
+    # torch._dynamo.reset() runs (it resets the Triton kernel side table; the CuTeDSL
+    # records these wrappers hold must keep resolving).
     add_w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
     scale_inplace_w = wrap_cutedsl(scale_inplace_kernel, mutates_args=["mX"])
     add_one_2d_w = wrap_cutedsl(add_one_2d_kernel, mutates_args=["mOut"])
@@ -357,6 +384,48 @@ if HAS_CUTEDSL:
 
     same_name_add_w = wrap_cutedsl(same_name_add_kernel, mutates_args=["mOut"])
     same_name_sub_w = wrap_cutedsl(same_name_sub_kernel, mutates_args=["mOut"])
+
+
+if HAS_CUTEDSL:
+    # The toy: out = relu(x + y), the add launched as in eager CuTeDSL code (cute
+    # tensors from from_dlpack, the current stream) with no wrap_cutedsl. Dynamo
+    # captures the raw call (torch.compile, strict export); make_fx cannot see it.
+    @cute.kernel
+    def toy_add_device(
+        gX: cute.Tensor, gY: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 1024 + tidx
+        if i < n:
+            gOut[i] = gX[i] + gY[i]
+
+    @cute.jit
+    def toy_add_kernel(
+        mX: cute.Tensor,
+        mY: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        toy_add_device(mX, mY, mOut, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    def toy_launch_add(x, y, out):
+        n = out.numel()
+        toy_add_kernel(
+            from_dlpack(x),
+            from_dlpack(y),
+            from_dlpack(out),
+            n,
+            cutlass_torch.current_stream(),
+        )
+
+    def toy(x, y):
+        out = torch.empty_like(x)
+        toy_launch_add(x, y, out)
+        return out.relu()
 
 
 def _rand(*shape, dtype=torch.float32, requires_grad=False):
@@ -2146,8 +2215,1477 @@ def forward(self, x_1, y_1):
         self.assertRegex(str(error), r"nodes \(cutedsl user kernels\) is not supported")
 
 
+# Written through a global in
+# CuteDSLDynamoTests.test_object_constant_modified_through_another_path_graph_breaks.
+global_inner = types.SimpleNamespace(alpha=3.0)
+
+
+@requires_cutedsl
+class CuteDSLDynamoTests(TestCase):
+    """torch.compile front end: the wrapper (global or created inline) becomes one
+    HOP node, and so does a raw @cute.jit call written as for eager (from_dlpack,
+    cutlass.torch.current_stream()); recompiles follow the arg classes and the
+    contents of object constants."""
+
+    def test_bad_wrap_cutedsl_calls_graph_break(self):
+        # A call that eager refuses too (of a wrapper or a @cute.kernel function, which
+        # are not @cute.jit functions, or with missing or extra arguments) graph-breaks
+        # as a user error, and the eager call then raises; a non-constant
+        # mutates_args, which eager takes, is the one call Dynamo could support.
+        from torch._dynamo import graph_break_hints
+
+        user_error = graph_break_hints.USER_ERROR[0]
+        supportable = graph_break_hints.SUPPORTABLE[0]
+
+        def f(x, y, args, kwargs):
+            out = torch.empty_like(x)
+            wrap_cutedsl(*args, **kwargs)(x, y, out, x.numel())
+            return out
+
+        def generator(x, y):
+            out = torch.empty_like(x)
+            names = (name for name in ["mOut"])
+            wrap_cutedsl(add_kernel, mutates_args=names)(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        not_jit = "wrap_cutedsl: host_fn is not a @cute.jit function"
+        improper = "wrap_cutedsl: improper arguments"
+        non_constant = "wrap_cutedsl: non-constant mutates_args"
+        for args, kwargs, error, gb_type in (
+            ((add_w,), {"mutates_args": ["mOut"]}, RuntimeError, not_jit),
+            ((_add_k,), {"mutates_args": ["gOut"]}, RuntimeError, not_jit),
+            ((add_kernel,), {}, TypeError, improper),
+            ((add_kernel, ["mOut"]), {}, TypeError, improper),
+            ((add_kernel,), {"mutates_args": ["mOut"], "x": 1}, TypeError, improper),
+        ):
+            with self.subTest(args=args, kwargs=kwargs):
+                torch._dynamo.reset()
+                with self.assertRaises(error):
+                    f(x, y, args, kwargs)
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    cf = torch.compile(f, backend="eager", fullgraph=True)
+                    cf(x, y, args, kwargs)
+                self.assertEqual(cm.exception.gb_type, gb_type)
+                self.assertIn(user_error, str(cm.exception))
+                self.assertNotIn(supportable, str(cm.exception))
+                with self.assertRaises(error) as cm:
+                    torch.compile(f, backend="eager")(x, y, args, kwargs)
+                self.assertNotIsInstance(
+                    cm.exception, torch._dynamo.exc.TorchDynamoException
+                )
+        self.assertEqual(generator(x, y), x + y)
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.compile(generator, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(cm.exception.gb_type, non_constant)
+        self.assertIn(supportable, str(cm.exception))
+        self.assertNotIn(user_error, str(cm.exception))
+        self.assertEqual(torch.compile(generator, backend="eager")(x, y), x + y)
+
+    def test_inline_wrap_cutedsl_bad_mutates_args(self):
+        # Validated as in eager, None included (it does not stand for the write set
+        # of a raw call): under fullgraph the call graph-breaks with eager's reason,
+        # otherwise the eager wrap_cutedsl raises it.
+        def f(x, y, mutates_args):
+            out = torch.empty_like(x)
+            wrap_cutedsl(add_kernel, mutates_args=mutates_args)(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(16), _rand(16)
+        for bad, pattern in (
+            (None, "mutates_args must be a sequence"),
+            ("mOut", "mutates_args must be a sequence"),
+            (["not_a_param"], "not_a_param"),
+            (["n"], "'n'"),
+        ):
+            with self.subTest(mutates_args=bad):
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, pattern):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, y, bad)
+                with self.assertRaisesRegex(RuntimeError, pattern) as cm:
+                    torch.compile(f, backend="eager")(x, y, bad)
+                self.assertNotIsInstance(
+                    cm.exception, torch._dynamo.exc.TorchDynamoException
+                )
+
+    def test_inline_wrapper_live_across_graph_break(self):
+        # A wrapper made in the frame is rebuilt at the graph break, so both parts
+        # compile instead of the frame falling back to eager.
+        def f(x, y):
+            w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+            out = torch.zeros_like(x)
+            torch._dynamo.graph_break()
+            w(x, y, out, x.numel())
+            return out
+
+        cnt = CompileCounter()
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, backend=cnt)(x, y), x + y)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_wrapper_type_inside_compile(self):
+        # A wrapper has its own type in the region: TraceableCuteDSLKernelWrapper, or
+        # the subclass passed in. A subclass that overrides __call__ is not taken for
+        # a wrapper, so its override runs.
+        from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            TraceableCuteDSLKernelWrapper,
+        )
+
+        class SubWrapper(TraceableCuteDSLKernelWrapper):
+            pass
+
+        class Doubling(TraceableCuteDSLKernelWrapper):
+            def __call__(self, x, y, out, n):
+                super().__call__(x, y, out, n)
+                out.mul_(2)
+
+        def f(x):
+            return x + int(isinstance(add_w, TraceableCuteDSLKernelWrapper))
+
+        def g(x, w):
+            return x + int(isinstance(w, SubWrapper) and type(w) is SubWrapper)
+
+        def launch(w, x, y):
+            out = torch.empty_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), x + 1)
+        cg = torch.compile(g, backend="eager", fullgraph=True)
+        self.assertEqual(cg(x, SubWrapper(add_kernel, ["mOut"])), x + 1)
+        doubling = Doubling(add_kernel, ["mOut"])
+        self.assertEqual(launch(doubling, x, y), 2 * (x + y))
+        cl = torch.compile(launch, backend="aot_eager")
+        self.assertEqual(cl(doubling, x, y), 2 * (x + y))
+
+    def test_object_constants_fullgraph(self):
+        # Constants that are not Python constants are passed through the side table:
+        # a config object as a snapshot, guarded on its contents, a cutlass Numeric
+        # value as itself, guarded on its identity.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        cfg, alpha = Cfg(3.0), cutlass.Float32(2.0)
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            a, b = torch.empty_like(x), torch.empty_like(x)
+            w(x, a, x.numel(), cfg)
+            mul_const_w(x, b, x.numel(), alpha)
+            return a, b
+
+        x = _rand(1000)
+        a, b = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(a, 3 * x)
+        self.assertEqual(b, 2 * x)
+
+    def test_object_constant_modified_outside_the_region(self):
+        # The side table keeps a snapshot of the object, whose contents are guarded
+        # down through attributes (their names too, even ones that are not Python
+        # names), lists and dicts (their keys too): a change made between calls
+        # recompiles, so the kernel sees it as in eager, while the same contents, in
+        # this object or a copy, reuse the graph.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Override:  # a change adds an attribute
+            def __init__(self, alpha):
+                self.base = alpha
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return getattr(self, "override", self.base)
+
+            @alpha.setter
+            def alpha(self, alpha):
+                self.override = alpha
+
+        class Nested:
+            def __init__(self, alpha):
+                self.parts = [{"cfg": Cfg(alpha)}]
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.parts[0]["cfg"].alpha
+
+            @alpha.setter
+            def alpha(self, alpha):
+                self.parts[0]["cfg"].alpha = alpha
+
+        class Keyed:
+            def __init__(self, alpha):
+                self.table = {Cfg(alpha): None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+            @alpha.setter
+            def alpha(self, alpha):
+                next(iter(self.table)).alpha = alpha
+
+        def namespace(alpha):  # a keyword and a dotted name, as argparse dests
+            return types.SimpleNamespace(**{"alpha": alpha, "from": 0, "a.b": 0})
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x = _rand(1000)
+        for make in (Cfg, MulCfg, Override, Nested, Keyed, namespace):
+            with self.subTest(make=make.__name__):
+                torch._dynamo.reset()
+                cnt = CompileCounterWithBackend("aot_eager")
+                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                cfg = make(3.0)
+                self.assertEqual(cf(x, cfg), 3 * x)
+                self.assertEqual(cnt.frame_count, 1)
+                cfg.alpha = 5.0
+                self.assertEqual(cf(x, cfg), 5 * x)
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cf(x, cfg), 5 * x)
+                if make is not Keyed:  # a copied dict key fails Dynamo's equality guard
+                    self.assertEqual(cf(x, copy.deepcopy(cfg)), 5 * x)
+                self.assertEqual(cnt.frame_count, 2)
+
+    def test_unhashable_constant_graph_breaks(self):
+        class Opaque:
+            __slots__ = ("alpha",)
+            __hash__ = None
+
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "unhashable"):
+            torch.compile(f, backend="eager", fullgraph=True)(_rand(1000), Opaque(2.0))
+
+    def test_object_constant_attribute_name_not_a_str_graph_breaks(self):
+        # Dynamo guards an attribute only under an exact str name; eager also takes
+        # a str subclass, so the call graph-breaks and runs eagerly.
+        class Name(str):
+            pass
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x, cfg = _rand(1000), Cfg(3.0)
+        vars(cfg)[Name("tag")] = 0
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "not an exact str"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, cfg)
+        self.assertEqual(torch.compile(f, backend="aot_eager")(x, cfg), 3 * x)
+
+    def test_object_constant_modified_in_the_region_graph_breaks(self):
+        # Dynamo applies writes after the graph runs, so a kernel given an object (or
+        # a class) written earlier in the region, itself or through an attribute, a
+        # dict key, its class or a list its class holds, would see the old value: the
+        # call graph-breaks and runs eagerly, after the write.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        def cfg_class(alpha):
+            return type("CfgClass", (), {"alpha": alpha})
+
+        def class_attribute(alpha):
+            return cfg_class(alpha)()
+
+        def class_list(alpha):  # alpha is in a list the class holds
+            alpha_property = property(lambda self: self.parts[0])
+            return type("ListCfg", (), {"parts": [alpha], "alpha": alpha_property})()
+
+        class Holder:
+            def __init__(self, alpha):
+                self.cfg = Cfg(alpha)
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.cfg.alpha
+
+        class Keyed:
+            def __init__(self, alpha):
+                self.table = {Cfg(alpha): None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def launch(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def direct(x, cfg):
+            cfg.alpha = 5.0
+            return launch(x, cfg)
+
+        def nested(x, holder):
+            holder.cfg.alpha = 5.0
+            return launch(x, holder)
+
+        def through_key(x, keyed):
+            next(iter(keyed.table)).alpha = 5.0
+            return launch(x, keyed)
+
+        def through_class(x, cfg):
+            type(cfg).alpha = 5.0
+            return launch(x, cfg)
+
+        def through_class_list(x, cfg):
+            cfg.parts[0] = 5.0
+            return launch(x, cfg)
+
+        x = _rand(1000)
+        cases = (
+            (direct, Cfg),
+            (direct, cfg_class),
+            (nested, Holder),
+            (through_key, Keyed),
+            (through_class, class_attribute),
+            (through_class_list, class_list),
+        )
+        for f, make in cases:
+            with self.subTest(f=f.__name__, make=make.__name__):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "modified earlier in the compiled region",
+                ):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, make(3.0))
+                cfg = make(3.0)
+                self.assertEqual(torch.compile(f, backend="aot_eager")(x, cfg), 5 * x)
+                self.assertEqual(cfg.alpha, 5.0)
+
+    def test_object_constant_modified_through_another_path_graph_breaks(self):
+        # As above, with what the kernel reads (an object the config object holds,
+        # as an attribute or a dict key, or the config object's class) written
+        # through another argument, a closure or a global, whichever path the region
+        # reads first.
+        class Inner:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class Cfg:
+            def __init__(self, inner):
+                self.inner = inner
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return self.inner.alpha
+
+        class Keyed:
+            def __init__(self, inner):
+                self.table = {inner: None}
+
+            @property
+            def alpha(self):  # what cfg_scale_kernel reads
+                return next(iter(self.table)).alpha
+
+        class ClassCfg:
+            alpha = 3.0
+
+        def instance(cls):
+            return cls()
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+        shared = Inner(3.0)
+
+        def launch(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def through_argument(x, cfg, inner):
+            inner.alpha += 2.0
+            return launch(x, cfg)
+
+        def through_argument_after_cfg(x, cfg, inner):
+            inner.alpha = cfg.inner.alpha + 2.0
+            return launch(x, cfg)
+
+        def through_closure(x, cfg, inner):
+            shared.alpha += 2.0
+            return launch(x, cfg)
+
+        def through_global(x, cfg, inner):
+            global_inner.alpha += 2.0
+            return launch(x, cfg)
+
+        x = _rand(1000)
+        cases = (
+            (through_argument, Cfg, shared),
+            (through_argument_after_cfg, Cfg, shared),
+            (through_closure, Cfg, shared),
+            (through_global, Cfg, global_inner),
+            (through_argument, Keyed, shared),
+            (through_argument, instance, ClassCfg),
+        )
+        for f, make, inner in cases:
+            with self.subTest(f=f.__name__, make=make.__name__):
+                inner.alpha = 3.0
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "modified earlier in the compiled region",
+                ):
+                    cf = torch.compile(f, backend="eager", fullgraph=True)
+                    cf(x, make(inner), inner)
+                cf = torch.compile(f, backend="aot_eager")
+                self.assertEqual(cf(x, make(inner), inner), 5 * x)
+                self.assertEqual(inner.alpha, 5.0)
+
+    def test_object_constant_holding_a_tensor_graph_breaks(self):
+        # As in a tuple or a list, a tensor or a DSL object inside an object
+        # constant (a dict key included) would be baked into the side table, which
+        # is never reset and so also keeps it alive: the call graph-breaks, and a raw
+        # call runs eagerly.
+        class Cfg:
+            def __init__(self, alpha, held):
+                self.alpha = alpha
+                self.held = held
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def wrapped(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def raw(x, cfg):
+            out = torch.empty_like(x)
+            cfg_scale_kernel(
+                from_dlpack(x),
+                from_dlpack(out),
+                x.numel(),
+                cfg,
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x = _rand(1000)
+        for held, pattern in (
+            (x, "'cfg' holds a tensor inside a container"),
+            ({x: None}, "'cfg' holds a tensor inside a container"),
+            (from_dlpack(x), "not _Tensor"),
+            (_stream(), "not CUstream"),
+        ):
+            for f in (wrapped, raw):
+                with self.subTest(held=type(held).__name__, f=f.__name__):
+                    with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, pattern):
+                        cf = torch.compile(f, backend="eager", fullgraph=True)
+                        cf(x, Cfg(3.0, held))
+        self.assertEqual(torch.compile(raw, backend="eager")(x, Cfg(3.0, x)), 3 * x)
+
+    def test_constant_that_refers_to_itself_graph_breaks(self):
+        # A constant that holds itself cannot be guarded on its contents (nor keyed
+        # by them in the side table): a config object with a back-pointer, one
+        # holding a logging.Logger (whose manager's loggerDict holds the logger), a
+        # list holding itself, made outside the region or in it. The call
+        # graph-breaks instead of recursing forever, and a raw call runs eagerly.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        back_pointer, with_logger = Cfg(3.0), Cfg(3.0)
+        back_pointer.parent = types.SimpleNamespace(child=back_pointer)
+        # A manager of its own, so that what is walked before the cycle does not
+        # depend on the process's other loggers and handlers.
+        manager = logging.Manager(logging.RootLogger(logging.WARNING))
+        with_logger.log = manager.getLogger("cfg")
+        scales = [3]
+        scales.append(scales)
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+        w_scales = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def wrapped(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def raw(x, cfg):
+            out = torch.empty_like(x)
+            cfg_scale_kernel(
+                from_dlpack(x),
+                from_dlpack(out),
+                x.numel(),
+                cfg,
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def list_argument(x, scales):
+            out = torch.empty_like(x)
+            w_scales(x, out, x.numel(), scales)
+            return out
+
+        def list_made_in_the_region(x, scales):
+            scales = [scales[0]]
+            scales.append(scales)
+            return list_argument(x, scales)
+
+        x = _rand(1000)
+        back_pointer_pattern = (
+            r"the constant in 'cfg' refers to itself: "
+            r"L\['cfg'\]\.__dict__\['parent'\]\.__dict__\['child'\] is L\['cfg'\]"
+        )
+        logger_pattern = "the constant in 'cfg' refers to itself"
+        list_pattern = r"of type list refers to itself through \[1\]"
+        for f, arg, pattern in (
+            (wrapped, back_pointer, back_pointer_pattern),
+            (raw, back_pointer, back_pointer_pattern),
+            (wrapped, with_logger, logger_pattern),
+            (raw, with_logger, logger_pattern),
+            (list_argument, scales, list_pattern),
+            (list_made_in_the_region, scales, list_pattern),
+        ):
+            with self.subTest(f=f.__name__, arg=type(arg).__name__):
+                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, pattern):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, arg)
+        for cfg in (back_pointer, with_logger):
+            self.assertEqual(torch.compile(raw, backend="eager")(x, cfg), 3 * x)
+
+    def test_object_constants_inside_a_tuple(self):
+        # An object inside a tuple is passed like a bare one: as a snapshot, guarded
+        # on its contents. An object made in the region only exists after the graph
+        # runs, so passing one graph-breaks.
+        class Scale:
+            def __init__(self, v):
+                self.v = v
+
+            def __int__(self):
+                return self.v
+
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, scale):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (scale,))
+            return out
+
+        def g(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (Scale(2),))
+            return out
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        three = Scale(3)
+        cases = ((three, 1), (three, 1), (Scale(4), 2), (Scale(3), 2))
+        for scale, frame_count in cases:
+            self.assertEqual(cf(x, scale), scale.v * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "cannot pass the Scale in 'scales'"
+        ):
+            torch.compile(g, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(g, backend="eager")(x), 2 * x)
+
+    def test_function_constants(self):
+        # A function from outside the region is passed as itself and guarded on its
+        # identity: its own guard (on its code) also passes for another function
+        # made by the same def. A @cute.jit function (e.g. a callback) is passed the
+        # same way. Dynamo has no object for a bound method (one is made on each
+        # access), so passing one graph-breaks.
+        def make_cfg(alpha):
+            def cfg():
+                pass
+
+            cfg.alpha = alpha
+            return cfg
+
+        @cute.jit
+        def jit_cfg():
+            pass
+
+        jit_cfg.alpha = 4.0
+
+        class Holder:
+            def method(self):
+                pass
+
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        def g(x, holder):
+            return f(x, holder.method)
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        three = make_cfg(3.0)
+        for cfg, frame_count in (
+            (three, 1),
+            (three, 1),
+            (make_cfg(5.0), 2),
+            (jit_cfg, 3),
+        ):
+            self.assertEqual(cf(x, cfg), cfg.alpha * x)
+            self.assertEqual(cnt.frame_count, frame_count)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "cannot pass the method in 'cfg'"
+        ):
+            torch.compile(g, backend="eager", fullgraph=True)(x, Holder())
+
+    def test_nested_symint_in_constexpr_tuple(self):
+        # Specialized like a bare SymInt: one graph per value.
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), (x.shape[0] // 250,))
+            return out
+
+        cf = torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)
+        for n in (1000, 2000):
+            x = _rand(n)
+            self.assertEqual(cf(x), (n // 250) * x)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_global_wrapper_fullgraph(self, backend):
+        cnt = CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), (x + y).relu())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_inline_wrap_cutedsl_fullgraph(self, backend):
+        def f(x, y):
+            out = torch.empty_like(x)
+            wrap_cutedsl(add_kernel, mutates_args=["mOut"])(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, y), x + y)
+
+    def test_inline_wrap_cutedsl_of_a_kernel_read_without_a_source(self):
+        # A @cute.jit function that Dynamo reads without a source, here a staticmethod
+        # of a module made in the region, is taken by wrap_cutedsl as in eager.
+        class M(torch.nn.Module):
+            kernel = staticmethod(add_kernel)
+
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                wrap_cutedsl(self.kernel, mutates_args=["mOut"])(x, y, out, x.numel())
+                return out
+
+        def f(x, y):
+            return M()(x, y)
+
+        def live_across_graph_break(x, y):
+            w = wrap_cutedsl(M().kernel, mutates_args=["mOut"])
+            out = torch.empty_like(x)
+            torch._dynamo.graph_break()
+            w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        backend = EagerAndRecordGraphs()
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(x, y), x + y)
+        (gm,) = backend.graphs
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(record.fn, add_kernel)
+        self.assertEqual(record.mutates_args, ("mOut",))
+        # Dynamo cannot rebuild such a function at a graph break, nor the wrapper, so
+        # the frame runs eagerly.
+        cf = torch.compile(live_across_graph_break, backend="eager")
+        self.assertEqual(cf(x, y), x + y)
+
+    def test_dynamo_graph_has_one_hop_node(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        (gm,) = backend.graphs
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(record.fn, add_kernel)
+        self.assertNotIn("stream", node.kwargs["kwargs"])
+
+    def test_aot_eager_graph_is_functional(self):
+        backend = AotEagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        (fw,) = backend.fw_graphs
+        self.assertEqual(_hop_nodes(fw, cutedsl_kernel_wrapper_mutation), [])
+        (node,) = _hop_nodes(fw, cutedsl_kernel_wrapper_functional)
+        self.assertEqual(node.kwargs["tensors_to_clone"], ["mOut"])
+
+    @parametrize("view", ["offset", "gap"])
+    def test_aot_eager_mutated_view_gets_tensor_bases(self, view):
+        # The production functionalization path (AOTAutograd) hands the base of a
+        # mutated view to the functional HOP.
+        backend = AotEagerAndRecordGraphs()
+
+        def take_view(base):
+            return base[4:] if view == "offset" else base[::2]
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            base = x * 1
+            v = take_view(base)
+            scale_inplace_w(v, v.numel())
+            return base
+
+        x = torch.arange(1, 1001, device=DEVICE, dtype=torch.float32)
+        expected = x.clone()
+        take_view(expected).mul_(2)
+        self.assertEqual(f(x), expected)
+        (node,) = _hop_nodes(backend.fw_graphs[0], cutedsl_kernel_wrapper_functional)
+        self.assertEqual(list(node.kwargs["tensor_bases"]), ["mX"])
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("grad_fn", [torch.no_grad, torch.enable_grad])
+    def test_wrapper_with_grad_option(self, backend, grad_fn):
+        # Mirrors test_triton_kernel_with_grad_option.
+        def f(x):
+            with grad_fn():
+                out = torch.empty_like(x)
+                mul_const_w(x, out, x.numel(), 2)
+                return out
+
+        x = _rand(1000)
+        self.assertEqual(torch.compile(f, backend=backend, fullgraph=True)(x), 2 * x)
+
+    def test_wrapper_argument_guards(self):
+        # A wrapper passed in is guarded on its type, kernel and write set, not on
+        # its identity: an equal wrapper reuses the compiled code, while another
+        # write set, another kernel of the same name, or another wrapper type
+        # recompiles into a node for it.
+        from torch._higher_order_ops.cutedsl_kernel_wrap import (
+            TraceableCuteDSLKernelWrapper,
+        )
+
+        class SubWrapper(TraceableCuteDSLKernelWrapper):
+            pass
+
+        backend = AotEagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(w, x, y):
+            out = torch.zeros_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        add_out = wrap_cutedsl(same_name_add_kernel, mutates_args=["mOut"])
+        add_out_again = wrap_cutedsl(same_name_add_kernel, mutates_args=("mOut",))
+        add_unknown = wrap_cutedsl(same_name_add_kernel, mutates_args="unknown")
+        sub_out = wrap_cutedsl(same_name_sub_kernel, mutates_args=["mOut"])
+        add_out_sub = SubWrapper(same_name_add_kernel, ["mOut"])
+        x, y = _rand(1000), _rand(1000)
+        for w, expected, frame_count in (
+            (add_out, x + y, 1),
+            (add_out_again, x + y, 1),
+            (add_unknown, x + y, 2),
+            (sub_out, x - y, 3),
+            (add_out_sub, x + y, 4),
+        ):
+            self.assertEqual(f(w, x, y), expected)
+            self.assertEqual(cnt.frame_count, frame_count)
+        self.assertEqual(len(backend.fw_graphs), 4)
+        for gm, fw, w, cloned in zip(
+            backend.graphs,
+            backend.fw_graphs,
+            (add_out, add_unknown, sub_out, add_out_sub),
+            (["mOut"], ["mOut", "mX", "mY"], ["mOut"], ["mOut"]),
+        ):
+            (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+            self.assertEqual(node.kwargs["kernel_idx"], w.kernel_idx)
+            (fn_node,) = _hop_nodes(fw, cutedsl_kernel_wrapper_functional)
+            self.assertEqual(sorted(fn_node.kwargs["tensors_to_clone"]), cloned)
+
+    def test_runtime_scalar_stays_dynamic(self):
+        # n is annotated cutlass.Int32: a runtime arg, so a new size does not
+        # recompile under dynamic=True.
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        for n in (1000, 3000, 77):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(f(x, y), x + y)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_constexpr_specializes_and_recompiles(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x, alpha_from_shape):
+            out = torch.empty_like(x)
+            alpha = x.shape[0] if alpha_from_shape else 3
+            mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        # A constant Constexpr value: shape changes stay dynamic.
+        for n in (8, 16):
+            x = _rand(n)
+            self.assertEqual(f(x, False), 3 * x)
+        self.assertEqual(cnt.frame_count, 1)
+        # A symbolic value for a Constexpr param is guarded on: a new value
+        # recompiles, a seen value does not.
+        for n in (8, 16, 8):
+            x = _rand(n)
+            self.assertEqual(f(x, True), n * x)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_unannotated_scalar_stays_dynamic(self):
+        # A Python int for an unannotated parameter is a runtime Int32 in the DSL:
+        # a symbolic value stays a graph input and new values do not recompile.
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def f(x):
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), x.shape[0])
+            return out
+
+        for n in (8, 16, 8):
+            x = _rand(n)
+            self.assertEqual(f(x), x + n)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_float_scalar_default_and_explicit(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, y):
+            s1, d1 = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s1, d1, x.numel())
+            s2, d2 = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s2, d2, x.numel(), scale=0.25)
+            return s1, d1, s2, d2
+
+        x, y = _rand(1000), _rand(1000)
+        s1, d1, s2, d2 = f(x, y)
+        self.assertEqual((s1, d1), (x + y, x - y))
+        self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
+
+    def test_toy_raw_call(self):
+        # The toy: Dynamo captures the raw call as one HOP node, as the call of
+        # wrap_cutedsl(toy_add_kernel) with the write set of a raw call. A new size
+        # does not recompile: n is a runtime Int32.
+        x, y = _rand(2048), _rand(2048)
+        self.assertEqual(toy(x, y), (x + y).relu())
+        backend = AotEagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        cf = torch.compile(toy, backend=cnt, fullgraph=True, dynamic=True)
+        for n in (2048, 1000):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(cf(x, y), (x + y).relu())
+        self.assertEqual(cnt.frame_count, 1)
+        (node,) = _hop_nodes(backend.graphs[0], cutedsl_kernel_wrapper_mutation)
+        self.assertEqual(sorted(node.kwargs["kwargs"]), ["mOut", "mX", "mY", "n"])
+        kernel = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(kernel.fn, toy_add_kernel)
+        self.assertEqual(kernel.mutates_args, "unknown")
+        (fn_node,) = _hop_nodes(backend.fw_graphs[0], cutedsl_kernel_wrapper_functional)
+        self.assertEqual(
+            sorted(fn_node.kwargs["tensors_to_clone"]), ["mOut", "mX", "mY"]
+        )
+
+    def test_raw_call_keywords_defaults_and_constexpr(self):
+        # A raw call binds like a wrapper call: keywords, a default after the stream,
+        # a Constexpr baked into the compiled kernel.
+        stream = cutlass_torch.current_stream
+
+        def f(x, y):
+            s1, d1, s2, d2, m = [torch.empty_like(x) for _ in range(5)]
+            n = x.numel()
+            add_sub_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(s1),
+                from_dlpack(d1),
+                n,
+                stream(),
+            )
+            add_sub_kernel(
+                mX=from_dlpack(x),
+                mY=from_dlpack(y),
+                mSum=from_dlpack(s2),
+                mDiff=from_dlpack(d2),
+                n=n,
+                stream=stream(),
+                scale=0.25,
+            )
+            mul_const_kernel(from_dlpack(x), from_dlpack(m), n, 3.0, stream())
+            return s1, d1, s2, d2, m
+
+        x, y = _rand(1000), _rand(1000)
+        expected = (x + y, x - y, (x + y) * 0.25, (x - y) * 0.25, 3 * x)
+        self.assertEqual(f(x, y), expected)
+        cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cf(x, y), expected)
+
+    def test_raw_call_from_dlpack_options(self):
+        # assumed_align is a hint PT2 replaces with the alignment it compiles for (each
+        # pointer's own, at most 16 bytes); an option that changes the compiled kernel
+        # graph-breaks.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, assumed_align=16),
+                from_dlpack(y, 4),
+                from_dlpack(out, use_32bit_stride=False),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def g(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, use_32bit_stride=True),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cf(x, y), x + y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "use_32bit_stride"):
+            torch.compile(g, backend="eager", fullgraph=True)(x, y)
+
+    def test_raw_call_stream_made_outside_graph_breaks(self):
+        # Only cutlass.torch.current_stream() called in the region can be the stream:
+        # the captured kernel is launched on the current stream.
+        def f(x, y, stream):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"pass cutlass\.torch\.current_stream\(\)"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y, _stream())
+
+    def test_raw_call_torch_tensor_graph_breaks(self):
+        # Eager CuTeDSL refuses a torch.Tensor for a cute.Tensor param, and so does
+        # the capture of a raw call.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(x, y, out, x.numel(), cutlass_torch.current_stream())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"pass from_dlpack\(tensor\) for 'mX'"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+
+    def test_raw_call_arguments_live_across_graph_break(self):
+        # from_dlpack(t) and current_stream() made before a graph break are made
+        # again after it. The resumed frame then sees DSL objects made outside its
+        # region, so the call graph-breaks there (the reason checked below only comes
+        # from tracing the rebuilt objects) and runs eagerly.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            args = (from_dlpack(x), from_dlpack(y, assumed_align=16), from_dlpack(out))
+            stream = cutlass_torch.current_stream()
+            torch._dynamo.graph_break()
+            add_kernel(*args, x.numel(), stream)
+            return out, args[1]
+
+        x, y = _rand(1000), _rand(1000)
+        torch._dynamo.utils.counters.clear()
+        out, ty = torch.compile(f, backend="eager")(x, y)
+        self.assertEqual(out, x + y)
+        self.assertEqual(ty._assumed_align, 16)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        self.assertTrue(any("current_stream()" in r for r in reasons), reasons)
+        failures = list(torch._dynamo.utils.counters["unimplemented"])
+        self.assertFalse(any("Reconstruction failure" in r for r in failures), failures)
+
+    def test_raw_call_stream_is_the_one_read(self):
+        # cutlass.torch.current_stream() stands for the stream current where it is
+        # called. A raw call on another stream graph-breaks (the captured kernel would
+        # launch on the call's stream), and a value that leaves the graph is the stream
+        # it was read on, not the one current at the graph break.
+        side = torch.cuda.Stream()
+
+        def read_outside_call_inside(x, y):
+            out = torch.empty_like(x)
+            stream = cutlass_torch.current_stream()
+            with torch.cuda.stream(side):
+                add_kernel(
+                    from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream
+                )
+            return out
+
+        def read_inside(x):
+            with torch.cuda.stream(side):
+                stream = cutlass_torch.current_stream()
+            return x + 1, stream
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(read_outside_call_inside, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"read on the stream current at this call"
+        ):
+            cf(x, y)
+        _, stream = torch.compile(read_inside, backend="eager", fullgraph=True)(x)
+        self.assertEqual(int(stream), side.cuda_stream)
+
+    @requires_cuda_and_triton
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_raw_call_on_a_side_stream(self, backend):
+        # With the stream read and the call inside torch.cuda.stream(side), the raw
+        # call is captured under fullgraph, and its node carries the region's stream
+        # annotation, as the node of a user Triton kernel launched there does. A
+        # backend that runs each node on its annotated stream, as Inductor does,
+        # launches the kernel on side. The eager and aot_eager backends ignore the
+        # annotations and run every node, aten ops and Triton kernels too, on the
+        # current stream, so this does not check which stream the kernel runs on.
+        import triton
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional as triton_functional,
+            triton_kernel_wrapper_mutation as triton_mutation,
+        )
+        from torch.testing._internal.triton_utils import add_kernel as triton_add
+
+        side = torch.cuda.Stream()
+
+        def f(x, y):
+            out, ref = torch.empty_like(x), torch.empty_like(x)
+            n = x.numel()
+            with torch.cuda.stream(side):
+                add_kernel(
+                    from_dlpack(x),
+                    from_dlpack(y),
+                    from_dlpack(out),
+                    n,
+                    cutlass_torch.current_stream(),
+                )
+                triton_add[(triton.cdiv(n, 128),)](x, y, ref, n, BLOCK_SIZE=128)
+            torch.cuda.current_stream().wait_stream(side)
+            return out, ref
+
+        if backend == "eager":
+            record = EagerAndRecordGraphs()
+        else:
+            record = AotEagerAndRecordGraphs()
+        x, y = _rand(1000), _rand(1000)
+        torch.cuda.synchronize()  # the region reads x and y without waiting for them
+        out, ref = torch.compile(f, backend=record, fullgraph=True)(x, y)
+        self.assertEqual((out, ref), (x + y, x + y))
+        (gm,) = record.graphs
+        hops = [(gm, cutedsl_kernel_wrapper_mutation, triton_mutation)]
+        if backend == "aot_eager":
+            (fw,) = record.fw_graphs
+            hops.append((fw, cutedsl_kernel_wrapper_functional, triton_functional))
+        for gm, hop, triton_hop in hops:
+            (node,) = _hop_nodes(gm, hop)
+            (triton_node,) = _hop_nodes(gm, triton_hop)
+            self.assertIn("stream", triton_node.meta["custom"])
+            self.assertEqual(node.meta.get("custom"), triton_node.meta["custom"])
+
+    def test_raw_call_cute_tensor_attributes_graph_break(self):
+        # A from_dlpack(t) made in the region cannot be read there: reading the cute
+        # tensor (its element type, shape, ...) graph-breaks and runs eagerly.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            mx = from_dlpack(x)
+            if mx.element_type is cutlass.Float32 and mx.shape == (1000,):
+                add_kernel(
+                    mx,
+                    from_dlpack(y),
+                    from_dlpack(out),
+                    x.numel(),
+                    cutlass_torch.current_stream(),
+                )
+            else:
+                out.fill_(-1.0)
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"from_dlpack\(\.\.\.\)\.element_type: a cute",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        torch._dynamo.reset()  # the compiled code is cached on f's code object
+        self.assertEqual(torch.compile(f, backend="eager")(x, y), x + y)
+
+    def test_raw_call_values_have_no_repr_in_the_region(self):
+        # repr(), str() and f-strings of a from_dlpack(t) or current_stream() value made
+        # in the region graph-break like any other read, and then run on the real
+        # object, as in eager.
+        def f(x):
+            return x + 1, f"{from_dlpack(x)}", str(cutlass_torch.current_stream())
+
+        x = _rand(8)
+        for g in (
+            lambda x: str(from_dlpack(x)),
+            lambda x: repr(cutlass_torch.current_stream()),
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "cannot be read"
+            ):
+                torch.compile(g, backend="eager", fullgraph=True)(x)
+        _, tensor_text, stream_text = torch.compile(f, backend="eager")(x)
+        self.assertEqual(tensor_text, str(from_dlpack(x)))
+        self.assertTrue(stream_text.startswith("<CUstream"), stream_text)
+
+    def test_raw_call_from_dlpack_requires_grad_graph_breaks(self):
+        # Eager from_dlpack refuses a tensor that requires grad, and so does the
+        # capture; from_dlpack(t.detach()) is captured.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def g(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x.detach()),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000, requires_grad=True), _rand(1000)
+        with self.assertRaises(BufferError):
+            f(x, y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "requires grad"):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        cg = torch.compile(g, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cg(x, y), (x + y).detach())
+
+    def test_raw_call_replaced_from_dlpack_is_traced(self):
+        # A functools.wraps wrapper of from_dlpack (such as one stored under its
+        # name) has its __module__ and __qualname__ but is not taken for it: Dynamo
+        # inlines it like any function, so its body runs (it records each call), and
+        # captures the from_dlpack it calls.
+        from torch._library.cutedsl import is_cutedsl_from_dlpack
+
+        calls = []
+
+        @functools.wraps(from_dlpack)
+        def logged(tensor, **kwargs):
+            calls.append(tensor.shape)
+            return from_dlpack(tensor, **kwargs)
+
+        self.assertTrue(is_cutedsl_from_dlpack(from_dlpack))
+        self.assertFalse(is_cutedsl_from_dlpack(logged))
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_kernel(
+                logged(x),
+                logged(y),
+                logged(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        backend = EagerAndRecordGraphs()
+        cf = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(cf(x, y), x + y)
+        self.assertEqual(calls, [x.shape] * 3)
+        (gm,) = backend.graphs
+        self.assertEqual(len(_hop_nodes(gm, cutedsl_kernel_wrapper_mutation)), 1)
+
+    @parametrize("view", [False, True])
+    def test_raw_call_in_place(self, view):
+        # x = x + y in place: the same tensor (or an identical view of it) for mX and
+        # mOut. Every tensor of a raw call counts as written, and two written
+        # arguments that are the same memory cannot be functionalized, so the call
+        # graph-breaks and runs eagerly instead of failing in the backend.
+        def f(x, y):
+            x = x.clone()
+            add_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(x.view(-1) if view else x),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return x
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "'mX' and 'mOut' are the same tensor"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(torch.compile(f, backend="aot_eager")(x, y), x + y)
+
+    def test_wrapper_call_with_overlapping_written_args(self):
+        # As for a raw call: two written arguments that are the same memory, under
+        # mutates_args="unknown" or for two named parameters, cannot be
+        # functionalized, so the call graph-breaks and runs eagerly instead of
+        # failing in the backend.
+        add_unknown = wrap_cutedsl(add_kernel, mutates_args="unknown")
+
+        def in_place(x, y):
+            x = x.clone()
+            add_unknown(x, y, x, x.numel())
+            return x
+
+        def same_outputs(x, y):
+            out = torch.empty_like(x)
+            add_sub_w(x, y, out, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        for f, pattern in (
+            (in_place, "'mX' and 'mOut' are the same tensor"),
+            (same_outputs, "'mSum' and 'mDiff' are the same tensor"),
+        ):
+            with self.subTest(f=f.__name__):
+                expected = f(x, y)
+                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, pattern):
+                    torch.compile(f, backend="aot_eager", fullgraph=True)(x, y)
+                self.assertEqual(torch.compile(f, backend="aot_eager")(x, y), expected)
+
+    def test_raw_call_counts_read_only_tensors_as_written(self):
+        # As the wrap_cutedsl docstring says, a raw call counts every tensor argument
+        # as written, so the same tensor, or views that may overlap, passed for two
+        # parameters that the kernel only reads graph-break, and the call runs
+        # eagerly; a call through wrap_cutedsl naming the precise write set is
+        # captured.
+        def raw(x, y):
+            out = torch.empty_like(y)
+            add_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(out),
+                y.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def wrapped(x, y):
+            out = torch.empty_like(y)
+            add_w(x, y, out, y.numel())
+            return out
+
+        base = _rand(1001)
+        for x, y in ((base, base), (base[1:], base[:-1])):
+            with self.subTest(views=x is not y):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "'mX' and 'mY' are the same tensor"
+                ):
+                    torch.compile(raw, backend="aot_eager", fullgraph=True)(x, y)
+                self.assertEqual(torch.compile(raw, backend="aot_eager")(x, y), x + y)
+                cf = torch.compile(wrapped, backend="aot_eager", fullgraph=True)
+                self.assertEqual(cf(x, y), x + y)
+
+    def test_raw_cute_jit_call_runs_eagerly_after_graph_break(self):
+        # Without fullgraph, cute tensors and a stream made outside the region
+        # graph-break with the capture hint, and the call then runs eagerly.
+        def f(x, tx, ty, tout, n, stream):
+            y = x + 1
+            add_kernel(tx, ty, tout, n, stream)
+            return y * 2
+
+        x, a, b = _rand(1000), _rand(1000), _rand(1000)
+        out = torch.zeros_like(a)
+        tx, ty, tout = (from_dlpack(t, assumed_align=16) for t in (a, b, out))
+        torch._dynamo.utils.counters.clear()
+        res = torch.compile(f, backend="eager")(x, tx, ty, tout, 1000, _stream())
+        self.assertEqual(res, (x + 1) * 2)
+        self.assertEqual(out, a + b)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        self.assertTrue(any("current_stream()" in r for r in reasons), reasons)
+
+    def test_strict_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(M(), (x, y), strict=True)
+        self.assertExpectedInline(
+            _normalize_indices(ep.graph_module.code.strip()),
+            """\
+def forward(self, x, y):
+    empty_like_default = torch.ops.aten.empty_like.default(x, pin_memory = False)
+    cutedsl_kernel_wrapper_mutation = torch.ops.higher_order.cutedsl_kernel_wrapper_mutation(kernel_idx = K, constant_args_idx = C, kwargs = {'mX': x, 'mY': y, 'mOut': empty_like_default});  x = y = cutedsl_kernel_wrapper_mutation = None
+    return (empty_like_default,)""",
+        )
+        # Dynamo passes the static size as a constant of the launch.
+        (node,) = _hop_nodes(ep.graph_module, cutedsl_kernel_wrapper_mutation)
+        constant_args_idx = node.kwargs["constant_args_idx"]
+        constant_args = cutedsl_kernel_side_table.get_constant_args(constant_args_idx)
+        self.assertEqual(constant_args, {"n": 1000})
+        self.assertEqual(ep.module()(x, y), x + y)
+        decomposed = ep.run_decompositions()
+        self.assertEqual(decomposed.module()(x, y), x + y)
+        # Unlike a raw call (test_strict_export_raw_call), x and y are not written.
+        self.assertEqual(decomposed.graph_signature.user_inputs_to_mutate, {})
+
+    def test_strict_export_raw_call(self):
+        # The toy's raw call has the write set "unknown": once functionalized, every
+        # tensor argument is cloned and every user input is a mutated input.
+        class Toy(torch.nn.Module):
+            def forward(self, x, y):
+                return toy(x, y)
+
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(Toy(), (x, y), strict=True)
+        (node,) = _hop_nodes(ep.graph_module, cutedsl_kernel_wrapper_mutation)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertEqual(record, CuteDSLKernel(toy_add_kernel, "unknown"))
+        decomposed = ep.run_decompositions()
+        self.assertExpectedInline(
+            _normalize_indices(decomposed.graph_module.code.strip()),
+            """\
+def forward(self, x, y):
+    empty_permuted_default = torch.ops.aten.empty_permuted.default([1000], [0], dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+    cutedsl_kernel_wrapper_functional = torch.ops.higher_order.cutedsl_kernel_wrapper_functional(kernel_idx = K, constant_args_idx = C, kwargs = {'mX': x, 'mY': y, 'mOut': empty_permuted_default}, tensors_to_clone = ['mX', 'mY', 'mOut']);  x = y = empty_permuted_default = None
+    getitem = cutedsl_kernel_wrapper_functional['mOut']
+    getitem_1 = cutedsl_kernel_wrapper_functional['mX']
+    getitem_2 = cutedsl_kernel_wrapper_functional['mY'];  cutedsl_kernel_wrapper_functional = None
+    relu_default = torch.ops.aten.relu.default(getitem);  getitem = None
+    return (getitem_1, getitem_2, relu_default)""",
+        )
+        self.assertEqual(
+            decomposed.graph_signature.user_inputs_to_mutate,
+            {"getitem_1": "x", "getitem_2": "y"},
+        )
+        for program in (ep, decomposed):
+            x_in, y_in = x.clone(), y.clone()
+            self.assertEqual(program.module()(x_in, y_in), (x + y).relu())
+            self.assertEqual((x_in, y_in), (x, y))
+
+    @parametrize("strict", [False, True])
+    def test_later_strict_export_keeps_earlier_programs_valid(self, strict):
+        # Strict export runs Dynamo, which resets per-process tables (the Triton
+        # kernel side table is reset by torch._dynamo.reset()). A program exported
+        # earlier must keep launching its own kernel, not whatever now sits at its
+        # kernel_idx.
+        class Add(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        class Scale(torch.nn.Module):
+            def forward(self, x):
+                y = x.clone()
+                scale_inplace_w(y, y.numel())
+                return y
+
+        x, y = _rand(1000), _rand(1000)
+        ep1 = torch.export.export(Add(), (x, y), strict=strict)
+        torch._dynamo.reset()
+        ep2 = torch.export.export(Scale(), (x,), strict=True)
+        self.assertEqual(ep1.module()(x, y), x + y)
+        self.assertEqual(ep1.run_decompositions().module()(x, y), x + y)
+        self.assertEqual(ep2.module()(x), 2 * x)
+
+    def test_global_wrapper_survives_dynamo_reset(self):
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        gm = make_fx(f)(x, y)
+        self.assertEqual(
+            torch.compile(f, backend="aot_eager", fullgraph=True)(x, y), x + y
+        )
+        torch._dynamo.reset()
+        # Another kernel takes the next side-table slot after the reset.
+        z = _rand(1000)
+        scale_inplace_w(z.clone(), 1000)
+        self.assertEqual(
+            torch.compile(f, backend="aot_eager", fullgraph=True)(x, y), x + y
+        )
+        self.assertEqual(gm(x, y), x + y)
+        self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
+
+    @parametrize("backend", ["aot_eager"])
+    def test_kernel_output_in_autograd_graph(self, backend):
+        # The launch has no derivative: its output enters the autograd graph as a
+        # constant, exactly as in eager.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x.detach(), y.detach(), out, x.numel())
+            return (out * x).sum()
+
+        x, y = _rand(1000, requires_grad=True), _rand(1000)
+        f(x, y).backward()
+        eager_grad = x.grad.clone()
+        x.grad = None
+        torch.compile(f, backend=backend, fullgraph=True)(x, y).backward()
+        self.assertEqual(x.grad, eager_grad)
+        self.assertEqual(eager_grad, (x + y).detach())
+
+
 instantiate_parametrized_tests(CuteDSLHOPTests)
 instantiate_parametrized_tests(CuteDSLWrapTests)
+instantiate_parametrized_tests(CuteDSLDynamoTests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
