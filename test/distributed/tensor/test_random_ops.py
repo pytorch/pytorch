@@ -169,7 +169,8 @@ class DistTensorRandomInitTest(DTensorTestBase):
         state_before = rng.get_state()
         dtensor.uniform_(generator=rng)
 
-        # No per-shard offsets without the tracker: every rank draws from seed 42.
+        # No per-shard offsets with the distribute region disabled: every rank
+        # draws from seed 42.
         ref_rng = torch.Generator(device=self.device_type).manual_seed(42)
         expected = torch.empty_like(dtensor.to_local()).uniform_(generator=ref_rng)
         self.assertEqual(dtensor.to_local(), expected)
@@ -1149,6 +1150,20 @@ class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
         with torch.no_grad():
             with self.assertRaisesRegex(RuntimeError, "local tensors on cpu"):
                 lin.weight.normal_()
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_op_on_cpu_offloaded_param_with_distribute_region_disabled(self):
+        dp_mesh = self.build_device_mesh()
+        torch.distributed.tensor.randn(4, device_mesh=dp_mesh)  # constructs the tracker
+        random._rng_tracker.distribute_region_enabled = False
+
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(lin, mesh=dp_mesh, offload_policy=CPUOffloadPolicy())
+        lin.to_empty(device="cpu")
+        with torch.no_grad():
+            samples = [lin.weight.normal_().to_local().clone() for _ in range(2)]
+        self.assertNotEqual(samples[0], samples[1])
 
     @with_comms
     @skip_if_lt_x_gpu(1)

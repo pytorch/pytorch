@@ -416,8 +416,14 @@ class OpDispatcher:
 
                 local_device_type = first_local_arg.device.type
                 mesh_device_type = first_spec.mesh.device_type
+                # Users who disabled the distribute region opted out of coordination.
+                coordination_disabled = (
+                    random._rng_tracker is not None
+                    and not random._rng_tracker.distribute_region_enabled
+                )
                 if (
                     not first_local_arg.is_meta
+                    and not coordination_disabled
                     and local_device_type != mesh_device_type
                 ):
                     # e.g. CPU-offloaded local tensors on an accelerator mesh.
@@ -431,11 +437,11 @@ class OpDispatcher:
                         "replicas get the same values."
                     )
 
+                rng_tracker = random._tracker_for_mesh(first_spec.mesh)
                 if (
-                    random._rng_tracker
-                    and random._tracker_handles_mesh(first_spec.mesh)
+                    rng_tracker
                     and not first_local_arg.is_meta
-                    and random._rng_tracker.distribute_region_enabled
+                    and rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
                     if (
@@ -447,7 +453,7 @@ class OpDispatcher:
                             and type(first_local_arg) is not torch.Tensor
                         )
                     ):
-                        with random._rng_tracker._distribute_region(
+                        with rng_tracker._distribute_region(
                             first_spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
@@ -458,12 +464,10 @@ class OpDispatcher:
                                 )
                     else:
                         # Accelerator device without user generator, use HOP for traceability
-                        if not isinstance(
-                            random._rng_tracker, random.OffsetBasedRNGTracker
-                        ):
+                        if not isinstance(rng_tracker, random.OffsetBasedRNGTracker):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_spec)
+                            rng_tracker._compute_rng_offsets(first_spec)
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec

@@ -1494,8 +1494,8 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
             random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
 
-        if random._rng_tracker and random._tracker_handles_mesh(device_mesh):
-            with random._rng_tracker._distribute_region(spec):
+        if rng_tracker := random._tracker_for_mesh(device_mesh):
+            with rng_tracker._distribute_region(spec):
                 local_tensor = init_op(local_shape, **kwargs)
         else:
             local_tensor = init_op(local_shape, **kwargs)
