@@ -637,6 +637,13 @@ def _build_multigraph_forward():
     # binding the ones precompiled from the captured text.
     _sha256 = globals().get("_GRAPH_SOURCE_SHA256", {})
     graph_sources = globals().get("GRAPH_SOURCES", {})
+    if graph_sources.keys() != _sha256.keys():
+        raise _PrecompileError(
+            f"precompile: GRAPH_SOURCES must hold every captured graph's code under "
+            f"its own key; missing {sorted(_sha256.keys() - graph_sources.keys())}, "
+            f"unexpected {sorted(graph_sources.keys() - _sha256.keys())}. Edit the "
+            f"code of an entry, not its key."
+        )
     for _key, _source in graph_sources.items():
         _backend_id, _, _part = _key.rpartition(".")
         _graph = getattr(backends[_backend_id].content, f"compiled_{_part}").result
