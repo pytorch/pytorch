@@ -200,6 +200,25 @@ class StrictNumericsConfigTest(TestCase):
 
 
 class StrictNumericsFallbackTest(TestCase):
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("numerics", ("default", "strict_reduction"))
+    @parametrize("decimals", (-3, 3))
+    def test_round_decimals_without_decompositions(
+        self, device, dtype, numerics, decimals
+    ):
+        from torch._inductor.compile_fx import compile_fx
+
+        def backend(gm, inputs):
+            return compile_fx(gm, inputs, decompositions={})
+
+        def fn(x):
+            return torch.round(x, decimals=decimals)
+
+        x = torch.arange(-1000, 1000, device=device, dtype=dtype) / 777
+        with config.patch(numerics=numerics):
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(actual.view(_BIT_VIEW[dtype]), fn(x).view(_BIT_VIEW[dtype]))
+
     @ops(
         [op for op in op_db if op.name in ("fmin", "fmax")],
         allowed_dtypes=(torch.float32,),
@@ -223,6 +242,30 @@ class StrictNumericsFallbackTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("op_name", ("floor_divide", "remainder", "true_divide"))
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("scalar", (False, True))
+    @parametrize("upcast", (False, True))
+    def test_quotient_specials(self, device, dtype, op_name, numerics, scalar, upcast):
+        values = _min_max_specials(dtype, device)
+        a = values.repeat_interleave(values.numel())
+        b = 0.7 if scalar else values.repeat(values.numel())
+
+        def fn(a, b):
+            result = getattr(torch, op_name)(a, b)
+            return result, result.double()
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )(a, b)
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
+        )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("op_name", ("sub", "rsub", "logaddexp2", "ldexp", "mul"))
     @parametrize("numerics", ("strict_pointwise", "strict"))
@@ -257,6 +300,28 @@ class StrictNumericsCompileTest(TestCase):
             tuple(t.view(_BIT_VIEW[t.dtype]) for t in actual),
             tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(x, y)),
         )
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_addcdiv_options_gradients(self, device, dtype, numerics):
+        inputs = [
+            torch.randn(512, device=device, dtype=dtype, requires_grad=True)
+            for _ in range(3)
+        ]
+        grad = torch.randn_like(inputs[0])
+
+        def fn(a, b, c, value):
+            return torch.addcdiv(a, b, c, value=value)
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        for value in (0.7, 0.6, -0.7):
+            expected = torch.autograd.grad(fn(*inputs, value), inputs, grad)
+            actual = torch.autograd.grad(compiled(*inputs, value), inputs, grad)
+            self.assertEqual(
+                tuple(x.view(_BIT_VIEW[dtype]) for x in actual),
+                tuple(x.view(_BIT_VIEW[dtype]) for x in expected),
+            )
 
     @ops(
         [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp", "signbit")],
@@ -1750,29 +1815,14 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
-        ("div_trunc_rounding", "bfloat16"),
-        ("div_trunc_rounding", "float16"),
         ("xlogy", "float32"),
-        ("div_no_rounding_mode", "bfloat16"),
-        ("div_no_rounding_mode", "float16"),
         ("special_ndtr", "bfloat16"),
         ("special_ndtr", "float16"),
-        ("true_divide", "bfloat16"),
-        ("true_divide", "float16"),
-        ("addcdiv", "bfloat16"),
-        ("addcdiv", "float16"),
-        ("addcdiv", "float32"),
         ("copysign", "bfloat16"),
         ("copysign", "float16"),
-        ("div_floor_rounding", "bfloat16"),
-        ("div_floor_rounding", "float16"),
-        ("div_floor_rounding", "float32"),
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
-        ("floor_divide", "bfloat16"),
-        ("floor_divide", "float16"),
-        ("floor_divide", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
@@ -1787,18 +1837,6 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("remainder", "bfloat16"),
-        ("remainder", "float16"),
-        ("remainder", "float32"),
-        ("__rmod__", "bfloat16"),
-        ("__rmod__", "float16"),
-        ("__rmod__", "float32"),
-        ("round_decimals_3", "bfloat16"),
-        ("round_decimals_3", "float16"),
-        ("round_decimals_3", "float32"),
-        ("round_decimals_neg_3", "bfloat16"),
-        ("round_decimals_neg_3", "float16"),
-        ("round_decimals_neg_3", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
@@ -1819,8 +1857,6 @@ BACKWARD_XFAIL = frozenset(
         ("addcmul", "float16"),
         ("deg2rad", "bfloat16"),
         ("deg2rad", "float16"),
-        ("div_no_rounding_mode", "bfloat16"),
-        ("div_no_rounding_mode", "float16"),
         ("erf", "bfloat16"),
         ("erf", "float16"),
         ("erfc", "bfloat16"),
@@ -1841,20 +1877,9 @@ BACKWARD_XFAIL = frozenset(
         ("sinc", "float16"),
         ("special_ndtr", "bfloat16"),
         ("special_ndtr", "float16"),
-        ("true_divide", "bfloat16"),
-        ("true_divide", "float16"),
-        ("remainder", "bfloat16"),
-        ("remainder", "float16"),
-        ("remainder", "float32"),
-        ("__rmod__", "bfloat16"),
-        ("__rmod__", "float16"),
-        ("__rmod__", "float32"),
         ("__rpow__", "bfloat16"),
         ("__rpow__", "float16"),
         ("__rpow__", "float32"),
-        ("addcdiv", "bfloat16"),
-        ("addcdiv", "float16"),
-        ("addcdiv", "float32"),
         ("double", "bfloat16"),
         ("double", "float16"),
         ("float_power", "bfloat16"),
@@ -1901,6 +1926,16 @@ NONFLOAT_XFAIL = frozenset(
 # Preserve all floating dtype coverage after removing repaired xfail entries.
 FULL_DTYPE_BACKWARD_OPS = frozenset(
     {
+        "__rmod__",
+        "addcdiv",
+        "div_floor_rounding",
+        "div_no_rounding_mode",
+        "div_trunc_rounding",
+        "floor_divide",
+        "remainder",
+        "round_decimals_3",
+        "round_decimals_neg_3",
+        "true_divide",
         "ldexp",
         "logaddexp2",
         "rsub",

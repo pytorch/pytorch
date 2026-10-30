@@ -2133,6 +2133,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
+                from torch._inductor import config as inductor_config
+
+                get_config = getattr(tx.output.compiler_fn, "get_compiler_config", None)
+                backend_config = (
+                    get_config() if get_config is not None else None
+                ) or {}
+                # Backend snapshots contain ordinary values, before implications apply.
+                strict_cuda = (
+                    (
+                        backend_config.get("numerics", inductor_config.numerics)
+                        in ("strict", "strict_pointwise")
+                        or backend_config.get(
+                            "strict_pointwise", inductor_config.strict_pointwise
+                        )
+                    )
+                    and backend_config.get("cuda_backend", inductor_config.cuda_backend)
+                    == "triton"
+                    and torch.version.hip is None
+                    and any(
+                        isinstance(realized := arg.realize(), TensorVariable)
+                        and realized.device is not None
+                        and realized.device.type == "cuda"
+                        for arg in args
+                    )
+                )
+                # Keep native Autograd, including when a Python scale becomes symbolic.
+                if strict_cuda and not kwargs["value"].is_tensor():
+                    return None
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
                 result = _create_internal_torch_function(torch.div).call_function(
