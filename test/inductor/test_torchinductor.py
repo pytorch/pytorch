@@ -6992,6 +6992,28 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @parametrize(
+        "input_size,grad_size",
+        [
+            ((3, 7, 9), (2, 3, 3, 4)),
+            ((2, 3, 7, 9), (3, 3, 4)),
+            ((1, 2, 3, 7, 9), (2, 3, 3, 4)),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward_mismatched_ranks(self, input_size, grad_size):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.randn(input_size, device=self.device)
+        grad_output = torch.randn(grad_size, device=self.device)
+        error = f"Expected dimensions {len(input_size)}"
+        with self.assertRaisesRegex(RuntimeError, error):
+            fn(grad_output, x)
+        with self.assertRaisesRegex(RuntimeError, error):
+            fn(grad_output.to("meta"), x.to("meta"))
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.compile(fn, fullgraph=True)(grad_output, x)
+
     @parametrize("dtype", (torch.int32, torch.int64))
     def test_adaptive_avg_pool2d_backward_integer_dtype(self, dtype):
         def fn(grad_output, x):

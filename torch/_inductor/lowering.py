@@ -6698,15 +6698,9 @@ def adaptive_max_pool2d(x, output_size):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_max_pool2d(x, output_size)
 
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
     inner_func_max_val = _adaptive_pooling_fn(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
@@ -6714,8 +6708,8 @@ def adaptive_max_pool2d(x, output_size):
     )
 
     inner_func_max_idx = _adaptive_pooling_fn_with_idx(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
