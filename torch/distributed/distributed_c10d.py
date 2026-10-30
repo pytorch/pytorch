@@ -785,6 +785,8 @@ def _create_nccl_process_group(
 ) -> C10DBackend:
     if not is_nccl_available():
         raise RuntimeError("Distributed package doesn't have NCCL built in")
+    if not opts.split_from:
+        _check_nccl_impl_agreement(opts, "nccl-legacy")
     if backend_options is not None:
         if not isinstance(backend_options, ProcessGroupNCCL.Options):
             raise AssertionError(
@@ -881,6 +883,7 @@ def _create_nccl2_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
+    _check_nccl_impl_agreement(opts, "nccl2")
     backend = ProcessGroupNCCL2(
         opts.store,
         opts.group_rank,
@@ -910,6 +913,8 @@ def _create_nccl_lazy_process_group(
         return opts.split_from.split(  # pyrefly: ignore[missing-attribute]
             opts.store, opts.global_ranks_in_group, pg_options
         )
+    # ProcessGroupNCCLLazy bootstraps like nccl2.
+    _check_nccl_impl_agreement(opts, "nccl2")
     backend = ProcessGroupNCCLLazy(
         opts.store,
         opts.group_rank,
@@ -973,28 +978,139 @@ def _register_builtin_gloo_backend() -> None:
     )
 
 
+def _use_nccl2_from_env(*, default: bool) -> bool:
+    # One parser for every registrar that consults TORCH_DIST_USE_NCCL2: "1"
+    # and "0" are explicit, anything else keeps the registrar's default. Values
+    # other than unset/"0"/"1" are accepted for backward compatibility but
+    # warned about, since e.g. "true" is read differently by the default and the
+    # opt-in registrar.
+    value = os.environ.get("TORCH_DIST_USE_NCCL2")
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    if value is not None:
+        warnings.warn(
+            f"TORCH_DIST_USE_NCCL2={value!r} is not '0' or '1'; "
+            f"using the default ({'nccl2' if default else 'nccl-legacy'}). "
+            "Set '1' for nccl2, '0' for nccl-legacy, or unset it.",
+            stacklevel=2,
+        )
+    return default
+
+
 def _register_builtin_nccl_backend() -> None:
+    _register_nccl_backend(use_nccl2=_use_nccl2_from_env(default=True))
+
+
+def _register_builtin_nccl_opt_in_backend() -> None:
+    """Register ``nccl`` as stock ProcessGroupNCCL unless ``TORCH_DIST_USE_NCCL2=1``.
+
+    For staged rollouts of nccl2 where unset must keep the legacy backend.
+    Install it as the ``nccl`` entry point of the ``torch.distributed.backends``
+    group *in place of* ``_register_builtin_nccl_backend``, not alongside it:
+    ``Backend._ensure_backend_registered`` loads the first matching entry point.
+
+    The variable is read once per process, the first time ``nccl`` is looked
+    up, so it must be set before then and be the same on every rank of the
+    job. Ranks that disagree hang until the timeout;
+    ``_check_nccl_impl_agreement`` logs a warning naming the cause.
+
+    Depends on nccl-legacy: remove both together once the rollout completes.
+    """
+    _register_nccl_backend(use_nccl2=_use_nccl2_from_env(default=False))
+
+
+def _register_nccl_backend(*, use_nccl2: bool) -> None:
     creator_fn = (
-        _create_nccl_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
-        else _create_nccl2_process_group
+        _create_nccl2_process_group if use_nccl2 else _create_nccl_process_group
+    )
+    logger.info(
+        "c10d backend 'nccl' resolved to %s", "nccl2" if use_nccl2 else "nccl-legacy"
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
     # FlightRecorder by itself: stock ProcessGroupNCCL does, nccl2 needs the
-    # hook. Derived from the creator picked above rather than re-read from the
-    # environment, which is only consulted here and could otherwise disagree
-    # with what was built.
-    if creator_fn is _create_nccl_process_group:
-        _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
-    else:
+    # hook.
+    if use_nccl2:
         _FR_SELF_RECORDING_BACKENDS.discard(Backend.NCCL)
+    else:
+        _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
     Backend.register_backend(
         Backend.NCCL,
         creator_fn,
         extended_api=True,
         devices=Backend.backend_capability[Backend.NCCL],
         _backend_type=ProcessGroup.BackendType.NCCL,
+    )
+
+
+# Set once _check_nccl_impl_agreement has checked a group of every rank.
+_nccl_impl_checked_world = False
+
+
+def _reset_nccl_impl_check() -> None:
+    # The next WORLD may include replacement processes, so check it again.
+    global _nccl_impl_checked_world
+    _nccl_impl_checked_world = False
+
+
+def _check_nccl_impl_agreement(
+    opts: _DistributedBackendOptions, impl: Literal["nccl-legacy", "nccl2"], /
+) -> None:
+    """Warn if another rank created this group with the other NCCL implementation.
+
+    Stock ProcessGroupNCCL ("nccl-legacy") and nccl2 exchange ncclUniqueIds
+    under different store keys, so a group mixing them waits until the timeout
+    without naming the cause. This happens when ranks resolve ``nccl``
+    differently (e.g. ``TORCH_DIST_USE_NCCL2`` differs) or pass different
+    backend names. Each rank publishes its implementation in the group's store
+    and checks whether the other one was published; with stores that apply
+    operations in order at least one rank warns. Does not block.
+
+    Runs for each group until one of every rank has been checked (reset when
+    WORLD is destroyed). If that group was created through ``nccl``, every
+    pair of ranks has then compared the process-wide ``TORCH_DIST_USE_NCCL2``.
+    With an NCCL default group that is one check per process; with a gloo
+    default, subgroups keep being checked since the first one may not span the
+    ranks that disagree (e.g. intra-node groups when hosts differ). Later
+    groups are not checked, so mismatched backend names, or a later ``nccl``
+    group after an all-rank ``nccl-legacy``/``nccl2``/``nccl-lazy`` group, go
+    undetected.
+
+    Only warns: the keys are never deleted, and torchelastic reuses its store
+    across restarts, so a key can be left over from an earlier attempt that
+    used the other implementation. Best effort: store errors are ignored.
+    """
+    global _nccl_impl_checked_world
+    if opts.group_size <= 1 or _nccl_impl_checked_world:
+        return
+    other = "nccl2" if impl == "nccl-legacy" else "nccl-legacy"
+    try:
+        opts.store.set(f"nccl_impl/{impl}", "1")
+        mixed = opts.store.check([f"nccl_impl/{other}"])
+    except Exception:
+        logger.debug("Skipping NCCL implementation check", exc_info=True)
+        return
+    # The default group is created before _world.default_pg is set.
+    default_pg = _world.default_pg
+    if default_pg is None or opts.group_size == default_pg.size():
+        _nccl_impl_checked_world = True
+    if not mixed:
+        return
+    # Like the ProcessGroupNCCL log prefix.
+    group = opts.group_id
+    if opts.group_desc not in ("", "undefined"):
+        group = f"{group}({opts.group_desc})"
+    logger.warning(
+        "Process group %s may mix NCCL implementations: this rank uses %s, "
+        "but %s was published to the group's store. Mixed ranks hang until the "
+        "timeout; use the same backend name and TORCH_DIST_USE_NCCL2 value on "
+        "every rank. This is harmless if the key is left over from an earlier "
+        "attempt that shared the store.",
+        group,
+        impl,
+        other,
     )
 
 
@@ -1009,14 +1125,9 @@ def _register_builtin_nccl_legacy_backend() -> None:
 
 
 def _register_builtin_nccl_as_legacy() -> None:
-    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
-    Backend.register_backend(
-        Backend.NCCL,
-        _create_nccl_process_group,
-        extended_api=True,
-        devices=Backend.backend_capability[Backend.NCCL],
-        _backend_type=ProcessGroup.BackendType.NCCL,
-    )
+    # Ignores TORCH_DIST_USE_NCCL2. Kept for builds whose ``nccl`` entry point
+    # still names it; remove once they use _register_builtin_nccl_opt_in_backend.
+    _register_nccl_backend(use_nccl2=False)
 
 
 def _register_builtin_nccl2_backend() -> None:
@@ -3377,6 +3488,7 @@ def destroy_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
+        _reset_nccl_impl_check()
     else:
         _finalize_torchcomms(pg)
         _release_nvshmem_team_pool(_world.pg_names[pg])
@@ -3491,6 +3603,7 @@ def _abort_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
+        _reset_nccl_impl_check()
     else:
         pg.abort()
         # As for WORLD above, only after the abort.
