@@ -1105,11 +1105,12 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       // The two handle types differ in calling convention, not just in the type
       // tag: ROCm dereferences the argument for a fabric handle but casts it by
       // value for an fd.
+      hipError_t import_err = hipSuccess;
       if constexpr (use_fabric_handle) {
-        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-            &handles[r], &imported_handles[r], kMemHandleTypeFabric));
+        import_err = hipMemImportFromShareableHandle(
+            &handles[r], &imported_handles[r], kMemHandleTypeFabric);
       } else {
-        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+        import_err = hipMemImportFromShareableHandle(
             &handles[r],
 #if ROCM_VERSION >= 70100
             reinterpret_cast<void*>(
@@ -1117,7 +1118,15 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #else
             (void*)(uintptr_t)&(imported_handles[r]),
 #endif
-            kMemHandleTypePosixFd));
+            kMemHandleTypePosixFd);
+      }
+      if (import_err != hipSuccess) {
+        (void)hipGetLastError();
+        TORCH_CHECK(
+            false,
+            "hipMemImportFromShareableHandle failed: ",
+            hipGetErrorString(import_err),
+            import_err_msg(rank, r, reqs));
       }
 #else
       TORCH_CHECK(

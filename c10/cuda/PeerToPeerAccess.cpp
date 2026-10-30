@@ -313,8 +313,8 @@ bool get_fabric_access(c10::DeviceIndex dev) {
   // There is no ROCm counterpart to the NVML fabric state query, and no UALink
   // domain identifier is exposed, so clique_id stays unsupported and
   // validate_nvlink_fabric_support() degrades to a no-op. Ranks spanning
-  // separate UALink domains therefore fail at import with a driver error rather
-  // than the message naming each rank's host and domain.
+  // separate UALink domains therefore fail at import, with an error that names
+  // both ranks' hosts and devices but not their domains.
   fabricCliqueId_[dev] = kCliqueIdUnsupported;
   cache = isFabricSupported(dev) ? 1 : 0;
   return cache;
