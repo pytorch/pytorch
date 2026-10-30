@@ -17,6 +17,7 @@ runs.
 import copy
 import dataclasses
 import inspect
+import itertools
 import weakref
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TYPE_CHECKING
@@ -36,6 +37,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     KernelSideTable,
     register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
+    specialize_symbolic,
     store_non_graphable_args,
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
@@ -44,7 +46,6 @@ from torch._higher_order_ops.user_kernel_hop import (
 )
 from torch._higher_order_ops.utils import register_fake
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 
 if TYPE_CHECKING:
@@ -61,6 +62,10 @@ MutatesArgs = tuple[str, ...] | Literal["unknown"]
 # The write set Dynamo gives a raw call (a host function called as in eager code, not
 # through wrap_cutedsl): every tensor argument.
 RAW_CALL_MUTATES_ARGS: MutatesArgs = "unknown"
+
+
+def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
+    return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,7 +102,7 @@ class CuteDSLKernel:
 
     @property
     def name(self) -> str:
-        return getattr(inspect.unwrap(self.fn), "__name__", "cutedsl_kernel")
+        return cutedsl_kernel_name(self.fn)
 
 
 # Unlike Triton's table, torch._dynamo.reset() leaves this one alone: graphs and
@@ -373,48 +378,37 @@ def _same_storage(a: Tensor, b: Tensor) -> bool:
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
     """Whether two tensors may share memory: the same tensor, or two on one storage
-    that are not provably disjoint (statically_known_true, so no guards). Provably
-    disjoint are an empty tensor and any other, tensors whose byte ranges do not
-    meet, and 2-D tensors with contiguous rows the same stride apart whose rows do
-    not meet modulo that stride, such as the q, k and v columns of a fused qkv
-    buffer. Bytes, not elements: views of one storage can differ in dtype. (Not
-    compute_overlapping_tensors, which reinplacing uses: it reports some
-    overlapping 2-D views as disjoint.)"""
+    that compute_overlapping_tensors, which reinplacing uses too, does not find
+    disjoint. It guards on the symbolic sizes it compares, and a size it cannot guard
+    on (an unbacked one) counts as an overlap. It counts offsets and strides in
+    elements, so views of one storage with different element sizes are compared by
+    their byte ranges instead, without guards (statically_known_true)."""
     if a is b:
         return True
     if not _same_storage(a, b):
         return False
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch._C._dynamo.guards import compute_overlapping_tensors
+    from torch.fx.experimental.symbolic_shapes import (
+        GuardOnDataDependentSymNode,
+        statically_known_true,
+    )
 
-    if any(statically_known_true(t.numel() == 0) for t in (a, b)):
-        return False
+    if a.element_size() == b.element_size():
+        try:
+            return bool(compute_overlapping_tensors([a, b]))
+        except GuardOnDataDependentSymNode:
+            return True
 
-    def start(t: Tensor) -> Any:
-        return t.storage_offset() * t.element_size()
-
-    def end(t: Tensor) -> Any:
+    def byte_range(t: Tensor) -> tuple[Any, Any]:
         # Exact unless t is empty, and an empty tensor overlaps nothing.
+        start = t.storage_offset() * t.element_size()
         last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
-        return start(t) + (last + 1) * t.element_size()
+        return start, start + (last + 1) * t.element_size()
 
-    if statically_known_true(end(a) <= start(b)) or statically_known_true(
-        end(b) <= start(a)
-    ):
-        return False
-    if a.dim() != 2 or b.dim() != 2:
-        return True
-    # Modulo a symbolic row stride, only a difference known to be >= 0 simplifies.
-    if statically_known_true(start(b) < start(a)):
-        a, b = b, a
-    row, b_row = (t.stride(0) * t.element_size() for t in (a, b))
-    same_rows = (a.stride(1) == 1, b.stride(1) == 1, row > 0, b_row == row)
-    if not all(map(statically_known_true, same_rows)):
-        return True
-    # Every row of b starts `shift` bytes into a period of a's rows.
-    shift = (start(b) - start(a)) % row
+    (a_start, a_end), (b_start, b_end) = byte_range(a), byte_range(b)
     return not (
-        statically_known_true(a.shape[1] * a.element_size() <= shift)
-        and statically_known_true(shift + b.shape[1] * b.element_size() <= row)
+        statically_known_true(a_end <= b_start)
+        or statically_known_true(b_end <= a_start)
     )
 
 
@@ -695,7 +689,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                 if name not in info.params or name in scalar_params:
                     self.raise_unsupported(
                         f"mutates_args: {name!r} is not a tensor parameter of "
-                        f"{CuteDSLKernel(kernel, ()).name} (parameters: {info.params})"
+                        f"{cutedsl_kernel_name(kernel)} (parameters: {info.params})"
                     )
         variable.mutates_args = normalized
         variable.kernel_idx = cutedsl_kernel_side_table.add_kernel(
@@ -715,7 +709,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """Bind a call of a wrapper (torch tensors, no stream) to the host function's
         parameters, minus the stream."""
         kernel = variable.kernel
-        name = CuteDSLKernel(kernel, ()).name
+        name = cutedsl_kernel_name(kernel)
         info = self.host_fn_info(kernel)
         params = [p for p in info.params if p != info.stream_param]
         if len(args) > len(params):
@@ -788,7 +782,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         ``cutlass.torch.current_stream()`` read on the stream current at the call,
         because the wrapper launches on that stream."""
         kernel = variable.kernel
-        name = CuteDSLKernel(kernel, ()).name
+        name = cutedsl_kernel_name(kernel)
         info = self.host_fn_info(kernel)
         if len(args) > len(info.params):
             self.raise_unsupported(
@@ -865,6 +859,30 @@ class CuteDSLHOPifier(UserKernelHOPifier):
 # into a graph via make_fx or non-strict export
 
 
+def _contents(value: Any) -> tuple[list[Any], Callable[[list[Any]], Any]] | None:
+    """The values directly inside ``value`` and a function that rebuilds it from new
+    ones, for a pytree container or an object the side table keys by its contents
+    (see _object_state); None for any other value, a tensor included."""
+    if isinstance(value, Tensor):
+        return None
+    # One level by hand: tree_flatten would recurse forever into a list holding itself.
+    node = pytree.SUPPORTED_NODES.get(pytree._get_node_type(value))
+    if node is not None:
+        children, context = node.flatten_fn(value)
+        return list(children), lambda new: node.unflatten_fn(new, context)
+    state = _object_state(value)
+    if state is None:
+        return None
+
+    def rebuild(new: list[Any]) -> Any:
+        obj = copy.copy(value)
+        for name, item in zip(state, new):
+            object.__setattr__(obj, name, item)
+        return obj
+
+    return list(state.values()), rebuild
+
+
 class TracingCuteDSLHOPifier(CuteDSLHOPifier):
     def raise_unsupported(self, msg: str) -> Never:
         raise RuntimeError(msg)
@@ -880,25 +898,47 @@ class TracingCuteDSLHOPifier(CuteDSLHOPifier):
 
     def leaves(self, val: Any) -> list[Any]:
         leaves: list[Any] = []
-        for leaf in pytree.tree_leaves(val):
-            state = None if self.is_tensor(leaf) else _object_state(leaf)
-            leaves += [leaf] if state is None else self.leaves(list(state.values()))
+        path: list[Any] = []  # the containers enclosing the value being walked
+
+        def walk(v: Any) -> None:
+            contents = _contents(v)
+            if contents is None:
+                leaves.append(v)
+                return
+            cycle = list(itertools.dropwhile(lambda c: c is not v, path))
+            if cycle:
+                # Refused here: once specialize_nested has copied part of a cycle, the
+                # side table would report a SymInt left in the rest of it instead.
+                self.raise_unsupported(
+                    "a constant kernel argument contains a reference cycle: "
+                    + " -> ".join(type(c).__name__ for c in [*cycle, v])
+                )
+            path.append(v)
+            for child in contents[0]:
+                walk(child)
+            path.pop()
+
+        walk(val)
         return leaves
 
     def specialize_nested(self, variable: Any, val: Any) -> Any:
-        def specialize(leaf: Any) -> Any:
-            state = _object_state(leaf)
-            if state is None:
-                return variable.specialize_symbolic(leaf)
-            values = {k: self.specialize_nested(variable, v) for k, v in state.items()}
-            if all(values[k] is v for k, v in state.items()):
-                return leaf
-            new = copy.copy(leaf)
-            for name, value in values.items():
-                object.__setattr__(new, name, value)
-            return new
+        path: set[int] = set()
 
-        return pytree.tree_map(specialize, val)
+        def specialize(v: Any) -> Any:
+            contents = _contents(v)
+            if contents is None:
+                return specialize_symbolic(v)
+            if id(v) in path:  # a cycle, which leaves refuses
+                return v
+            children, rebuild = contents
+            path.add(id(v))
+            new = [specialize(child) for child in children]
+            path.remove(id(v))
+            if all(a is b for a, b in zip(new, children)):
+                return v
+            return rebuild(new)
+
+        return specialize(val)
 
     def call_HOP(
         self,
@@ -948,14 +988,6 @@ class TraceableCuteDSLKernelWrapper:
             tracing_cutedsl_hopifier_singleton.bind_args(self, args, kwargs),
         )
 
-    def specialize_symbolic(self, arg: Any) -> Any:
-        import torch
-
-        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
-            return guard_scalar(arg)
-        return arg
-
 
 # Imported after every definition: torch._dynamo imports CuteDSLHOPifier and
 # other names from this module.
@@ -973,5 +1005,6 @@ register_user_kernel_hop(
         get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
         functional_dense=cutedsl_kernel_wrapper_functional_dense,
         reinplace_trigger=ReInplaceTrigger.CUTEDSL_OPS,
+        serializable=False,
     )
 )

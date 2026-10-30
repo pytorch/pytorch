@@ -28,7 +28,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
-    CuteDSLKernel,
+    cutedsl_kernel_name,
     is_dsl_runtime_object,
     MutatesArgs,
     RAW_CALL_MUTATES_ARGS,
@@ -81,12 +81,30 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     def leaves(self, val: VariableTracker) -> list[VariableTracker]:
         from .lists import BaseListVariable
 
-        realized = val.realize()
-        if isinstance(realized, BaseListVariable):
-            return [leaf for item in realized.items for leaf in self.leaves(item)]
-        # An object constant's contents are checked on the real object, in
-        # guard_contents.
-        return [val]
+        # bind_args walks each argument here first, so specialize_nested and
+        # constant_object only see lists that do not hold themselves.
+        def walk(
+            val: VariableTracker, path: str, lists: dict[int, str]
+        ) -> list[VariableTracker]:
+            realized = val.realize()
+            if not isinstance(realized, BaseListVariable):
+                # An object constant's contents are checked on the real object, in
+                # guard_contents.
+                return [val]
+            if id(realized) in lists:
+                self.raise_unsupported(
+                    "a constant kernel argument of type "
+                    f"{realized.python_type_name()} refers to itself through "
+                    f"{path[len(lists[id(realized)]) :]}"
+                )
+            lists = {**lists, id(realized): path}
+            return [
+                leaf
+                for i, item in enumerate(realized.items)
+                for leaf in walk(item, f"{path}[{i}]", lists)
+            ]
+
+        return walk(val, "", {})
 
     def specialize_nested(
         self, variable: "CuteDSLKernelVariable", val: VariableTracker
@@ -150,7 +168,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 inspect.isfunction(value) or inspect.isclass(value)
             ):
                 return value
-        name = CuteDSLKernel(variable.kernel, ()).name
+        name = cutedsl_kernel_name(variable.kernel)
         obj = val.get_real_python_backed_value()
         if val.source is None or obj is NO_SUCH_SUBOBJ:
             self.raise_unsupported(
@@ -172,7 +190,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 source = source.base
             if source == val.source:
                 self.raise_modified(name, key, other.source.name)
-        self.guard_contents(val.source, obj, tx, name, key)
+        self.guard_contents(val.source, obj, tx, name, key, {})
         return obj
 
     def guard_contents(
@@ -182,6 +200,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         tx: "InstructionTranslatorBase",
         name: str,
         key: str,
+        path: dict[int, "Source"],
     ) -> None:
         """Guard ``value``, read from ``source``, on what the side table keys and
         snapshots it by (see constant_key): a list, tuple or dict on its type and
@@ -193,12 +212,20 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         with the old snapshot.
 
         Graph-breaks on what the snapshot cannot stand for: a value that the region
-        modified earlier, or whose class it modified, through whatever path; and a
+        modified earlier, or whose class it modified, through whatever path; a
         tensor or a DSL object, which, as in a container, would be baked into the
-        side table. ``name`` and ``key`` name the kernel and the parameter."""
+        side table; and a value that holds itself (constant_key refuses one).
+        ``name`` and ``key`` name the kernel and the parameter; ``path`` maps the id
+        of each value that holds this one, from the argument down, to its source."""
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
+        if id(value) in path:
+            self.raise_unsupported(
+                f"{name}(): the constant in {key!r} refers to itself: {source.name} "
+                f"is {path[id(value)].name}"
+            )
+        path = {**path, id(value): source}
         side_effects = tx.output.side_effects
         if value in side_effects and side_effects.is_modified(side_effects[value]):
             self.raise_modified(name, key, source.name)
@@ -223,7 +250,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         elif isinstance(value, (tuple, list)):
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             for i, item in enumerate(value):
-                self.guard_contents(GetItemSource(source, i), item, tx, name, key)
+                self.guard_contents(GetItemSource(source, i), item, tx, name, key, path)
         elif isinstance(value, dict):
             # constant_key keys a dict by its items in order.
             tx.output.guard_on_key_order.add(source)
@@ -235,14 +262,15 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 # constant_key keys an object key by its contents, which
                 # DICT_KEYS_MATCH, an equality check, does not see.
                 key_source = ConstDictKeySource(source, i)
-                self.guard_contents(key_source, item_key, tx, name, key)
+                self.guard_contents(key_source, item_key, tx, name, key, path)
                 item_source = DictGetItemSource(source, key_source)
-                self.guard_contents(item_source, item, tx, name, key)
+                self.guard_contents(item_source, item, tx, name, key, path)
         elif (state := _object_state(value)) is not None:
             install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
             if dataclasses.is_dataclass(value):
                 for attr, item in state.items():
-                    self.guard_contents(AttrSource(source, attr), item, tx, name, key)
+                    attr_source = AttrSource(source, attr)
+                    self.guard_contents(attr_source, item, tx, name, key, path)
             else:
                 # Read through __dict__: an attribute name can be a keyword or dotted
                 # (an argparse dest), which AttrSource cannot take; DictGetItemSource
@@ -256,7 +284,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
                 for attr, item in state.items():
                     item_source = DictGetItemSource(dict_source, attr)
-                    self.guard_contents(item_source, item, tx, name, key)
+                    self.guard_contents(item_source, item, tx, name, key, path)
         else:
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
@@ -268,7 +296,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     ) -> VariableTracker:
         from .dicts import ConstDictVariable
 
-        name = CuteDSLKernel(variable.kernel, ()).name
+        name = cutedsl_kernel_name(variable.kernel)
         # Written tensors that may overlap would fail check_written_args_disjoint in
         # the backend: a graph break here, as for a raw call (see unwrap_raw_args).
         mutates_args = variable.mutates_args or ()
