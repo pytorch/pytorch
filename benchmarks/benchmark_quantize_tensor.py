@@ -7,6 +7,7 @@ os.environ["KINETO_LOG_LEVEL"] = "6"
 
 import torch
 from torch._inductor.utils import do_bench_using_profiling
+from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_quantized import mxfp8_32x32_swizzle_f, to_mxfp
 
@@ -59,24 +60,27 @@ def _reference(input, dim: int, square, swizzled):
         if square or not swizzled:
             raise ValueError("dim-m benchmark reference requires swizzled 1x32 scales")
         qdata, scales = _reference_dim_k(input.t().contiguous(), square, swizzled)
-        return qdata.t(), scales
+        return qdata.t(), scales.t()
     return _reference_dim_k(input, square, swizzled)
 
 
 def _benchmark_one(kernel, M, K, dtype):
-    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-        _blockscaled_tma_impl,
-        _blockscaled_tma_impl_dual,
-    )
-
     torch.manual_seed(0)
     input = torch.randn(M, K, dtype=dtype, device="cuda")
     selection, square, swizzled = _KERNELS[kernel]
+    swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
+    quantize = F.quantize_tensor_dual if selection == "dual" else F.quantize_tensor
 
     def run():
-        if selection == "dual":
-            return _blockscaled_tma_impl_dual(input)
-        return _blockscaled_tma_impl(input, selection, square, swizzled)
+        return quantize(
+            input,
+            dim=(-2, -1) if selection == "dual" else selection,
+            qdata_dtype=torch.float8_e4m3fn,
+            scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
+            scaling_type=F.ScalingType.BlockWise1x32,
+            swizzle_type=swizzle_type,
+            scaling_type_use_square_block_size=square,
+        )
 
     outputs = run()
     torch.cuda.synchronize()
