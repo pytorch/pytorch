@@ -1249,7 +1249,8 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
 
 
 class TestHuggingFaceWhisperDevice(HuggingFacePrefillTestCase):
-    def test_training_accuracy(self, device):
+    @parametrize("name", ("openai/whisper-tiny", "openai/whisper-large-v3-turbo"))
+    def test_training_accuracy(self, device, name):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = common.parse_args(
             [
@@ -1257,12 +1258,12 @@ class TestHuggingFaceWhisperDevice(HuggingFacePrefillTestCase):
                 "--backend=aot_eager",
                 "--accuracy",
                 "--training",
-                "--only=openai/whisper-tiny",
+                f"--only={name}",
             ]
         )
         runner.model_iter_fn = runner.forward_and_backward_pass
         with self._mock_whisper(_tiny_whisper()):
-            _, name, model, inputs, _ = runner.load_model(device, "openai/whisper-tiny")
+            _, name, model, inputs, _ = runner.load_model(device, name)
         self.assertEqual(set(inputs), {"input_features", "labels"})
         self.assertEqual(inputs["labels"].shape, (1, 128))
         self.assertTrue(model.training)
