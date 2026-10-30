@@ -4484,6 +4484,66 @@ Tensor linalg_qr_backward(
   }
 }
 
+Tensor linalg_qr_piv_backward(
+    const Tensor& gQ,
+    const Tensor& gR,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode) {
+  // The backward formulas for QR with column pivoting follow from the standard
+  // QR case by substituting A -> A P. Using (dA) P = (dQ) R + Q (dR), the
+  // gradient becomes gA = gA0 * P^T, where gA0 is the gradient for the
+  // non-pivoted QR and P^T is the transpose of the permutation matrix.
+
+  auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
+
+  TORCH_CHECK(
+      compute_q,
+      "The derivative of linalg.qr_piv depends on Q, which is not computed when "
+      "mode='r'. Please use linalg.qr_piv(A, mode='reduced') if you are "
+      "going to differentiate through linalg.qr_piv.");
+
+  auto m = Q.sym_size(-2);
+  auto n = R.sym_size(-1);
+
+  TORCH_CHECK(
+      reduced || m <= n,
+      "The pivoted QR decomposition is not differentiable when "
+      "mode='complete' and nrows > ncols.");
+
+  auto gA = linalg_qr_backward(gQ, gR, Q, R, mode);
+  // P is a permutation, so the scatter overwrites every entry of gA
+  return gA.scatter(-1, P.unsqueeze(-2).expand_as(gA), gA);
+}
+
+std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
+    const Tensor& dA,
+    const Tensor& Q,
+    const Tensor& R,
+    const Tensor& P,
+    const std::string_view mode) {
+  // For a perturbation dA of A with factorization A P = Q R,
+  // the JVP satisfies dA P = dQ R + Q dR, assuming the pivot
+  // pattern is locally constant (dP = 0).
+
+  auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
+
+  TORCH_CHECK(
+      compute_q,
+      "The derivative of linalg.qr_piv depends on Q, which is not computed when "
+      "mode='r'. Please use linalg.qr_piv(A, mode='reduced') if you are "
+      "going to differentiate through linalg.qr_piv.");
+
+  TORCH_CHECK(
+      reduced || dA.sym_size(-2) <= dA.sym_size(-1),
+      "The pivoted QR decomposition is not differentiable when "
+      "mode='complete' and nrows > ncols.");
+
+  auto dAP = dA.gather(-1, P.unsqueeze(-2).expand_as(dA));
+  return linalg_qr_jvp(dAP, Q, R, mode);
+}
+
 // Based on:
 //
 // Mathias, Roy.
