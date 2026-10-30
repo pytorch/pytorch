@@ -492,19 +492,11 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("backend", &CacheEntry::backend)
       .def_readonly(
           "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
-      .def(
-          "update_diff_guard_root_manager",
-          &CacheEntry::update_diff_guard_root_manager)
-      // Python is handed copies, so compare the entries they were taken from.
-      // compile_id rules out a later entry reusing a freed one's address.
       .def("__eq__", &CacheEntry::py_equal, py::is_operator())
       .def("__hash__", &CacheEntry::py_hash);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
       .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
-
-  py::class_<ExtraState>(m, "_ExtraState")
-      .def("invalidate", &ExtraState::invalidate);
 
   py::enum_<FrameAction>(m, "_FrameAction")
       .value("DEFAULT", FrameAction::DEFAULT)
@@ -553,6 +545,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
+  m.def("_invalidate_cache_entry", &_invalidate_cache_entry);
+  m.def("_update_diff_guard_root_manager", &_update_diff_guard_root_manager);
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
   m.def("set_bytecode_debugger_callback", &set_bytecode_debugger_callback);
