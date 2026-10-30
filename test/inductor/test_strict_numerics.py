@@ -419,6 +419,20 @@ class StrictNumericsCompileTest(TestCase):
         )
         self.assertEqual(compiled(x, divisor), fn(x, divisor))
 
+    @config.patch({"numerics": "strict_pointwise", "graph_partition": True})
+    @dtypes(torch.float32)
+    def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(self, device, dtype):
+        # Cover CPU scalar movement under cudagraphs, absent from the generic test.
+        # Non-strict returns 3.0: it divides directly instead of multiplying.
+        x = torch.tensor([11.4375], device=device, dtype=dtype)
+        divisor = torch.tensor(3.8125, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
     @dtypes(torch.float16, torch.bfloat16)
     def test_div_trunc_cpu_scalar_precision(self, device, dtype):
         # Cover mixed-dtype CPU scalar promotion.

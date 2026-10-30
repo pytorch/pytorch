@@ -74,6 +74,7 @@ from ..utils import (
     is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
+    is_strict_cuda_triton,
     is_view,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
@@ -3033,6 +3034,18 @@ class ConstructorMoverPass:
             return True
 
         if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
+            return True
+
+        if (
+            node.target == aten.div.Tensor_mode
+            and node.kwargs.get("rounding_mode") == "trunc"
+            and (device := self.get_node_device(node)) is not None
+            and is_strict_cuda_triton(device)
+            and isinstance(divisor := get_arg_value(node, 1, "other"), fx.Node)
+            and self.is_cpu_scalar_tensor(divisor)
+        ):
+            # For strict mode, match eager use of reciprocal multiplication
+            # for CPU scalar divisors.
             return True
 
         return False
