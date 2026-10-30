@@ -3075,7 +3075,11 @@ class GraphLowering(torch.fx.Interpreter):
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
 
-    def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
+    def codegen(
+        self, *, enclosing_device: torch.device | None = None
+    ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
+        """enclosing_device: a device whose guard every caller of this graph's
+        code has already entered, so codegen need not enter it again."""
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             self.init_wrapper_code()
 
@@ -3083,7 +3087,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
             self.wrapper_code.push_codegened_graph(self)
-            self.scheduler.codegen()
+            self.scheduler.codegen(enclosing_device=enclosing_device)
 
             log.debug(
                 "Finished codegen for all nodes. The list of kernel names available: %s",

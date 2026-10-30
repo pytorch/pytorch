@@ -2446,6 +2446,8 @@ class PythonWrapperCodegen(CodeGen):
         self._meta_vars: OrderedSet[str] = OrderedSet()
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
+        # Locals holding a switch selector's value; see codegen_switch.
+        self.used_switch_selector: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
 
         # intermediate tensor value printing utility
@@ -3165,12 +3167,24 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
+    def can_inherit_device_guard(self, multi_stream: bool) -> bool:
+        """Whether a subgraph's code may run inside its caller's device guard
+        instead of entering its own. Not when entering a guard also emits setup
+        the subgraph's code uses: compile-time autotuning's block, the
+        compile-on-one-rank device index, stream locals. A subclass whose
+        codegen_device_guard_enter emits more must override this."""
+        return not (
+            multi_stream or config.triton.autotune_at_compile_time or _coor_enabled()
+        )
+
     def codegen_device_guard_enter(
         self,
         device_idx: int,
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
+        # Setup emitted here beyond the guard itself must be reflected in
+        # can_inherit_device_guard, including in subclasses.
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
@@ -6415,7 +6429,7 @@ class PythonWrapperCodegen(CodeGen):
             f"{outer_buffer_name} = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
-    def codegen_subgraph_common(self, subgraph):
+    def codegen_subgraph_common(self, subgraph, *, enclosing_device=None):
         self.push_codegened_graph(subgraph.graph)
         self.make_comment("")
         self.make_comment(f"{self.comment} subgraph: {subgraph.name}")
@@ -6443,7 +6457,9 @@ class PythonWrapperCodegen(CodeGen):
                 V.set_graph_handler(subgraph.graph),
             ):
                 # Call the codegen of subgraph recursively
-                subgraph_code, _ = subgraph.graph.codegen()
+                subgraph_code, _ = subgraph.graph.codegen(
+                    enclosing_device=enclosing_device
+                )
             subgraph_name = subgraph.graph.name
             self.already_codegened_subgraphs.add(subgraph_name)
             self.define_subgraph_launcher_fn(subgraph_name, subgraph_code)
@@ -6456,10 +6472,12 @@ class PythonWrapperCodegen(CodeGen):
             subgraph, outer_inputs, outer_flattened_outputs
         )
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_buffer_name):
+    def codegen_subgraph(
+        self, subgraph, outer_inputs, outer_buffer_name, *, enclosing_device=None
+    ):
         # Codegen subgraph by recursively calling the codegen for the subgraph.
         # This lifts the subgraph as a function in the output code.
-        self.codegen_subgraph_common(subgraph)
+        self.codegen_subgraph_common(subgraph, enclosing_device=enclosing_device)
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_buffer_name)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
@@ -6497,16 +6515,26 @@ class PythonWrapperCodegen(CodeGen):
         selector_ref = node.selector.codegen_reference()
         # Evaluate the selector once into a named local.
         selector_var = f"{name}_selector"
-        if not isinstance(node.selector, ir.ShapeAsConstantBuffer):
-            # move the Tensor selector to host; always as int so the branch loop
-            # can use uniform index comparisons (cond: True==1, False==0)
-            self.writeline(f"{selector_var} = int({selector_ref}.item())")
-        else:
+        if isinstance(node.selector, ir.ShapeAsConstantBuffer):
             # ShapeAsConstantBuffer yields a Python bool/int expression; wrap in
             # int() so "== <idx>" comparisons don't form a Python chained comparison.
             self.writeline(f"{selector_var} = int({selector_ref})")
+        else:
+            # AOT mode inlines branches into if-blocks, where a read might never
+            # run; otherwise branches are functions, and the first read always
+            # runs before any later switch on the same selector.
+            if not V.graph.aot_mode and self.is_shareable_selector(node.selector):
+                selector_var = f"{node.selector.get_name()}_selector"
+            if selector_var not in self.used_switch_selector:
+                # move the Tensor selector to host; always as int so the branch loop
+                # can use uniform index comparisons (cond: True==1, False==0)
+                self.writeline(f"{selector_var} = int({selector_ref}.item())")
+                self.used_switch_selector.add(selector_var)
 
         self.writeline(f"{name} = [None] * {len(node.outputs)}")
+        # Each branch function is only called below, inside this node's device
+        # guard, so it need not enter the guard itself.
+        device = node.get_device()
 
         def _emit_branch(keyword: str, condition: str, branch) -> None:
             self.writeline(f"{keyword}{condition}:")
@@ -6515,7 +6543,9 @@ class PythonWrapperCodegen(CodeGen):
                 outer_outputs = [f"{name}[{i}]" for i in range(len(node.outputs))]
                 self.codegen_subgraph_by_inlining(branch, outer_inputs, outer_outputs)
             else:
-                self.codegen_subgraph(branch, outer_inputs, name)
+                self.codegen_subgraph(
+                    branch, outer_inputs, name, enclosing_device=device
+                )
             self.writeline(ExitSubgraphLine(self))
 
         num_branches = len(node.branches)
