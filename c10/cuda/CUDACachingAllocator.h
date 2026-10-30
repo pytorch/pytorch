@@ -3,6 +3,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAGraphMemory.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -159,8 +160,16 @@ class CUDAAllocator : public DeviceAllocator {
   // allocations into a private mempool and can be invoked without an active
   // cudaStreamBeginCapture (e.g. from torch.cuda.use_mem_pool, NCCL
   // registration, or inductor cudagraph_trees warmup).
-  virtual void markCaptureBegin(c10::DeviceIndex /*device*/) {}
-  virtual void markCaptureEnd(c10::DeviceIndex /*device*/) {}
+  // The default hooks do not track or validate captures.
+  virtual void markCaptureBegin(
+      c10::DeviceIndex /*device*/,
+      const CUDAGraphMemory::CaptureRegistration& /*registration*/) {}
+  // Return the number of invalid conditional-scope frees in this capture.
+  virtual size_t markCaptureEnd(
+      c10::DeviceIndex /*device*/,
+      CaptureId_t /*capture_id*/) {
+    return 0;
+  }
   // Whether the current stream on `device` is inside a CUDA graph capture.
   // The native allocator answers from the capture count kept by
   // markCaptureBegin/markCaptureEnd and only queries the driver while a
@@ -483,14 +492,6 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
-}
-
-inline void markCaptureBegin(c10::DeviceIndex device) {
-  get()->markCaptureBegin(device);
-}
-
-inline void markCaptureEnd(c10::DeviceIndex device) {
-  get()->markCaptureEnd(device);
 }
 
 inline bool isCaptureContext(c10::DeviceIndex device) {
