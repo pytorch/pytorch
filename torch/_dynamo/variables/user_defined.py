@@ -120,7 +120,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import ConstDictVariable, OrderedDictVariable, pyanydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -3207,15 +3207,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 and name not in self._slotdefs
                 and not trace_rules.is_polyfilled_callable(method)
             ):
-                # Inherited non-slot C methods beyond object without Torch/polyfill
-                # handling dispatch through their defining descriptor. This includes
-                # ordinary inheritance and aliases such as `copy = dict.copy`.
+                # Dispatch C descriptors such as `copy = dict.copy` through their defining type.
                 return variables.MethodDescriptorVariable(
                     method, owner=VariableTracker.build(tx, method.__objclass__)
                 ).call_function(tx, [self, *args], kwargs)
 
-            # Slots, Torch methods and registered polyfills retain their specialized
-            # paths; Python overrides continue through UserMethodVariable below.
+            # Keep specialized slot/Torch/polyfill dispatch and Python overrides below.
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -3225,9 +3222,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Remaining non-slot base methods (polyfilled C descriptors and methods
-            # of other types) use the base VT. Slot names stay on the subclass's
-            # protocol path, including comparisons of tensor elements.
+            # Other non-slot methods use the base VT; slots preserve subclass semantics.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -4035,6 +4030,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
+            if (
+                isinstance(type_attr, types.MethodDescriptorType)
+                and self.lookup_method_descriptor(type_attr) is not None
+            ):
+                return variables.BoundBuiltinMethodVariable(
+                    type_attr, self, source=source
+                )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -5297,7 +5299,7 @@ class DefaultDictVariable(ConstDictVariable):
         if not isinstance(self_, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
-        if not pydict_check(other_):
+        if not pyanydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
         cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
