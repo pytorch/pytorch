@@ -353,6 +353,11 @@ class MetaTensorDescriber:
                     and not base.is_nested
                     and t.layout == torch.strided
                     and base.layout == torch.strided
+                    # A traceable wrapper subclass (e.g. AsyncCollectiveTensor) can
+                    # rewrap a view output, giving the wrapper a fresh outer storage
+                    # even though it is a real view, so the storage test would wrongly
+                    # mark it stale. Skip it for those.
+                    and not is_traceable_wrapper_subclass_v
                     and base.untyped_storage()._cdata != t.untyped_storage()._cdata
                 ):
                     is_view = False
@@ -522,7 +527,10 @@ class MetaTensorDescriber:
                 else None
             ),
             creation_meta=(
-                torch._C._autograd._get_creation_meta(t) if t._is_view() else None
+                # Gate on the local ``is_view`` (which the stale-_base check may
+                # have downgraded), not ``t._is_view()``: a downgraded descriptor
+                # must not carry creation_meta alongside ``is_view=False``.
+                torch._C._autograd._get_creation_meta(t) if is_view else None
             ),
             unwrapped=unwrapped,
             level=(
@@ -533,7 +541,7 @@ class MetaTensorDescriber:
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
             base=(
                 self.describe_tensor(t._base, trace=trace)
-                if recurse and t._is_view() and t._base is not None
+                if recurse and is_view and t._base is not None
                 else None
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),

@@ -4824,6 +4824,26 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
+    def test_stale_base_at_entry_not_aliased(self):
+        # The input is already stale when the compiled function is called:
+        # dest.set_(src) runs before compile, so dest._base still points at the
+        # old storage while dest now owns src's. describe_tensor and
+        # _view_base_sharing_storage must see dest as standalone, not alias storage.
+        def fn(dest, storage):
+            dest[0] = 10.0
+            return storage[0].clone()
+
+        storage = torch.arange(5, dtype=torch.float32)
+        dest = storage[:3]
+        dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is now stale
+
+        expected_storage = storage.clone()
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            s = expected_storage.clone()
+            torch.compile(fn, backend=backend)(dest, s)
+            self.assertEqual(s, expected_storage)
+
     def test_set_new_base_stays_aliased(self):
         # After dest.set_(src), dest must alias src, not its old base.
         def fn(dest, src):
