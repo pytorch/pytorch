@@ -571,6 +571,74 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_compiled_graph_wrapper_bypasses_cache(self):
+        """
+        A cache hit would skip compiled_graph_wrapper, so it bypasses
+        AOTAutogradCache while set and normal hits resume once it is unset.
+        """
+        hook_calls: list[str] = []
+
+        def hook(compiled, graph_name, *, graph_role):
+            hook_calls.append(graph_role)
+            return compiled
+
+        def fn(x):
+            return x.sin() * 2
+
+        a = torch.rand(8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        with functorch_config.patch(compiled_graph_wrapper=hook):
+            for _ in range(2):
+                self._clear_dynamo_and_codecache()
+                self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(hook_calls, ["inference", "inference"])
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a), compiled_fn(a))
+        self.assertEqual(hook_calls, ["inference", "inference"])
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(enable_autograd_cache=True, compiled_graph_wrapper=None)
+    @parametrize("warm_cache", [False, True])
+    def test_late_compiled_graph_wrapper_only_wraps_uncached_backward(self, warm_cache):
+        hook_calls: list[str] = []
+
+        def hook(compiled, graph_name, *, graph_role):
+            hook_calls.append(graph_role)
+            return compiled
+
+        def fn(x):
+            return x.sin() * 2
+
+        compiled_fn = torch.compile(fn, backend="inductor", dynamic=False)
+        if warm_cache:
+            seed = torch.randn(8, requires_grad=True)
+            compiled_fn(seed).sum().backward()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+
+        inp = torch.randn(8, requires_grad=True)
+        output = compiled_fn(inp)
+        self.assertEqual(output, fn(inp))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], int(warm_cache))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], int(not warm_cache))
+        with functorch_config.patch(compiled_graph_wrapper=hook):
+            output.sum().backward()
+
+        self.assertEqual(inp.grad, inp.detach().cos() * 2)
+        self.assertEqual(hook_calls, [] if warm_cache else ["backward"])
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
@@ -3814,6 +3882,7 @@ class _MockEntryForPickleTest:
 
 
 @inductor_config.patch("fx_graph_cache", True)
+@instantiate_parametrized_tests
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
@@ -3872,6 +3941,75 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                     None,
                     act_input_paths=act_input_paths,
                 )
+
+    @parametrize("strict_mode", ["autograd_cache", "precompile"])
+    @parametrize("bypass_cache_key", [False, True])
+    def test_compiled_graph_wrapper_respects_strict_nonce_policy(
+        self, strict_mode, bypass_cache_key
+    ):
+        def hook(compiled, graph_name, *, graph_role):
+            return compiled
+
+        _, graph, inputs = self._get_dynamo_output(lambda x: x.sin(), torch.ones(3))
+        config = self.default_config()
+        context = TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        with (
+            fresh_cache(),
+            torch._guards.tracing(context),
+            functorch_config.patch(
+                compiled_graph_wrapper=hook,
+                bypass_autograd_cache_key=bypass_cache_key,
+                strict_autograd_cache=strict_mode == "autograd_cache",
+            ),
+            dynamo_config.patch(strict_precompile=strict_mode == "precompile"),
+        ):
+            if not bypass_cache_key:
+                with self.assertRaisesRegex(
+                    BypassAOTAutogradCache, "compiled_graph_wrapper is set"
+                ):
+                    AOTAutogradCache.try_load(
+                        graph, inputs, config, None, local=True, remote=False
+                    )
+            else:
+                keys = []
+                for _ in range(2):
+                    compiled, updated_config = AOTAutogradCache.try_load(
+                        graph, inputs, config, None, local=True, remote=False
+                    )
+                    self.assertIsNone(compiled)
+                    self.assertIsNotNone(updated_config.cache_info)
+                    keys.append(updated_config.cache_info.cache_key)
+                self.assertNotEqual(keys[0], keys[1])
+                self.assertIsNone(config.cache_info)
+
+    @parametrize("aot", [False, True])
+    @parametrize("bypass_cache_key", [False, True])
+    def test_standalone_key_preserves_no_hook_nonce_policy(self, aot, bypass_cache_key):
+        _, graph, inputs = self._get_dynamo_output(lambda x: x.sin(), torch.ones(3))
+        context = TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        with (
+            torch._guards.tracing(context),
+            functorch_config.patch(
+                compiled_graph_wrapper=None,
+                bypass_autograd_cache_key=bypass_cache_key,
+            ),
+            inductor_config.patch(freezing=True),
+        ):
+            if not bypass_cache_key:
+                with self.assertRaisesRegex(BypassAOTAutogradCache, "freezing enabled"):
+                    standalone_compile_autograd_cache_key(
+                        graph, inputs, dynamic_shapes="from_tracing_context", aot=aot
+                    )
+            else:
+                key1, debug1 = standalone_compile_autograd_cache_key(
+                    graph, inputs, dynamic_shapes="from_tracing_context", aot=aot
+                )
+                key2, debug2 = standalone_compile_autograd_cache_key(
+                    graph, inputs, dynamic_shapes="from_tracing_context", aot=aot
+                )
+                self.assertNotEqual(key1, key2)
+                self.assertEqual(debug1, [])
+                self.assertEqual(debug2, [])
 
     @functorch_config.patch({"bypass_autograd_cache_key": True})
     def test_fallback_nonce_cache_dirs_are_unique(self):
