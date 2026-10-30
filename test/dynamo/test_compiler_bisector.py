@@ -13,7 +13,7 @@ from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton
 
@@ -385,11 +385,14 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertIn(expected_result, output.stdout)
 
 
+# mode="reduce-overhead" exercises CUDA cudagraphs, which XPU does not
+# support, so this test stays device-specific rather than joining the
+# accelerator-wide TestCompilerBisectorDevice class.
 class TestCompilerBisectorCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @requires_cuda
-    def test_cudagraph_bisect_max(self):
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_cudagraph_bisect_max(self, device):
         """Test that cudagraph bisector can limit number of cudagraphed graphs."""
         import os
         from unittest.mock import patch
@@ -418,7 +421,7 @@ class TestCompilerBisectorCuda(TestCase):
             try:
                 foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device="cuda")
+                x = torch.randn(10, device=device)
                 foo_c(x)
                 bar_c(x)
 
@@ -432,6 +435,7 @@ class TestCompilerBisectorCuda(TestCase):
 instantiate_device_type_tests(
     TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
 )
+instantiate_device_type_tests(TestCompilerBisectorCuda, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
