@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: pt2"]
+import ast
 import importlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import textwrap
+import unittest
 import uuid
 
 import torch
@@ -17,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 # export_python serves an artifact by importing the module its function was captured
@@ -77,6 +81,10 @@ def countdown(x, n):
 
 def shifted(x):
     return x * 7.25 + 1
+
+def reduce(x):
+    return (x.sin() * 2).sum(dim=-1)
+
 """
 
 
@@ -109,10 +117,7 @@ def _in_a_fresh_process(test, body):
     return out.stdout
 
 
-@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
-class TestExportPython(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class _ExportPythonTestCase(TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -131,6 +136,11 @@ class TestExportPython(TestCase):
         return torch.compiler.export_python(path=path, **kwargs)(
             getattr(self.module, name)
         )
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestExportPython(_ExportPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_first_call_captures_and_later_calls_serve_the_file(self):
         path = os.path.join(self.dir, "artifacts", "scaled.py")
@@ -327,6 +337,44 @@ class TestExportPython(TestCase):
         fn.__module__ = "__main__"
         with self.assertRaisesRegex(PrecompileError, "importable module"):
             torch.compiler.export_python(path=os.path.join(self.dir, "f.py"))(fn)
+
+
+@unittest.skipUnless(HAS_CUDA_AND_TRITON, "needs CUDA and Triton")
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestExportPythonCUDA(_ExportPythonTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_an_edited_kernel_config_is_what_launches(self):
+        path = os.path.join(self.dir, "reduce.py")
+        x = torch.randn(64, 1024, device="cuda")
+        ref = self._export("reduce", path)(x)
+        with open(path) as f:
+            graph_code = f.read().partition("GRAPH_SOURCES = {}")[2]
+        # Compile-time tuning wrote each kernel's launch config into the graph code.
+        row = re.search(r"^    '(triton_\w+)': (\{.*\}),$", graph_code, re.MULTILINE)
+        self.assertIsNotNone(row, "no KERNEL_CONFIGS row in the graph code")
+        name, config = row.group(1), ast.literal_eval(row.group(2))
+        warps = 8 if config["num_warps"] != 8 else 4
+        edited = {**config, "num_warps": warps}
+        _edit_graph_code(path, row.group(0), f"    {name!r}: {edited!r},")
+        torch.save((x, ref), os.path.join(self.dir, "io.pt"))
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch._inductor.codecache import PyCodeCache
+            x, ref = torch.load({os.path.join(self.dir, "io.pt")!r})
+            run = torch.compiler.export_python(path={path!r})(m.reduce)
+            torch.testing.assert_close(run(x), ref)
+            (module,) = (
+                mod
+                for mod in PyCodeCache.modules
+                if getattr(mod, "KERNEL_CONFIGS", {{}}).get({name!r}) == {edited!r}
+            )
+            (launcher,) = getattr(module, {name!r}).launchers
+            if launcher.config.num_warps != {warps}:
+                raise AssertionError(launcher.config)
+            """,
+        )
 
 
 if __name__ == "__main__":
