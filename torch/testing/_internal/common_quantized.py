@@ -521,7 +521,19 @@ def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
 
     return output_scales
 
-def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
+def from_blocked_format(
+    x_mxfp8,
+    scales_unswizzled,
+    blocksize=32,
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
+):
+    if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
+        scales_unswizzled = from_blocked(
+            x_mxfp8, scales_unswizzled.flatten(), blocksize
+        )
+    elif swizzle_type != SwizzleType.NO_SWIZZLE:
+        raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+
     # expand scales
     scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=-1)
 

@@ -43,6 +43,11 @@ from torch._prims_common.wrappers import (
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
+from torch.utils._quantize_tensor_validation import (
+    _get_quant_format,
+    _quantize_tensor_dual_validate_inputs,
+    _quantize_tensor_validate_inputs,
+)
 
 
 _T = TypeVar("_T")
@@ -7534,6 +7539,71 @@ def meta_scaled_mm(
     return _check_scaled_mm_sizes(
         self, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum
     )
+
+
+@register_meta([aten._quantize_tensor.default])
+def meta_quantize_tensor(
+    input: torch.Tensor,
+    dim: list[int],
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        infer_blockscaled_tma_outputs,
+    )
+    from torch.nn.functional import SwizzleType
+
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
+    )
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    axes = _quantize_tensor_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(
+        input,
+        axes,
+        scaling_type_use_square_block_size,
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
+        False,
+    )
+
+
+@register_meta([aten._quantize_tensor_dual.default])
+def meta_quantize_tensor_dual(
+    input: torch.Tensor,
+    dim: list[int],
+    scaling_type: int,
+    qdata_dtype: torch.dtype,
+    scaling_algorithm: int,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool = False,
+) -> list[torch.Tensor]:
+    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        infer_blockscaled_tma_outputs,
+    )
+
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
+    )
+    quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    axes = _quantize_tensor_dual_validate_inputs(
+        quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
+    )
+    return infer_blockscaled_tma_outputs(input, axes, False, True, True)
 
 
 @register_meta([aten._scaled_mm_v2.default])
