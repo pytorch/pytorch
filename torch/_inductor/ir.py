@@ -11527,8 +11527,6 @@ class Switch(ExternKernel):
         """Create a sequence of IRNodes from a switch/cond statement."""
         # pyrefly: ignore [bad-assignment]
         selector = cls.realize_input(selector)
-        # pyrefly: ignore [bad-assignment]
-        operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         if not isinstance(fx_operands, Sequence):
@@ -11543,6 +11541,16 @@ class Switch(ExternKernel):
             else:
                 # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
+
+        # The branches are compiled for the operands' fake strides, so pin each
+        # realized operand to them (free for a FlexibleLayout producer).
+        # pyrefly: ignore [bad-assignment]
+        operands = [
+            ExternKernel.require_exact_strides(x, fake.stride())
+            if isinstance(fake, torch.Tensor)
+            else x
+            for x, fake in zip(map(cls.realize_input, operands), fake_operands)
+        ]
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(

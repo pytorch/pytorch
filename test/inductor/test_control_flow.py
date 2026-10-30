@@ -26,6 +26,11 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
 
 
+@torch.library.custom_op("test_control_flow::flip_", mutates_args=("p",))
+def flip_(p: torch.Tensor) -> None:
+    p.logical_not_()
+
+
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1, device=None):
     result = []
     if len(inputs) != 0:
@@ -335,6 +340,18 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [x])
 
+    class OperandStrides(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return x.sum(0) + y.sum(0)
+
+            def false_fn(x, y):
+                return x.amax(0) - y.amax(0)
+
+            # Eager gives both operands a.t()'s column-major strides. Inductor
+            # lays out x row-major (it follows b) and pads y's leading stride.
+            return torch.cond(p, true_fn, false_fn, (a.t() + b, a.t().relu()))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -402,6 +419,63 @@ class CondTests(TestCase):
             inputs=(torch.randn(15, 19500),),
             device=GPU_TYPE,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_operand_strides(self, device):
+        # The branches are compiled for the operands' eager strides. 8261 rows
+        # trigger stride padding on GPU.
+        self._run_test(
+            model=CondModels.OperandStrides(),
+            inputs=(torch.randn(19, 8261), torch.randn(8261, 19)),
+            device=device,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_predicate_views_of_one_buffer(self, device):
+        # Each predicate is a different view of one buffer, so each needs its own read.
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            q = ~p
+            a = torch.cond(p[0], true_fn, false_fn, (x,))[0]
+            b = torch.cond(p[1], true_fn, false_fn, (x,))[0]
+            c = torch.cond(q[0], true_fn, false_fn, (x,))[0]
+            return a, b, c, torch.cond(q[1], true_fn, false_fn, (x,))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for preds in ([True, False], [False, True]):
+            p = torch.tensor(preds)
+            self.assertEqual(compiled(p, x), model(p, x))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_mutated_input_predicate(self, device):
+        # A custom op mutates the input in place, so the second cond reads the
+        # input buffer again (logical_not_ would be functionalized into a new one).
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            flip_(p)
+            return a, torch.cond(p, true_fn, false_fn, (x,))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for pred in (True, False):
+            p, p_ref = torch.tensor(pred), torch.tensor(pred)
+            self.assertEqual(compiled(p, x), model(p_ref, x))
+            self.assertEqual(p, p_ref)
 
     @requires_gpu
     @torch._functorch.config.patch("donated_buffer", True)

@@ -6478,6 +6478,16 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
+    @staticmethod
+    def is_shareable_selector(selector: ir.IRNode) -> bool:
+        """Whether a switch selector is an unmutated buffer (not a view of one), so
+        every switch on it can share one read of its value."""
+        return (
+            isinstance(selector, ir.StorageBox)
+            and selector.get_name() not in V.graph.mutated_inputs
+            and selector.get_name() not in V.graph.mutated_buffers
+        )
+
     def codegen_switch(self, node) -> None:
         name = node.get_name()
 
