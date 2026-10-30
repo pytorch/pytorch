@@ -38,13 +38,14 @@ class FakePermissionGitHub:
 
 
 class GateFactTest(unittest.TestCase):
-    def test_already_handled_uses_only_prior_outcome_labels(self) -> None:
+    def test_already_handled_uses_only_prior_outcome_and_opt_out_labels(self) -> None:
         self.assertFalse(is_already_handled([{"name": "open source"}]))
         self.assertFalse(is_already_handled([]))
         for label in (
             "triaged",
             "bot-triaged",
             "bot-triage-error",
+            "no automated triage",
         ):
             with self.subTest(label=label):
                 self.assertTrue(is_already_handled([{"name": label}]))
@@ -589,8 +590,6 @@ def intake_argv(*, output_dir: Path, github_output: Path) -> list[str]:
         REPOSITORY,
         "--workflow-sha",
         "a" * 40,
-        "--expected-base-ref",
-        "main",
         "--output-dir",
         str(output_dir),
         "--github-output",
@@ -691,12 +690,15 @@ class IntakeMainTest(unittest.TestCase):
         activity: tuple[str, tuple[str, ...]] | None,
         *,
         body: str = "fixture body",
+        base_ref: str = "main",
         fetch_permission: mock.Mock | None = None,
         fetch_labels: mock.Mock | None = None,
         fetch_labelers: mock.Mock | None = None,
     ) -> tuple[IntakeResult, dict[str, str], mock.Mock, mock.Mock]:
         github = mock.Mock()
-        github.json.return_value = external_pr(body=body)
+        github.json.return_value = external_pr(
+            body=body, base={"ref": base_ref, "repo": {"full_name": REPOSITORY}}
+        )
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory) / "output"
             github_output = Path(directory) / "github-output"
@@ -767,11 +769,24 @@ class IntakeMainTest(unittest.TestCase):
             author_login="external-author",
         )
 
+    def test_intake_treats_ghstack_base_as_main(self) -> None:
+        intake, outputs, _, _ = self.run_intake_for_external_pr(
+            ("@maintainer", ("comment",)), base_ref="gh/External-Author/12/base"
+        )
+
+        self.assertTrue(intake.facts.is_open_non_draft_pr_against_main)
+        self.assertTrue(intake.facts.passes_intake)
+        self.assertEqual(outputs["active"], "true")
+
     def test_intake_records_inactive_target_without_further_reads(self) -> None:
         cases = (
             (
                 "retargeted",
                 {"base": {"ref": "release", "repo": {"full_name": REPOSITORY}}},
+            ),
+            (
+                "ghstack head branch",
+                {"base": {"ref": "gh/user/1/head", "repo": {"full_name": REPOSITORY}}},
             ),
             ("closed", {"state": "closed"}),
             ("draft", {"draft": True}),

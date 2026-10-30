@@ -37,6 +37,11 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
+  // Remove Fake when creating the wrapper: the wrapper is not a C++ FakeTensor,
+  // only value_ is (similar to removing python_ks so the wrapper is not treated
+  // as a tensor subclass). This matters because C++ FakeTensor is identified by
+  // the Fake key rather than isinstance(FakeTensor) as with Python FakeTensor.
+  key_set_ = key_set_ - c10::DispatchKeySet(c10::DispatchKey::Fake);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
@@ -864,7 +869,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
 
   // Wrap all tensor-like inputs into FunctionalTensorWrappers.
   // When we re-invoke the dispatcher, this will automatically enable the functionalization pass.
-  for (uint64_t idx = 0; idx < num_arguments; ++idx) {
+  for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& t = ivalue.toTensor();
