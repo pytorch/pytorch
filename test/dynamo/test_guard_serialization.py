@@ -1578,7 +1578,7 @@ class _KeyNormalizingOrderedDict(collections.OrderedDict):
 class _OrderedDictWithGetState(collections.OrderedDict):
     def __init__(self):
         super().__init__(constructor=0)
-        self.recreated = object()
+        self.recreated = "constructor"
         self.saved = 0
 
     def __getstate__(self):
@@ -1596,7 +1596,7 @@ class _OrderedDictMeta(type):
     def __call__(cls):
         result = super().__call__()
         result["constructor"] = 0
-        result.recreated, result.saved = object(), 0
+        result.recreated, result.saved = "constructor", 0
         return result
 
 
@@ -1613,9 +1613,26 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    class NestedOrderedDict(collections.OrderedDict):
+        pass
+
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
+
+    @parametrize("local", [False, True])
+    def test_ordered_dict_requires_global_class(self, local):
+        class LocalOrderedDict(collections.OrderedDict):
+            pass
+
+        mapping_type = LocalOrderedDict if local else self.NestedOrderedDict
+        mapping = mapping_type(a=1)
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, io.BytesIO()).dump(
+                mapping
+            )
 
     @parametrize(
         "mapping_type",
@@ -1672,6 +1689,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         mapping.update(a=1, b=2)
         mapping.move_to_end("a")
         mapping.saved = saved
+        mapping.recreated = "overwritten"
         expected = pickle.loads(pickle.dumps(mapping))
         buf = io.BytesIO()
         GuardsStatePickler({id(mapping): mapping}, {}, {}, {}, buf).dump(mapping)
@@ -1680,7 +1698,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(list(dict.keys(loaded)), list(dict.keys(expected)))
         self.assertEqual(loaded.saved, expected.saved)
         self.assertEqual(vars(loaded).keys(), vars(expected).keys())
-        self.assertIsNot(loaded.recreated, mapping.recreated)
+        self.assertEqual(loaded.recreated, "constructor")
         if mapping_type is _OrderedDictWithSetState and saved is not None:
             self.assertEqual(loaded.state_restored, expected.state_restored)
 
