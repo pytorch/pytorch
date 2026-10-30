@@ -924,6 +924,25 @@ user_stack=None)
         self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
         self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
 
+    def test_compute_overlapping_tensors_2d_rows(self):
+        # Views with contiguous rows and one row stride overlap when a row of one
+        # starts inside a row of the other, whichever rows those are.
+        base = torch.zeros(5, 10)
+        for symbolic in (False, True):
+            overlapping = [base[0:4, 0:5], base[1:5, 2:5]]
+            self.assertEqual(
+                guards.compute_overlapping_tensors(overlapping, symbolic), {0, 1}
+            )
+            overlapping = [base[:4, :3], base[1:5, 2:5]]
+            self.assertEqual(
+                guards.compute_overlapping_tensors(overlapping, symbolic), {0, 1}
+            )
+            # Columns of a fused buffer, which interleave without overlapping.
+            columns = [base[:, :5], base[:, 5:]]
+            self.assertEqual(
+                guards.compute_overlapping_tensors(columns, symbolic), set()
+            )
+
     def test_globals(self):
         global global_pair, Pair
         guard_manager = RootGuardManager()
