@@ -413,6 +413,13 @@ TEST_F(XpuptiActivityHandlersTest, SwimLanesStayPerSyclQueueNotPerEngine) {
   ASSERT_EQ(traceBuffer->activities.size(), 2);
   EXPECT_EQ(traceBuffer->activities[0]->resourceId(), 64);
   EXPECT_EQ(traceBuffer->activities[1]->resourceId(), 64);
+  // The stream metadata is the same SYCL queue id the lane is keyed by.
+  EXPECT_EQ(
+      traceBuffer->activities[0]->getMetadataValue(XpuMetadataFields::kStream),
+      std::optional<int64_t>{64});
+  EXPECT_EQ(
+      traceBuffer->activities[1]->getMetadataValue(XpuMetadataFields::kStream),
+      std::optional<int64_t>{64});
 
   const auto resourceInfos = session->getResourceInfos();
   ASSERT_EQ(resourceInfos.size(), 1);
