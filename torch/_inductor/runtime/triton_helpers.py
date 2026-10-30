@@ -187,6 +187,94 @@ def fp8e4m3fn_to_float32(x):
 
 
 @triton.jit
+def round_float32_to_bits(
+    x,
+    MODE: tl.constexpr,
+    MANT_BITS: tl.constexpr,
+    BIAS: tl.constexpr,
+    SIGNED: tl.constexpr,
+    HAS_NEG_ZERO: tl.constexpr,
+    HAS_SUBNORMALS: tl.constexpr,
+    SIGN_BIT: tl.constexpr,
+    MAX_FINITE: tl.constexpr,
+    OVERFLOW: tl.constexpr,
+    NAN: tl.constexpr,
+):
+    """
+    Port of c10::convert_with_rounding (c10/util/FloatRounding.h) for float32
+    inputs. MODE is 0 (to_nearest_even), 1 (toward_zero), 2 (toward_positive)
+    or 3 (toward_negative); the other parameters describe the destination
+    format (see ROUNDING_FORMATS in torch/_inductor/codegen/triton.py).
+    Returns the destination's bits as int32.
+    """
+    bits = x.to(tl.int32, bitcast=True)
+    exp_field = (bits >> 23) & 0xFF
+    mant = bits & 0x7FFFFF
+    if SIGNED:
+        neg = bits < 0
+    else:
+        neg = bits != bits
+    sign = tl.where(neg, SIGN_BIT, 0)
+
+    # Normalize subnormal inputs; the exponent of float(mant), which is exact,
+    # gives the position of its leading one.
+    is_sub = exp_field == 0
+    sub_top = ((mant.to(tl.float32).to(tl.int32, bitcast=True) >> 23) & 0xFF) - 127
+    sub_shift = tl.minimum(tl.maximum(23 - sub_top, 0), 23)
+    sig = tl.where(is_sub, mant << sub_shift, mant | 0x800000)
+    top_exp = tl.where(is_sub, sub_top - 149, exp_field - 127)
+
+    if HAS_SUBNORMALS:
+        EMIN: tl.constexpr = 1 - BIAS
+    else:
+        EMIN: tl.constexpr = -BIAS
+    # Number of low bits of sig below the destination's quantum.
+    shift = (23 - MANT_BITS) + tl.maximum(EMIN - top_exp, 0)
+    big = shift > 24
+    s = tl.minimum(shift, 24)
+    kept = tl.where(big, 0, sig >> s)
+    guard = tl.where(big, 0, (sig >> (s - 1)) & 1)
+    sticky = tl.where(big, 1, ((sig & ((1 << (s - 1)) - 1)) != 0).to(tl.int32))
+    enc = tl.where(
+        top_exp >= EMIN,
+        ((top_exp + BIAS) << MANT_BITS) + kept - (1 << MANT_BITS),
+        kept,
+    )
+
+    if MODE == 0:
+        to_zero = neg != neg
+        if MANT_BITS == 0:
+            enc += guard
+        else:
+            enc += guard & (sticky | (enc & 1))
+    else:
+        if MODE == 1:
+            to_zero = neg == neg
+        elif MODE == 2:
+            to_zero = neg
+        else:
+            to_zero = ~neg
+        enc += tl.where(to_zero, 0, guard | sticky)
+
+    result = tl.where(enc > MAX_FINITE, tl.where(to_zero, MAX_FINITE, OVERFLOW), enc)
+    if not HAS_SUBNORMALS:
+        # No zero or subnormals to round to: clamp to the smallest value.
+        result = tl.where(top_exp < EMIN, 0, result)
+    if HAS_NEG_ZERO:
+        result = result | sign
+    else:
+        result = tl.where(result == 0, result, result | sign)
+    is_zero = is_sub & (mant == 0)
+    if HAS_NEG_ZERO:
+        result = tl.where(is_zero, sign, result)
+    else:
+        result = tl.where(is_zero, 0, result)
+    return tl.where(
+        exp_field == 0xFF, tl.where(mant != 0, NAN | sign, OVERFLOW | sign), result
+    )
+
+
+@triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer
