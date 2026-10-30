@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import importlib.metadata
 import os
 import pickle
 import re
@@ -10,7 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -366,6 +367,49 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
+    def test_fake_backend_registration(self):
+        from torch.distributed._backends import fake
+        from torch.testing._internal.distributed import fake_pg
+
+        def ensure_registered_without_entrypoint():
+            with unittest.mock.patch(
+                "importlib.metadata.entry_points", return_value=[]
+            ):
+                dist.Backend._ensure_backend_registered("fake")
+
+        for name, register in {
+            "fallback": ensure_registered_without_entrypoint,
+            "testing_shim": lambda: importlib.reload(fake_pg),
+        }.items():
+            with self.subTest(name), unittest.mock.patch.dict(dist.Backend._plugins):
+                dist.Backend._plugins.pop("FAKE", None)
+                register()
+                creator = dist.Backend._plugins["FAKE"].creator_fn
+                self.assertIs(creator, fake._create_fake_pg)
+
+        # fbcode/sandcastle builds have no installed entry points.
+        if IS_FBCODE or IS_SANDCASTLE:
+            return
+        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+        self.assertEqual(
+            [ep.value for ep in eps if ep.name == "fake"],
+            ["torch.distributed._backends.fake:_register_fake_backend"],
+        )
+        # A fresh process registers "fake" without importing it up front.
+        script = (
+            "import sys, torch, torch.distributed as dist\n"
+            "print('torch.distributed._backends.fake' in sys.modules)\n"
+            "dist.init_process_group('fake', rank=0, world_size=2)\n"
+            "print('torch.testing._internal.distributed.fake_pg' in sys.modules)\n"
+            "print(type(dist.get_backend_impl(device=torch.device('cpu'))).__module__)\n"
+        )
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], text=True, timeout=120
+        )
+        self.assertEqual(
+            out.split(), ["False", "False", "torch.distributed._backends.fake"]
+        )
+
     @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
         timeout = timedelta(seconds=1)
@@ -669,6 +713,7 @@ class SparseGradientModule(nn.Module):
 
 class CommonDistributedDataParallelTest:
     def tearDown(self):
+        super().tearDown()
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
@@ -3280,6 +3325,68 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             dist.all_to_all_single(output_tensor, input_tensor)
 
 
+@instantiate_parametrized_tests
+class CollectiveConfigTest(TestCase):
+    @contextmanager
+    def _group(self, backend="fake"):
+        if backend == "gloo" and not dist.is_gloo_available():
+            self.skipTest("Gloo is unavailable")
+        kwargs = {"store": dist.HashStore()} if backend == "gloo" else {}
+        dist.init_process_group(backend, rank=0, world_size=1, **kwargs)
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize("frontend", ["compile", "export_strict", "export_nonstrict"])
+    @parametrize("config_kind", ["omitted", "none"])
+    def test_tracing(self, name, frontend, config_kind):
+        torch._dynamo.reset()
+        collective = getattr(dist, name)
+        kwargs = {}
+        if config_kind != "omitted":
+            kwargs["config"] = None
+
+        class Module(nn.Module):
+            def forward(self, tensor):
+                output = tensor.clone()
+                if name == "all_reduce":
+                    collective(output, **kwargs)
+                elif name == "all_gather":
+                    collective([output], tensor, **kwargs)
+                elif name == "reduce_scatter":
+                    collective(output, [tensor], **kwargs)
+                else:
+                    collective(output, tensor, **kwargs)
+                return output
+
+        with self._group():
+            module = Module()
+            tensor = torch.ones(2)
+            if frontend == "compile":
+                compiled = torch.compile(module, backend="eager", fullgraph=True)
+            else:
+                compiled = torch.export.export(
+                    module, (tensor,), strict=frontend == "export_strict"
+                ).module()
+            self.assertEqual(compiled(tensor), module(tensor))
+
+
 class ReduceOpTest(TestCase):
     # Ref: https://github.com/pytorch/pytorch/issues/87191
     def test_op_isinstance_of_reduceop(self):
@@ -3299,6 +3406,12 @@ class ReduceOpTest(TestCase):
             premul_sum = c10d.ReduceOp.PREMUL_SUM(scale)
             self.assertIsInstance(premul_sum, c10d.ReduceOp)
             self.assertEqual(premul_sum.factor, scale)
+
+        # `op` is writable, so PREMUL_SUM can lack its factor supplement.
+        reduce_op = c10d.ReduceOp(c10d.ReduceOp.SUM)
+        reduce_op.op = c10d.ReduceOp.PREMUL_SUM
+        with self.assertRaisesRegex(RuntimeError, "has no factor"):
+            reduce_op.factor
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
