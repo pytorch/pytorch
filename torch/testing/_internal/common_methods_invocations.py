@@ -6928,9 +6928,10 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(shape), args=(make_arg((S, 1, S)),))
     yield SampleInput(make_arg(shape), args=(None, make_arg(shape)))
     yield SampleInput(make_arg(shape), args=(make_arg(shape), None))
-    # test type promotion
-    yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
-    yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
+    # test type promotion; skipped for bool since the int result can't be written back in-place
+    if dtype is not torch.bool:
+        yield SampleInput(make_arg(shape), args=(make_integral_arg(shape), None))
+        yield SampleInput(make_arg(shape), args=(make_arg(shape), make_integral_arg(shape)))
     # scalar min/max; .item() keeps the input's kind (e.g. Python bool for torch.bool)
     yield SampleInput(make_arg(shape), args=(make_arg(()).item(), make_arg(()).item()))
     yield SampleInput(make_arg(shape), args=(make_arg(()).item(), None))
