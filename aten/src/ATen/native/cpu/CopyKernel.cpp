@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/FloatRounding.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/TensorIteratorInternal.h>
@@ -293,6 +294,13 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
     copy_same_dtype(iter, requires_conj, requires_neg);
   } else if (reduced_float_type_copy(requires_conj, iter)) {
     reduced_float_copy_kernel(iter, requires_neg);
+  } else if (iter.dtype(1) == kDouble && (dtype == kHalf || dtype == kBFloat16 || isFloat8Type(dtype))) {
+    // c10::convert would round twice, through float.
+    AT_DISPATCH_V2(dtype, "copy_", AT_WRAP([&] {
+      cpu_kernel(iter, [requires_neg](double x) -> scalar_t {
+        return c10::convert_with_rounding<scalar_t>(requires_neg ? -x : x, c10::RoundingMode::ToNearestEven);
+      });
+    }), kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
   } else {
     _AT_DISPATCH_ALL_TYPES(dtype, "copy_", [&] {
       using dest_t = scalar_t;
