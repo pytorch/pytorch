@@ -6378,6 +6378,47 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
 
+    @requires_gpu
+    @common_utils.parametrize("via_triton_op", [False, True])
+    def test_omitted_kernel_param_binds_declared_default(self, via_triton_op):
+        # Eager Triton binds an omitted parameter to its declared default; the
+        # captured HOP call must too, or TTIR analysis and the generated
+        # launcher see too few arguments.
+        @triton.jit
+        def scale_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            SCALE: tl.constexpr = 3,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * SCALE, mask=mask)
+
+        def launch(kernel, x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](x, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        if via_triton_op:
+
+            @torch.library.triton_op(
+                "test_default_param::scale", mutates_args={}
+            )
+            def scale(x: torch.Tensor) -> torch.Tensor:
+                return launch(capture_triton(scale_kernel), x)
+
+        else:
+
+            def scale(x: torch.Tensor) -> torch.Tensor:
+                return launch(scale_kernel, x)
+
+        x = torch.randn(37, device=GPU_TYPE)
+        self.assertEqual(torch.compile(scale, fullgraph=True)(x), x * 3)
+
     @requires_cuda_tma
     @requires_gpu
     @common_utils.parametrize("backend", ["aot_eager", "inductor", "aoti"])
