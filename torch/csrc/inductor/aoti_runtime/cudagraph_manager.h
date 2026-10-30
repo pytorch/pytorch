@@ -329,8 +329,8 @@ class CudaGraphManager {
         sources.push_back(block);
       }
       auto n = static_cast<int64_t>(sources.size());
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_foreach_copy_(
-          group.destinations.data(), sources.data(), n));
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_foreach_copy_(
+          group.destinations.data(), n, sources.data(), n, 0));
     }
     for (size_t i : graph.elementwise_inputs) {
       AOTI_TORCH_ERROR_CODE_CHECK(

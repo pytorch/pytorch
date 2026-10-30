@@ -92,6 +92,38 @@ struct ConstantBufferSet {
   }
 };
 
+// A shared mutex whose waiting exclusive lockers keep new shared lockers out.
+// std::shared_mutex does not promise that, and glibc's prefers readers, so a
+// stream of overlapping shared lockers can starve an exclusive locker forever.
+// An exclusive locker holds turnstile_ while it waits, and every shared locker
+// has to pass through turnstile_. As with std::shared_mutex, a thread must not
+// lock it again while holding it: a second lock_shared() deadlocks as soon as
+// an exclusive locker is waiting for the first one to be released.
+class WritePrioritySharedMutex {
+ public:
+  void lock() {
+    std::lock_guard turnstile(turnstile_);
+    mutex_.lock();
+  }
+
+  void unlock() {
+    mutex_.unlock();
+  }
+
+  void lock_shared() {
+    std::lock_guard turnstile(turnstile_);
+    mutex_.lock_shared();
+  }
+
+  void unlock_shared() {
+    mutex_.unlock_shared();
+  }
+
+ private:
+  std::mutex turnstile_;
+  std::shared_mutex mutex_;
+};
+
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
@@ -402,7 +434,7 @@ class AOTInductorModelContainer {
         pool_.return_model_to_available(model);
         throw;
       }
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
@@ -440,7 +472,7 @@ class AOTInductorModelContainer {
         throw;
       }
 
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     }
   }
 
@@ -906,7 +938,7 @@ class AOTInductorModelContainer {
   }
 
   // Folds the constants on the first call, then runs fn on a model instance
-  // checked out of the pool and leaves the instance pending until its work
+  // checked out of the pool and leaves the instance in flight until its work
   // finishes.
   template <typename Fn>
   void run_on_available_model(
@@ -937,7 +969,7 @@ class AOTInductorModelContainer {
           pool_.return_model_to_available(model);
           throw;
         }
-        pool_.return_model_to_pending(model);
+        pool_.return_model_to_in_flight(model);
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -957,7 +989,7 @@ class AOTInductorModelContainer {
       throw;
     }
 
-    pool_.return_model_to_pending(model);
+    pool_.return_model_to_in_flight(model);
   }
 
   // This mutex is used to protect execution of model.
@@ -965,7 +997,15 @@ class AOTInductorModelContainer {
   // We acquire the mutex in unique mode when we want exclusive access of the
   // model. One such case is when we want to do a weight swapping. We want to
   // make sure no one is executing the model.
-  std::shared_mutex model_exec_mutex_;
+  // A waiting exclusive locker blocks new shared lockers and waits for the
+  // current holders. So, unlike glibc's reader-preferring std::shared_mutex, a
+  // thread holding this mutex shared must not lock it again, and must not
+  // block on work that needs another thread to take it: either deadlocks as
+  // soon as a swap or fold is waiting. Waiting for threads that already hold
+  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
+  // on this when they block in pool_.get_available_model() for a model another
+  // holder has checked out.
+  WritePrioritySharedMutex model_exec_mutex_;
 };
 
 } // namespace torch::aot_inductor

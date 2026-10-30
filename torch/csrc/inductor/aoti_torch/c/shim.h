@@ -384,6 +384,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
     AtenTensorHandle src,
     int32_t non_blocking);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// torch._foreach_copy_: copies each src tensor into the dst tensor at the same
+// index; dst_len must equal src_len. On CUDA the copies fuse into one kernel
+// only when all tensors share a device, the dst tensors share a dtype, the src
+// tensors share a dtype, and each dst matches its src's sizes and strides;
+// otherwise each tensor is copied separately, so callers group their lists.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_foreach_copy_(
+    const AtenTensorHandle* dst,
+    int64_t dst_len,
+    const AtenTensorHandle* src,
+    int64_t src_len,
+    int32_t non_blocking);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle a,
@@ -654,6 +668,9 @@ aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 // - use a pool and its graphs from one thread at a time, capture into a pool
 //   one graph at a time, and use a new pool once every graph that began a
 //   capture into it is deleted;
+// - not delete a pool while the thread's current stream on its device is
+//   capturing, which delete_cuda_mem_pool rejects, or while any global-mode
+//   capture is open, which makes freeing the pool's memory abort;
 // - not overlap replays of graphs sharing a pool, and use a replay's outputs
 //   before replaying another graph of the pool, unless replaying in capture
 //   order;
@@ -708,14 +725,6 @@ aoti_torch_cuda_graph_capture_end(CUDAGraphHandle graph);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cuda_graph_replay(CUDAGraphHandle graph);
-
-// torch._foreach_copy_(dst, src) on the current stream: copies each src
-// tensor into the dst tensor at the same index, fusing copies that share a
-// dtype, e.g. for a caller copying inputs into a graph's static buffers.
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_foreach_copy_(
-    const AtenTensorHandle* dst,
-    const AtenTensorHandle* src,
-    int64_t num_tensors);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #endif // USE_CUDA
