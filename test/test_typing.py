@@ -5,10 +5,12 @@ import itertools
 import os
 import re
 import shutil
+import tempfile
 import unittest
 from collections import defaultdict
 from threading import Lock
 from typing import IO
+from unittest import mock
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -73,7 +75,11 @@ def _run_mypy() -> dict[str, list[str]]:
 
         # Parse the output
         iterator = itertools.groupby(stdout.split("\n"), key=_key_func)
-        rc.update((k, list(v)) for k, v in iterator if k)
+        # Notes can point into another file between two errors in the same
+        # fixture. Preserve every group, not just the last one for each path.
+        for key, messages in iterator:
+            if key:
+                rc.setdefault(key, []).extend(messages)
     return rc
 
 
@@ -154,6 +160,29 @@ Observed reveal: {!r}
 def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> None:
     if reveal not in expected_reveal:
         raise AssertionError(_REVEAL_MSG.format(lineno, expected_reveal, reveal))
+
+
+@unittest.skipIf(NO_MYPY, reason="Mypy is not installed")
+class TestMypyOutput(TestCase):
+    def test_interleaved_diagnostics(self):
+        path = os.path.join(FAIL_DIR, "fixture.py")
+        stub = os.path.join(DATA_DIR, "bindings.pyi")
+        first_error = f'{path}:6:1: error: Module has no attribute "QRResult"'
+        note = f"{stub}:66:1: note: Called function defined here"
+        last_error = f'{path}:13:1: error: Unexpected keyword argument "input"'
+        stdout = "\n".join([first_error, note, last_error, ""])
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch(f"{__name__}.CACHE_DIR", cache_dir),
+            mock.patch.object(
+                api,
+                "run",
+                side_effect=[("", "", 0), ("", "", 0), (stdout, "", 1)],
+            ),
+        ):
+            output = _run_mypy()
+        self.assertEqual(output[path], [first_error, last_error])
+        self.assertEqual(output[stub], [note])
 
 
 @unittest.skipIf(NO_MYPY, reason="Mypy is not installed")

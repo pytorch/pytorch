@@ -1352,6 +1352,9 @@ exclude_patterns = [
     # instead.
     'torch/_C/__init__.pyi',
     'torch/_C/_nn.pyi',
+    'torch/_C/_fft.pyi',
+    'torch/_C/_linalg.pyi',
+    'torch/_C/_special.pyi',
     'torch/_C/_VariableFunctions.pyi',
     'torch/_VF.pyi',
     'torch/return_types.pyi',
@@ -1725,6 +1728,9 @@ exclude_patterns = [
     # instead.
     'torch/_C/__init__.pyi',
     'torch/_C/_nn.pyi',
+    'torch/_C/_fft.pyi',
+    'torch/_C/_linalg.pyi',
+    'torch/_C/_special.pyi',
     'torch/_C/_VariableFunctions.pyi',
     'torch/_VF.pyi',
     'torch/return_types.pyi',
