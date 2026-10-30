@@ -2702,11 +2702,15 @@ def _split_graph_sources(
 
 
 def _source_literal(source: str) -> str:
-    """A raw triple-quoted literal of ``source``, so it reads and edits as code."""
+    """A triple-quoted literal of ``source`` that keeps its lines, so it reads and
+    edits as code: raw when a quote style allows it, else with backslashes and double
+    quotes escaped (code holding both quote styles, a user Triton kernel's docstring
+    inside Inductor's '''-quoted kernels, say)."""
     for quote in ('"""', "'''"):
         if quote not in source and not source.endswith((quote[0], "\\")):
             return f"r{quote}{source}{quote}"
-    return repr(source)
+    escaped = source.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"""{escaped}"""'
 
 
 def _build_multigraph_python_source(
@@ -3566,16 +3570,21 @@ def _read_artifact(
 def _matching_cache(
     python_code: str, cache_path: str | os.PathLike[str]
 ) -> bytes | None:
-    """The cache at ``cache_path`` if it was captured with exactly ``python_code``:
-    None for a missing or unreadable cache, and for an artifact edited after capture
-    (the cache's code_hash covers the captured text)."""
+    """The cache at ``cache_path``, or None if it is missing or was captured with
+    other text than ``python_code`` (an artifact edited after capture: the cache's
+    code_hash covers the captured text). A cache that does not read as an envelope is
+    returned as is, for the loader to report as corrupt."""
     try:
         with open(cache_path, "rb") as f:
             cache = f.read()
+    except FileNotFoundError:
+        return None
+    try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
     except Exception:
-        return None
-    if blob.get("code_hash") != hashlib.sha256(python_code.encode()).hexdigest():
+        return cache
+    code_hash = hashlib.sha256(python_code.encode()).hexdigest()
+    if isinstance(blob, dict) and blob.get("code_hash") != code_hash:
         return None
     return cache
 
