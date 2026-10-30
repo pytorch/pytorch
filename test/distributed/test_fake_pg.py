@@ -20,9 +20,12 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import HAS_ACCELERATOR
-from torch.testing._internal.common_fsdp import get_devtype
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -38,10 +41,10 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-device_type = get_devtype().type
-
 
 class TestFakePG(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         super().tearDown()
         try:
@@ -355,44 +358,6 @@ class TestFakePG(TestCase):
         dist.reduce_scatter(output_tensor, to_reduce_scatter)
         self.assertEqual(tuple(output_tensor.shape), (3, 3))
 
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_construct_fsdp(self):
-        store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        FSDP(nn.Linear(2, 3, device=device_type))
-
-    @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_fsdp_fake_e2e(self):
-        store = dist.HashStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        my_module = nn.Sequential(
-            nn.Linear(2, 3, device=device_type),
-            nn.ReLU(),
-            nn.Linear(3, 2, device=device_type),
-        )
-        sharded_module = FSDP(my_module, use_orig_params=True)
-        optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
-        input = torch.randn(2, 2)
-        x = sharded_module(input)
-        loss = x.sum()
-        loss.backward()
-        optim.step()
-
-    @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_fake_pg_tracing(self):
-        store = dist.HashStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-
-        default_pg = dist.distributed_c10d._get_default_group()
-
-        def allgather_fn(tensor):
-            return funcol.all_gather_single(tensor, 0, default_pg)
-
-        gm = make_fx(allgather_fn)(torch.randn(2, 2, device=device_type))
-        FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
-
     def test_broadcast(self):
         dist.init_process_group(backend="fake", rank=0, world_size=2)
 
@@ -458,50 +423,6 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3)
         dist.recv(output, 1)
         self.assertEqual(tuple(output.shape), (3, 3))
-
-    @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_fsdp_tp_fake_e2e(self):
-        world_size = 4
-        tp_size = 2
-
-        store = dist.HashStore()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=world_size, store=store
-        )
-
-        device_mesh = init_device_mesh(
-            device_type, (world_size // tp_size, tp_size), mesh_dim_names=["dp", "tp"]
-        )
-
-        sequence_parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0)),
-            "net2": RowwiseParallel(output_layouts=Shard(0)),
-        }
-        pairwise_parallelize_plan = {
-            "net1": ColwiseParallel(),
-            "net2": RowwiseParallel(),
-        }
-        for parallel_plan in [sequence_parallelize_plan, pairwise_parallelize_plan]:
-            my_module = parallelize_module(
-                MLPModule(device=device_type),
-                device_mesh["tp"],
-                parallel_plan,
-            )
-
-            sharded_module = FSDP(
-                my_module, use_orig_params=True, device_mesh=device_mesh["dp"]
-            )
-            optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
-
-            for i in range(10):
-                dp_rank = dist.get_rank()
-                torch.manual_seed(i + dp_rank)
-                input = torch.randn(20, 10, device=f"{device_type}:{dp_rank}")
-                x = sharded_module(input)
-                loss = x.sum()
-                loss.backward()
-                optim.step()
 
     @parametrize("rank", [0, 1])
     def test_reduce_scatter_copy_semantics(self, rank):
@@ -1106,10 +1027,105 @@ class TestFakePG(TestCase):
         with self.assertRaisesRegex(RuntimeError, "lists to have the same length"):
             pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
 
+
+class TestFakePGDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+    @onlyAccelerator
+    def test_construct_fsdp(self, device):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        FSDP(nn.Linear(2, 3, device=self.device_type))
+
+    @onlyAccelerator
     @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_fsdp_fake_e2e(self, device):
+        store = dist.HashStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        my_module = nn.Sequential(
+            nn.Linear(2, 3, device=self.device_type),
+            nn.ReLU(),
+            nn.Linear(3, 2, device=self.device_type),
+        )
+        sharded_module = FSDP(my_module, use_orig_params=True)
+        optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
+        input = torch.randn(2, 2)
+        x = sharded_module(input)
+        loss = x.sum()
+        loss.backward()
+        optim.step()
+
+    @onlyAccelerator
+    @skipIfHpu
+    def test_fake_pg_tracing(self, device):
+        store = dist.HashStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        default_pg = dist.distributed_c10d._get_default_group()
+
+        def allgather_fn(tensor):
+            return funcol.all_gather_single(tensor, 0, default_pg)
+
+        gm = make_fx(allgather_fn)(torch.randn(2, 2, device=self.device_type))
+        FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
+
+    @onlyAccelerator
+    @skipIfHpu
+    def test_fsdp_tp_fake_e2e(self, device):
+        world_size = 4
+        tp_size = 2
+
+        store = dist.HashStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=world_size, store=store
+        )
+
+        device_mesh = init_device_mesh(
+            self.device_type,
+            (world_size // tp_size, tp_size),
+            mesh_dim_names=["dp", "tp"],
+        )
+
+        sequence_parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0)),
+            "net2": RowwiseParallel(output_layouts=Shard(0)),
+        }
+        pairwise_parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        for parallel_plan in [sequence_parallelize_plan, pairwise_parallelize_plan]:
+            my_module = parallelize_module(
+                MLPModule(device=self.device_type),
+                device_mesh["tp"],
+                parallel_plan,
+            )
+
+            sharded_module = FSDP(
+                my_module, use_orig_params=True, device_mesh=device_mesh["dp"]
+            )
+            optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
+
+            for i in range(10):
+                dp_rank = dist.get_rank()
+                torch.manual_seed(i + dp_rank)
+                input = torch.randn(20, 10, device=f"{self.device_type}:{dp_rank}")
+                x = sharded_module(input)
+                loss = x.sum()
+                loss.backward()
+                optim.step()
+
+    @onlyAccelerator
+    @skipIfHpu
     @parametrize("rank", [0, 1, 2, 3])
-    def test_split_group(self, rank):
+    def test_split_group(self, device, rank):
         world_size = 4
         store = FakeStore()
         dist.init_process_group(
@@ -1117,12 +1133,12 @@ class TestFakePG(TestCase):
             rank=rank,
             world_size=world_size,
             store=store,
-            device_id=torch.device(device_type, 0),
+            device_id=torch.device(self.device_type, 0),
         )
 
         parent_pg = dist.distributed_c10d._get_default_group()
         self.assertTrue(
-            parent_pg._get_backend(torch.device(device_type)).supports_splitting
+            parent_pg._get_backend(torch.device(self.device_type)).supports_splitting
         )
 
         # Interleaved, unsorted subgroups: each rank shares a group with the
@@ -1149,9 +1165,9 @@ class TestFakePG(TestCase):
         dist.all_reduce(tensor, group=new_pg)
         self.assertEqual(tuple(tensor.shape), (3, 3))
 
+    @onlyAccelerator
     @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_split_group_backend_filter(self):
+    def test_split_group_backend_filter(self, device):
         # A fake world's backend string is the bare name "fake", which
         # BackendConfig expands to every device fake supports. split_group's
         # filter validation used to re-expand it through
@@ -1164,11 +1180,11 @@ class TestFakePG(TestCase):
             rank=0,
             world_size=2,
             store=store,
-            device_id=torch.device(device_type, 0),
+            device_id=torch.device(self.device_type, 0),
         )
         parent_pg = dist.distributed_c10d._get_default_group()
         parent_devices = {d.type for d in parent_pg._device_types}
-        self.assertIn(device_type, parent_devices)
+        self.assertIn(self.device_type, parent_devices)
 
         # A bare filter naming the parent's backend keeps every parent device.
         full = dist.split_group(split_ranks=[[0, 1]], backend="fake")
@@ -1181,9 +1197,11 @@ class TestFakePG(TestCase):
         self.assertEqual({d.type for d in cpu_only._device_types}, {"cpu"})
 
         pair = dist.split_group(
-            split_ranks=[[0, 1]], backend=f"cpu:fake,{device_type}:fake"
+            split_ranks=[[0, 1]], backend=f"cpu:fake,{self.device_type}:fake"
         )
-        self.assertEqual({d.type for d in pair._device_types}, {"cpu", device_type})
+        self.assertEqual(
+            {d.type for d in pair._device_types}, {"cpu", self.device_type}
+        )
 
         # Filters that genuinely do not match the parent are still rejected.
         with self.assertRaisesRegex(ValueError, "is not present in the parent"):
@@ -1193,25 +1211,25 @@ class TestFakePG(TestCase):
         with self.assertRaisesRegex(ValueError, "is not present in the parent"):
             dist.split_group(split_ranks=[[0, 1]], backend="gloo")
 
+    @onlyAccelerator
     @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_split_group_non_member(self):
+    def test_split_group_non_member(self, device):
         store = FakeStore()
         dist.init_process_group(
             backend="fake",
             rank=0,
             world_size=4,
             store=store,
-            device_id=torch.device(device_type, 0),
+            device_id=torch.device(self.device_type, 0),
         )
 
         # Rank 0 is in none of the splits, so it gets the non-member sentinel.
         new_pg = dist.split_group(split_ranks=[[1, 2, 3]])
         self.assertIs(new_pg, dist.GroupMember.NON_GROUP_MEMBER)
 
+    @onlyAccelerator
     @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
-    def test_split_group_store_not_retained(self):
+    def test_split_group_store_not_retained(self, device):
         # split_group clones the parent's store, and the process group holds the
         # store only at the C++ level. FakeStore.clone() must therefore be a
         # real C++ method: a pure-Python Store.clone() override would be garbage
@@ -1223,7 +1241,7 @@ class TestFakePG(TestCase):
                 rank=0,
                 world_size=2,
                 store=FakeStore(),
-                device_id=torch.device(device_type, 0),
+                device_id=torch.device(self.device_type, 0),
             )
 
         setup()  # the only Python reference to the store is dropped here
@@ -1231,10 +1249,10 @@ class TestFakePG(TestCase):
         self.assertIsNotNone(new_pg)
         self.assertEqual(new_pg.size(), 2)
 
+    @onlyAccelerator
     @skipIfHpu
-    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     @parametrize("rank", [0, 1, 2, 3])
-    def test_split_group_consistent_naming_after_partial_split(self, rank):
+    def test_split_group_consistent_naming_after_partial_split(self, device, rank):
         # Regression test for https://github.com/pytorch/pytorch/issues/190396.
         #
         # _hash_ranks_to_str previously used len(_world.pg_names) as the
@@ -1256,7 +1274,7 @@ class TestFakePG(TestCase):
             rank=rank,
             world_size=world_size,
             store=store,
-            device_id=torch.device(device_type, 0),
+            device_id=torch.device(self.device_type, 0),
         )
         import hashlib as _hashlib
 
@@ -1301,6 +1319,8 @@ class TestFakePGUniformRanks(TestCase):
     the group behaves as if every rank held data identical to this one, which
     makes every collective well defined from local inputs alone.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def tearDown(self):
         super().tearDown()
@@ -1771,6 +1791,8 @@ class TestFakePGVersionCounter(TestCase):
     """Fake collectives move output version counters as NCCL does. See NOTE
     [FakeProcessGroup output version counters]."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
@@ -1808,6 +1830,7 @@ class TestFakePGVersionCounter(TestCase):
         self.assertEqual(x.grad, weights)
 
 
+instantiate_device_type_tests(TestFakePGDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestFakePG)
 instantiate_parametrized_tests(TestFakePGUniformRanks)
 
