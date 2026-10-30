@@ -1038,7 +1038,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   // Under graph capture nothing else may hold the inputs once the caller drops
   // the ops' works.
   work->retainInputs(works);
-  work->recordStart("coalesced");
+  // Legacy endCoalescing() works also report 0/0.
+  work->recordStart("coalesced", ::c10d::OpType::COALESCED, 0, 0);
   work->waitFor(works);
   work->recordEnd();
   enqueueWork(work, stream);

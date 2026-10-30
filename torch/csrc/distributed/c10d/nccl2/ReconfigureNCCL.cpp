@@ -503,6 +503,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
   revoked_ = false;
+  {
+    std::lock_guard<std::mutex> lock(timeout_message_mutex_);
+    ++timeout_message_generation_;
+    timeout_message_.clear();
+  }
   revokeLock.unlock();
 
   // Resolve the device on the first reconfigure: prefer the bound device,

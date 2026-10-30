@@ -404,7 +404,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   friend class WindowNCCL;
 
  protected:
+  // work: the operation being launched; a launch timeout reports it.
   void waitForNcclOperation(
+      const WorkNCCL& work,
       ncclResult_t status,
       std::chrono::milliseconds timeout,
       std::string_view operation);
@@ -442,6 +444,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
   // another thread cannot still be inside commRevoke when the comm is aborted.
   std::mutex revoke_mutex_;
+
+  // Same as legacy WorkNCCL's per-work prefix, which starts its watchdog
+  // timeout line: "[PG GUID <uid>(<desc>) Rank <rank>] ".
+  std::string workLogPrefix(int rank) const;
+  // The first timeout of a communicator generation; later timeouts and
+  // follow-on errors of that generation report it instead of a generic
+  // message. reconfigure() starts a new generation.
+  uint64_t timeoutMessageGeneration() const;
+  void recordTimeoutMessage(uint64_t generation, const std::string& message);
+  std::string timeoutMessage(uint64_t generation, int rank) const;
+  // The current generation's message.
+  std::string timeoutMessage() const;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
@@ -705,6 +719,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+
+  mutable std::mutex timeout_message_mutex_;
+  // Written under timeout_message_mutex_; atomic so works can read it lock-free
+  // at creation.
+  std::atomic<uint64_t> timeout_message_generation_{0};
+  std::string timeout_message_;
 
   std::mutex ephemeral_timeout_mutex_;
   std::chrono::milliseconds ephemeral_timeout_active_{0};
