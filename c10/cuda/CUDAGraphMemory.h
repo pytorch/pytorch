@@ -11,14 +11,15 @@ namespace c10::cuda::CUDAGraphMemory {
 
 struct CaptureRegistration {
   CaptureId_t capture_id{};
-  MempoolId_t mempool_id;
-  cudaStream_t primary_stream{};
   std::optional<CaptureId_t> parent_capture_id;
-  std::optional<cudaStream_t> parent_dependency_stream;
+  // Conditional captures only: the new child primary stream and the parent
+  // stream on which its conditional node was inserted.
+  cudaStream_t primary_stream{};
+  cudaStream_t parent_dependency_stream{};
 };
 
-// Graph-aware capture lifecycle hooks. The native allocator receives the full
-// registration; other allocator backends retain their legacy capture hooks.
+// Notify the active allocator of capture lifecycle changes. End returns the
+// number of invalid conditional-scope frees observed during the capture.
 C10_CUDA_API void markCaptureBegin(
     c10::DeviceIndex device,
     const CaptureRegistration& registration);

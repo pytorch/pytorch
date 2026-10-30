@@ -260,11 +260,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   c10::cuda::CUDAGraphMemory::markCaptureBegin(
       capture_dev_,
       c10::cuda::CUDAGraphMemory::CaptureRegistration{
-          capture_id_,
-          mempool_id_,
-          capture_stream_.stream(),
-          std::nullopt,
-          std::nullopt});
+          capture_id_, std::nullopt});
 
   {
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -706,9 +702,8 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
       capture_dev_,
       c10::cuda::CUDAGraphMemory::CaptureRegistration{
           conditional_graph_capture_ids_.top(),
-          mempool_id_,
-          child_stream.stream(),
           parent_capture_id,
+          child_stream.stream(),
           parent_dependency_stream.stream()});
 
   conditional_node_streams_.emplace(child_stream);
