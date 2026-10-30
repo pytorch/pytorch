@@ -3,8 +3,6 @@
 Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
 """
 
-import unittest
-
 import torch
 from torch._C import FileCheck
 from torch._inductor import config
@@ -67,105 +65,16 @@ def _register_split_add_ops(lib):
     return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
 
 
-class TestCustomOpOutLoweringAccelerator(InductorTestCase):
-    """Tests for lowering functional custom ops to out-variant ExternKernelOut on accelerators."""
+class TestCustomOpOutLowering(InductorTestCase):
+    """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_add_one_lowered_to_out(self, device):
-        """Test that a simple functional op gets lowered to its out-variant."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            _register_add_one_ops(lib)
-
-            def f(x):
-                return torch.ops.mylib.add_one(x)
-
-            x = torch.randn(4, 4, device=device)
-            eager_out = f(x)
-
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, backend="inductor", fullgraph=True), x
-            )
-            self.assertEqual(compiled_out, eager_out)
-
-            FileCheck().check(".out(").check_not(".default(").run(code)
-
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_add_one_lowered_to_out_dynamic_shape(self, device):
-        """Out-variant lowering with symbolic output shape (see #185503)."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            _register_add_one_ops(lib)
-
-            def f(x):
-                return torch.ops.mylib.add_one(x)
-
-            x = torch.randn(4, 8, device=device)
-            torch._dynamo.mark_dynamic(x, 0)
-            eager_out = f(x)
-
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, backend="inductor", fullgraph=True, dynamic=True),
-                x,
-            )
-            self.assertEqual(compiled_out, eager_out)
-            FileCheck().check(".out(").check_not(".default(").run(code)
-
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_multi_output_lowered_to_out(self, device):
-        """Test a two-output functional op gets lowered to its .out variant."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            _register_split_add_ops(lib)
-
-            def f(x):
-                a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
-                return a + b
-
-            x = torch.randn(4, 4, device=device)
-            eager_out = f(x)
-
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, backend="inductor", fullgraph=True), x
-            )
-            self.assertEqual(compiled_out, eager_out)
-            FileCheck().check(".out(").check("out0=").check("out1=").run(code)
-
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_op_without_out_variant_falls_through(self, device):
-        """Test that ops without an out-variant fall through to FallbackKernel."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("no_out_op(Tensor x) -> Tensor")
-
-            def _impl(x):
-                return x + 1
-
-            lib.impl("no_out_op", _impl, "CompositeExplicitAutograd")
-
-            @torch.library.register_fake("mylib::no_out_op", lib=lib)
-            def _fake(x):
-                return x.new_empty(x.shape)
-
-            def f(x):
-                return torch.ops.mylib.no_out_op(x)
-
-            x = torch.randn(4, 4, device=device)
-            eager_out = f(x)
-
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, backend="inductor", fullgraph=True), x
-            )
-            self.assertEqual(
-                compiled_out,
-                eager_out,
-                msg="output mismatch for op_without_out_variant_falls_through",
-            )
-            self.assertNotIn(".out(", code)
-
-
-class TestCustomOpOutLoweringCPU(InductorTestCase):
-    """CPU tests for lowering and cpp_wrapper runtime dispatch."""
-
-    hw_classification = HardwareClassification.CPU
+    def setUp(self):
+        super().setUp()
+        # CPU inductor does not use triton, so only skip accelerator instances.
+        if self.device_type != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton")
 
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
@@ -252,7 +161,13 @@ class TestCustomOpOutLoweringCPU(InductorTestCase):
             )
             self.assertNotIn(".out(", code)
 
-    def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self, device):
+
+class TestCustomOpOutLoweringCppWrapper(InductorTestCase):
+    """Tests for cpp_wrapper runtime dispatch."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("no_out_op(Tensor x) -> Tensor")
 
@@ -268,7 +183,7 @@ class TestCustomOpOutLoweringCPU(InductorTestCase):
             def f(x):
                 return torch.ops.mylib.no_out_op(x)
 
-            x = torch.randn(4, 4, device=device)
+            x = torch.randn(4, 4)
             eager_out = f(x)
 
             with config.patch(
@@ -282,7 +197,7 @@ class TestCustomOpOutLoweringCPU(InductorTestCase):
             FileCheck().check("aoti_torch_call_dispatcher").run(source_code)
             output_assert = r'assert_size_stride\([^,]+,\s*\{4L?L?,\s*4L?L?\},\s*\{4L?L?,\s*1L?L?\},\s*"torch.ops.mylib.no_out_op.default"(, .*)?\)'
             wrapper_codegen = common.get_wrapper_codegen_for_device(
-                device, cpp_wrapper=True
+                "cpu", cpp_wrapper=True
             )
             if wrapper_codegen.__name__ == "CppWrapperCpuArrayRef":
                 self.assertNotRegex(source_code, output_assert)
@@ -291,10 +206,7 @@ class TestCustomOpOutLoweringCPU(InductorTestCase):
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
 
 
-instantiate_device_type_tests(
-    TestCustomOpOutLoweringAccelerator, globals(), allow_xpu=True, except_for="cpu"
-)
-instantiate_device_type_tests(TestCustomOpOutLoweringCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestCustomOpOutLowering, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
