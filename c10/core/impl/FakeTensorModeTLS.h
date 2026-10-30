@@ -25,6 +25,19 @@ class C10_API FakeTensorModeTLS {
   // thread-local flag is set; in_kernel_invocation_manager sets it too.
   // Excluding DispatchKey::Fake does not change the reported device, so code
   // can suspend fake dispatch without fakes changing device.
+  //
+  // Unlike the Python flag, which is a field on one FakeTensorMode, this flag
+  // belongs to the thread and is not tied to a mode:
+  // - While it is set, every C++ fake on the thread reports meta, whichever
+  //   mode owns it, so in_kernel_invocation_manager(mode_a) also affects fakes
+  //   of mode_b. Code that runs with it unset, such as to_meta_tensor in
+  //   torch/csrc/PyInterpreter.cpp, sees the fake device of a fake from
+  //   another mode.
+  // - at::ThreadLocalState carries it into worker threads, next to the mode.
+  // - reset_state() leaves it alone on purpose: the flag records that a meta
+  //   kernel is running, not which mode is installed, and the
+  //   FakeInKernelInvocationGuard that set it restores the previous value when
+  //   its scope ends.
   static bool in_kernel_invocation();
   static void set_in_kernel_invocation(bool value);
 };
