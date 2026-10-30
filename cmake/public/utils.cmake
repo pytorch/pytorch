@@ -140,15 +140,28 @@ endmacro()
 # it. only checking wether the entry exists gets this wrong: a configure
 # that dies before its fallback runs leaves the declaration default behind
 # and the next run reads it as a user request.
+#
+# the doc string only proves the entry is user-sourced on the configure
+# that sees it: the declaration stamps its own doc string over an adopted
+# entry during the same run, and the cache is saved even when a later
+# guard fails the configure, so the next run in the same dir would read
+# the stamped entry as a declaration default and forget the request. the
+# decision is therefore kept in an INTERNAL marker that survives the
+# re-stamp, and is cleared again when the user sets the option OFF.
 function(pytorch_record_explicit_request option docstring)
-  set(_explicit FALSE)
   if(DEFINED CACHE{${option}})
     get_property(_help CACHE ${option} PROPERTY HELPSTRING)
     if(NOT _help STREQUAL "${docstring}")
-      set(_explicit TRUE)
+      if(${option})
+        set(_${option}_EXPLICITLY_SET ON
+            CACHE INTERNAL "user-sourced request for ${option}" FORCE)
+      else()
+        set(_${option}_EXPLICITLY_SET OFF
+            CACHE INTERNAL "user-sourced request for ${option}" FORCE)
+      endif()
     endif()
   endif()
-  set(_${option}_EXPLICITLY_SET "${_explicit}" PARENT_SCOPE)
+  set(_${option}_EXPLICITLY_SET "${_${option}_EXPLICITLY_SET}" PARENT_SCOPE)
 endfunction()
 
 

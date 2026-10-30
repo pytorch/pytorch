@@ -418,14 +418,22 @@ cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 pytorch_record_explicit_request(USE_NCCL "Use NCCL")
 # same early refusal as USE_ROCM above, for the parts of the condition we
-# can already decide here. whether a CUDA or ROCm build actually shows up
-# gets checked at the fallback site in cmake/Dependencies.cmake
-if(_USE_NCCL_EXPLICITLY_SET AND USE_NCCL
-    AND NOT (USE_DISTRIBUTED AND UNIX AND NOT APPLE))
-  message(FATAL_ERROR
-    "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires "
-    "USE_DISTRIBUTED on a non-Apple UNIX platform. "
-    "If you want to build without NCCL, please set USE_NCCL=0.")
+# can already decide here: the platform and distributed parts, and whether
+# any NCCL-capable backend is even asked for. whether a CUDA or ROCm build
+# actually materializes gets checked at the fallback site in
+# cmake/Dependencies.cmake
+if(_USE_NCCL_EXPLICITLY_SET AND USE_NCCL)
+  if(NOT (USE_DISTRIBUTED AND UNIX AND NOT APPLE))
+    message(FATAL_ERROR
+      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires "
+      "USE_DISTRIBUTED on a non-Apple UNIX platform. "
+      "If you want to build without NCCL, please set USE_NCCL=0.")
+  elseif(NOT (USE_CUDA OR USE_ROCM))
+    message(FATAL_ERROR
+      "PyTorch: NCCL was explicitly requested (USE_NCCL=1) but requires a "
+      "CUDA or ROCm build. "
+      "If you want to build without NCCL, please set USE_NCCL=0.")
+  endif()
 endif()
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)

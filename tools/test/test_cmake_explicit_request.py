@@ -158,6 +158,24 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         # fallback-cached OFF as an explicit request
         self.assert_ok("USE_CUDA", False, build="cuda-default")
 
+    def test_cuda_explicit_request_persists_in_cache(self) -> None:
+        self.skip_if_cuda_installed()
+        # option() stamps its doc string over an adopted entry during the
+        # same configure, and the cache is saved even when the guard fails
+        # it, so the next run cannot tell the entry apart from a
+        # declaration default by its help string anymore. the INTERNAL
+        # marker has to remember the request across runs, env-forwarded
+        # requests included (gh-114388)
+        self.assert_fails(CUDA_GUARD_MESSAGE, env={"USE_CUDA": "1"},
+                          build="cuda-env-persist")
+        self.assert_fails(CUDA_GUARD_MESSAGE, env={"USE_CUDA": "1"},
+                          build="cuda-env-persist")
+        self.assert_fails(CUDA_GUARD_MESSAGE, build="cuda-env-persist")
+        self.assert_ok("USE_CUDA", False, "-DUSE_CUDA=OFF",
+                       build="cuda-env-persist")
+        # taking the request back also clears it for later default runs
+        self.assert_ok("USE_CUDA", False, build="cuda-env-persist")
+
     # --- ROCm: new guard, split by what the platform lets you reach
 
     def test_rocm_explicit_request_on_unsupported_platform(self) -> None:
@@ -217,6 +235,20 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
     def test_nccl_default_falls_back(self) -> None:
         self.assert_ok("USE_NCCL", False, build="nccl-default")
         self.assert_ok("USE_NCCL", False, "-DUSE_NCCL=OFF", build="nccl-d-off")
+
+    def test_nccl_explicit_request_no_backend(self) -> None:
+        if not IS_LINUX:
+            self.skipTest("only Linux reaches the no-backend early refusal")
+        message = ("NCCL was explicitly requested (USE_NCCL=1) but requires "
+                   "a CUDA or ROCm build.")
+        # USE_ROCM defaults to ON at its declaration on Linux, so both
+        # backends have to be turned off explicitly to reach the case
+        # where the NCCL declaration condition is already false
+        self.assert_fails(message, "-DUSE_NCCL=ON", "-DUSE_CUDA=0",
+                          "-DUSE_ROCM=0", build="nccl-no-backend")
+        self.assert_fails(message, env={"USE_NCCL": "1", "USE_CUDA": "0",
+                                        "USE_ROCM": "0"},
+                          build="nccl-no-backend-env")
 
     # --- a configure that dies before a fallback site runs must not leave
     # the declaration defaults looking like user requests on the next run

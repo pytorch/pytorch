@@ -162,6 +162,15 @@ else
     USE_KINETO=1
 fi
 
+# s390x wheels are CPU-only, so there is no CUDA or ROCm backend for
+# NCCL/RCCL to build against. Pass an explicit off instead of relying on
+# the configure-time fallback, which now fails the build for explicitly
+# requested options it cannot provide.
+if [[ "$(uname -m)" == "s390x" ]]; then
+    USE_RCCL=0
+    USE_NCCL=0
+fi
+
 echo "Building wheel at $(date)"
 
 time CMAKE_ARGS=${CMAKE_ARGS[@]} \
