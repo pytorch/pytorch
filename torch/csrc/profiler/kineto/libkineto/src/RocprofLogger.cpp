@@ -520,25 +520,41 @@ RocprofLogger& RocprofLogger::singleton() {
 RocprofLogger::RocprofLogger() {}
 
 namespace {
-thread_local std::deque<uint64_t>
-    t_externalIds[RocLogger::CorrelationDomain::size];
-}
+// A thread's thread_locals are destroyed when it exits; for the main thread
+// that happens inside exit(), before static destructors that can still make
+// traced HIP calls (rocBLAS/hipBLASLt unloading code objects while a session
+// is open). ~ThreadState sets t_threadExiting before its members are
+// destroyed, and the trivially destructible flag stays readable afterwards.
+thread_local bool t_threadExiting = false;
+struct ThreadState {
+  std::deque<uint64_t> externalIds[RocLogger::CorrelationDomain::size];
+  // This owner keeps the returned pointer alive while clearLogs() invalidates
+  // and releases the registry's copy from another thread.
+  std::shared_ptr<ThreadTraceBuffer> buffer;
+  ~ThreadState() {
+    t_threadExiting = true;
+  }
+};
+thread_local ThreadState t_state;
+} // namespace
 
 void RocprofLogger::pushCorrelationID(uint64_t id, CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_.load(
+  if (t_threadExiting ||
+      !singleton().externalCorrelationEnabled_.load(
           std::memory_order_relaxed)) {
     return;
   }
-  t_externalIds[type].push_back(id);
+  t_state.externalIds[type].push_back(id);
 }
 
 void RocprofLogger::popCorrelationID(CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_.load(
+  if (t_threadExiting ||
+      !singleton().externalCorrelationEnabled_.load(
           std::memory_order_relaxed)) {
     return;
   }
-  if (!t_externalIds[type].empty()) {
-    t_externalIds[type].pop_back();
+  if (!t_state.externalIds[type].empty()) {
+    t_state.externalIds[type].pop_back();
   } else {
     LOG(ERROR)
         << "Attempt to popCorrelationID from an empty external Ids stack";
@@ -574,9 +590,7 @@ void RocprofLogger::clearLogs() {
 
 ThreadTraceBuffer* RocprofLogger::getThreadBuffer() {
   static RocprofLogger* dis = &singleton();
-  // This owner keeps the returned pointer alive while clearLogs() invalidates
-  // and releases the registry's copy from another thread.
-  thread_local std::shared_ptr<ThreadTraceBuffer> buffer;
+  auto& buffer = t_state.buffer;
 
   if (buffer == nullptr ||
       buffer->generation != dis->generation_.load(std::memory_order_acquire)) {
@@ -620,8 +634,10 @@ void RocprofLogger::mergeThreadBuffers() {
 void RocprofLogger::insert_row_to_buffer(rocprofBase* row) {
   RocprofLogger* dis = &singleton();
 
-  // perThreadBuffers disabled
-  if (!dis->perThreadBuffers_.load(std::memory_order_relaxed)) {
+  // perThreadBuffers disabled, or this thread's buffer is already destroyed
+  // (buffer_callback still delivers records from the final flush in exit())
+  if (!dis->perThreadBuffers_.load(std::memory_order_relaxed) ||
+      t_threadExiting) {
     std::lock_guard<std::mutex> lock(dis->rowsMutex_);
     if (dis->rows_.size() >= dis->maxBufferSize_) {
       LOG_FIRST_N(WARNING, 10)
@@ -687,17 +703,21 @@ void RocprofLogger::code_object_callback(
 
 void RocprofLogger::api_callback(
     rocprofiler_callback_tracing_record_t record,
-    [[maybe_unused]] rocprofiler_user_data_t* user_data,
+    rocprofiler_user_data_t* user_data,
     [[maybe_unused]] void* callback_data) {
-  thread_local std::unordered_map<uint64_t, uint64_t> timestamps;
-
+  // Calls made after this thread's thread_locals are gone (see
+  // ThreadState) happen during thread or process teardown; drop them.
+  if (t_threadExiting) {
+    return;
+  }
+  // The SDK keeps user_data from the ENTER to the EXIT phase of one call, so
+  // the start time needs no per-thread map.
   if (record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) {
-      timestamps[record.correlation_id.internal] = getApproximateTime();
+      user_data->value = getApproximateTime();
     } // ROCPROFILER_CALLBACK_PHASE_ENTER
     else { // ROCPROFILER_CALLBACK_PHASE_EXIT
-      uint64_t startTime = timestamps[record.correlation_id.internal];
-      timestamps.erase(record.correlation_id.internal);
+      uint64_t startTime = user_data->value;
       uint64_t endTime = getApproximateTime();
 
       // Kernel Launch Records
@@ -805,9 +825,10 @@ void RocprofLogger::api_callback(
           for (int it = RocLogger::CorrelationDomain::begin;
                it < RocLogger::CorrelationDomain::end;
                ++it) {
-            if (t_externalIds[it].size() > 0) {
+            if (t_state.externalIds[it].size() > 0) {
               buffer->externalCorrelations[it].emplace_back(
-                  record.correlation_id.internal, t_externalIds[it].back());
+                  record.correlation_id.internal,
+                  t_state.externalIds[it].back());
             }
           }
           break;
@@ -817,10 +838,10 @@ void RocprofLogger::api_callback(
         for (int it = RocLogger::CorrelationDomain::begin;
              it < RocLogger::CorrelationDomain::end;
              ++it) {
-          if (t_externalIds[it].size() > 0) {
+          if (t_state.externalIds[it].size() > 0) {
             std::lock_guard<std::mutex> lock(dis->externalCorrelationsMutex_);
             dis->externalCorrelations_[it].emplace_back(
-                record.correlation_id.internal, t_externalIds[it].back());
+                record.correlation_id.internal, t_state.externalIds[it].back());
           }
         }
       }
