@@ -3504,7 +3504,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ) or repr(t) in ("Layout", "MemoryFormat", "ScalarType", "SymFloat")
 
         def return_supported(t: torch.JitType) -> bool:
-            if isinstance(t, torch.OptionalType):
+            if isinstance(t, (torch.OptionalType, torch.ListType)):
                 return isinstance(t.getElementType(), torch.TensorType)
             return isinstance(t, (torch.NoneType, torch.TensorType))
 
@@ -3638,12 +3638,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Emit JIT-mode fallback kernel code (no-Python dispatcher or Python callback)."""
         if not isinstance(op_overload, torch._ops.OpOverload):
             raise AssertionError(type(op_overload))
-        for output in output_args:
-            if not (output is None or isinstance(output, str)):
-                raise AssertionError(
-                    "fallback kernels with runtime lookup currently only support tensor "
-                    "returns, not more complicated types (such as list-of-list-of-tensor)"
-                )
 
         # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
         # outputs of the op can be represented with StableIValue.  This avoids the
@@ -3668,9 +3662,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return
 
-        # Otherwise, we call back into Python, which has some extra runtime overhead,
-        # but handles situations like list[Tensor] (currently unrepresentable via
-        # StableIValue).
+        for output in output_args:
+            if not (output is None or isinstance(output, str)):
+                raise AssertionError(
+                    "fallback kernels with runtime lookup currently only support tensor "
+                    "returns, not more complicated types (such as list-of-list-of-tensor)"
+                )
+
+        # Schemas outside native dispatch support, such as Tensor?[] returns,
+        # use a Python callback with some extra runtime overhead.
         self.generate_fallback_kernel_with_runtime_lookup_python(
             buf_name,
             python_kernel_name,
@@ -3985,8 +3985,8 @@ if (!custom_op_wrapper) {
         self,
         op_overload: torch._ops.OpOverload,
         raw_args: Sequence[Any],
-        output_args: Sequence[str | None],
-        raw_outputs: Sequence[ir.Buffer],
+        output_args: _OUTPUT_ARGS_TYPE,
+        raw_outputs: Sequence[ir.Buffer | Sequence[ir.Buffer] | None],
     ) -> None:
         """Generate a JIT-only fallback call through c10::Dispatcher.
 
@@ -3998,17 +3998,21 @@ if (!custom_op_wrapper) {
         self.include_extra_header("ATen/core/jit_type.h")
         self.include_extra_header("torch/csrc/inductor/aoti_torch/utils.h")
 
+        flat_output_args = torch.utils._pytree.tree_leaves(output_args)
+        flat_raw_outputs = torch.utils._pytree.tree_leaves(raw_outputs)
         if raw_outputs:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                for output_arg, raw_output_arg in zip(
+                    flat_output_args, flat_raw_outputs
+                )
                 if output_arg is not None
                 and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
         else:
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg in flat_output_args
                 if output_arg is not None
             ]
 
@@ -4017,6 +4021,8 @@ if (!custom_op_wrapper) {
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            if kernel_profile_enabled():
+                dispatch_lines.writeline(_record_function_handle_line(str(op_overload)))
             tmp_var_number = count()
 
             def next_tmp(prefix: str) -> str:
@@ -4214,16 +4220,53 @@ if (!custom_op_wrapper) {
             )
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
-            stack_idx = 0
-            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
+            returns = op_overload._schema.returns
+            if len(returns) == 1 and isinstance(returns[0].real_type, torch.ListType):
+                outputs_by_return = [(output_args, raw_outputs)]
+            else:
+                outputs_by_return = zip(output_args, raw_outputs)
+
+            for stack_idx, (schema_return, (output_arg, raw_output_arg)) in enumerate(
+                zip(returns, outputs_by_return)
+            ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
-                if output_arg is not None:
+                if isinstance(schema_return.real_type, torch.ListType):
+                    if not isinstance(output_arg, list):
+                        raise AssertionError(
+                            f"Expected tensor-list outputs, got {output_arg}"
+                        )
+                    if not isinstance(raw_output_arg, (list, tuple)):
+                        raise AssertionError(
+                            f"Expected tensor-list output buffers, got {raw_output_arg}"
+                        )
+                    if raw_output_arg and all(
+                        isinstance(out, ir.MutationOutput) for out in raw_output_arg
+                    ):
+                        continue
+                    list_var = next_tmp("returned_list")
+                    dispatch_lines.writeline(
+                        f"auto {list_var} = std::move({stack_var}[{stack_idx}]).toTensorList();"
+                    )
+                    dispatch_lines.writeline(
+                        f"TORCH_CHECK({list_var}.size() == {len(output_arg)}, "
+                        f'"{op_overload._schema.name} return {stack_idx} expected '
+                        f'{len(output_arg)} tensors, got ", {list_var}.size());'
+                    )
+                    for idx, (name, raw_output) in enumerate(
+                        zip(output_arg, raw_output_arg)
+                    ):
+                        if name is None or isinstance(raw_output, ir.MutationOutput):
+                            continue
+                        dispatch_lines.writeline(
+                            f"{name} = torch::aot_inductor::new_tensor_handle("
+                            f"at::Tensor({list_var}.get({idx})));"
+                        )
+                elif output_arg is not None:
                     dispatch_lines.writeline(
                         f"{output_arg} = torch::aot_inductor::new_tensor_handle("
                         f"std::move({stack_var}[{stack_idx}]).toTensor());"
                     )
-                stack_idx += 1
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())

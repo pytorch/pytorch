@@ -41,6 +41,7 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import is_triton
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.select_algorithm import TritonTemplate
@@ -5899,6 +5900,122 @@ class AOTInductorTestsTemplate:
 
             example_args = (torch.randn(8, device=self.device),)
             self.check_model(M(), example_args, options={"fallback_by_default": True})
+
+    @parametrize("empty_middle", [False, True])
+    @config.patch({"triton.autotune_at_compile_time": False, "memory_planning": True})
+    def test_nested_tensor_list_fallback(self, empty_middle):
+        if self.device == "mps":
+            raise unittest.SkipTest("requires CPU or a Triton GPU backend")
+
+        with torch.library._scoped_library("nested_fallback", "FRAGMENT") as lib:
+            torch.library.define(
+                "nested_fallback::lists",
+                "(Tensor x) -> (Tensor[], Tensor[], Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "nested_fallback::lists", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("nested_fallback::lists", lib=lib)
+            def lists(x):
+                return [x + 1, x * 2], [] if empty_middle else [x - 3], [x.square()]
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, middle, last = torch.ops.nested_fallback.lists(x.sin())
+                    result = first[0] * first[1] + last[0]
+                    if not empty_middle:
+                        result = result + middle[0]
+                    return result
+
+            inputs = [
+                (torch.randn(batch, 16, device=self.device),) for batch in (4, 7, 12)
+            ]
+            # CPU covers AOT output marshalling; Triton devices also emit the JIT wrapper.
+            native_dispatch_guard = (
+                patch.object(
+                    CppWrapperCpu,
+                    "generate_fallback_kernel_with_runtime_lookup_python",
+                    side_effect=AssertionError("Expected native boxed dispatch"),
+                )
+                if is_triton(self.device)
+                else contextlib.nullcontext()
+            )
+            with native_dispatch_guard:
+                self.check_model_with_multiple_inputs(
+                    Model(),
+                    inputs,
+                    dynamic_shapes=({0: Dim("batch", min=2, max=32)},),
+                )
+
+    @config.patch({"triton.autotune_at_compile_time": False})
+    def test_mutating_empty_tensor_list_fallback(self):
+        if self.device == "mps":
+            raise unittest.SkipTest("requires CPU or a Triton GPU backend")
+
+        from torch._inductor.lowering import (
+            lowerings,
+            make_fallback,
+            needs_realized_inputs,
+        )
+
+        with torch.library._scoped_library("empty_list_fallback", "FRAGMENT") as lib:
+            lib.define("fill(Tensor x) -> Tensor", tags=torch.Tag.pt2_compliant_tag)
+            lib.define(
+                "empty_out(Tensor(a!) out) -> Tensor[]",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+            lib.impl(
+                "fill", lambda x: torch.full_like(x, 7), "CompositeExplicitAutograd"
+            )
+            lib.impl("fill", lambda x: torch.empty_like(x), "Meta")
+
+            def empty_out(out):
+                out.fill_(7)
+                return []
+
+            lib.impl("empty_out", empty_out, "CompositeExplicitAutograd")
+            lib.impl("empty_out", lambda out: [], "Meta")
+            empty = torch.ops.empty_list_fallback.empty_out.default
+            functional = torch.ops.empty_list_fallback.fill.default
+
+            def functionalize_empty(out):
+                torch._functionalize_sync(out)
+                raw = torch._from_functional_tensor(out)
+                with torch._C._ExcludeDispatchKeyGuard(
+                    torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+                ):
+                    replacement = raw.clone()
+                    empty(replacement)
+                torch._functionalize_replace(out, replacement)
+                torch._functionalize_commit_update(out)
+                return []
+
+            # FallbackKernel requires this opt-in for mutable Tensor[]-returning ops;
+            # the post-grad rewrite intentionally happens after functionalization.
+            lib.impl("empty_out", functionalize_empty, "Functionalize")
+            self.addCleanup(lowerings.pop, empty, None)
+            self.addCleanup(needs_realized_inputs.discard, empty)
+            make_fallback(empty, warn=False)
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    y = torch.ops.empty_list_fallback.fill(x.sin())
+                    return y * x.cos()
+
+            def mutate_after_functionalize(graph):
+                nodes = graph.find_nodes(op="call_function", target=functional)
+                self.assertEqual(len(nodes), 1)
+                node = nodes[0]
+                node.replace_all_uses_with(node.args[0])
+                node.target = empty
+                node.meta["val"] = []
+                graph.lint()
+
+            with config.patch(post_grad_custom_post_pass=mutate_after_functionalize):
+                self.check_model(Model(), (torch.randn(4, 8, device=self.device),))
 
     def test_proxy_executor_error_message_preserved(self):
         @torch.library.custom_op("aoti_test::validate_input", mutates_args=())
@@ -12006,18 +12123,56 @@ class TestCppWrapperFallbackProfiling(TestCase):
         "enable_kernel_profile only supported on linux and win32",
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_boxed_dispatcher(self, enable_kernel_profile):
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            lib.define(
+                "boxed_cat(Tensor[] tensors, int dim=0) -> Tensor[]",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl(
+                "proftest::boxed_cat", "CompositeExplicitAutograd", lib=lib
+            )
+            def boxed_cat(tensors, dim=0):
+                return [torch.cat(tensors, dim=dim)]
+
+            class Model(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.proftest.boxed_cat([x, y])[0]
+
+            inputs = (torch.randn(4, 4), torch.randn(4, 4))
+            with config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "cpp.enable_kernel_profile": enable_kernel_profile,
+                }
+            ):
+                code = get_code(torch.compile(Model()), *inputs)[0]
+            FileCheck().check(".callBoxed(").check(".toTensorList()").run(code)
+            FileCheck().check_not("PyObject_CallObject").run(code)
+            if enable_kernel_profile:
+                FileCheck().check(
+                    "RAIIAtenRecordFunctionHandle record_proftest_boxed_cat_default_("
+                ).check(".callBoxed(").run(code)
+            else:
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler_python_fallback(self, enable_kernel_profile):
         """Test profiling for non-AOT Python fallback path.
 
-        Custom ops whose return type is not boxed-dispatch compatible (only
-        Tensor, Tensor? and () are) go through PyObject_CallObject in non-AOT
-        cpp_wrapper mode. A Tensor[] return is the cheapest such schema; a
-        Tensor[] argument is boxed-compatible and would not reach this path.
+        A Tensor?[] return is outside the native boxed-dispatch subset and
+        goes through PyObject_CallObject. Tensor[] arguments are supported
+        by boxed dispatch, so the return type forces the Python path.
         """
         with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
             torch.library.define(
                 "proftest::python_cat",
-                "(Tensor[] tensors, int dim=0) -> Tensor[]",
+                "(Tensor[] tensors, int dim=0) -> Tensor?[]",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
@@ -12030,7 +12185,7 @@ class TestCppWrapperFallbackProfiling(TestCase):
             )
             def python_cat_impl(
                 tensors: list[torch.Tensor], dim: int = 0
-            ) -> list[torch.Tensor]:
+            ) -> list[torch.Tensor | None]:
                 return [torch.cat(tensors, dim=dim)]
 
             class Model(torch.nn.Module):
