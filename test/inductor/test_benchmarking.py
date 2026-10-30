@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from torch._inductor.config import (
     inductor_default_autotune_warmup,
 )
 from torch._inductor.runtime.benchmarking import (
+    _get_default_gpu_device_type,
     Benchmarker,
     InductorBenchmarker,
     TorchProfilerBenchmarker,
@@ -19,6 +21,7 @@ from torch._inductor.runtime.benchmarking import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -432,7 +435,9 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def _run_fake_cuda_graph_benchmark(self, iters, return_mode="min", grads=None):
+    def _run_fake_cuda_graph_benchmark(
+        self, iters, return_mode="min", grads=None, cudagraph_unroll=None
+    ):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeCUDAGraph:
@@ -483,10 +488,14 @@ class TestBenchmarker(TestCase):
                 patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
             ):
+                kwargs = {}
+                if cudagraph_unroll is not None:
+                    kwargs["cudagraph_unroll"] = cudagraph_unroll
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
                     lambda: calls.append("call"),
                     grad_to_none=grads,
                     return_mode=return_mode,
+                    **kwargs,
                 )
         finally:
             _bench.set_gpu_benchmark_lock_context(previous)
@@ -510,6 +519,49 @@ class TestBenchmarker(TestCase):
             ],
         )
 
+    def test_cudagraph_recursion_guard_is_thread_local(self):
+        from torch._inductor.runtime.benchmarking import Benchmarker
+
+        benchmarker = InductorBenchmarker()
+        both_entered = threading.Barrier(2)
+        first_finished = threading.Event()
+        observed = []
+        errors = []
+
+        def benchmark_with_cuda_graph(_self, _callable, **kwargs):
+            both_entered.wait(timeout=5)
+            if threading.current_thread().name == "second":
+                self.assertTrue(first_finished.wait(timeout=5))
+                observed.append(benchmarker._in_cudagraph_benchmark)
+            return 1.0
+
+        def run(name):
+            try:
+                benchmarker.benchmark_gpu_with_cuda_graph(lambda: None)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                if name == "first":
+                    first_finished.set()
+
+        with patch.object(
+            Benchmarker,
+            "benchmark_gpu_with_cuda_graph",
+            benchmark_with_cuda_graph,
+        ):
+            first = threading.Thread(target=run, args=("first",), name="first")
+            second = threading.Thread(target=run, args=("second",), name="second")
+            first.start()
+            second.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(observed, [True])
+        self.assertFalse(benchmarker._in_cudagraph_benchmark)
+
     @parametrize(
         "return_mode, expected",
         (("min", 0.9), ("all", [0.9, 1.8])),
@@ -524,6 +576,30 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(calls.count("call"), 2 + 10)
         self.assertEqual(calls[-4:], ["benchmark_gpu", "replay", "exit", "exit"])
+
+    def test_benchmark_gpu_with_cuda_graph_overrides_configured_unroll(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(
+            iters=10, cudagraph_unroll=4
+        )
+        self.assertEqual(result, 2.25)
+        self.assertEqual(calls.count("call"), 2 + 4)
+
+    @parametrize("configured_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_clamps_invalid_configured_unroll(
+        self, configured_unroll
+    ):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=configured_unroll)
+        self.assertEqual(result, 9.0)
+        self.assertEqual(calls.count("call"), 2 + 1)
+
+    @parametrize("cudagraph_unroll", (0, -1))
+    def test_benchmark_gpu_with_cuda_graph_rejects_invalid_unroll(
+        self, cudagraph_unroll
+    ):
+        with self.assertRaisesRegex(ValueError, "must be at least 1"):
+            self._run_fake_cuda_graph_benchmark(
+                iters=10, cudagraph_unroll=cudagraph_unroll
+            )
 
     def test_benchmark_gpu_with_cuda_graph_clears_grads_per_iteration(self):
         class FakeTensor:
@@ -653,6 +729,21 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+
+class TestGpuBenchmarkDeviceTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_default_delegates_to_get_gpu_type(self):
+        # _get_default_gpu_device_type is a thin delegate to
+        # torch._inductor.utils.get_gpu_type, which owns GPU discovery
+        # (DeviceInterface.is_gpu()) and multi-GPU disambiguation. Patching
+        # get_gpu_type at the module attribute is picked up because the
+        # delegate imports it by name at each call, sidestepping its
+        # functools.cache.
+        sentinel = "privateuse1_test_device"
+        with patch("torch._inductor.utils.get_gpu_type", return_value=sentinel):
+            self.assertEqual(_get_default_gpu_device_type(), sentinel)
 
 
 if __name__ == "__main__":
