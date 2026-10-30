@@ -4721,6 +4721,10 @@ def single(model, x):
     return model(x).sum(dim=0)
 
 
+def scaled(x):
+    return (x * 7.25).relu()
+
+
 def reads_unregistered(model, x):
     return model(x).sum(dim=0) * unregistered.SCALE
 
@@ -4910,6 +4914,57 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
+
+    def test_two_artifacts_of_one_capture_load_side_by_side(self):
+        # A save() checkpoint and the final artifact share compiled graphs, code and
+        # all, so loading both binds the same code under the same names.
+        checkpoint = os.path.join(self.dir, "checkpoint.py")
+        with self._capture(self.mod.scaled) as cap:
+            cap(torch.randn(8))
+            cap.save()
+            shutil.copy(self.artifact, checkpoint)
+            shutil.copy(self.cache, checkpoint + ".cache")
+            cap(torch.randn(3, 3))
+        x = torch.randn(8)
+        self.assertEqual(load(checkpoint, checkpoint + ".cache")(x), (x * 7.25).relu())
+        self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
+
+    def test_compiled_graph_code_is_editable(self):
+        from torch.compiler.precompile import no_compilation
+
+        x = torch.randn(8)
+        with self._capture(self.mod.scaled) as cap:
+            cap(x)
+        with open(self.artifact) as f:
+            src = f.read()
+        self.assertIn("GRAPH_SOURCES[", src)
+        self.assertIn("7.25", src)
+        # The code moved out of _BACKENDS, so the unedited artifact runs it from the
+        # text and still serves its precompiled kernels.
+        with no_compilation():
+            self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
+        with open(self.artifact, "w") as f:
+            f.write(src.replace("7.25", "3.5"))
+        with self.assertRaisesRegex(PrecompileError, "cache_path=None"):
+            load(self.artifact, self.cache)
+        # This process serves the captured version; the edited one is another version
+        # of the capture, which binds the same compiled-graph names.
+        with self.assertRaisesRegex(
+            PrecompileError, "other code for the same compiled"
+        ):
+            load(self.artifact, None)
+        script = (
+            f"import sys, torch; sys.path.insert(0, {self.dir!r}); "
+            f"import {self.module_name}; "
+            "from torch.compiler.precompile import load; x = torch.ones(8); "
+            f"out = load({self.artifact!r}, None)(x); "
+            "torch.testing.assert_close(out, (x * 3.5).relu()); print('served')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
 
     def _serve_in_fresh_process(
         self, calls, grads=None, mode="standalone", eager_miss=None, refused_frame=None
