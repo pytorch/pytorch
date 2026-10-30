@@ -355,13 +355,21 @@ def _check_method_arity(
     args: Any,
     kwargs: Any,
     *,
-    qualname: str | None = None,
+    qualname: str | Callable[[], str] | None = None,
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
-    if qualname is None:
+    if (
+        (not kwargs or flags & MethodFlags.KEYWORDS)
+        and not (flags & MethodFlags.NOARGS and args)
+        and not (flags & MethodFlags.O and n != 1)
+    ):
+        return
+    if callable(qualname):
+        qualname = qualname()
+    elif qualname is None:
         qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
         raise_type_error(tx, f"{qualname}() takes no keyword arguments")
@@ -431,7 +439,7 @@ class Method:
         kwargs: Any,
         *,
         descriptor: types.MethodDescriptorType | None = None,
-        qualname: str | None = None,
+        qualname: str | Callable[[], str] | None = None,
     ) -> VariableTracker | None:
         flags = (
             _derive_method_flags(vt, name)
@@ -1828,12 +1836,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def lookup_method_descriptor(
         self, descriptor: types.MethodDescriptorType
     ) -> Method | None:
-        # Match the descriptor, e.g. `dict.update(ordered, src)` must select
-        # `dict.update`, even when the receiver's tracker models `OrderedDict`.
+        # For example, `dict.update(ordered, src)` must bypass `OrderedDict.update`.
         name = descriptor.__name__
         if self._cpython_type is None:
-            # Some trackers have no type-to-table mapping. Keep their name lookup;
-            # the caller already validated the descriptor's receiver type.
+            # Keep validated name lookup for trackers without a type-to-table mapping.
             return self.lookup_tp_method(name)
         python_type = self._cpython_type
         for cls in type(self).__mro__:

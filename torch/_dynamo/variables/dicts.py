@@ -336,6 +336,7 @@ class ConstDictVariable(VariableTracker):
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx, guard_keys=True)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -387,6 +388,7 @@ class ConstDictVariable(VariableTracker):
         tree_map_kwargs: dict[str, VariableTracker],
         keypath: tuple[Any, ...],
     ) -> VariableTracker:
+        self.install_dict_order_guard(tx, guard_keys=True)
         other_dicts: list[ConstDictVariable] = []
         for candidate in rest:
             candidate = candidate.realize()
@@ -455,7 +457,6 @@ class ConstDictVariable(VariableTracker):
         # Build a dictionary that contains the keys and values.
         num_args = 0
         for key, value in self.items.items():
-            # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
                 key_var = key.vt
@@ -474,7 +475,10 @@ class ConstDictVariable(VariableTracker):
                     (ValueMutationExisting, AttributeMutationExisting),
                 ) and (
                     self.should_reconstruct_all
-                    or (key_var.source is not None and key_var.source.is_dict_key())
+                    or (
+                        isinstance(key_var.source, ConstDictKeySource)
+                        and key_var.source.base == self.source
+                    )
                 ):
                     self.install_dict_order_guard(codegen.tx, guard_keys=True)
                 codegen(key_var)
@@ -1003,13 +1007,7 @@ class ConstDictVariable(VariableTracker):
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        self.install_dict_order_guard(tx, guard_keys=True)
-        reversed_keys: list[VariableTracker] = [
-            k.vt for k in reversed(list(self.items.keys()))
-        ]
-        return variables.ListIteratorVariable(
-            reversed_keys, mutation_type=ValueMutationNew()
-        )
+        return DictKeysVariable(self).dict_view_reversed(tx, args, kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
@@ -1392,6 +1390,16 @@ class OrderedDictVariable(ConstDictVariable):
     ) -> VariableTracker:
         return super().dict_items(tx, args, kwargs).clone(is_ordered=True)
 
+    def dict_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictKeysVariable(self, is_ordered=True).dict_view_reversed(
+            tx, args, kwargs
+        )
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
         "copy": Method(dict_copy),
@@ -1401,6 +1409,7 @@ class OrderedDictVariable(ConstDictVariable):
         "keys": Method(dict_keys),
         "values": Method(dict_values),
         "items": Method(dict_items),
+        "__reversed__": Method(dict_reversed),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
