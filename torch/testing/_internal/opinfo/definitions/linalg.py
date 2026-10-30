@@ -1703,12 +1703,8 @@ op_db: list[OpInfo] = [
         supports_out=True,
         sample_inputs_func=sample_inputs_linalg_lstsq,
         error_inputs_func=error_inputs_lstsq,
-        decorators=[skipCPUIfNoLapack],
-        skips=(
-            # we skip gradient checks for this suite as they are tested in
-            # variant_test_name='grad_oriented'
-            # The values for attribute 'shape' do not match
-            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
+        decorators=[
+            skipCPUIfNoLapack,
             # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
             DecorateInfo(
                 toleranceOverride(
@@ -1721,6 +1717,12 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
+        ],
+        skips=(
+            # we skip gradient checks for this suite as they are tested in
+            # variant_test_name='grad_oriented'
+            # The values for attribute 'shape' do not match
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1770,17 +1772,8 @@ op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCPUIfNoLapack],
-        skips=(
-            # tests do not work with passing lambda for op
-            DecorateInfo(
-                unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestOperatorSignatures",
-                "test_get_torch_func_signature_exhaustive",
-            ),
+        decorators=[
+            skipCPUIfNoLapack,
             # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
             DecorateInfo(
                 toleranceOverride(
@@ -1792,6 +1785,17 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="cpu",
+            ),
+        ],
+        skips=(
+            # tests do not work with passing lambda for op
+            DecorateInfo(
+                unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestOperatorSignatures",
+                "test_get_torch_func_signature_exhaustive",
             ),
         ),
     ),
