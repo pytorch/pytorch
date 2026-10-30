@@ -5,6 +5,7 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
+#include <c10/util/Float8_e5m3fnu.h>
 #include <c10/util/Float8_e8m0fnu.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>

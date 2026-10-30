@@ -888,11 +888,17 @@ static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy
 
   // cusolver batched kernels require input be "device array of device pointers"
   Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
+  auto self_working_copy_array_ptr = reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr());
+  auto infos_ptr = infos.data_ptr<int>();
 
-  at::cuda::solver::potrfBatched<scalar_t>(
-    handle, uplo, n,
-    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
-    lda, infos.data_ptr<int>(), batch_size);
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrfBatched<scalar_t>(
+      handle, uplo, n,
+      &self_working_copy_array_ptr[mini_idx],
+      lda, &infos_ptr[mini_idx], cur_batch_size);
+  }
 }
 
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
@@ -992,18 +998,24 @@ static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, cons
 
   auto self_ptr_array = get_device_pointers<scalar_t>(self_working_copy);
   auto A_ptr_array = get_device_pointers<scalar_t>(A_column_major_copy);
+  auto self_ptr_array_data = reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr());
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
 
-  at::cuda::solver::potrsBatched(
-    handle, uplo,
-    cuda_int_cast(n, "n"),
-    cuda_int_cast(nrhs, "nrhs"),
-    reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr()),
-    cuda_int_cast(lda, "lda"),
-    reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr()),
-    cuda_int_cast(ldb, "ldb"),
-    infos_ptr,
-    cuda_int_cast(batch_size, "batch_size")
-  );
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrsBatched(
+      handle, uplo,
+      cuda_int_cast(n, "n"),
+      cuda_int_cast(nrhs, "nrhs"),
+      &A_ptr_array_data[mini_idx],
+      cuda_int_cast(lda, "lda"),
+      &self_ptr_array_data[mini_idx],
+      cuda_int_cast(ldb, "ldb"),
+      infos_ptr,
+      cur_batch_size
+    );
+  }
 }
 
 void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper) {
@@ -1381,25 +1393,52 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
 
   rocblas_handle handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
 
-  // rocsolver will manage the workspace size automatically
-   if(!rocblas_is_managing_device_memory(handle))
-        TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
+  auto run_syevd = [&] {
+    return _rocsolver_syevd_strided_batched<scalar_t>(
+        handle,
+        evect,
+        uplo,
+        n,
+        vectors_data,
+        lda,
+        vectors_stride,
+        values_data,
+        values_stride,
+        static_cast<scalar_t*>(work_data.get()),
+        work_stride,
+        infos_data,
+        batch_size);
+  };
 
-  TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
-    handle,
-    evect,
-    uplo,
-    n,
-    vectors_data,
-    lda,
-    vectors_stride,
-    values_data,
-    values_stride,
-    static_cast<scalar_t*>(work_data.get()),
-    work_stride,
-    infos_data,
-    batch_size
-  ));
+  TORCH_ROCBLAS_CHECK(rocblas_start_device_memory_size_query(handle));
+  auto query_status = run_syevd();
+  size_t workspace_size = 0;
+  TORCH_ROCBLAS_CHECK(
+      rocblas_stop_device_memory_size_query(handle, &workspace_size));
+  TORCH_CHECK(
+      query_status == rocblas_status_success ||
+          query_status == rocblas_status_size_increased ||
+          query_status == rocblas_status_size_unchanged,
+      "rocblas error: ",
+      rocblas_status_to_string(query_status),
+      " when querying workspace for rocsolver syevd");
+
+  // The query accumulator starts at 0, so size_increased does not mean the
+  // installed workspace is too small. Bind whenever this call needs memory.
+  c10::DataPtr workspace;
+  if (workspace_size > 0) {
+    workspace = allocator.allocate(workspace_size);
+    TORCH_ROCBLAS_CHECK(
+        rocblas_set_workspace(handle, workspace.get(), workspace_size));
+  }
+  auto status = run_syevd();
+  rocblas_status reset_status = rocblas_status_success;
+  if (workspace_size > 0) {
+    // Drop the user pointer before its DataPtr is freed.
+    reset_status = rocblas_set_workspace(handle, nullptr, 0);
+  }
+  TORCH_ROCBLAS_CHECK(status);
+  TORCH_ROCBLAS_CHECK(reset_status);
 }
 #endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 
