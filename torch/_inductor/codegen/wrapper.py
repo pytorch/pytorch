@@ -6484,6 +6484,7 @@ class PythonWrapperCodegen(CodeGen):
         every switch on it can share one read of its value."""
         return (
             isinstance(selector, ir.StorageBox)
+            and isinstance(selector.data, ir.Buffer)
             and selector.get_name() not in V.graph.mutated_inputs
             and selector.get_name() not in V.graph.mutated_buffers
         )
