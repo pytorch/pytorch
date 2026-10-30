@@ -16,7 +16,7 @@ class C10_API FakeTensorModeTLS {
   static std::shared_ptr<FakeTensorMode> get_state();
   static void reset_state();
 
-  // Note [C++ fake in_kernel_invocation]
+  // Note [C++ in_kernel_invocation]
   // A Python FakeTensor reports its fake device, except inside
   // FakeTensorMode's in_kernel_invocation_manager, where a meta kernel is
   // running on it and must see the meta device (see [in_kernel_invocation] in
@@ -36,26 +36,23 @@ class C10_API FakeTensorModeTLS {
   // - at::ThreadLocalState carries it into worker threads, next to the mode.
   // - reset_state() leaves it alone on purpose: the flag records that a meta
   //   kernel is running, not which mode is installed, and the
-  //   FakeInKernelInvocationGuard that set it restores the previous value when
+  //   InKernelInvocationGuard that set it restores the previous value when
   //   its scope ends.
   static bool in_kernel_invocation();
   static void set_in_kernel_invocation(bool value);
 };
 
-struct C10_API FakeInKernelInvocationGuard {
-  FakeInKernelInvocationGuard()
-      : prev_(FakeTensorModeTLS::in_kernel_invocation()) {
+struct C10_API InKernelInvocationGuard {
+  InKernelInvocationGuard() : prev_(FakeTensorModeTLS::in_kernel_invocation()) {
     FakeTensorModeTLS::set_in_kernel_invocation(true);
   }
-  ~FakeInKernelInvocationGuard() {
+  ~InKernelInvocationGuard() {
     FakeTensorModeTLS::set_in_kernel_invocation(prev_);
   }
-  FakeInKernelInvocationGuard(const FakeInKernelInvocationGuard&) = delete;
-  FakeInKernelInvocationGuard& operator=(const FakeInKernelInvocationGuard&) =
-      delete;
-  FakeInKernelInvocationGuard(FakeInKernelInvocationGuard&&) = delete;
-  FakeInKernelInvocationGuard& operator=(FakeInKernelInvocationGuard&&) =
-      delete;
+  InKernelInvocationGuard(const InKernelInvocationGuard&) = delete;
+  InKernelInvocationGuard& operator=(const InKernelInvocationGuard&) = delete;
+  InKernelInvocationGuard(InKernelInvocationGuard&&) = delete;
+  InKernelInvocationGuard& operator=(InKernelInvocationGuard&&) = delete;
 
  private:
   bool prev_;
