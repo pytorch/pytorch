@@ -5259,6 +5259,19 @@ class CppFakeTensorModeBindingsTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a Python wrapper"):
             torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
 
+    def test_from_meta_and_device(self):
+        mode, wrapper = self._make_mode()
+        fake = torch._C._from_meta_and_device(
+            torch.empty(2, 3, device="meta"), torch.device("cpu"), mode
+        )
+        self.assertTrue(torch._C._is_fake_tensor(fake))
+        self.assertEqual(fake.device, torch.device("cpu"))
+        self.assertEqual(fake.shape, (2, 3))
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        with self.assertRaisesRegex(RuntimeError, "Expected a meta tensor"):
+            torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
+
 
 if __name__ == "__main__":
     run_tests()

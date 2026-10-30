@@ -2975,6 +2975,48 @@ Call this whenever a new thread is created in order to propagate values from
           py::arg("wrapper"))
       .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_);
 
+  // Turns a meta tensor into a C++ fake of mode on device, in place, like
+  // Python's FakeTensorConverter.from_meta_and_device.
+  py_module.def(
+      "_from_meta_and_device",
+      [](const at::Tensor& meta,
+         c10::Device device,
+         const std::shared_ptr<c10::FakeTensorMode>& mode) {
+        TORCH_CHECK(mode != nullptr, "Expected a C++ FakeTensorMode");
+        // A C++ fake is itself meta-backed but reports its fake device, so
+        // check the backing storage rather than is_meta().
+        TORCH_CHECK(
+            meta.key_set().has_backend(c10::BackendComponent::MetaBit),
+            "Expected a meta tensor");
+        auto* impl = meta.unsafeGetTensorImpl();
+        TORCH_CHECK(
+            !impl->is_fake() || impl->fake_tensor_mode() == mode,
+            "Expected a meta tensor or a fake of the given mode");
+        // Check before mutating meta, so a failure leaves it untouched.
+        TORCH_CHECK(
+            device.type() != c10::DeviceType::Meta || mode->allow_meta_,
+            "device.type must not be 'meta' when allow_meta is False");
+        at::set_and_normalize_fake_device(impl, device);
+        impl->set_fake_tensor_mode(mode);
+        // Like a fresh Python FakeTensor, the result shadows no real tensor.
+        if (impl->real_tensor()) {
+          impl->set_real_tensor(nullptr);
+        }
+        return meta;
+      },
+      py::arg("meta"),
+      py::arg("device"),
+      py::arg("mode"));
+
+  // The Python wrapper of a C++ fake's mode, or None for any other tensor.
+  py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
+    if (!t.defined() || !t.is_fake()) {
+      return py::none();
+    }
+    return torch::fake_tensor::getCppFakeTensorModePyObj(
+        t.unsafeGetTensorImpl()->fake_tensor_mode());
+  });
+
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
