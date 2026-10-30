@@ -4375,13 +4375,8 @@ def _get_fake_value_impl(
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
-        ) or (
-            isinstance(cause, RuntimeError)
-            and "Unsupported operator for C++ FakeTensor" in str(cause)
         ):
-            op = getattr(cause, "func", node.target)  # type: ignore[assignment]
-            if isinstance(op, torch._ops.OpOverloadPacket):
-                op = op.default
+            op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -4396,7 +4391,7 @@ def _get_fake_value_impl(
                     )
             unimplemented(
                 gb_type="Operator does not support running with fake tensors",
-                context=f"unsupported operator: {op}",
+                context=f"unsupported operator: {cause.func}",
                 explanation="",
                 hints=[
                     f"{import_suggestion}see "
@@ -4513,6 +4508,37 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def safe_repr(x: object) -> str:
+    """repr(x), falling back to reprs of the elements of a list, tuple or dict
+    when that raises, and to <ClassName> for an element whose repr raises, so
+    that one bad repr does not hide the others or the error being reported."""
+    try:
+        return repr(x)
+    except Exception:
+        pass
+    if isinstance(x, (list, tuple)):
+        items = ", ".join(safe_repr(e) for e in x)
+        if isinstance(x, list):
+            return f"[{items}]"
+        return f"({items},)" if len(x) == 1 else f"({items})"
+    if isinstance(x, dict):
+        items = ", ".join(f"{safe_repr(k)}: {safe_repr(v)}" for k, v in x.items())
+        return f"{{{items}}}"
+    return f"<{type(x).__name__}>"
+
+
+def summarize_example_value(v: object) -> str:
+    """A short description of a graph input's example value for logs and
+    errors: tensors, including those in a list or tuple, show only their class
+    and size, since a fake tensor's repr can be large or can raise."""
+    if isinstance(v, torch.Tensor):
+        return f"{type(v).__name__}(..., size={tuple(v.shape)})"
+    if isinstance(v, (list, tuple)):
+        items = ", ".join(summarize_example_value(e) for e in v)
+        return f"{type(v).__name__}[{items}]"
+    return safe_repr(v)
+
+
 def run_node(
     tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
 ) -> Any:
@@ -4535,14 +4561,8 @@ def run_node(
     with set_current_node(node):
 
         def make_error_message(e: object) -> str:
-            try:
-                args_str = repr(args)
-                kwargs_str = repr(kwargs)
-            except Exception:
-                args_str = f"<{len(args)} args>"
-                kwargs_str = f"<{len(kwargs)} kwargs>"
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args_str}, **{kwargs_str}): got "
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{safe_repr(args)}, **{safe_repr(kwargs)}): got "
                 + repr(e)
             )
 
