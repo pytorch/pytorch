@@ -61,7 +61,8 @@ class TORCH_API Reducer {
       bool skip_all_reduce_unused_params,
       bool use_python_reducer,
       std::vector<int64_t> bucket_bytes_cap_list,
-      bool batched_grad_copy = false);
+      bool batched_grad_copy = false,
+      bool lazy_bucket_allocation = false);
 
   ~Reducer() noexcept(false);
 
@@ -251,6 +252,8 @@ class TORCH_API Reducer {
   const bool gradient_as_bucket_view_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool batched_grad_copy_;
+  const bool lazy_bucket_allocation_;
+  bool has_logged_bucket_allocator_{false};
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
   // Previous iteration's unused params, used for checking if unused parameters
@@ -336,12 +339,14 @@ class TORCH_API Reducer {
   // are marked ready).
   void flush_deferred_copies(Bucket& bucket, size_t bucket_index);
 
-  // This function is called inside `initialize_buckets()`. It initializes both
-  // `bucket_views_in` and `bucket_views_out` with views for each variable's
-  // gradient into the bucket's flattened `gradients` tensor. Views serve as
-  // entry points to `copy_()` each grad's data in/out of the flattened
-  // `gradients` tensor.
+  // Initializes views for each variable into the flattened gradient tensor.
   void initialize_bucket_views(Bucket& bucket);
+
+  void initialize_bucket_storage(Bucket& bucket);
+
+  // Parameter gradients retain their bucket views until the optimizer clears
+  // them, so releasing these references does not invalidate visible gradients.
+  void release_bucket_storage();
 
   // This function is called inside `finalize_backward`, it happens only if
   // DDP communication hook was registered to recreate just bucket_views_out
@@ -410,6 +415,10 @@ class TORCH_API Reducer {
     // Future work handle for DDP communication hook
     // If no hook is registered, a temporary vanilla allreduce hook is used.
     c10::intrusive_ptr<at::ivalue::Future> future_work;
+
+    // Retained for lazy buckets so finalize_backward can release NCCL's tensor
+    // stash on the autograd thread after communication completes.
+    c10::intrusive_ptr<c10d::Work> allreduce_work;
 
     // if this bucket contains complex parameters
     bool is_complex_bucket = false;

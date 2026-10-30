@@ -480,7 +480,7 @@ Supported OS flavors are summarized in the table below:
 | Operating System family | Architecture | Notes |
 | --- | --- | --- |
 | Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
-| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 14 (Sonoma). MPS support is enabled on macOS 14 (Sonoma) or later. |
+| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 15 (Sequoia) and macOS 26 (Tahoe). MPS support is enabled on macOS 15 (Sequoia) or later. |
 | Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials
