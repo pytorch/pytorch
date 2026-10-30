@@ -39,9 +39,10 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
-    skipIfHpu,
     skipIfXpu,
     TEST_CUDA,
 )
@@ -193,7 +194,7 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     return _custom_policy
 
 
-class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
+class ActivationCheckpointingViaTagsTestBase(torch._dynamo.test_case.TestCase):
     def _validate(
         self,
         fn,
@@ -283,7 +284,8 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                     msg="Gradient mismatch between the original version and the checkpointed version of the same function",
                 )
 
-        run(functools.partial(torch.compile, fullgraph=fullgraph))
+        if HAS_GPU_AND_TRITON:
+            run(functools.partial(torch.compile, fullgraph=fullgraph))
         if fullgraph:
 
             def export_compiler(fn):
@@ -315,6 +317,10 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
             run(export_compiler)
 
+
+class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "partition_fn",
         [
@@ -345,7 +351,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -375,7 +380,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -406,7 +410,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     def test_checkpoint_shows_tags_in_tlparse(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -433,7 +436,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_gpu_and_triton
     def test_ac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -481,7 +483,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_gpu_and_triton
     def test_sac_tags_through_custom_autograd_function(self, device):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -539,7 +540,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         out = torch.compile(fn, backend=backend)(x, w)
         out.sum().backward()
 
-    @requires_gpu_and_triton
     def test_tangent_placeholders_have_is_backward_tag(self, device):
         """Test that tangent placeholders in the joint graph are tagged with is_backward."""
 
@@ -573,7 +573,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         _ = torch.compile(fn, backend=backend)(x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -609,7 +608,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -642,7 +640,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -681,7 +678,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -798,92 +794,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
 
-    @skipIfHpu
-    @torch._functorch.config.patch(recompute_views=True)
-    @torch._inductor.config.patch(fx_graph_cache=False)
-    def test_tags_must_save_tensor_that_has_backward_hook(self):
-        def my_post_forward_hook(submod, args, output):
-            output.register_hook(my_backward_hook)
-            return output
-
-        def my_backward_hook(grad):
-            return grad
-
-        class MySubmod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                y = torch.matmul(x, x)
-                z = y * y
-                return z
-
-        class MyMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = MySubmod()
-                self.norm = torch.nn.LayerNorm(4)
-
-            def forward(self, x):
-                out = torch.utils.checkpoint.checkpoint(
-                    self.submod, x, use_reentrant=False
-                )
-                norm_out = self.norm(out)
-                return norm_out
-
-        def _factory_fn():
-            mod = MyMod()
-            x = torch.ones(4, 4, dtype=torch.float32, requires_grad=True)
-            backend = "inductor"
-            return mod, x, backend
-
-        mod_no_hook, x, backend = _factory_fn()
-        mod_no_hook_fwd_outputs = set()
-
-        with torch._inductor.config.patch(
-            post_grad_custom_pre_pass=functools.partial(
-                collect_fwd_graph_outputs, fwd_outputs=mod_no_hook_fwd_outputs
-            )
-        ):
-            self._validate(
-                mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
-            )
-
-        torch._dynamo.reset()
-        mod_with_hook, x, backend = _factory_fn()
-        mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
-        mod_with_hook_fwd_outputs = set()
-
-        with torch._inductor.config.patch(
-            post_grad_custom_pre_pass=functools.partial(
-                collect_fwd_graph_outputs, fwd_outputs=mod_with_hook_fwd_outputs
-            )
-        ):
-            self._validate(
-                mod_with_hook, backend, x, fullgraph=True, compiled_autograd=True
-            )
-
-        # If `z` has a backward hook, result of `z = y * y` should also be saved in addition to the usual saved tensors.
-        mod_no_hook_fwd_outputs_no_primal = {
-            x for x in mod_no_hook_fwd_outputs if not x.startswith("primals_")
-        }
-        mod_with_hook_fwd_outputs_no_primal = {
-            x for x in mod_with_hook_fwd_outputs if not x.startswith("primals_")
-        }
-        additional_saved_tensors = (
-            mod_with_hook_fwd_outputs_no_primal - mod_no_hook_fwd_outputs_no_primal
-        )
-        expected_additional_saved_tensors = {"mul"}
-        self.assertEqual(
-            additional_saved_tensors,
-            expected_additional_saved_tensors,
-            lambda msg: f"""{msg}\n
-Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
-Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
-Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
-        )
-
-    @requires_gpu_and_triton
     def test_fallback(self, device):
         def gn(x, y):
             torch._dynamo.graph_break()
@@ -911,7 +821,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
 
-    @requires_gpu_and_triton
     def test_kwargs(self, device):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -945,7 +854,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_gpu_and_triton
     def test_symints_location(self, device):
         def gn(x, y):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
@@ -975,7 +883,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1051,38 +958,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             partition_fn=partition_fn,
         )
 
-    def test_sac_with_partial_context_fn(self):
-        class CustomPolicy:
-            def __init__(self):
-                super().__init__()
-
-            def __call__(self, ctx, out, func, *args, **kwargs):
-                return CheckpointPolicy.MUST_SAVE
-
-        def f(x, y):
-            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
-
-        context_fn1 = functools.partial(
-            create_selective_checkpoint_contexts, CustomPolicy()
-        )
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                f,
-                x,
-                y,
-                use_reentrant=False,
-                context_fn=context_fn1,
-            )
-
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
-        a = torch.randn(4, 4, requires_grad=True, device="cpu")
-        b = torch.randn(4, 4, requires_grad=True, device="cpu")
-
-        expected = fn(a, b)
-        result = opt_fn(a, b)
-        self.assertEqual(result, expected)
-
     @parametrize(
         "policy,expected_calls",
         [
@@ -1142,7 +1017,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self.assertEqual(call_count, expected_calls)
             self.assertEqual(x.grad, x.cos())
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1198,7 +1072,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1328,7 +1201,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1385,7 +1257,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1457,7 +1328,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1510,7 +1380,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1562,7 +1431,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1737,7 +1605,311 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
+    @skipIfXpu(msg="XPU has some known limitations on flash attention.")
     @requires_gpu_and_triton
+    def test_autocast_flash_attention(self, device):
+        def fn(primals_1, primals_2, primals_3):
+            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                primals_1, primals_2, primals_3, None, True, scale=0.17677669529663687
+            )[0]
+
+        def gn(*args):
+            return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
+
+        with torch.autocast(device_type=device):
+            x = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
+            y = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
+            z = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
+            args = (x, y, z)
+
+            torch.manual_seed(0)
+            ref = gn(*args)
+
+            opt_gn = torch.compile(gn, backend="aot_eager_decomp_partition")
+            torch.manual_seed(0)
+            res = opt_gn(*args)
+            self.assertEqual(ref, res)
+
+    @requires_gpu_and_triton
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "This platform doesn't support efficient attention",
+    )
+    def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
+        def eager_attn(x):
+            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                x, x, x, None, True, dropout_p=0.0
+            )[0]
+
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+        def attn(x):
+            return eager_attn(x)
+
+        def block(x):
+            return x + attn(x)
+
+        x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
+        _, _, philox_seed, philox_offset = (
+            torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                x_ref, x_ref, x_ref, None, True, dropout_p=0.0
+            )
+        )
+        self.assertEqual(philox_seed, torch.zeros((), device=device, dtype=torch.int64))
+        self.assertEqual(
+            philox_offset, torch.zeros((), device=device, dtype=torch.int64)
+        )
+
+        ref = x_ref + eager_attn(x_ref)
+        ref.sum().backward()
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        y = checkpoint(block, x, use_reentrant=False)
+        y.sum().backward()
+
+        self.assertEqual(ref, y)
+        self.assertEqual(x_ref.grad, x.grad)
+
+    def test_error_msg(self, device):
+        class MockModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.sin(x)
+                torch._dynamo.graph_break()
+                x = torch.cos(x)
+                return x
+
+        mod = MockModule().to(device)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
+
+        x = torch.randn(4, 4).to(device)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "User-inserted graph break"
+        ):
+            opt_fn(x)
+
+    def test_list_inputs(self, device):
+        class MockModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, ys):
+                a = torch.sin(x)  # noqa: F841
+                b = torch.cos(ys[0])
+                c = torch.cos(ys[1])
+                return (x, [b, c])
+
+        mod = MockModule().to(device)
+
+        def fn(x, ys):
+            return torch.utils.checkpoint.checkpoint(mod, x, ys, use_reentrant=True)
+
+        x = torch.randn(4, 4).to(device)
+        y = torch.randn(4, 4).to(device)
+        z = torch.randn(4, 4).to(device)
+        ref = fn(x, [y, z])
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        res = opt_fn(x, [y, z])
+        self.assertEqual(ref, res)
+
+    @requires_gpu_and_triton
+    def test_pattern_matcher(self, device):
+        # Check that the sdpa op is recomputed in the backward graph
+        # tests percolate_tags
+
+        @checkpoint_wrapper
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        def fn(query, key, value):
+            # Checks that sin is not recomputed in the backward graph
+            return dot_prod_attention(query.sin(), key, value)
+
+        tensor_shape = (4, 2, 16, 32)
+        dtype = torch.float16
+        args1 = [
+            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
+            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
+            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
+        ]
+
+        # Save the AOT graphs
+        aot_graphs = []
+        from torch._inductor import compile_fx
+        from torch._inductor.utils import fresh_cache
+
+        def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
+            aot_graphs.append(graph)
+            return compile_fx.compile_fx_inner(graph, example_inputs, *args, **kwargs)
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=debug_compile_fx_inner
+        )
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        # A warm FX-graph cache short-circuits inner_compile, leaving aot_graphs
+        # empty; use a fresh cache so the hook always runs.
+        with fresh_cache():
+            opt_fn(*args1).sum().backward()
+
+        fwd_graph = aot_graphs[0]
+        # Determine which fused attention backend is expected based on the
+        # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
+        dprops = torch.get_device_module(device_type).get_device_properties(device)
+        cudnn_version = (
+            torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        )
+        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
+        if prefer_cudnn and torch.version.cuda and TEST_CUDA:
+            sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        else:
+            sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
+        self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
+        bwd_graph = aot_graphs[1]
+        # Check that sin is not recomputed in the backward graph - checks percolate tags
+        self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
+        # Check that the sdpa op is recomputed in the backward graph
+        self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
+
+
+class ActivationCheckpointingViaTagsCPUOnlyTests(
+    ActivationCheckpointingViaTagsTestBase
+):
+    hw_classification = HardwareClassification.CPU
+
+    @torch._functorch.config.patch(recompute_views=True)
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_tags_must_save_tensor_that_has_backward_hook(self):
+        def my_post_forward_hook(submod, args, output):
+            output.register_hook(my_backward_hook)
+            return output
+
+        def my_backward_hook(grad):
+            return grad
+
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.matmul(x, x)
+                z = y * y
+                return z
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = MySubmod()
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                out = torch.utils.checkpoint.checkpoint(
+                    self.submod, x, use_reentrant=False
+                )
+                norm_out = self.norm(out)
+                return norm_out
+
+        def _factory_fn():
+            mod = MyMod()
+            x = torch.ones(4, 4, dtype=torch.float32, requires_grad=True)
+            backend = "inductor"
+            return mod, x, backend
+
+        mod_no_hook, x, backend = _factory_fn()
+        mod_no_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_no_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        torch._dynamo.reset()
+        mod_with_hook, x, backend = _factory_fn()
+        mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
+        mod_with_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_with_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_with_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        # If `z` has a backward hook, result of `z = y * y` should also be saved in addition to the usual saved tensors.
+        mod_no_hook_fwd_outputs_no_primal = {
+            x for x in mod_no_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        mod_with_hook_fwd_outputs_no_primal = {
+            x for x in mod_with_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        additional_saved_tensors = (
+            mod_with_hook_fwd_outputs_no_primal - mod_no_hook_fwd_outputs_no_primal
+        )
+        expected_additional_saved_tensors = {"mul"}
+        self.assertEqual(
+            additional_saved_tensors,
+            expected_additional_saved_tensors,
+            lambda msg: f"""{msg}\n
+Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
+Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
+Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
+        )
+
+
+class ActivationCheckpointingViaTagsGenericTests(
+    ActivationCheckpointingViaTagsTestBase
+):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sac_with_partial_context_fn(self):
+        class CustomPolicy:
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, ctx, out, func, *args, **kwargs):
+                return CheckpointPolicy.MUST_SAVE
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        context_fn1 = functools.partial(
+            create_selective_checkpoint_contexts, CustomPolicy()
+        )
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                f,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=context_fn1,
+            )
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+
+        expected = fn(a, b)
+        result = opt_fn(a, b)
+        self.assertEqual(result, expected)
+
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -1782,7 +1954,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         ):
             self._validate(fn, backend, x, y)
 
-    @requires_gpu_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1883,187 +2054,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(out, out_compiled)
         self.assertEqual(input.grad, input_compiled.grad)
 
-    @skipIfXpu(msg="XPU has some known limitations on flash attention.")
-    @requires_gpu_and_triton
-    def test_autocast_flash_attention(self, device):
-        def fn(primals_1, primals_2, primals_3):
-            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
-                primals_1, primals_2, primals_3, None, True, scale=0.17677669529663687
-            )[0]
-
-        def gn(*args):
-            return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
-
-        with torch.autocast(device_type=device):
-            x = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
-            y = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
-            z = torch.randn(4, 2, 16, 32, device=device, requires_grad=True)
-            args = (x, y, z)
-
-            torch.manual_seed(0)
-            ref = gn(*args)
-
-            opt_gn = torch.compile(gn, backend="aot_eager_decomp_partition")
-            torch.manual_seed(0)
-            res = opt_gn(*args)
-            self.assertEqual(ref, res)
-
-    @requires_gpu_and_triton
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        "This platform doesn't support efficient attention",
-    )
-    def test_compile_checkpoint_mem_eff_attention_no_dropout(self, device):
-        def eager_attn(x):
-            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
-                x, x, x, None, True, dropout_p=0.0
-            )[0]
-
-        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-        def attn(x):
-            return eager_attn(x)
-
-        def block(x):
-            return x + attn(x)
-
-        x_ref = torch.randn(3, 1, 77, 64, device=device, requires_grad=True)
-        _, _, philox_seed, philox_offset = (
-            torch.ops.aten._scaled_dot_product_efficient_attention.default(
-                x_ref, x_ref, x_ref, None, True, dropout_p=0.0
-            )
-        )
-        self.assertEqual(philox_seed, torch.zeros((), device=device, dtype=torch.int64))
-        self.assertEqual(
-            philox_offset, torch.zeros((), device=device, dtype=torch.int64)
-        )
-
-        ref = x_ref + eager_attn(x_ref)
-        ref.sum().backward()
-
-        x = x_ref.detach().clone().requires_grad_(True)
-        y = checkpoint(block, x, use_reentrant=False)
-        y.sum().backward()
-
-        self.assertEqual(ref, y)
-        self.assertEqual(x_ref.grad, x.grad)
-
-    @requires_gpu_and_triton
-    def test_error_msg(self, device):
-        class MockModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x):
-                x = torch.sin(x)
-                torch._dynamo.graph_break()
-                x = torch.cos(x)
-                return x
-
-        mod = MockModule().to(device)
-
-        def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
-
-        x = torch.randn(4, 4).to(device)
-        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "User-inserted graph break"
-        ):
-            opt_fn(x)
-
-    @requires_gpu_and_triton
-    def test_list_inputs(self, device):
-        class MockModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x, ys):
-                a = torch.sin(x)  # noqa: F841
-                b = torch.cos(ys[0])
-                c = torch.cos(ys[1])
-                return (x, [b, c])
-
-        mod = MockModule().to(device)
-
-        def fn(x, ys):
-            return torch.utils.checkpoint.checkpoint(mod, x, ys, use_reentrant=True)
-
-        x = torch.randn(4, 4).to(device)
-        y = torch.randn(4, 4).to(device)
-        z = torch.randn(4, 4).to(device)
-        ref = fn(x, [y, z])
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
-        res = opt_fn(x, [y, z])
-        self.assertEqual(ref, res)
-
-    @requires_gpu_and_triton
-    def test_pattern_matcher(self, device):
-        # Check that the sdpa op is recomputed in the backward graph
-        # tests percolate_tags
-
-        @checkpoint_wrapper
-        def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
-        ) -> torch.Tensor:
-            return (
-                torch.matmul(query, key.transpose(-2, -1))
-                .mul(1.0 / math.sqrt(key.shape[-1]))
-                .softmax(dim=-1)
-                .matmul(value)
-            )
-
-        def fn(query, key, value):
-            # Checks that sin is not recomputed in the backward graph
-            return dot_prod_attention(query.sin(), key, value)
-
-        tensor_shape = (4, 2, 16, 32)
-        dtype = torch.float16
-        args1 = [
-            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
-            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
-            torch.randn(tensor_shape, device=device, dtype=dtype, requires_grad=True),
-        ]
-
-        # Save the AOT graphs
-        aot_graphs = []
-        from torch._inductor import compile_fx
-        from torch._inductor.utils import fresh_cache
-
-        def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
-            aot_graphs.append(graph)
-            return compile_fx.compile_fx_inner(graph, example_inputs, *args, **kwargs)
-
-        backend = functools.partial(
-            compile_fx.compile_fx, inner_compile=debug_compile_fx_inner
-        )
-
-        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        # A warm FX-graph cache short-circuits inner_compile, leaving aot_graphs
-        # empty; use a fresh cache so the hook always runs.
-        with fresh_cache():
-            opt_fn(*args1).sum().backward()
-
-        fwd_graph = aot_graphs[0]
-        # Determine which fused attention backend is expected based on the
-        # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
-        dprops = torch.get_device_module(device_type).get_device_properties(device)
-        cudnn_version = (
-            torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        )
-        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10)
-        if prefer_cudnn and torch.version.cuda and TEST_CUDA:
-            sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        else:
-            sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
-        self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
-        bwd_graph = aot_graphs[1]
-        # Check that sin is not recomputed in the backward graph - checks percolate tags
-        self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
-        # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
-
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
@@ -2091,7 +2082,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
@@ -2500,52 +2490,6 @@ sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_region_activation_memory_budget_reduces_act_mem(self):
-        N, NUM_LAYERS = 1000, 4
-
-        class Model(torch.nn.Module):
-            def __init__(self, budget=None):
-                super().__init__()
-                self.budget = budget
-                self.linears = torch.nn.ModuleList(
-                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
-                )
-
-            def forward(self, x):
-                if self.budget is not None:
-                    with torch.autograd.graph.region_activation_memory_budget(
-                        self.budget
-                    ):
-                        for linear in self.linears:
-                            x = linear(x).relu()
-                        return x.sum()
-                else:
-                    for linear in self.linears:
-                        x = linear(x).relu()
-                    return x.sum()
-
-        def get_act_mem(f):
-            out = f()
-            out.backward()
-            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
-            out = f()
-            act_mem = (
-                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
-            )
-            out.backward()
-            return act_mem
-
-        x = torch.randn(N, N, device="cuda")
-
-        torch._dynamo.reset()
-        compiled = torch.compile(Model().cuda(), backend="aot_eager")
-        self.assertGreater(get_act_mem(lambda: compiled(x)), 0)
-
-        torch._dynamo.reset()
-        compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
-        self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
-
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_region_activation_memory_budget_survives_graph_break(self):
         from unittest.mock import patch
@@ -2635,73 +2579,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             ],
             [[0.2], [0.7], [0.7], [0.2], [None]],
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_region_activation_memory_budget_per_region(self):
-        """Different graphs (separated by a graph break) can have different
-        memory budgets."""
-        N, NUM_LAYERS = 1000, 2
-
-        class Model(torch.nn.Module):
-            def __init__(self, budget_a, budget_b):
-                super().__init__()
-                self.budget_a = budget_a
-                self.budget_b = budget_b
-                self.linears_a = torch.nn.ModuleList(
-                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
-                )
-                self.linears_b = torch.nn.ModuleList(
-                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
-                )
-
-            def forward(self, x):
-                with torch.autograd.graph.region_activation_memory_budget(
-                    self.budget_a
-                ):
-                    for linear in self.linears_a:
-                        x = linear(x).relu()
-                torch._dynamo.graph_break()
-                with torch.autograd.graph.region_activation_memory_budget(
-                    self.budget_b
-                ):
-                    for linear in self.linears_b:
-                        x = linear(x).relu()
-                    return x.sum()
-
-        def get_act_mem(f):
-            out = f()
-            out.backward()
-            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
-            out = f()
-            act_mem = (
-                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
-            )
-            out.backward()
-            return act_mem
-
-        x = torch.randn(N, N, device="cuda")
-
-        torch._dynamo.reset()
-        both_save = torch.compile(Model(1.0, 1.0).cuda(), backend="aot_eager")
-        mem_both_save = get_act_mem(lambda: both_save(x))
-
-        torch._dynamo.reset()
-        a_recomp = torch.compile(Model(0.0, 1.0).cuda(), backend="aot_eager")
-        mem_a_recomp = get_act_mem(lambda: a_recomp(x))
-
-        torch._dynamo.reset()
-        b_recomp = torch.compile(Model(1.0, 0.0).cuda(), backend="aot_eager")
-        mem_b_recomp = get_act_mem(lambda: b_recomp(x))
-
-        torch._dynamo.reset()
-        both_recomp = torch.compile(Model(0.0, 0.0).cuda(), backend="aot_eager")
-        mem_both_recomp = get_act_mem(lambda: both_recomp(x))
-
-        # Both save > either one recomputing > both recomputing
-        self.assertGreater(mem_both_save, mem_a_recomp)
-        self.assertGreater(mem_both_save, mem_b_recomp)
-        self.assertGreater(mem_a_recomp, mem_both_recomp)
-        self.assertGreater(mem_b_recomp, mem_both_recomp)
 
     def test_region_activation_memory_budget_validation(self):
         region_activation_memory_budget = (
@@ -2826,7 +2703,156 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertIsNotNone(x.grad)
         self.assertEqual(budgets, [0.3, 0.3])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
+        """Different budgets in two invoke_subgraph regions of a single graph are
+        rejected: the agreement check recurses into nested subgraphs, so the
+        outermost graph sees both budgets. Use a graph break for different
+        budgets."""
+        from torch.compiler import nested_compile_region
+
+        wa = torch.randn(8, 8, requires_grad=True)
+        wb = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region_a(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                return (x @ wa).relu()
+
+        @nested_compile_region
+        def region_b(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (x @ wb).relu()
+
+        def fn(x):
+            return region_b(region_a(x)).sum()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x).backward()
+
+
+instantiate_parametrized_tests(ActivationCheckpointingViaTagsGenericTests)
+
+
+@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+class ActivationCheckpointingViaTagsCUDAOnlyTests(
+    ActivationCheckpointingViaTagsTestBase
+):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_region_activation_memory_budget_reduces_act_mem(self):
+        N, NUM_LAYERS = 1000, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget=None):
+                super().__init__()
+                self.budget = budget
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                if self.budget is not None:
+                    with torch.autograd.graph.region_activation_memory_budget(
+                        self.budget
+                    ):
+                        for linear in self.linears:
+                            x = linear(x).relu()
+                        return x.sum()
+                else:
+                    for linear in self.linears:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model().cuda(), backend="aot_eager")
+        self.assertGreater(get_act_mem(lambda: compiled(x)), 0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
+        self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
+
+    def test_region_activation_memory_budget_per_region(self):
+        """Different graphs (separated by a graph break) can have different
+        memory budgets."""
+        N, NUM_LAYERS = 1000, 2
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget_a, budget_b):
+                super().__init__()
+                self.budget_a = budget_a
+                self.budget_b = budget_b
+                self.linears_a = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+                self.linears_b = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_a
+                ):
+                    for linear in self.linears_a:
+                        x = linear(x).relu()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_b
+                ):
+                    for linear in self.linears_b:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        both_save = torch.compile(Model(1.0, 1.0).cuda(), backend="aot_eager")
+        mem_both_save = get_act_mem(lambda: both_save(x))
+
+        torch._dynamo.reset()
+        a_recomp = torch.compile(Model(0.0, 1.0).cuda(), backend="aot_eager")
+        mem_a_recomp = get_act_mem(lambda: a_recomp(x))
+
+        torch._dynamo.reset()
+        b_recomp = torch.compile(Model(1.0, 0.0).cuda(), backend="aot_eager")
+        mem_b_recomp = get_act_mem(lambda: b_recomp(x))
+
+        torch._dynamo.reset()
+        both_recomp = torch.compile(Model(0.0, 0.0).cuda(), backend="aot_eager")
+        mem_both_recomp = get_act_mem(lambda: both_recomp(x))
+
+        # Both save > either one recomputing > both recomputing
+        self.assertGreater(mem_both_save, mem_a_recomp)
+        self.assertGreater(mem_both_save, mem_b_recomp)
+        self.assertGreater(mem_a_recomp, mem_both_recomp)
+        self.assertGreater(mem_b_recomp, mem_both_recomp)
+
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_region_activation_memory_budget_covers_invoke_subgraph(self):
         """A budget covering a forward that contains an invoke_subgraph
@@ -2878,39 +2904,12 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         recompute = torch.compile(build(0.0), backend="aot_eager", fullgraph=True)
         self.assertEqual(get_act_mem(lambda: recompute(x)), 0)
 
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
-        """Different budgets in two invoke_subgraph regions of a single graph are
-        rejected: the agreement check recurses into nested subgraphs, so the
-        outermost graph sees both budgets. Use a graph break for different
-        budgets."""
-        from torch.compiler import nested_compile_region
-
-        wa = torch.randn(8, 8, requires_grad=True)
-        wb = torch.randn(8, 8, requires_grad=True)
-
-        @nested_compile_region
-        def region_a(x):
-            with torch.autograd.graph.region_activation_memory_budget(0.3):
-                return (x @ wa).relu()
-
-        @nested_compile_region
-        def region_b(x):
-            with torch.autograd.graph.region_activation_memory_budget(0.8):
-                return (x @ wb).relu()
-
-        def fn(x):
-            return region_b(region_a(x)).sum()
-
-        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
-            cfn(x).backward()
-
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_sac_with_bound_method_context_fn(self):
         # A bound method is a valid context_fn; extracting the underlying
@@ -3031,7 +3030,7 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         self.assertEqual(cnt.frame_count, 1)
 
 
-class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
+class RematerializeACNodesPassTestBase(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
     def count_op(self, gm, target):
@@ -3062,7 +3061,10 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
+
+class RematerializeACNodesPassTests(RematerializeACNodesPassTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3244,84 +3246,6 @@ def forward(self, arg0_1, arg1_1):
                     node = SimpleNamespace(target=op, args=tuple(args), kwargs={})
 
                     self.assertEqual(is_rng_op(node), expected)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-
-        cases = []
-        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
-            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
-        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
-        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
-            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
-        if not cases:
-            self.skipTest("No fused SDPA backends available")
-        sdpa_ops = {
-            torch.ops.aten.scaled_dot_product_attention.default,
-            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
-            torch.ops.aten._scaled_dot_product_flash_attention.default,
-            torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
-        }
-
-        def policy_fn(ctx, op, *args, **kwargs):
-            if op in sdpa_ops:
-                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
-            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
-
-        context_fn = functools.partial(
-            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
-        )
-
-        for backend, dtype in cases:
-            with self.subTest(backend=backend, dtype=dtype):
-                torch._dynamo.reset()
-                q = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-                k = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-                v = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-
-                def fwd_bwd_with_sdpa(q, k, v):
-                    with sdpa_kernel(backend):
-                        z = torch.utils.checkpoint.checkpoint(
-                            lambda q, k, v: F.scaled_dot_product_attention(
-                                q, k, v, dropout_p=0.0
-                            ),
-                            q,
-                            k,
-                            v,
-                            use_reentrant=False,
-                            context_fn=context_fn,
-                        )
-                        loss = z.sum()
-                        dq, dk, dv = _grad(loss, (q, k, v))
-
-                    return z.detach(), dq, dk, dv
-
-                result_with, gm_with = self._compile_and_capture(
-                    fwd_bwd_with_sdpa, True, (q, k, v)
-                )
-                torch._dynamo.reset()
-                result_without, _ = self._compile_and_capture(
-                    fwd_bwd_with_sdpa, False, (q, k, v)
-                )
-                eager_inputs = tuple(
-                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
-                )
-                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
-
-                for actual, expected in zip(result_with, result_without):
-                    self.assertEqual(actual, expected)
-                for actual, expected in zip(result_with, result_eager):
-                    self.assertEqual(actual, expected)
-                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
 
     def test_ac_rematerialize_with_no_annotations(self):
         x = torch.randn(4, 4, requires_grad=True)
@@ -3576,7 +3500,6 @@ def forward(self, arg0_1):
         self.assertEqual(ref, result)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_multiple_user_phase_annotations_errors(self):
         x = torch.randn(4, 4, requires_grad=True)
         w = torch.randn(4, 4, requires_grad=True)
@@ -3597,7 +3520,6 @@ def forward(self, arg0_1):
         with self.assertRaisesRegex(RuntimeError, "backward regions annotated"):
             self._compile_and_capture(fn, True, (x, w))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_user_phase_annotation_with_extra_autograd_grad(self):
         """Only the user-annotated backward region gets rematerialization."""
         x = torch.randn(4, 4, requires_grad=True)
@@ -3749,6 +3671,88 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+class RematerializeACNodesPassCUDAOnlyTests(RematerializeACNodesPassTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        cases = []
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
+        if not cases:
+            self.skipTest("No fused SDPA backends available")
+        sdpa_ops = {
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in sdpa_ops:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        for backend, dtype in cases:
+            with self.subTest(backend=backend, dtype=dtype):
+                torch._dynamo.reset()
+                q = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                k = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                v = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+
+                def fwd_bwd_with_sdpa(q, k, v):
+                    with sdpa_kernel(backend):
+                        z = torch.utils.checkpoint.checkpoint(
+                            lambda q, k, v: F.scaled_dot_product_attention(
+                                q, k, v, dropout_p=0.0
+                            ),
+                            q,
+                            k,
+                            v,
+                            use_reentrant=False,
+                            context_fn=context_fn,
+                        )
+                        loss = z.sum()
+                        dq, dk, dv = _grad(loss, (q, k, v))
+
+                    return z.detach(), dq, dk, dv
+
+                result_with, gm_with = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, True, (q, k, v)
+                )
+                torch._dynamo.reset()
+                result_without, _ = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, False, (q, k, v)
+                )
+                eager_inputs = tuple(
+                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
+                )
+                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
+
+                for actual, expected in zip(result_with, result_without):
+                    self.assertEqual(actual, expected)
+                for actual, expected in zip(result_with, result_eager):
+                    self.assertEqual(actual, expected)
+                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
+
+
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
@@ -3756,6 +3760,8 @@ instantiate_device_type_tests(
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _count_backward_regions(gm):
@@ -4082,14 +4088,17 @@ def forward(self, arg0_1, arg1_1):
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
-    @requires_gpu_and_triton
-    def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self, device):
         from torch._guards import tracing, TracingContext
         from torch._subclasses import FakeTensorMode
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
 
-        compiled_f = torch.compile(lambda x: x.sin().cos(), fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        compiled_f = torch.compile(
+            lambda x: x.sin().cos(), backend="eager", fullgraph=True
+        )
 
         @contextlib.contextmanager
         def skip_nested_compile():
@@ -4107,8 +4116,8 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             def block(self, x):
                 return compiled_f(x)
 
-        m = getattr(M(), device_type)()
-        x = torch.randn(8, device=device_type, requires_grad=True)
+        m = M().to(device)
+        x = torch.randn(8, device=device, requires_grad=True)
 
         def fn(x):
             y = m(x).sum()
@@ -4156,6 +4165,14 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingNestedCompileTests,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
