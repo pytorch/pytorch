@@ -16,7 +16,7 @@ Flag an added install that resolves packages from an index during a Linux build 
 - a helper or `subprocess` call that runs one of these
 - an install-on-`ImportError` fallback (`try: import x` / `except ImportError: pip install ...`)
 
-The fix is to add the package to the CI image: `.ci/docker/requirements-ci.txt`, or a script under `.ci/docker/common/`. Requirements in the image may float (a lower bound is fine). An exact `==` pin at the install site is not a fix, because the package's own dependencies still resolve fresh on every run.
+The fix is to add the package to the CI image: `.ci/docker/requirements-ci.txt`, or a script under `.ci/docker/common/`. Pin it there with `==`: upgrades then come through a PR that bumps the pin, which rebuilds the image and runs CI on it. An exact `==` pin at the install site is not a fix, because the package's own dependencies still resolve fresh on every run.
 
 Adding a package to `requirements-ci.txt` is the fix even though some jobs still resolve it on each run: s390x installs that file at test time into an image that doesn't preinstall it, and macOS and Windows have no image.
 
