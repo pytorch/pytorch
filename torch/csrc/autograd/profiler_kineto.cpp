@@ -1188,7 +1188,7 @@ void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
         if (in.size() < n) {
           in.resize(n, 0);
         }
-        for (size_t i = 0; i < n; ++i) {
+        for (const auto i : c10::irange(n)) {
           in[i] = (*e.perf_event_counters_)[i];
         }
       },

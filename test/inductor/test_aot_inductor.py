@@ -36,6 +36,7 @@ from torch._inductor.codegen.wrapper import (
     EnterKernelProfileScopeLine,
     ExitKernelProfileScopeLine,
     MemoryPlanningLine,
+    PythonWrapperCodegen,
     SymbolicCallArg,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -176,6 +177,7 @@ if HAS_GPU:
     import triton  # @manual
     from triton import language as tl
 
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
     from torch.testing._internal.triton_utils import (
         add_kernel,
         add_kernel_2d_autotuned,
@@ -192,6 +194,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
         create_tensor_descriptor_shim,
+        double_strided_kernel,
         masked_add_kernel_with_bool_tensor,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
@@ -2697,6 +2700,24 @@ class AOTInductorTestsTemplate:
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
 
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                output = torch.zeros_like(x, dtype=torch.int32)
+                output[1:] = x[:-1]
+                return output
+
+        inputs = [
+            (torch.arange(size, dtype=torch.int64, device=self.device),)
+            for size in (2, 0, 1, 7, 35)
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            inputs,
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        )
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
@@ -4809,13 +4830,19 @@ class AOTInductorTestsTemplate:
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
-    def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
+    @common_utils.parametrize("autotune_with_sample_inputs", [False, True])
+    def test_triton_kernel_tma_descriptor_2d(
+        self, dynamic, tma_version, autotune_with_sample_inputs
+    ):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        lazy_autotune = config.triton.autotune_at_compile_time is False
+        if autotune_with_sample_inputs and lazy_autotune:
+            self.skipTest("requires triton.autotune_at_compile_time=True")
 
         kernel = (
             add_kernel_with_tma_2d_new_api
@@ -4868,11 +4895,140 @@ class AOTInductorTestsTemplate:
                 "b": {0: dim0_ab, 1: None},
             }
 
-        self.check_model(
-            Model(),
-            example_inputs=example_inputs,
-            dynamic_shapes=dynamic_shapes,
-        )
+        orig_stable = PythonWrapperCodegen._generate_tma_descriptor_call_stable
+        autotune_tensor_refs: list[str | None] = []
+
+        def record_stable(self, desc, apply_size_hints=False, tensor_ref=None):
+            # apply_size_hints=True only when emitting the compile-time autotune block.
+            if apply_size_hints:
+                autotune_tensor_refs.append(tensor_ref)
+            return orig_stable(self, desc, apply_size_hints, tensor_ref=tensor_ref)
+
+        with (
+            config.patch(
+                "triton.autotune_with_sample_inputs", autotune_with_sample_inputs
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "_generate_tma_descriptor_call_stable",
+                record_stable,
+            ),
+        ):
+            self.check_model(
+                Model(),
+                example_inputs=example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+
+        if lazy_autotune or tma_version == "old":
+            return
+        # The sample-input path passes tensor_ref=_REAL_AUTOTUNE_INPUT_<i>; the
+        # synthetic path passes None and resolves the generated buffer itself.
+        self.assertEqual(len(autotune_tensor_refs), 3, autotune_tensor_refs)
+        for ref in autotune_tensor_refs:
+            if autotune_with_sample_inputs:
+                self.assertTrue(
+                    ref is not None and ref.startswith("_REAL_AUTOTUNE_INPUT_"), ref
+                )
+            else:
+                self.assertIsNone(ref)
+
+    @requires_cuda_tma
+    @requires_autotune_at_compile_time
+    def test_triton_kernel_tma_descriptors_on_one_tensor_autotune_with_sample_inputs(
+        self,
+    ):
+        # Two descriptors over one captured input, with different block shapes,
+        # must not share a variable in the compile-time autotune block.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        @triton.jit
+        def copy_kernel(
+            full_desc,
+            half_desc,
+            out_full_desc,
+            out_half_desc,
+            BLOCK_SIZE_X: "tl.constexpr",
+            BLOCK_SIZE_Y: "tl.constexpr",
+        ):
+            x = tl.program_id(axis=0) * BLOCK_SIZE_X
+            y = tl.program_id(axis=1) * BLOCK_SIZE_Y
+            half: tl.constexpr = BLOCK_SIZE_Y // 2
+            tl.store_tensor_descriptor(
+                out_full_desc, [x, y], tl.load_tensor_descriptor(full_desc, [x, y])
+            )
+            tl.store_tensor_descriptor(
+                out_half_desc, [x, y], tl.load_tensor_descriptor(half_desc, [x, y])
+            )
+            tl.store_tensor_descriptor(
+                out_half_desc,
+                [x, y + half],
+                tl.load_tensor_descriptor(half_desc, [x, y + half]),
+            )
+
+        class Model(torch.nn.Module):
+            def forward(self, a):
+                BLOCK_SIZE_X = 16
+                BLOCK_SIZE_Y = 32
+                out_full = torch.empty_like(a)
+                out_half = torch.empty_like(a)
+                x_size, y_size = a.size()
+                descs = [
+                    create_tensor_descriptor_shim(t, block_shape, new_api=True)
+                    for t, block_shape in (
+                        (a, [BLOCK_SIZE_X, BLOCK_SIZE_Y]),
+                        (a, [BLOCK_SIZE_X, BLOCK_SIZE_Y // 2]),
+                        (out_full, [BLOCK_SIZE_X, BLOCK_SIZE_Y]),
+                        (out_half, [BLOCK_SIZE_X, BLOCK_SIZE_Y // 2]),
+                    )
+                ]
+                grid = (
+                    triton.cdiv(x_size, BLOCK_SIZE_X),
+                    triton.cdiv(y_size, BLOCK_SIZE_Y),
+                )
+                copy_kernel[grid](
+                    *descs, BLOCK_SIZE_X=BLOCK_SIZE_X, BLOCK_SIZE_Y=BLOCK_SIZE_Y
+                )
+                return out_full, out_half
+
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        autotune_code = []
+        generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def capture_autotune_block(wrapper):
+            autotune_code.append(wrapper.kernel_autotune_calls.getvalue())
+            return generate_and_run(wrapper)
+
+        a = torch.randn((32, 64), device=self.device)
+
+        with (
+            config.patch(
+                {
+                    "triton.autotune_with_sample_inputs": True,
+                    "force_disable_caches": True,
+                }
+            ),
+            unittest.mock.patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                capture_autotune_block,
+            ),
+        ):
+            self.check_model(Model(), example_inputs=(a,))
+
+        # The model's own launch is correct either way; only the autotune block
+        # shows whether each descriptor parameter got its own block shape.
+        code = "\n".join(autotune_code)
+        match = re.search(r"copy_kernel_\d+\.run\((\w+), (\w+),", code)
+        self.assertIsNotNone(match, code)
+        full, half = match.groups()
+        self.assertNotEqual(full, half)
+        FileCheck().check(f"{full} = ").check_same("(16, 32)").run(code)
+        FileCheck().check(f"{half} = ").check_same("(16, 16)").run(code)
 
     def test_triton_kernel_sympy_expr_arg(self):
         if self.device != GPU_TYPE:
@@ -9319,9 +9475,10 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         # Attribute naming has changed in the new export API, so still use the legacy API here.
-        compile_config = {"always_keep_tensor_constants": True}
-        if self.device == "cuda":
-            compile_config["aot_inductor.weight_use_caching_allocator"] = True
+        compile_config = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.weight_use_caching_allocator": True,
+        }
 
         with torch.no_grad(), config.patch(compile_config):
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -9332,10 +9489,7 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def constant_buffer_memory_used():
-            if self.device == "cuda":
-                return torch.cuda.memory_allocated(self.device)
-            free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
-            return -free_memory
+            return torch.accelerator.memory_allocated(self.device)
 
         def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
@@ -10067,6 +10221,49 @@ class AOTInductorTestsTemplate:
                 expected_grids,
                 lambda msg: f"{msg}\ngrid_0={actual_grid} not in expected {expected_grids} from kernel configs",
             )
+
+    @requires_gpu
+    @requires_autotune_at_compile_time
+    @common_utils.parametrize("offset", [0, 128])
+    def test_triton_mutated_strided_autotuning(self, offset):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                base = torch.empty((64, 256), device=x.device, dtype=x.dtype)
+                out = base[:, offset : offset + 128]
+                double_strided_kernel[(4, 4)](
+                    x,
+                    out,
+                    x.stride(0),
+                    out.stride(0),
+                    X_BLOCK_SIZE=32,
+                    Y_BLOCK_SIZE=16,
+                )
+                return out
+
+        x = torch.randn(64, 128, device=self.device)
+        original_run = CachingAutotuner.run
+        observed_calls = 0
+
+        def check_strides(autotuner, *args, **kwargs):
+            """Check the actual autotune tensors before launching the strided kernel."""
+            nonlocal observed_calls
+            if autotuner.fn.__name__ == double_strided_kernel.__name__:
+                observed_calls += 1
+                # Random fallback inputs must not satisfy this regression test.
+                self.assertEqual(args[0], x)
+                self.assertEqual(args[0].stride(0), args[2])
+                self.assertEqual(args[1].stride(0), args[3])
+            return original_run(autotuner, *args, **kwargs)
+
+        with (
+            config.patch("triton.autotune_with_sample_inputs", True),
+            patch.object(CachingAutotuner, "run", new=check_strides),
+        ):
+            self.check_model(Model(), (x,))
+        self.assertGreater(observed_calls, 0)
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     @requires_autotune_at_compile_time

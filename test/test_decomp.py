@@ -20,12 +20,12 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, tf32_off
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
@@ -1214,6 +1214,43 @@ instantiate_device_type_tests(TestDecomp, globals())
 class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyCPU
+    def test_matmul_should_fold_viewable_layout(self, device):
+        from torch._decomp.decompositions import matmul, should_fold
+
+        for shape, stride, can_fold in (
+            ((4, 1, 8), (16, 4, 1), True),
+            ((4, 1, 8), (8, 32, 1), True),
+            ((1, 4, 8), (8, 8, 1), True),
+            ((4, 3, 8), (100, 8, 1), False),
+        ):
+            x = torch.empty_strided(shape, stride, device=device).normal_()
+            y = torch.randn((8, 5), device=device)
+
+            self.assertEqual(should_fold(x, y, False), can_fold)
+            if not can_fold:
+                continue
+
+            result = matmul(x, y)
+            expected = (
+                x.reshape(-1, x.shape[-1]).mm(y).reshape(*x.shape[:-1], y.shape[-1])
+            )
+            self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_matmul_should_fold_uses_transposed_rhs_layout(self, device):
+        from torch._decomp.decompositions import should_fold
+
+        lhs = torch.randn((8,), device=device)
+        rhs = torch.randn((2, 8, 5), device=device)
+
+        # The contiguous RHS is not viewable after mT when folding to (10, 8).
+        folded_rhs = rhs.mT.reshape(10, 8)
+        self.assertNotEqual(
+            folded_rhs.untyped_storage().data_ptr(), rhs.untyped_storage().data_ptr()
+        )
+        self.assertFalse(should_fold(lhs, rhs, False))
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
@@ -1348,7 +1385,7 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
 
@@ -1361,9 +1398,8 @@ class DecompOneOffTests(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
-    @onlyCUDA
-    def test_amp_batch_norm_backward(self):
-        device = "cuda"
+    @onlyAccelerator
+    def test_amp_batch_norm_backward(self, device):
         grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         x = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
         weight = torch.randn((2,), dtype=torch.float32, device=device)
@@ -1462,7 +1498,7 @@ class DecompOneOffTests(TestCase):
                 rtol=1e-2,
             )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
@@ -1493,7 +1529,7 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(decomp_out, ref_out)
         self.assertEqual(decomp_mask, ref_mask)
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_fused_dropout_compile_extreme_p(self, device):
         def fn(input_tensor, p, generator):
@@ -1585,8 +1621,8 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
-    @onlyCUDA
-    @unittest.skipIf(not SM70OrLater, "triton")
+    @onlyAccelerator
+    @unittest.skipIf(TEST_CUDA and not SM70OrLater, "triton requires CUDA with SM>=7.0")
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):
@@ -1611,7 +1647,7 @@ class DecompOneOffTests(TestCase):
             in generated_codes[1]
         )
 
-    @onlyCUDA
+    @onlyAccelerator
     @skipIfCrossRef
     def test_addmm_out_dtype_decomp(self, device):
         cases = [
@@ -1722,7 +1758,7 @@ class DecompOneOffTests(TestCase):
             )
 
 
-instantiate_device_type_tests(DecompOneOffTests, globals())
+instantiate_device_type_tests(DecompOneOffTests, globals(), allow_xpu=True)
 
 
 class HasDecompTest(TestCase):
