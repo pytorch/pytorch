@@ -2751,6 +2751,41 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
+class TestFullyShardGradientDivideFactor(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @parametrize("divide_factor", [None, 1.0, 2.0, 4.0])
+    @parametrize("force_sum", [False, True])
+    @parametrize(
+        "reduce_dtype", [torch.float32, torch.bfloat16, torch.float16, torch.float64]
+    )
+    def test_single_rank_divides_once(
+        self, device, divide_factor, force_sum, reduce_dtype
+    ):
+        model = nn.Linear(2, 2, bias=False, device=device)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(torch.device(device).type, (1,)),
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype),
+        )
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        model.set_force_sum_reduction_for_comms(force_sum)
+
+        inp = torch.tensor([[2.0, 4.0]], device=device)
+        model(inp).sum().backward()
+
+        expected = inp.expand(2, -1) / (divide_factor or 1)
+        self.assertEqual(model.weight.grad.to_local(), expected)
+
+
+instantiate_device_type_tests(
+    TestFullyShardGradientDivideFactor, globals(), only_for="cpu"
+)
+
+
 @instantiate_parametrized_tests
 class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property

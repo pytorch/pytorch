@@ -657,7 +657,12 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
+            if (
+                gradient_divide_factor is not None
+                and gradient_divide_factor != 1.0
+                and predivide_factor is None
+                and postdivide_factor is None
+            ):
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)
