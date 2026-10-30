@@ -683,7 +683,6 @@
   "test/python_native/test_topk_radix_kernel.py",
   "test/python_native/test_torch_backends.py",
   "test/python_native/test_traits.py",
-  "test/quantization/ao_migration/test_ao_migration.py",
   "test/quantization/core/experimental/test_floatx.py",
   "test/quantization/core/test_quantized_op.py",
   "test/quantization/core/test_quantized_tensor.py",
