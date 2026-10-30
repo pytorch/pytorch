@@ -351,48 +351,37 @@ def _same_storage(a: Tensor, b: Tensor) -> bool:
 
 def _may_overlap(a: Tensor, b: Tensor) -> bool:
     """Whether two tensors may share memory: the same tensor, or two on one storage
-    that are not provably disjoint (statically_known_true, so no guards). Provably
-    disjoint are an empty tensor and any other, tensors whose byte ranges do not
-    meet, and 2-D tensors with contiguous rows the same stride apart whose rows do
-    not meet modulo that stride, such as the q, k and v columns of a fused qkv
-    buffer. Bytes, not elements: views of one storage can differ in dtype. (Not
-    compute_overlapping_tensors, which reinplacing uses: it reports some
-    overlapping 2-D views as disjoint.)"""
+    that compute_overlapping_tensors, which reinplacing uses too, does not find
+    disjoint. It guards on the symbolic sizes it compares, and a size it cannot guard
+    on (an unbacked one) counts as an overlap. It counts offsets and strides in
+    elements, so views of one storage with different element sizes are compared by
+    their byte ranges instead, without guards (statically_known_true)."""
     if a is b:
         return True
     if not _same_storage(a, b):
         return False
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
+    from torch._C._dynamo.guards import compute_overlapping_tensors
+    from torch.fx.experimental.symbolic_shapes import (
+        GuardOnDataDependentSymNode,
+        statically_known_true,
+    )
 
-    if any(statically_known_true(t.numel() == 0) for t in (a, b)):
-        return False
+    if a.element_size() == b.element_size():
+        try:
+            return bool(compute_overlapping_tensors([a, b]))
+        except GuardOnDataDependentSymNode:
+            return True
 
-    def start(t: Tensor) -> Any:
-        return t.storage_offset() * t.element_size()
-
-    def end(t: Tensor) -> Any:
+    def byte_range(t: Tensor) -> tuple[Any, Any]:
         # Exact unless t is empty, and an empty tensor overlaps nothing.
+        start = t.storage_offset() * t.element_size()
         last = sum((n - 1) * s for n, s in zip(t.shape, t.stride()))
-        return start(t) + (last + 1) * t.element_size()
+        return start, start + (last + 1) * t.element_size()
 
-    if statically_known_true(end(a) <= start(b)) or statically_known_true(
-        end(b) <= start(a)
-    ):
-        return False
-    if a.dim() != 2 or b.dim() != 2:
-        return True
-    # Modulo a symbolic row stride, only a difference known to be >= 0 simplifies.
-    if statically_known_true(start(b) < start(a)):
-        a, b = b, a
-    row, b_row = (t.stride(0) * t.element_size() for t in (a, b))
-    same_rows = (a.stride(1) == 1, b.stride(1) == 1, row > 0, b_row == row)
-    if not all(map(statically_known_true, same_rows)):
-        return True
-    # Every row of b starts `shift` bytes into a period of a's rows.
-    shift = (start(b) - start(a)) % row
+    (a_start, a_end), (b_start, b_end) = byte_range(a), byte_range(b)
     return not (
-        statically_known_true(a.shape[1] * a.element_size() <= shift)
-        and statically_known_true(shift + b.shape[1] * b.element_size() <= row)
+        statically_known_true(a_end <= b_start)
+        or statically_known_true(b_end <= a_start)
     )
 
 
@@ -548,5 +537,6 @@ register_user_kernel_hop(
         get_kernel_name=lambda hop_kwargs: get_kernel(hop_kwargs["kernel_idx"]).name,
         functional_dense=cutedsl_kernel_wrapper_functional_dense,
         reinplace_trigger=ReInplaceTrigger.CUTEDSL_OPS,
+        serializable=False,
     )
 )

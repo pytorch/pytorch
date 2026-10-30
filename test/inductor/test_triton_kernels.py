@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import io
 import logging
 import os
 import subprocess
@@ -356,6 +357,7 @@ scale_kernel_hop_info = UserKernelHOPInfo(
     functional_dense=scale_kernel_wrapper_functional_dense,
     # Not Triton's trigger, so that the reinplacing counters tell the DSLs apart.
     reinplace_trigger=ReInplaceTrigger.AUTO_FUNC_V1,
+    serializable=False,
 )
 
 
@@ -1148,7 +1150,7 @@ def forward(self, x_1, output_1):
         }[folder]
         # Each kernel gets its own constants, each used once, so folding the second
         # kernel (the old behavior) also leaves its constants unused and removed.
-        x1, y1, out1, x2, y2, out2 = (torch.randn(16, device=GPU_TYPE) for _ in range(6))
+        x1, y1, o1, x2, y2, o2 = (torch.randn(16, device=GPU_TYPE) for _ in range(6))
         kernel_idx = kernel_side_table.add_kernel(add_kernel)
         constant_args_idx = kernel_side_table.add_constant_args(
             {"n_elements": 16, "BLOCK_SIZE": 16}
@@ -1167,7 +1169,7 @@ def forward(self, x_1, output_1):
         def f(z):
             # The tensors are closed over, so make_fx stores them as graph constants
             # and both kernels see only constant inputs.
-            return add(x1, y1, out1) + z, add(x2, y2, out2) + z
+            return add(x1, y1, o1) + z, add(x2, y2, o2) + z
 
         gm = make_fx(f)(torch.zeros(16, device=GPU_TYPE))
 
@@ -1189,7 +1191,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(gm(z), (x1 + y1 + z, x2 + y2 + z))
 
     @requires_gpu
-    @inductor_config.patch(freezing=True)
+    @inductor_config.patch(freezing=True, cpp_wrapper=False)
     def test_freezing_keeps_every_user_kernel(self):
         # Freezing turns the parameters into constants and runs Inductor's constant
         # folding; both kernels on them must still be launched.
@@ -1246,6 +1248,35 @@ def forward(self, x_1, output_1):
         with self.assertRaises(error):
             register_user_kernel_hop(info)
         self.assertEqual(_user_kernel_hops, registry)
+
+    @common_utils.parametrize("serializable", [False, True])
+    @common_utils.parametrize("which", ["mutation", "functional"])
+    @mock.patch.dict(_user_kernel_hops)
+    def test_user_kernel_hop_serialization(self, which, serializable):
+        # torch.export's serializer refuses the nodes of a pair registered with
+        # serializable=False, and writes them otherwise, whatever the DSL's name.
+        from torch._export.serde.serialize import SerializeError
+
+        info = dataclasses.replace(scale_kernel_hop_info, serializable=serializable)
+        register_user_kernel_hop(info)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                kwargs = {"x": x, "out": torch.empty_like(x)}
+                if which == "mutation":
+                    scale_kernel_wrapper_mutation(scale=2, kwargs=kwargs)
+                    return kwargs["out"]
+                return scale_kernel_wrapper_functional(
+                    scale=2, kwargs=kwargs, tensors_to_clone=["out"]
+                )["out"]
+
+        ep = torch.export.export(M(), (torch.randn(4),), strict=False)
+        if serializable:
+            torch.export.save(ep, io.BytesIO())
+            return
+        msg = rf"Serializing scale_kernel_wrapper_{which} nodes \(scale user kernels\)"
+        with self.assertRaisesRegex(SerializeError, msg):
+            torch.export.save(ep, io.BytesIO())
 
     @mock.patch.dict(_user_kernel_hops)
     def test_clone_of_offset_view_passed_to_user_kernel_hop_is_kept(self):
