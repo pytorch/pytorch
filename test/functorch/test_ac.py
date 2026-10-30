@@ -5,17 +5,20 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -69,10 +72,7 @@ def get_mem_and_flops(f, device, memory_budget=None):
         return round(get_act_mem(f, device), 1), get_bw_flops(f)
 
 
-@skipIfRocm(
-    msg="activation memory budget assertions assume non-ROCm allocator behavior"
-)
-class MemoryBudgetTest(TestCase):
+class MemoryBudgetTestDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -202,158 +202,16 @@ class MemoryBudgetTest(TestCase):
                 self.assertEqual(mem, mem_achieved)
 
     @onlyAccelerator
-    def test_prioritize_cheaper_matmul(self, device):
-        def f(xs, ws):
-            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum(x.sum() for x in xs)
-
-        x1, w1 = create_pair(1, 4, device)
-        x2, w2 = create_pair(2, 2, device)
-
-        def call():
-            return f([x1, x2], [w1, w2])
-
-        eager_mem, eager_flops = get_mem_and_flops(call, device)
-        self.assertEqual(eager_mem, 8)
-        self.assertEqual(eager_flops, 24)
-        comp_mem, comp_flops = get_mem_and_flops(call, device, memory_budget=0.5)
-        self.assertEqual(comp_mem, 4)
-        # We are recomputing x1 @ w1 here!
-        self.assertEqual(comp_flops, eager_flops + 4)
-
-    @onlyAccelerator
-    def test_prioritize_cheaper_matmul2(self, device):
-        def f(xs, ws):
-            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum(x.sum() for x in xs)
-
-        data = [(4, 4), (6, 2), (2, 6)]
-        xs, ws = zip(*[create_pair(a, b, device) for a, b in data])
-
-        def call():
-            return f(xs, ws)
-
-        eager_mem, eager_flops = get_mem_and_flops(call, device)
-        self.assertEqual(eager_mem, 40)
-        self.assertEqual(eager_flops, 320)
-        mem, flops = get_mem_and_flops(call, device, memory_budget=28 / eager_mem)
-        # Save w1 and w2
-        self.assertEqual(mem, 28)
-        # We're recomputing w3 (the cheap one!)
-        self.assertEqual(flops - eager_flops, 2 * 2 * 6)
-        mem, flops = get_mem_and_flops(call, device, memory_budget=16 / eager_mem)
-        # Save w2. Note that even though saving w1 gets us closer to our memory
-        # limit, w2 is actually *more* FLOPs than w1!
-        self.assertEqual(mem, 12)
-        self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
-
-    @onlyAccelerator
-    def test_manual_ac(self, device):
-        # test that manual checkpoint boundaries are respected
-        # when autoac is set
-        def f(x):
-            tmp1 = torch.matmul(x, x.T)
-            tmp1 = torch.matmul(tmp1, tmp1)
-            tmp1 = torch.matmul(tmp1, tmp1)
-            out = torch.matmul(tmp1, x)
-            return out
-
-        def g(x):
-            x = checkpoint(f, x, use_reentrant=False)
-            x = checkpoint(f, x, use_reentrant=False)
-            return x
-
-        x = torch.randn(64, 1024, requires_grad=True, device=device)
-
-        def call():
-            return g(x).sum()
-
-        eager_mem, eager_flops = get_mem_and_flops(call, device)
-        # give the memory budget logic a value that should cause it to run,
-        # but not recompute the matmuls
-        mem, flops = get_mem_and_flops(call, device, memory_budget=0.01)
-        self.assertEqual(mem, eager_mem)
-        self.assertEqual(flops, eager_flops)
-
-
-@skipIfRocm(
-    msg="activation memory budget assertions assume non-ROCm allocator behavior"
-)
-class MemoryBudgetBackendSpecificTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @config.patch(activation_memory_budget_runtime_estimator="profile")
-    def test_profile(self, device):
-        def f(x, ws):
-            x = x.cos()
-            for w in ws:
-                x = torch.mm(x, w).cos()
-            return x.sum()
-
-        x = torch.randn(512, 512, requires_grad=True, device=device)
-        ws = [
-            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
-        ]
-
-        def call():
-            return f(x, ws)
-
-        _, eager_flops = get_mem_and_flops(call, device)
-        mem, flops = get_mem_and_flops(call, device, memory_budget=0.2)
-        # We start saving the matmuls
-        self.assertEqual(mem, 2)
-        self.assertEqual(flops, eager_flops + 3)
-
-    def test_attention_vs_linear(self, device):
-        def f(x, w):
-            orig_shape = x.shape
-            x = x.reshape(1, 1, x.shape[0], x.shape[1])
-            # I know this isn't technically right lol
-            x = torch.nn.functional.scaled_dot_product_attention(
-                x, x, x, is_causal=False
-            ).reshape(*orig_shape)
-            x = torch.mm(x, w)
-            x = x.cos()
-            return x.sum()
-
-        def try_seq_length(S, D, expected_recompute):
-            x = torch.randn(S * 512, D * 512, requires_grad=True, device=device)
-            w = torch.randn(D * 512, D * 512, requires_grad=True, device=device)
-
-            def call():
-                return f(x, w)
-
-            with FlopCounterMode(display=False) as mode:
-                call()
-            mm_flops = mode.get_flop_counts()["Global"][torch.ops.aten.mm]
-            attn_flops = mode.get_total_flops() - mm_flops
-            mm_flops /= 512**3 * 2
-            attn_flops /= 512**3 * 2
-
-            eager_mem, eager_flops = get_mem_and_flops(call, device)
-            self.assertEqual(eager_mem, S * D * 2)
-
-            # Force it to recompute one of mm or attn
-            mem, flops = get_mem_and_flops(call, device, memory_budget=0.6)
-            self.assertEqual(mem, S * D)
-            if expected_recompute == "attn":
-                expected_flops = attn_flops
-            else:
-                expected_flops = mm_flops
-            self.assertEqual(flops - eager_flops, expected_flops)
-
-        # General behind this test is that if sequence length * 2 > D, then
-        # attention is more expensive than the linear.
-        try_seq_length(1, 1, "mm")
-        try_seq_length(1, 3, "attn")
-        try_seq_length(2, 2, "mm")
-        try_seq_length(2, 1, "mm")
-        try_seq_length(2, 5, "attn")
-        try_seq_length(4, 7, "mm")
-        try_seq_length(4, 9, "attn")
-
     @unittest.skipIf(not has_triton(), "test needs triton")
     def test_custom_triton_kernel(self, device):
+        device_interface = get_interface_for_device(torch.device(device))
+        if not device_interface.is_triton_capable(device):
+            self.skipTest(f"{device} does not support Triton")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            self.skipTest(str(exc))
+
         @triton.jit
         def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
@@ -427,20 +285,161 @@ class MemoryBudgetBackendSpecificTest(TestCase):
 
                 self.assertEqual(expected, f_compile())
 
+    @onlyAccelerator
+    def test_prioritize_cheaper_matmul(self, device):
+        def f(xs, ws):
+            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
+            return sum(x.sum() for x in xs)
+
+        x1, w1 = create_pair(1, 4, device=device)
+        x2, w2 = create_pair(2, 2, device=device)
+
+        def call():
+            return f([x1, x2], [w1, w2])
+
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
+        self.assertEqual(eager_mem, 8)
+        self.assertEqual(eager_flops, 24)
+        comp_mem, comp_flops = get_mem_and_flops(call, device, memory_budget=0.5)
+        self.assertEqual(comp_mem, 4)
+        # We are recomputing x1 @ w1 here!
+        self.assertEqual(comp_flops, eager_flops + 4)
+
+    @onlyAccelerator
+    @config.patch(activation_memory_budget_runtime_estimator="profile")
+    def test_profile(self, device):
+        def f(x, ws):
+            x = x.cos()
+            for w in ws:
+                x = torch.mm(x, w).cos()
+            return x.sum()
+
+        x = torch.randn(512, 512, requires_grad=True, device=device)
+        ws = [
+            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
+        ]
+
+        def call():
+            return f(x, ws)
+
+        _, eager_flops = get_mem_and_flops(call, device)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=0.2)
+        # We start saving the matmuls
+        self.assertEqual(mem, 2)
+        self.assertEqual(flops, eager_flops + 3)
+
+    @onlyAccelerator
+    def test_prioritize_cheaper_matmul2(self, device):
+        def f(xs, ws):
+            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
+            return sum(x.sum() for x in xs)
+
+        data = [(4, 4), (6, 2), (2, 6)]
+        xs, ws = zip(*[create_pair(a, b, device=device) for a, b in data])
+
+        def call():
+            return f(xs, ws)
+
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
+        self.assertEqual(eager_mem, 40)
+        self.assertEqual(eager_flops, 320)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=28 / eager_mem)
+        # Save w1 and w2
+        self.assertEqual(mem, 28)
+        # We're recomputing w3 (the cheap one!)
+        self.assertEqual(flops - eager_flops, 2 * 2 * 6)
+        mem, flops = get_mem_and_flops(call, device, memory_budget=16 / eager_mem)
+        # Save w2. Note that even though saving w1 gets us closer to our memory
+        # limit, w2 is actually *more* FLOPs than w1!
+        self.assertEqual(mem, 12)
+        self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
+
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4729")
+    def test_attention_vs_linear(self, device):
+        def f(x, w):
+            orig_shape = x.shape
+            x = x.reshape(1, 1, x.shape[0], x.shape[1])
+            # I know this isn't technically right lol
+            x = torch.nn.functional.scaled_dot_product_attention(
+                x, x, x, is_causal=False
+            ).reshape(*orig_shape)
+            x = torch.mm(x, w)
+            x = x.cos()
+            return x.sum()
+
+        def try_seq_length(S, D, expected_recompute):
+            x = torch.randn(S * 512, D * 512, requires_grad=True, device=device)
+            w = torch.randn(D * 512, D * 512, requires_grad=True, device=device)
+
+            def call():
+                return f(x, w)
+
+            with FlopCounterMode(display=False) as mode:
+                call()
+            mm_flops = mode.get_flop_counts()["Global"][torch.ops.aten.mm]
+            attn_flops = mode.get_total_flops() - mm_flops
+            mm_flops /= 512**3 * 2
+            attn_flops /= 512**3 * 2
+
+            eager_mem, eager_flops = get_mem_and_flops(call, device)
+            self.assertEqual(eager_mem, S * D * 2)
+
+            mem, flops = get_mem_and_flops(
+                call, device, memory_budget=0.6
+            )  # Force it to recompute one of mm or attn
+            self.assertEqual(mem, S * D)
+            if expected_recompute == "attn":
+                expected_flops = attn_flops
+            else:
+                expected_flops = mm_flops
+            self.assertEqual(flops - eager_flops, expected_flops)
+
+        # General behind this test is that if sequence length * 2 > D, then
+        # attention is more expensive than the linear.
+        try_seq_length(1, 1, "mm")
+        try_seq_length(1, 3, "attn")
+        try_seq_length(2, 2, "mm")
+        try_seq_length(2, 1, "mm")
+        try_seq_length(2, 5, "attn")
+        try_seq_length(4, 7, "mm")
+        try_seq_length(4, 9, "attn")
+
+    @onlyAccelerator
+    def test_manual_ac(self, device):
+        # test that manual checkpoint boundaries are respected
+        # when autoac is set
+        def f(x):
+            tmp1 = torch.matmul(x, x.T)
+            tmp1 = torch.matmul(tmp1, tmp1)
+            tmp1 = torch.matmul(tmp1, tmp1)
+            out = torch.matmul(tmp1, x)
+            return out
+
+        def g(x):
+            x = checkpoint(f, x, use_reentrant=False)
+            x = checkpoint(f, x, use_reentrant=False)
+            return x
+
+        x = torch.randn(64, 1024, requires_grad=True, device=device)
+
+        def call():
+            return g(x).sum()
+
+        eager_mem, eager_flops = get_mem_and_flops(call, device)
+        # give the memory budget logic a value that should cause it to run,
+        # but not recompute the matmuls
+        mem, flops = get_mem_and_flops(call, device, memory_budget=0.01)
+        self.assertEqual(mem, eager_mem)
+        self.assertEqual(flops, eager_flops)
+
 
 instantiate_device_type_tests(
-    MemoryBudgetTest,
-    globals(),
-    only_for=("cuda", "xpu"),
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    MemoryBudgetBackendSpecificTest,
-    globals(),
-    only_for=("cuda",),
+    MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 
 if __name__ == "__main__":
-    if not TEST_WITH_ROCM:
+    # I'm using the accelerator memory allocator to verify memory allocations
+    if HAS_TRITON and not TEST_WITH_ROCM:
         run_tests()
