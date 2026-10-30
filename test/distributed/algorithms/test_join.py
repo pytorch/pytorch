@@ -29,12 +29,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 BACKEND = dist.get_default_backend_for_device(device_type)
-WORLD_SIZE = min(4, max(2, torch.accelerator.device_count() if torch.accelerator.is_available() else 2))
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 # Constants used for testing post-hooks
 BEFORE_CONSTANT = 41
@@ -102,7 +100,9 @@ class AllReducer(Joinable):
         All-reduces a dim-1 one tensor ``num_allreduces``-many times, and
         returns the total result.
         """
-        Join.notify_join_context(self)
+        work = Join.notify_join_context(self)
+        if work is not None:
+            work.wait()
         device = self.device
         total = 0
         for _ in range(num_allreduces):
@@ -152,7 +152,7 @@ class TestJoin(MultiProcessTestCase):
     @property
     def device(self):
         return (
-            torch.device(device_type, self.rank)
+            torch.device(self.rank)
             if torch.accelerator.is_available()
             else torch.device("cpu")
         )

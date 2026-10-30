@@ -20,9 +20,13 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
+import gc
+import hashlib
 import importlib
 import inspect
 import io
@@ -75,6 +79,13 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
+from torch._dynamo.package import (
+    _globals_module,
+    _Missing,
+    _PRUNED_VALUE_PID,
+    FunctionPicklerBase,
+    SerializedCode,
+)
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -87,7 +98,11 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger, get_metrics_context
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    get_metrics_context,
+    get_type_dict_no_user_code,
+)
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -99,9 +114,17 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
+from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.fake_tensor import (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
+    FakeTensor,
+    is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
+)
+from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
@@ -112,6 +135,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -147,7 +171,9 @@ from .source import (
     GradSource,
     ImportSource,
     ListGetItemSource,
+    ListReverseIteratorBackingListSource,
     LocalSource,
+    MappingProxyMappingSource,
     NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -179,6 +205,7 @@ from .types import (  # noqa: F401
 from .utils import (
     builtin_dict_keys,
     common_constant_types,
+    constants_identical,
     dataclass_fields,
     dict_keys,
     get_current_stream,
@@ -188,6 +215,8 @@ from .utils import (
     istype,
     key_is_id,
     key_to_id,
+    list_reverseiterator_backing_list,
+    list_reverseiterator_len,
     normalize_count_iter,
     normalize_range_iter,
     orig_code_map,
@@ -221,7 +250,6 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
-    from torch._dynamo.package import SerializedCode
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -248,9 +276,74 @@ _COW_TENSOR_UNSUPPORTED = object()
 def _try_is_cow_tensor(value: object) -> bool | object:
     if not isinstance(value, torch.Tensor):
         return _COW_TENSOR_UNSUPPORTED
-    if torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python):
+    is_python = torch._C._dispatch_keys(value).has(torch._C.DispatchKey.Python)
+    if is_python or torch._subclasses.fake_tensor.is_fake_tensor(value):
         return _COW_TENSOR_UNSUPPORTED
     return torch._C._is_cow_tensor(value)  # pyrefly: ignore[missing-attribute]
+
+
+class FunctionCodeMetadata(NamedTuple):
+    code: types.CodeType
+    globals_module: str
+
+    def qualified_name(self) -> str:
+        # co_qualname is new in Python 3.11.
+        name = getattr(self.code, "co_qualname", self.code.co_name)
+        return f"{self.globals_module}.{name}"
+
+
+def _function_code_metadata(value: object) -> FunctionCodeMetadata | None:
+    if type(value) is not types.FunctionType:
+        return None
+    module = _globals_module(value.__globals__)
+    if module is None or value.__builtins__ is not builtins.__dict__:
+        return None
+    return FunctionCodeMetadata(value.__code__, module.__name__)
+
+
+def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> bool:
+    # The code first: a different function fails there, before the globals
+    # module is resolved.
+    return (
+        type(value) is types.FunctionType
+        and value.__code__ == expected.code
+        and value.__builtins__ is builtins.__dict__
+        and getattr(_globals_module(value.__globals__), "__name__", None)
+        == expected.globals_module
+    )
+
+
+class NativeMethodMetadata(NamedTuple):
+    # Pickled by reference, so it is the loading process's class.
+    receiver: type
+    name: str
+
+
+def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
+    if type(value) is not types.BuiltinMethodType:
+        return None
+    receiver = value.__self__
+    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
+        return None
+    if getattr(receiver, value.__name__, None) != value:
+        return None
+    return NativeMethodMetadata(receiver, value.__name__)
+
+
+def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
+    # The type check first: == would otherwise run the new value's __eq__.
+    return (
+        type(value) is types.BuiltinMethodType
+        and value.__self__ is expected.receiver
+        and value == getattr(expected.receiver, expected.name)
+    )
+
+
+def _mapping_proxy_mapping(value: object) -> object:
+    # A mappingproxy's only GC referent is the mapping it wraps.
+    return gc.get_referents(value)[0]
 
 
 def _cow_tensor_matches(value: object, expected: object) -> bool:
@@ -274,10 +367,11 @@ dunder_attrs_assumed_constants = (
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
     # Refer to index in the frame's localsplus directly.
     # NOTE: name order for a code object doesn't change.
-    # NOTE: we need to find the LAST matching index because <= 3.10 contains
-    # duplicate names in the case of cells: a name can be both local and cell
-    # and will take up 2 slots of the frame's localsplus. The correct behavior
-    # is to refer to the cell, which has a higher index.
+    # NOTE: we need to find the LAST matching index because localsplus can
+    # contain duplicate names in the case of cells (e.g. in Dynamo's resume
+    # functions): a name can be both local and cell and will take up 2 slots of
+    # the frame's localsplus. The correct behavior is to refer to the cell,
+    # which has a higher index.
     framelocals_names_reversed = code_framelocals_names_reversed_cached(code)
     framelocals_idx = (
         len(framelocals_names_reversed) - framelocals_names_reversed.index(var_name) - 1
@@ -327,7 +421,7 @@ class GuardManagerWrapper:
         self.cache_entry: CacheEntry | None = None
         self.extra_state: ExtraState | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
-        self.no_tensor_aliasing_sources: list[str] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
 
         self.printed_relational_guards: set[RelationalGuard] = set()
 
@@ -429,6 +523,11 @@ class GuardManagerWrapper:
         accessor is ``GetGenericDictGuardAccessor``—i.e., it only exposes its
         ``__dict__`` and nothing else that could mutate between runs.
 
+        A node whose subtree contains a relational guard with no dedicated
+        dict-tag fast path is not tag safe. Relational guards carry state across
+        multiple guarded values, so skipping one side of the relation can turn
+        a real failure into a false positive.
+
         For every tag safe node, verifying the identity/tag of just the top-level
         dictionary is enough to guarantee the entire subtree is unchanged, enabling
         a *fast-path* guard check.
@@ -456,10 +555,12 @@ class GuardManagerWrapper:
         1. Visit leaves and classify them as tag safe or not.
         2. Propagate tag-safety upward: a parent dictionary becomes tag safe only if
         all of its children are already tag-safe.
-        3. Propagate tag-safe-rootness upward: if the whole subtree is tag safe,
+        3. Propagate unoptimized relational guards upward so no ancestor can
+        skip a stateful guard in its subtree.
+        4. Propagate tag-safe-rootness upward: if the whole subtree is tag safe,
         the current node becomes the new tag safe root, otherwise propagate the
         subtree tag safe roots.
-        4. Collect every tag safe node and, by inspecting parent tags, label the
+        5. Collect every tag safe node and, by inspecting parent tags, label the
         subset that are tag safe roots.
         """
 
@@ -473,7 +574,9 @@ class GuardManagerWrapper:
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
-        def visit_dict_manager(node: DictGuardManager) -> list[GuardManager]:
+        def visit_dict_manager(
+            node: DictGuardManager,
+        ) -> tuple[list[GuardManager], bool]:
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
             if not issubclass(node.get_type_of_guarded_value(), dict):
@@ -482,17 +585,31 @@ class GuardManagerWrapper:
                 )
 
             tag_safe_roots = []
-            is_subtree_tag_safe = True
+            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
 
             # Recurse to get the tag safe roots from subtree.
             for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
-                    visit(key_mgr)
+                    _, child_has_unoptimized_relational_guard = visit(key_mgr)
+                    has_unoptimized_relational_guard |= (
+                        child_has_unoptimized_relational_guard
+                    )
                 if val_mgr is not None:
-                    tag_safe_roots.extend(visit(val_mgr))
+                    (
+                        child_tag_safe_roots,
+                        child_has_unoptimized_relational_guard,
+                    ) = visit(val_mgr)
+                    tag_safe_roots.extend(child_tag_safe_roots)
+                    has_unoptimized_relational_guard |= (
+                        child_has_unoptimized_relational_guard
+                    )
 
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
+
+            is_subtree_tag_safe = True
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
                     is_subtree_tag_safe &= key_mgr.is_tag_safe()
@@ -502,9 +619,9 @@ class GuardManagerWrapper:
 
             if is_subtree_tag_safe:
                 node.mark_tag_safe()
-            return tag_safe_roots
+            return tag_safe_roots, has_unoptimized_relational_guard
 
-        def visit_manager(node: GuardManager) -> list[GuardManager]:
+        def visit_manager(node: GuardManager) -> tuple[list[GuardManager], bool]:
             if isinstance(node, DictGuardManager):
                 raise AssertionError(
                     f"Expected non-DictGuardManager node, got {type(node)}"
@@ -512,15 +629,26 @@ class GuardManagerWrapper:
 
             # Collect the subtree tag safe roots
             tag_safe_roots = []
+            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
             for child_mgr in node.get_child_managers():
-                tag_safe_roots.extend(visit(child_mgr))
+                (
+                    child_tag_safe_roots,
+                    child_has_unoptimized_relational_guard,
+                ) = visit(child_mgr)
+                tag_safe_roots.extend(child_tag_safe_roots)
+                has_unoptimized_relational_guard |= (
+                    child_has_unoptimized_relational_guard
+                )
+
+            if has_unoptimized_relational_guard:
+                return tag_safe_roots, has_unoptimized_relational_guard
 
             if node.is_guarded_value_immutable():
                 # If the node guards a tensor, mark it tag safe only if there
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
-                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
+                    if node.has_no_accessors():
                         node.mark_tag_safe()
                 elif any(
                     a.repr() == "PythonLambdaGuardAccessor"
@@ -550,9 +678,7 @@ class GuardManagerWrapper:
                     node.mark_tag_safe()
                     # Return the current node as tag safe root, discarding the
                     # subtree tag safe roots.
-                    return [
-                        node,
-                    ]
+                    return [node], has_unoptimized_relational_guard
             elif (
                 node.get_type_of_guarded_value()
                 in (
@@ -624,16 +750,16 @@ class GuardManagerWrapper:
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
 
-            return tag_safe_roots
+            return tag_safe_roots, has_unoptimized_relational_guard
 
-        def visit(node: GuardManager) -> list[GuardManager]:
+        def visit(node: GuardManager) -> tuple[list[GuardManager], bool]:
             if node is None:
-                return []
+                return [], False
             if isinstance(node, DictGuardManager):
                 return visit_dict_manager(node)
             return visit_manager(node)
 
-        tag_safe_roots = visit(self.root)
+        tag_safe_roots, _ = visit(self.root)
         for node in tag_safe_roots:
             if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
@@ -737,11 +863,9 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # Only needed for debugging purposes.
         return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # Only needed for debugging purposes.
         return self.root.check_verbose(x)
 
     def populate_code_parts_for_debugging(self) -> None:
@@ -755,20 +879,25 @@ class GuardManagerWrapper:
                 code_parts.append(code_part)
             return code_parts
 
-        def visit(mgr: GuardManager) -> None:
+        def add_code_parts(guard: LeafGuard) -> None:
             nonlocal relational_guards_seen
-            for guard in mgr.get_leaf_guards():
-                if isinstance(guard, RelationalGuard):
-                    if guard not in relational_guards_seen:
-                        self.code_parts.extend(get_code_parts(guard))
-                        relational_guards_seen.add(guard)
-                else:
+            if isinstance(guard, RelationalGuard):
+                if guard not in relational_guards_seen:
                     self.code_parts.extend(get_code_parts(guard))
+                    relational_guards_seen.add(guard)
+            else:
+                self.code_parts.extend(get_code_parts(guard))
+
+        def visit(mgr: GuardManager) -> None:
+            for guard in mgr.get_leaf_guards():
+                add_code_parts(guard)
 
             for child_mgr in mgr.get_child_managers():
                 visit(child_mgr)
 
         visit(self.root)
+        for guard in self.root.get_epilogue_lambda_guards():
+            add_code_parts(guard)
 
 
 def from_numpy(a: Any) -> torch.Tensor:
@@ -836,6 +965,8 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
+            "___list_reverseiterator_len": list_reverseiterator_len,
+            "___list_reverseiterator_backing_list": list_reverseiterator_backing_list,
             "___set_getitem": set_getitem,
             "___dataclass_fields": dataclass_fields,
             "___namedtuple_fields": lambda x: x._fields,
@@ -890,6 +1021,44 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
             else:
                 extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
+
+
+_LIVE_SAVED_TENSORS_HOOKS = object()
+
+
+def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | None:
+    """
+    What AUTOGRAD_SAVED_TENSORS_HOOKS compares, named by content rather than id.
+
+    A hook graph whose code does not pin down what it computes gets a None part,
+    which a serialized guard never accepts.
+    """
+    from torch._functorch._aot_autograd.autograd_cache import check_node_safe
+
+    if not torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable(
+        hooks
+    ):
+        return None
+    parts: list[str | None] = []
+    for gm in hooks:
+        h = hashlib.sha256(gm.code.encode())
+        try:
+            for node in gm.graph.nodes:
+                # gm.code names a call_function target only by name; the
+                # AOTAutograd cache's safety rule says which names that is
+                # enough for, and an fx.wrap user_cache_hash names the body.
+                # A call_method's name and receiver are both in gm.code.
+                if node.op == "call_function":
+                    check_node_safe(node)
+                if (user_hash := node.meta.get("user_cache_hash")) is not None:
+                    h.update(str(user_hash).encode())
+        except Exception:
+            # Anything check_node_safe cannot vouch for, including targets it
+            # fails to introspect, is a cache bypass there and unverifiable here.
+            parts.append(None)
+            continue
+        parts.append(h.hexdigest())
+    return tuple(parts)
 
 
 def get_verbose_code_parts(
@@ -959,6 +1128,46 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
+def _guard_device_index_is_current(
+    value: torch.Tensor, compile_on_one_rank: bool
+) -> bool:
+    """Whether this tensor's device index may be guarded as "the current device".
+
+    Only under compile_on_one_rank, and only for an accelerator tensor. There the
+    index is just the compiling rank's and carries no information: any tensor on a
+    different accelerator was already refused while tracing, by
+    _coor_check_tensor_device. cpu is left alone -- it is portable across ranks
+    already, and its index is not a rank identity. Outside CooR several accelerator
+    devices can legitimately be live at once, so there the index stays pinned.
+
+    *compile_on_one_rank* comes from the traced graph's recorded state, not from the
+    ambient config. Loading a serialized guard rebuilds it through here, and the two
+    kinds of guard are not interchangeable: a relaxed one reloaded with CooR off
+    would be rebuilt pinned and reject the very device it was saved to accept, and a
+    pinned one reloaded with CooR on would be rebuilt relaxed and accept a device it
+    was saved to reject.
+
+    This deliberately does not compare against the current index. Guards are rebuilt
+    when a serialized state is loaded on another rank, where the saved tensor carries
+    the *saving* rank's device; anything derived from that comparison would be the
+    wrong answer there. Keyed on the device type alone, the answer is the same on
+    every rank, so there is nothing to record and replay.
+    """
+    if not compile_on_one_rank:
+        return False
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and value.device.type == acc.type
+
+
+def _stream_is_current(stream: torch.Stream) -> bool:
+    # Identity only: the stream's type is guarded separately, while subclasses such
+    # as torch.cuda.Stream override __eq__ to compare types too.
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or stream.device.type != acc.type:
+        return False
+    return torch.Stream.__eq__(stream, get_current_stream(torch.device(acc.type)))
+
+
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -966,12 +1175,17 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
+    device_index_is_current: bool = False,
 ) -> str:
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    device_index = value.device.index
+    # Render the relaxed form as "current" so diagnostics describe the
+    # rank-relative runtime check rather than the compiling rank's device index.
+    device_index: int | str | None = (
+        "current" if device_index_is_current else value.device.index
+    )
     requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
@@ -992,9 +1206,14 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
+def raise_local_type_error(t: type) -> NoReturn:
+    # A PackageError like the sibling checks in serialize_guards: a bypass, or
+    # an error under strict_precompile, never an internal compiler error. The
+    # message names the type only: repr(obj) is user code that can raise (one
+    # caller runs outside the mapped dump) and can be a multi-KB nn.Module
+    # printout.
+    raise torch._dynamo.exc.PackageError(
+        f"Type {t} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
     )
@@ -1320,7 +1539,12 @@ class GuardBuilder(GuardBuilderBase):
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.src_get_value_cache: dict[Source, object] = {}
-        self.runtime_global_scope = runtime_global_scope or global_scope
+        # An EMPTY dict is a scope, not the absence of one: falling back on a
+        # falsy dict would re-root a loaded artifact's guards at the globals
+        # serialized with it.
+        self.runtime_global_scope = (
+            global_scope if runtime_global_scope is None else runtime_global_scope
+        )
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -1345,11 +1569,17 @@ class GuardBuilder(GuardBuilderBase):
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
         self.no_tensor_aliasing_names: list[str] = []
+        self.no_tensor_aliasing_sources: list[Source] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         self.guard_tree_values: dict[int, Any] = {}
+        # The plain tuples an EQUALS_MATCH reads whole, keyed by id and holding
+        # the value so the id stays live; see Note [Reconstructing a function a
+        # guard is rooted at] in GuardsStatePickler. Save-path only.
+        self.value_guarded_containers: dict[int, Any] = {}
+        self.saved_tensors_hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -1682,6 +1912,21 @@ class GuardBuilder(GuardBuilderBase):
         if source_name != "":
             example_value = self.get(source)
             self.guard_tree_values[id(example_value)] = example_value
+            # A guard rooted at a bound method reads through method.__func__,
+            # which _reduce_bound_method carries explicitly, so the function must
+            # be registered before pickle can reach it: an unseeded fqn-mismatched
+            # func reduces to _Missing and the load AttributeErrors on it. Every
+            # method anywhere in the guard tree passes here before anything is
+            # pickled, so this one seed suffices. Only a plain function can be
+            # rebuilt by value (the reducer's isfunction branch), so only that is
+            # seeded; a partial or builtin __func__ would merely be kept verbatim
+            # wherever else it appears. The serializer is the only reader, hence
+            # the save_guards gate. See Note [Reconstructing a function a guard
+            # is rooted at] in GuardsStatePickler for the rebuild rule.
+            if self.save_guards and inspect.ismethod(example_value):
+                func = example_value.__func__
+                if inspect.isfunction(func):
+                    self.guard_tree_values[id(func)] = func
 
         guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -2010,6 +2255,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, MappingProxyMappingSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
+            out = base_guard_manager.lambda_manager(
+                python_lambda=_mapping_proxy_mapping,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, AttrProxySource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
@@ -2060,6 +2315,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.tuple_iterator_getitem_manager(
                 index=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ListReverseIteratorBackingListSource):
+            if not base_guard_manager:  # to make mypy happy
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=list_reverseiterator_backing_list,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -2169,7 +2433,9 @@ class GuardBuilder(GuardBuilderBase):
         make_guard_fn_args = ", ".join(closure_vars.keys())
         _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: dict[str, Any] = {}
-        globals_for_guard_fn = {"G": self.scope["G"]}
+        # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
+        # guard and in an accessor guard read the same scope on a loaded artifact.
+        globals_for_guard_fn = {"G": self.runtime_global_scope}
         guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -2360,9 +2626,9 @@ class GuardBuilder(GuardBuilderBase):
             t = type(value)
 
         if t.__qualname__ != t.__name__:
-            # Type match guards must be local scope, this is
-            # raised in self.serialize_guards
-            guard._unserializable = True
+            # A local-scope type cannot be serialized; serialize_guards raises
+            # for it, naming this type rather than re-reading the value.
+            guard._unserializable = t
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = _safe_type_repr(t)
@@ -2398,7 +2664,7 @@ class GuardBuilder(GuardBuilderBase):
             t = type(value)
 
         if t.__qualname__ != t.__name__:
-            guard._unserializable = True
+            guard._unserializable = t
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = _safe_type_repr(t)
@@ -2442,11 +2708,15 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Dictionary {dict_ref} must contain key {key!r}; Dynamo specialized the "
+            "compiled code on this key being present."
+        )
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             True,
             key,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2462,11 +2732,15 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
+            "the compiled code on this key being absent."
+        )
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             False,
             key,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2484,11 +2758,15 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Set {set_ref} must contain item {item!r}; Dynamo specialized the "
+            "compiled code on this item being present."
+        )
 
         self.get_guard_manager(guard).add_set_contains_guard(
             True,
             item,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2506,11 +2784,15 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(guard, [code])
+        reason = (
+            f"Set {set_ref} must not contain item {item!r}; Dynamo specialized the "
+            "compiled code on this item being absent."
+        )
 
         self.get_guard_manager(guard).add_set_contains_guard(
             False,
             item,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2694,29 +2976,74 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
-    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(
+        self, guard: Guard, hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
+    ) -> None:
         get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
         are_inline_hooks = (
             torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
         )
 
-        def hooks_ids_fn(
-            hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
-            if not are_inline_hooks(hooks):
-                return None
+        if hooks_fingerprint is not _LIVE_SAVED_TENSORS_HOOKS:
+            self._portable_saved_tensors_hooks_guard(
+                guard, hooks_fingerprint, get_hooks, are_inline_hooks
+            )
+            return
 
-            return tuple(map(id, hooks))
-
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids: tuple[int, int] | None = None
+        if are_inline_hooks(hooks):
+            # The C++ guard compares only the hooks' addresses, and a freed
+            # hook's address can be reused by new hooks, so freeing either hook
+            # must invalidate this entry.
+            pack, unpack = hooks
+            guard_hooks_ids = (
+                self.id_ref(pack, "saved_tensors_hooks pack hook"),
+                self.id_ref(unpack, "saved_tensors_hooks unpack hook"),
+            )
+        if self.save_guards:
+            self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
+                hooks
+            )
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
         ]
         self._set_guard_export_info(guard, code)
+        self.guard_manager.root.add_autograd_saved_tensors_hooks_guard(
+            torch.fx.GraphModule, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    def _portable_saved_tensors_hooks_guard(
+        self,
+        guard: Guard,
+        hooks_fingerprint: object,
+        get_hooks: Callable[[], Any],
+        are_inline_hooks: Callable[[Any], bool],
+    ) -> None:
+        # The capturing process's hook ids mean nothing here, and the hooks
+        # active while loading need not be the ones active while serving, so
+        # the hooks are compared by content against the capture's.
+        code = [
+            f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks fingerprint == {hooks_fingerprint}"
+        ]
+        self._set_guard_export_info(guard, code)
+        last: list[tuple[tuple[weakref.ref[Any], ...], bool]] = []
 
         def fn(x: object) -> bool:
-            return guard_hooks_ids == hooks_ids_fn(get_hooks())
+            hooks = get_hooks()
+            if not are_inline_hooks(hooks):
+                return hooks_fingerprint is None
+            if last and all(r() is h for r, h in zip(last[0][0], hooks)):
+                return last[0][1]
+            fingerprint = _saved_tensors_hooks_fingerprint(hooks)
+            result = (
+                fingerprint is not None
+                and None not in fingerprint
+                and fingerprint == hooks_fingerprint
+            )
+            last[:] = [(tuple(weakref.ref(h) for h in hooks), result)]
+            return result
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -2815,11 +3142,16 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
-        eval_fn=lambda value, metadata: value == metadata,
+        eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
+        # See Note [Reconstructing a function a guard is rooted at] in
+        # GuardsStatePickler: a plain tuple this guard compares whole must be
+        # carried verbatim by the serializer.
+        if self.save_guards and type(val) is tuple:
+            self.value_guarded_containers[id(val)] = val
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -2837,7 +3169,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             np_types = ()
 
-        ok_mutable_types = (list, set)
+        ok_mutable_types = (list, set, bytearray)
 
         ok_types = tuple(
             common_constant_types
@@ -2893,6 +3225,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_float_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -2905,6 +3238,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_complex_is_nan_guard(
+                val,
                 get_verbose_code_parts(code, guard),
                 guard.user_stack,
             )
@@ -2931,8 +3265,35 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            value.device.type,
+            _stream_is_current(value),
+        ),
+        eval_fn=lambda value, metadata: value.device.type == metadata[0]
+        and _stream_is_current(value) == metadata[1],
+    )
+    def CURRENT_STREAM_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        device_type = value.device.type
+        expected = _stream_is_current(value)
+
+        def guard_fn(stream: torch.Stream) -> bool:
+            return (
+                stream.device.type == device_type
+                and _stream_is_current(stream) == expected
+            )
+
+        relation = "==" if expected else "!="
+        code = f"{ref} {relation} ___get_current_stream(torch.device('{device_type}'))"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, [code])
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
-        eval_fn=lambda value, metadata: value == metadata,
+        eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
     def CONSTANT_MATCH(self, guard: Guard) -> None:
         val = self.get(guard)
@@ -2947,8 +3308,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _constant_subclass_base_value(value),
-        eval_fn=lambda value, metadata: _constant_subclass_base_value(value)
-        == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            _constant_subclass_base_value(value), metadata
+        ),
     )
     def CONSTANT_SUBCLASS_MATCH(self, guard: Guard) -> None:
         """Guard for subclasses of constant types (int, float, str, etc.).
@@ -3018,7 +3380,7 @@ class GuardBuilder(GuardBuilderBase):
     )
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
-        # don't support this in serialization because it uses unsupported ID_MATCH
+        # Serialized only when is_portable_identity_guard accepts the function.
         return self.ID_MATCH(guard)
 
     @register_guard_check_spec(
@@ -3064,16 +3426,80 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_function_code_matches,
+    )
+    def FUNCTION_CODE_MATCH(self, guard: Guard, expected: FunctionCodeMetadata) -> None:
+        """A function by its code and globals module, compared by value so the
+        check survives serialization; defaults and cells keep their own guards."""
+
+        last_match: list[tuple[types.CodeType, dict[str, object]]] = []
+
+        def guard_fn(value: object) -> bool:
+            if type(value) is not types.FunctionType:
+                return False
+            if (
+                last_match
+                and value.__code__ is last_match[0][0]
+                and value.__globals__ is last_match[0][1]
+                and value.__builtins__ is builtins.__dict__
+            ):
+                return True
+            if not _function_code_matches(value, expected):
+                return False
+            # Holding both keeps their ids from being reused.
+            last_match[:] = [(value.__code__, value.__globals__)]
+            return True
+
+        code = (
+            f"___check_function_code({self.arg_ref(guard)}, "
+            f"{expected.qualified_name()})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=_native_method_matches,
+    )
+    def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
+        last_match: list[object] = []
+
+        def guard_fn(value: object) -> bool:
+            # The object ID_MATCH would have pinned; holding it keeps its id
+            # from being reused.
+            if last_match and value is last_match[0]:
+                return True
+            if not _native_method_matches(value, expected):
+                return False
+            last_match[:] = [value]
+            return True
+
+        code = (
+            f"___check_native_method({self.arg_ref(guard)}, "
+            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
+        )
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: value is metadata,
     )
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
             # Record which builtin variables are used for pruning later.
-            if isinstance(guard.originating_source, DictGetItemSource):
-                self.check_fn_manager.used_builtin_vars.add(
-                    guard.originating_source.index
-                )
+            source = guard.originating_source
+            if isinstance(source, DictGetItemSource) and isinstance(source.index, str):
+                self.check_fn_manager.used_builtin_vars.add(source.index)
         return self.id_match_unchecked(guard)
 
     @register_guard_check_spec(
@@ -3189,6 +3615,31 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            type(value),
+            list_reverseiterator_len(value),
+        ),
+        eval_fn=lambda value, metadata: (
+            type(value) is metadata[0]
+            and list_reverseiterator_len(value) == metadata[1]
+        ),
+    )
+    def LIST_REVERSEITERATOR_LEN(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        it_type = type(value)
+        length = list_reverseiterator_len(value)
+
+        def guard_fn(x: object) -> bool:
+            return type(x) is it_type and list_reverseiterator_len(x) == length
+
+        code = [f"___list_reverseiterator_len({ref}) == {length}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
@@ -3253,7 +3704,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(value.keys()),
-        eval_fn=lambda value, metadata: list(value.keys()) == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            list(value.keys()), metadata
+        ),
     )
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
         """Guard on the key order of types.MappingProxyType object"""
@@ -3268,8 +3721,41 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ],
+        eval_fn=lambda value, metadata: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ]
+        == metadata,
+    )
+    def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
+        key_ids = [
+            self.id_ref(key, guard.name)
+            for key in collections.OrderedDict.keys(self.get(guard))
+        ]
+
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
+                id(current) == expected
+                for current, expected in zip(
+                    collections.OrderedDict.keys(value), key_ids
+                )
+            )
+
+        code = [f"___check_order({self.arg_ref(guard)})"]
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
-        eval_fn=lambda value, metadata: list(dict.keys(value)) == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            list(dict.keys(value)), metadata
+        ),
     )
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
@@ -3360,6 +3846,28 @@ class GuardBuilder(GuardBuilderBase):
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
             guard.user_stack,
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
+    def FX_ANNOTATION(self, guard: Guard) -> None:
+        """Guard on the torch.fx.traceback annotation active at frame entry."""
+        output_graph = self.check_fn_manager.output_graph
+        if output_graph is None:
+            raise AssertionError("check_fn_manager.output_graph must not be None")
+        annotation = output_graph.fx_annotation
+        code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
+        self._set_guard_export_info(guard, code)
+
+        get_annotation = torch.fx.traceback._get_current_annotation
+
+        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
+        # as a guard failure, so the frame recompiles.
+        def fn(x: object) -> bool:
+            return get_annotation() == annotation
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.
@@ -3667,14 +4175,14 @@ class GuardBuilder(GuardBuilderBase):
             value = value if value is not None else self.get(guard)
 
             pytype = type(value)
-            dispatch_keys = torch._C._dispatch_keys(value)
+            dispatch_keys = maybe_get_fake_dispatch_keys(value)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 value, torch._subclasses.FakeTensor
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-                if value.dispatch_keys is not None:
-                    dispatch_keys = value.dispatch_keys
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -3755,6 +4263,7 @@ class GuardBuilder(GuardBuilderBase):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_sources.append(guard.originating_source)
                     self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
@@ -3763,6 +4272,9 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
+                device_index_is_current = _guard_device_index_is_current(
+                    value, output_graph.compile_on_one_rank
+                )
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
@@ -3772,6 +4284,7 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
+                        device_index_is_current,
                     ),
                     guard,
                 )
@@ -3785,6 +4298,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    device_index_is_current,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
@@ -3822,6 +4336,14 @@ class GuardBuilder(GuardBuilderBase):
             #   _dynamo_weak_dynamic_indices is the user-facing attribute, set via
             #   maybe_mark_dynamic(), and guarded on like the other dimension marking
             #   attributes above.
+            #   _dynamo_dynamic_range holds the min/max declared through
+            #   mark_dynamic() or maybe_mark_dynamic(). It is compared by VALUE, as one
+            #   set, so declaring a different range for a dim recompiles instead of
+            #   silently reusing a graph built for another range. Comparing the set as a
+            #   whole also means a graph compiled from {dim 0: [2, 5], dim 1: [3, 7]} is
+            #   not reused by a tensor declaring only {dim 0: [2, 5]}, even though the
+            #   marking indices of that tensor would match. TODO we can optimize that
+            #   recompilation by comparing value per dim.
             #   _dynamo_propagated_dynamic_indices is a compiler-internal attribute set by
             #   AOTAutograd's mark_dynamo_propagated_dynamic_indices() to propagate dynamism across
             #   graph breaks. It is NOT guarded on. When AOTAutograd discovers that an
@@ -3840,25 +4362,39 @@ class GuardBuilder(GuardBuilderBase):
                 "_dynamo_static_indices",
             )
 
+            def read_marking(attr_name: str) -> Any:
+                marking = getattr(value, attr_name, None)
+                if self.save_guards and marking is not None:
+                    self.guard_tree_values[id(marking)] = marking
+                return marking
+
             expected_attrs: dict[str, set[int]] = {}
             absent_attrs: list[str] = []
             for attr_name in dim_marking_attrs:
                 if hasattr(value, attr_name):
-                    expected_attrs[attr_name] = getattr(value, attr_name)
-                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({getattr(value, attr_name)!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
+                    expected_attrs[attr_name] = read_marking(attr_name)
+                    code_part = f"((getattr({tensor_name}, '{attr_name}', set()).issubset({expected_attrs[attr_name]!r})) if hasattr({tensor_name}, '{attr_name}') else True)"
                     code.append(code_part)
                 else:
                     absent_attrs.append(attr_name)
                     code_part = f"hasattr({tensor_name}, '{attr_name}') == False"
                     code.append(code_part)
 
-            # Dependent attributes: checked only when _dynamo_unbacked_indices is present.
-            dependent_attrs: dict[str, tuple[dict[int, Any] | None, str]] = {}
-            dep_attr_names = ("_dynamo_shape_ids", "_dynamo_unbacked_bounds")
-            gate_attr = "_dynamo_unbacked_indices"
-            if hasattr(value, gate_attr):
+            # Dependent attributes: compared by value, and only when their gate
+            # attribute is present.
+            dependent_attrs: dict[str, tuple[Any, str]] = {}
+            gated_attrs = (
+                (
+                    "_dynamo_unbacked_indices",
+                    ("_dynamo_shape_ids", "_dynamo_unbacked_bounds"),
+                ),
+                ("_has_dynamo_dim_marking", ("_dynamo_dynamic_range",)),
+            )
+            for gate_attr, dep_attr_names in gated_attrs:
+                if not hasattr(value, gate_attr):
+                    continue
                 for attr_name in dep_attr_names:
-                    attr_value = getattr(value, attr_name, None)
+                    attr_value = read_marking(attr_name)
                     dependent_attrs[attr_name] = (attr_value, gate_attr)
                     code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '{gate_attr}') else True)"
                     code.append(code_part)
@@ -4073,20 +4609,38 @@ class GuardsState:
     local_state: Any | None = None
 
 
-class _Missing:
-    def __init__(self, reason: str | None = None) -> None:
-        self._reason = reason
+class _LiveBuiltins:
+    """Stands in a snapshot for builtins.__dict__: resolves to the loading
+    process's own, by reference, rather than a copy of the saving one's."""
 
-    def __repr__(self) -> str:
-        return f"_Missing({self._reason})"
+    def __reduce__(self) -> tuple[Any, ...]:
+        return vars, (builtins,)
 
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
 
-    # Sometimes _Missing object is used as the callable with functools.partial,
-    # so we add a dummy __call__ here to bypass TypeError from partial().
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return _Missing()
+# One instance, so a scope binding the dict twice (__builtins__ and Dynamo's
+# __builtins_dict___N alias) carries the reduce once and a memo get for the rest.
+_live_builtins = _LiveBuiltins()
+
+
+# FakeTensor state held in __dict__, and the setters on FakeTensor that write
+# it (fake_device, the memo descriptors); never carried off a fake. _is_param
+# is not here: FakeTensor sets it only when asked, so restoring it is correct.
+_FAKE_TENSOR_OWNED_ATTRIBUTES = (
+    _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
+    | {
+        "_fake_device",
+        "fake_mode",
+        "constant",
+        "pytype",
+        "dispatch_keys",
+        "real_tensor",
+    }
+    | {
+        name
+        for name, attr in vars(FakeTensor).items()
+        if hasattr(attr, "__set__") and not hasattr(torch.Tensor, name)
+    }
+)
 
 
 @functools.cache
@@ -4097,18 +4651,80 @@ def _get_unsupported_types() -> tuple[type, ...]:
         weakref.ReferenceType,
     )
     try:
-        ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
+        # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
+        # alone let an unguarded one fail the whole frame with "cannot pickle".
+        # The C++ Backend is also the Python backend extension point (a Python
+        # class subclasses it through its pybind trampoline), so a subclass
+        # carrying instance state is covered too, deliberately: it cannot be
+        # pickled either, and nothing rebuilds it at load.
+        ret += (
+            torch._C._distributed_c10d.ProcessGroup,
+            torch._C._distributed_c10d.Backend,
+        )
     except AttributeError:
         pass
     return ret
 
 
-class GuardsStatePickler(pickle.Pickler):
+def _pickles_from_dict(cls: type) -> bool:
+    """Whether pickle rebuilds an instance of cls by restoring its ``__dict__``,
+    with no hook that could read a pruned attribute (an Enum member's
+    ``__reduce_ex__`` passes ``_value_`` to the class, for one)."""
+    object_getstate = getattr(object, "__getstate__", None)
+    return (
+        cls not in copyreg.dispatch_table
+        and cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is object_getstate
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs_ex__")
+        and not hasattr(cls, "__getnewargs__")
+    )
+
+
+def _is_shared_constant(value: Any) -> bool:
+    """Whether pruning ``value`` by id would poison unrelated references to it.
+
+    Pruning is keyed by ``id()``, and a literal such as ``torch.float32`` or
+    ``Ellipsis`` is one object process-wide, so registering an unguarded
+    reference as missing would turn EVERY other reference -- the dtype inside
+    every tensor's reducer payload, a code object's constant -- into the
+    sentinel. FunctionPicklerBase._is_literal names exactly those values (by
+    exact type, so an IntEnum member or a str subclass is still pruned). The
+    empty tuple is the one container CPython shares the same way (an empty
+    frozenset is not); it matters for the module attribute loop, since a pytree
+    leaf is never a tuple. A class is one object too (torch.Tensor is the pytype
+    of every tensor payload); that matters for the local-scope leaf loop, since
+    the module loop skips every callable. A class that pickle cannot find by
+    name (a <locals> class) stays prunable: pickling it by reference would fail
+    the dump, and the artifact would import its module at load.
+    """
+    if type(value) is tuple and not value:
+        return True
+    if inspect.isclass(value) and FunctionPicklerBase._fqn_resolves(value):
+        return True
+    return FunctionPicklerBase._is_literal(value)
+
+
+# What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
+# breaks the module itself: __getattr__ indexes the three dicts for every name
+# outside __dict__, and __setattr__/__delattr__ index all four on any
+# assignment. The hook OrderedDicts are pruned deliberately, unless a guard
+# reads them: state_dict()/load_state_dict() on a loaded module then raise, the
+# accepted cost of keeping a module with a local-lambda hook serializable.
+_NN_MODULE_STATE_ATTRS = frozenset(
+    {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
+)
+
+
+class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
         guard_tree_values: dict[int, Any],
         empty_values: dict[int, Any],
         missing_values: dict[int, Any],
+        value_guarded_containers: dict[int, Any],
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -4116,8 +4732,78 @@ class GuardsStatePickler(pickle.Pickler):
         self.fake_mode = torch._subclasses.FakeTensorMode()
         self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
+        # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
+        # above _keep. Required, because omitting it would carry no plain
+        # tuple verbatim.
+        self.value_guarded_containers = value_guarded_containers
         self.empty_values = empty_values
         self.missing_values = missing_values
+        self._missing_cache: dict[str, _Missing] = {}
+        self._globals_snapshots: dict[int, dict[str, Any]] = {}
+        self._pruned_cells: dict[int, types.CellType] = {}
+        # Elements of a container carried verbatim (a value-guarded __defaults__
+        # tuple, see _keep_container_verbatim) must stay real even when an
+        # unguarded attribute is the very same object and registers it mid-dump.
+        self._verbatim_elements: set[int] = set()
+        stack = list(value_guarded_containers.values())
+        while stack:
+            for element in stack.pop():
+                if id(element) in self._verbatim_elements:
+                    continue
+                self._verbatim_elements.add(id(element))
+                if isinstance(element, (list, tuple, set, frozenset)):
+                    stack.append(element)
+                elif isinstance(element, dict):
+                    stack.append([*element.keys(), *element.values()])
+        # Everything reachable from a value a guard compares whole: a constant
+        # or opaque value type under EQUALS_MATCH, and what __tensor_unflatten__
+        # gets back through a traceable wrapper subclass's ctx under
+        # TENSOR_SUBCLASS_METADATA_MATCH. A pruned field anywhere inside would
+        # fail the guard after load. Held, not just ids, since
+        # __tensor_flatten__ may build the ctx afresh.
+        self._whole_compared_values: dict[int, Any] = {}
+        self._collect_whole_compared_values()
+
+    def _collect_whole_compared_values(self) -> None:
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        stack = [
+            value
+            for value in self.guard_tree_values.values()
+            if pytree.is_constant_class(type(value))
+            or is_opaque_constant_type(type(value))
+        ]
+        subclasses = [
+            value
+            for value in self.guard_tree_values.values()
+            if is_traceable_wrapper_subclass(value)
+        ]
+        while subclasses:
+            subclass = subclasses.pop()
+            attrs, ctx = subclass.__tensor_flatten__()
+            stack.append(ctx)
+            for attr in attrs:
+                inner = getattr(subclass, attr)
+                if is_traceable_wrapper_subclass(inner):
+                    subclasses.append(inner)
+        while stack:
+            value = stack.pop()
+            if id(value) in self._whole_compared_values:
+                continue
+            self._whole_compared_values[id(value)] = value
+            if isinstance(value, (list, tuple, set, frozenset)):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                stack.extend(value.keys())
+                stack.extend(value.values())
+            elif (
+                hasattr(value, "__dict__")
+                and not inspect.isclass(value)
+                and not inspect.ismodule(value)
+                and not inspect.isroutine(value)
+                and not isinstance(value, (torch.nn.Module, torch.Tensor))
+            ):
+                stack.extend(vars(value).values())
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4143,7 +4829,11 @@ class GuardsStatePickler(pickle.Pickler):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        # A .grad the guards never read is pruned to the _Missing sentinel on
+        # the way in (only a training capture has one to prune at all); it was
+        # not guarded on, so the rebuilt tensor does not need it, but assigning
+        # the sentinel raises.
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4172,10 +4862,6 @@ class GuardsStatePickler(pickle.Pickler):
         return out
 
     @classmethod
-    def _unpickle_python_module(cls, alias: str) -> types.ModuleType:
-        return importlib.import_module(alias)
-
-    @classmethod
     def _unpickle_dispatch_key_set(cls, raw_repr: int) -> torch._C.DispatchKeySet:
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
@@ -4190,6 +4876,10 @@ class GuardsStatePickler(pickle.Pickler):
         cls, d: dict[Any, Any]
     ) -> types.MappingProxyType[Any, Any]:
         return types.MappingProxyType(d)
+
+    @classmethod
+    def _unpickle_type_dict_item(cls, owner: type, name: str) -> object:
+        return get_type_dict_no_user_code(owner)[name]
 
     @classmethod
     def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
@@ -4225,22 +4915,19 @@ class GuardsStatePickler(pickle.Pickler):
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
     @classmethod
-    def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
-        return types.MethodType(func, base)
+    def _unpickle_custom_op_def(cls, qualname: str) -> Any:
+        try:
+            return OPDEFS[qualname]
+        except KeyError:
+            raise RuntimeError(
+                f"Custom op {qualname} is not registered; import the module that "
+                "defines it before loading"
+            ) from None
 
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
         return getattr(torch.nn.attention.SDPBackend, name)
-
-    @classmethod
-    def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
-            return val
-
-        if _.__closure__ is None:
-            raise AssertionError("Closure must not be None when unpickling cell")
-        return _.__closure__[0]
 
     @classmethod
     def _unpickle_named_tuple_type(
@@ -4249,23 +4936,251 @@ class GuardsStatePickler(pickle.Pickler):
         # pyrefly: ignore [bad-return]
         return collections.namedtuple(name, fields)
 
-    @classmethod
-    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
-        from torch._dynamo.package import SerializedCode
+    # Note [Reconstructing a function a guard is rooted at]
+    #
+    # A function whose qualname does not resolve back to it cannot be pickled by
+    # reference, and every functools.wraps decorator produces one: the wrapper
+    # copies the wrapped function's __module__ and __qualname__ while living in
+    # the decorator's file. Such a function becomes a _Missing sentinel, which is
+    # right for one nothing depends on. When a guard's source walks THROUGH it,
+    # evaluating that source against the sentinel either raises while the guard
+    # manager is still being built, failing the whole load, or -- for a name the
+    # sentinel happens to have, like __module__ -- rebakes the guard against the
+    # sentinel's value and misses forever with no error. So it is rebuilt from
+    # its code object instead (FunctionPicklerBase._reduce_function), carrying
+    # __code__, __name__, __qualname__, __module__, __closure__, __defaults__,
+    # __kwdefaults__, __dict__, __doc__, __annotations__ and __type_params__.
+    #
+    # Rebuilding drags along whatever the function holds -- closure cells,
+    # defaults, attributes, and the module scope its body reads -- and carrying
+    # all of that would let an unpicklable neighbour fail a package that never
+    # needed it. So only values some guard tree node references are carried
+    # (_keep) and the rest become sentinels. A plain tuple is carried verbatim
+    # only when an EQUALS_MATCH reads its values whole (`f.__defaults__ ==
+    # (2.0, (1, 2))`): that guard rebakes its comparison constant from the
+    # reconstructed function at load, so a pruned element would make it fail
+    # forever with no load error. A plain dict is never carried verbatim, since
+    # a whole-dict comparison lowers to DICT_KEYS_MATCH plus per-value guards.
+    # A container registered by a length or type guard alone -- what bind_args
+    # installs on __defaults__ for every called function with a positional
+    # default -- is pruned per value, since those guards survive it. Being
+    # registered is not what decides this: a whole-tuple EQUALS_MATCH and a
+    # per-element guard through the same tuple coexist in ordinary code (a
+    # call-site default binding next to `f.__defaults__ == (...)`), and only
+    # the value guard says the tuple must stay whole; GuardBuilder.EQUALS_MATCH
+    # records those tuples in value_guarded_containers, which the pickler takes
+    # as a required argument. A dict/tuple SUBCLASS is verbatim whenever kept,
+    # since its type must survive for the guard reading the slot
+    # (_keep_container_verbatim).
 
-        return SerializedCode.to_code_object(serialized_code)
+    def _keep(self, value: object) -> bool:
+        """Identity match; an interned value that collides is kept, harmlessly."""
+        return id(value) in self.guard_tree_values
 
-    @classmethod
-    def _unpickle_nested_function(
-        cls,
-        code: types.CodeType,
-        module: str,
-        qualname: str,
-        argdefs: tuple[object, ...] | None,
-        closure: tuple[types.CellType, ...] | None,
-    ) -> types.FunctionType:
-        f_globals = importlib.import_module(module).__dict__
-        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+    def _missing(self, reason: str) -> _Missing:
+        """One sentinel per reason; a snapshot prunes a whole module dict."""
+        if reason not in self._missing_cache:
+            self._missing_cache[reason] = _Missing(reason)
+        return self._missing_cache[reason]
+
+    def _prune(self, value: object, reason: str) -> object:
+        if self._is_literal(value) or self._keep(value):
+            return value
+        return self._missing(reason)
+
+    def _keep_container_verbatim(self, container: object) -> bool:
+        """Whether a function container (__defaults__/__dict__/...) is carried whole
+        rather than pruned per value; the rule and its reasons are in the Note
+        [Reconstructing a function a guard is rooted at] above."""
+        # The tuple case is decided on the recording alone. A recorded tuple is
+        # also in guard_tree_values today (EQUALS_MATCH registers the value it
+        # reads), but the failure mode of that second invariant breaking would
+        # be the silent forever-miss this rule exists to prevent.
+        if type(container) is tuple:
+            return id(container) in self.value_guarded_containers
+        if type(container) is dict:
+            return False
+        return self._keep(container)
+
+    def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
+        """Built once per module dict, so every function rebuilt against that
+        dict is built over ONE shared scope after load (pickle memoizes it)."""
+        snapshot: dict[str, Any] | None = self._globals_snapshots.get(id(f_globals))
+        if snapshot is None:
+            snapshot = {}
+            # Iterate a COPY: a CleanupHook can pop a name Dynamo installed out
+            # of this dict from a weakref callback, and iterating it live while
+            # pruning raises RuntimeError when that lands mid-loop.
+            for name, value in dict(f_globals).items():
+                # The live builtins.__dict__ is exempt from the keep contract
+                # wherever it is bound, not just under __builtins__: a traced
+                # module's own dict also holds it under Dynamo's
+                # __builtins_dict___N alias, the SAME object, and that is the
+                # dict a saved BUILTIN_MATCH guard registers. Keeping it "as
+                # read" would carry all of builtins (~6 KB) per snapshot, so
+                # every such slot travels as a reference resolved in the
+                # loading process. It stays a dict, since a guard may have
+                # walked through the slot and rebakes against whatever is in
+                # it; where no guard registered it at all (caching_precompile
+                # drops the BUILTIN_MATCH guard, and aot_compile's default
+                # filter drops every global one) this hands back the live dict
+                # rather than a sentinel, which the same rebake argument
+                # covers. The cost: a guard that walked the slot rebakes
+                # against the loading process's builtins rather than the
+                # binding the compile saw, which is the rule
+                # test_snapshot_keeps_the_save_time_value_of_a_guarded_global
+                # pins for a guarded global.
+                if value is builtins.__dict__:
+                    snapshot[name] = _live_builtins
+                else:
+                    snapshot[name] = self._prune(value, "unguarded function global")
+            # FunctionType binds builtins from the scope's __builtins__ at
+            # creation, so that entry can never be a sentinel: a pruned one
+            # becomes the real module. A dict without the key stays without it,
+            # since FunctionType falls back to the loading frame's builtins and
+            # a guard on the dict's shape must see the same keys. The key set is
+            # the module dict's at save time, names Dynamo installed into it
+            # included; a guard on the dict's shape compares against the live
+            # dict at run time and is only as portable as those names (see the
+            # commit message).
+            if isinstance(snapshot.get("__builtins__"), _Missing):
+                snapshot["__builtins__"] = builtins
+            self._globals_snapshots[id(f_globals)] = snapshot
+        return snapshot
+
+    def _prune_cell(self, cell: types.CellType) -> types.CellType:
+        # The contents decide: any guard that reads them registers them. A cell
+        # with kept (or empty) contents passes through UNCHANGED so pickle
+        # memoizes it and two functions closing over one variable still share it
+        # after reload.
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            return cell
+        if self._is_literal(contents) or self._keep(contents):
+            return cell
+        # Memoize by the ORIGINAL cell's identity so two functions sharing one
+        # unguarded cell still share a single pruned cell after reload, rather
+        # than each getting a distinct _Missing-filled one.
+        pruned = self._pruned_cells.get(id(cell))
+        if pruned is None:
+            pruned = types.CellType(self._missing("unguarded function closure"))
+            self._pruned_cells[id(cell)] = pruned
+        return pruned
+
+    def _reduce_function_by_value(self, obj: types.FunctionType) -> tuple[Any, ...]:
+        """Pickle a function by value, pruned to what some guard reads.
+
+        See Note [Reconstructing a function a guard is rooted at].
+        """
+        snapshot = None
+        if self._keep(obj.__globals__):
+            snapshot = self._globals_snapshot(obj.__globals__)
+        # A container (__defaults__/__kwdefaults__/__dict__/__annotations__) is
+        # carried whole or pruned per value; see _keep_container_verbatim.
+        defaults = obj.__defaults__
+        if defaults is not None and not self._keep_container_verbatim(defaults):
+            reason = "unguarded function default"
+            defaults = tuple(self._prune(v, reason) for v in defaults)
+
+        kwdefaults = obj.__kwdefaults__
+        if kwdefaults is not None and not self._keep_container_verbatim(kwdefaults):
+            reason = "unguarded function kwdefault"
+            kwdefaults = {k: self._prune(v, reason) for k, v in kwdefaults.items()}
+
+        closure = obj.__closure__
+        if closure is not None:
+            # No _keep_container_verbatim gate like the other containers: a
+            # guard through __closure__ always ends at cell_contents, which
+            # registers the contents _prune_cell keys on, so per-cell pruning
+            # already keeps what is read, and _prune_cell is length-preserving.
+            closure = tuple(self._prune_cell(cell) for cell in closure)
+        if self._keep_container_verbatim(obj.__dict__):
+            attributes = obj.__dict__
+        else:
+            attributes = {
+                name: self._prune(value, "unguarded function attribute")
+                for name, value in obj.__dict__.items()
+            }
+        # An unguarded annotation/type param may be an unpicklable local class;
+        # prune it. An exact dict is never carried whole, so the keep below only
+        # fires for a dict SUBCLASS assigned onto __annotations__ that a guard
+        # registered, and not even for that on 3.14, where the read copies. The
+        # 3.14 FORWARDREF read reruns the annotate function with only NAME
+        # lookups proxied, so it absorbs a missing name, a raising attribute or a
+        # raising call, but the rest of the expression still runs for real:
+        # formatting a proxy in an f-string (_Stringifier refuses __format__) or
+        # a sub-expression that never touches a name (`()[0]`) raises out of it;
+        # that would fail the dump for a slot the prune exists to make optional,
+        # so drop the whole set instead.
+        # Safe for those: FORWARDREF hands back the cached __annotations__ when
+        # the function has one, so reaching the handler means the whole
+        # __annotate__ call was unreadable, and a guard rooted at
+        # fn.__annotations__ read them at trace time.
+        try:
+            raw_annotations = self._read_raw_annotations(obj)
+        except RecursionError:
+            # Not expression-shaped: an overflow drops a set that reads fine at
+            # any other depth, cached and guarded ones included. It is the dump's
+            # own limit, which pickle_guards_state reports as a bypass.
+            raise
+        except Exception as e:
+            code = obj.__code__
+            log.debug(
+                "dropping the annotations of %s (%s:%d): %s",
+                code.co_qualname,
+                code.co_filename,
+                code.co_firstlineno,
+                e,
+            )
+            raw_annotations: dict[str, Any] = {}
+        if self._keep_container_verbatim(raw_annotations):
+            annotations = raw_annotations
+        else:
+            annotations = {
+                name: self._prune(value, "unguarded function annotation")
+                for name, value in raw_annotations.items()
+            }
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params is not None and not self._keep_container_verbatim(type_params):
+            type_params = tuple(
+                self._prune(t, "unguarded function type param") for t in type_params
+            )
+        return self._reduce_function(
+            obj,
+            defaults=defaults,
+            kwdefaults=kwdefaults,
+            closure=closure,
+            attributes=attributes,
+            doc=self._prune(obj.__doc__, "unguarded function doc"),
+            annotations=annotations,
+            type_params=type_params,
+            globals_snapshot=snapshot,
+        )
+
+    # The C pickler saves an exact builtin container by type, before it ever
+    # consults reducer_override, so a pruned ``self.its = [generator]`` was
+    # still walked and still failed. persistent_id is asked about every object
+    # first, so it is the one hook that can substitute those. Only the MUTABLE
+    # exact containers: the compiler folds a constant tuple or frozenset into
+    # one object shared across a module, so an unguarded ``self.dims = (0, 1)``
+    # can be the very object in another function's co_consts or in a guarded
+    # __defaults__, and substituting it by id would put the sentinel there.
+    # Everything else in missing_values stays on the reducer_override path, and
+    # so does a container that is also in empty_values: reducer_override checks
+    # empty_values first, so a bound method's receiver is rebuilt empty rather
+    # than as the sentinel, and this hook keeps that precedence.
+    _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
+
+    def persistent_id(self, obj: object) -> int | str | None:
+        if (
+            type(obj) in self._PRUNED_CONTAINER_TYPES
+            and id(obj) in self.missing_values
+            and id(obj) not in self.empty_values
+            and id(obj) not in self._verbatim_elements
+        ):
+            return _PRUNED_VALUE_PID
+        return None
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4276,9 +5191,10 @@ class GuardsStatePickler(pickle.Pickler):
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
-        if inspect.iscode(obj):
-            from torch._dynamo.package import SerializedCode
+        if obj is dict_keys:
+            return type, (dict[Any, Any]().keys(),)
 
+        if inspect.iscode(obj):
             return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
         if id(obj) in self.missing_values:
@@ -4312,6 +5228,14 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data,
                 )
 
+            # _dispatch_keys() on a fake reports the Python and
+            # PythonTLSSnapshot keys of the fake itself; the converter may
+            # have recorded the real tensor's keys (from_meta_and_device
+            # always does, from_real_tensor only for an mkldnn source).
+            dispatch_keys = maybe_get_fake_dispatch_keys(obj)
+            if dispatch_keys is None:
+                dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = is_fake_tensor(obj)
             # For FakeTensors, use pytype if set, otherwise default to
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
@@ -4320,37 +5244,67 @@ class GuardsStatePickler(pickle.Pickler):
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+            # A fake answers empty_like with another fake through its own
+            # __torch_dispatch__, whether or not its FakeTensorMode is active,
+            # and that fake would drag the mode and its converters into the
+            # pickle; no_dispatch makes the template a plain meta tensor.
+            with no_dispatch() if is_fake else contextlib.nullcontext():
+                meta = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
 
-            return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
-                obj.device,
-                pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+            return (
+                type(self)._unpickle_tensor,
+                (
+                    meta,
+                    obj.device,
+                    pytype,
+                    dispatch_keys.raw_repr(),
+                    # Whatever .grad holds, without the non-leaf warning: a plain
+                    # non-leaf has None, a retained-grad non-leaf (torch.optim
+                    # permits one as a param) or a fake mirroring one has a real
+                    # tensor.
+                    safe_grad(obj),
+                ),
+                # The state slot, not a constructor argument: pickle memoizes the
+                # tensor before saving state, so an attribute referring back to
+                # the tensor round-trips instead of recursing.
+                self._carried_tensor_attributes(obj, is_fake),
+                None,
+                None,
+                type(self)._restore_tensor_attributes,
             )
 
         elif isinstance(obj, torch.nn.Module):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
+            # A module with its own __setstate__ (RNNBase indexes _all_weights)
+            # would read a pruned attribute at load, so it is pickled whole. DDP
+            # is rebuilt through nn.Module.__setstate__ below, so it stays pruned.
+            is_ddp = isinstance(obj, torch.nn.parallel.DistributedDataParallel)
+            if is_ddp or type(obj).__setstate__ is torch.nn.Module.__setstate__:
+                self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
-            if isinstance(obj, torch.nn.parallel.DistributedDataParallel):
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+            if is_ddp:
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
-            if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
+            if obj.__class__.__getstate__ is torch.nn.Module.__getstate__:
                 return type(self)._unpickle_module, (obj.__getstate__(),)
 
         elif inspect.ismodule(obj):
@@ -4368,24 +5322,47 @@ class GuardsStatePickler(pickle.Pickler):
             and hasattr(obj, "_torch_handler_name")
         ):
             if not hasattr(obj, "_torch_unpickler"):
-                raise AssertionError(
+                # A reducer invariant, not a third-party value we cannot carry:
+                # raise PackageError so pickle_guards_state's broad catch, which
+                # rewraps everything else as a bypass, stays honest.
+                raise torch._dynamo.exc.PackageError(
                     f"sympy Function subclass {obj} must have _torch_unpickler attribute"
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
-        elif (
-            inspect.isclass(obj)
-            and issubclass(obj, tuple)
-            and hasattr(obj, "_fields")
-            and obj.__qualname__ != obj.__name__
-        ):
+        elif _is_nested_named_tuple_type(obj):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
-        elif isinstance(obj, torch.SymInt):
-            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+        elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # Unconditional on purpose. A bystander in a PRUNABLE position (a
+            # local_scope leaf, a direct nn.Module attribute) is registered in
+            # missing_values and pruned by the branch above before this one is
+            # reached. Anything that does arrive here -- the sizes of a guarded
+            # dynamic-shaped tensor's payload, or a scalar nested in a container
+            # carried verbatim -- is refused, because no position reached here
+            # can hold a sentinel safely.
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
+            )
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
+
+        elif isinstance(
+            obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
+        ):
+            owner = obj.__objclass__
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+                raise torch._dynamo.exc.PackageError(
+                    f"Cannot serialize {type(obj).__name__} with a mutable owner"
+                )
+            for name, value in get_type_dict_no_user_code(owner).items():
+                if value is obj:
+                    return type(self)._unpickle_type_dict_item, (owner, name)
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot locate {obj!r} in {owner!r}.__dict__"
+            )
 
         elif type(obj) is _COUNT_ITERATOR_TYPE:
             item, step = normalize_count_iter(obj)
@@ -4407,6 +5384,10 @@ class GuardsStatePickler(pickle.Pickler):
                 obj._overloadname,
             )
 
+        elif _is_registered_custom_op_def(obj):
+            # Its Library holds a _DispatchModule, which cannot be pickled.
+            return type(self)._unpickle_custom_op_def, (obj._qualname,)
+
         elif (
             obj.__class__.__module__ == "builtins"
             and obj.__class__.__name__ == "PyCapsule"
@@ -4415,34 +5396,41 @@ class GuardsStatePickler(pickle.Pickler):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
+            # Only when no guard reads it: a guarded one (a TYPE_MATCH on a
+            # stream local, a FAKE_SCRIPT_TYPE_MATCH on a process-group local)
+            # would otherwise load as a sentinel the rebuilt guard can never
+            # match, so it is refused by name.
+            if id(obj) in self.guard_tree_values:
+                raise torch._dynamo.exc.PackageError(
+                    f"a guard reads a {type(obj).__name__}, which cannot be serialized"
+                )
             return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
-            if "<locals>" in obj.__qualname__:
-                return type(self)._unpickle_nested_function, (
-                    obj.__code__,
-                    obj.__module__,
-                    obj.__qualname__,
-                    obj.__defaults__,
-                    obj.__closure__,
-                )
-            if obj.__module__ in sys.modules:
-                f = sys.modules[obj.__module__]
-                for name in obj.__qualname__.split("."):
-                    f = getattr(f, name, None)  # type: ignore[assignment]
-                if f is not obj:
+            if "<locals>" in obj.__qualname__.split("."):
+                # Rebuilt whether or not a guard is rooted at it, as before this
+                # change: it can never be found by name, and unlike a wraps
+                # wrapper it has no module-level neighbourhood to drag along.
+                return self._reduce_function_by_value(obj)
+            if not self._fqn_resolves(obj):
+                # See Note [Reconstructing a function a guard is rooted at].
+                # A module absent from sys.modules (an exec-created function, or
+                # __module__ is None) is an fqn mismatch too: pickling by
+                # reference imports __module__ and re-reads the qualname, which
+                # would not round back to this object -- it fails to resolve, or
+                # resolves to a different one -- so rebuild a guarded function by
+                # value and prune an unguarded one, rather than fall through and
+                # fail the dump with pickle's PicklingError (a bypass).
+                if id(obj) not in self.guard_tree_values:
                     return _Missing, ("fqn mismatch",)
+                return self._reduce_function_by_value(obj)
         elif inspect.ismethod(obj):
-            func = obj.__func__
-            method_self = obj.__self__
-            inner_func = getattr(method_self, func.__name__)
-            if inspect.ismethod(inner_func):
-                inner_func = inner_func.__func__
-            if func is not inner_func:
-                return type(self)._unpickle_bound_method, (func, method_self)
+            reduced = self._reduce_bound_method(obj)
+            if reduced is not None:
+                return reduced
 
-        elif isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
-            return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif isinstance(obj, types.CellType):
+            return self._reduce_cell(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4453,12 +5441,13 @@ class GuardsStatePickler(pickle.Pickler):
         if isinstance(obj, torch.nn.attention.SDPBackend):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
+        if isinstance(obj, enum.Enum) and _resolves_by_reference(obj):
+            # Enum's own __reduce_ex__ passes _value_ to the class, which may
+            # not round-trip, and a nested enum would hit the check below.
+            return getattr, (type(obj), obj.name)
+
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
-            raise torch._dynamo.exc.PackageError(
-                f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
-            )
+            raise_local_type_error(type(obj))
 
         if (
             inspect.isclass(obj)
@@ -4468,19 +5457,293 @@ class GuardsStatePickler(pickle.Pickler):
             if obj is not torch.distributed.fsdp._fully_shard.FSDPModule:
                 original_type = obj.__mro__[2]
                 if not issubclass(original_type, torch.nn.Module):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"Expected nn.Module subclass, got {original_type}"
                     )
                 if (
                     original_type
                     not in torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()
                 ):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"{original_type} not found in FSDP cls-to-fsdp-cls mapping"
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and hasattr(obj, "__dict__")
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not inspect.isroutine(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and type(obj).__module__.partition(".")[0] != "torch"
+            and _pickles_from_dict(type(obj))
+            and not hasattr(type(obj), "__slots__")
+            and id(obj) not in self._whole_compared_values
+        ):
+            # A guarded user object (a train pipeline, a wrapper holding a
+            # dataloader) would otherwise be pickled whole, so one unguarded
+            # unpicklable attribute takes the frame down. Last, so the specific
+            # reducers above get first refusal. Nothing a guard compares whole
+            # is pruned (_whole_compared_values); skipping torch's own types on
+            # top of that is only a conservative filter, so they stay whole.
+            # The sentinel goes into this object's state only, not into
+            # missing_values: another object pickled whole may hold the same
+            # attribute and need it at load.
+            pruned = self._unguarded_attributes(obj)
+            if pruned:
+                missing = self._missing("unguarded attribute")
+                state = {k: missing if k in pruned else v for k, v in vars(obj).items()}
+                # Swap only the state: a dict or list subclass's default reduce
+                # also carries its items. Every protocol >= 2 reduces alike.
+                rv = obj.__reduce_ex__(2)
+                return (*rv[:2], state, *rv[3:])
+
         return NotImplemented
+
+    @classmethod
+    def _restore_tensor_attributes(
+        cls, tensor: torch.Tensor, state: dict[str, Any]
+    ) -> None:
+        for name, value in state.items():
+            object.__setattr__(tensor, name, value)
+
+    @staticmethod
+    def _warn_dropped_tensor_attribute(name: str, value: object) -> None:
+        message = (
+            f"a tensor's {name!r} attribute holds {value!r}, which a guard may "
+            f"read; the rebuilt FakeTensor keeps its own {name!r}, so such a "
+            f"guard fails after load"
+        )
+        log.warning(message)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "guard_state_dropped_tensor_attribute",
+                "encoding": "string",
+            },
+            payload_fn=lambda: message,
+        )
+
+    def _carried_tensor_attributes(
+        self, obj: torch.Tensor, is_fake: bool
+    ) -> dict[str, Any] | None:
+        """The Python attributes of ``obj``, pruned to what a guard reaches.
+
+        A tensor is rebuilt from metadata, so a guard whose source traverses an
+        attribute assigned onto it cannot be rebuilt unless the attribute is
+        carried. An unguarded value becomes the _Missing sentinel, since it may
+        not pickle; its name stays, as a HASATTR guard reads only presence.
+        """
+        state = getattr(obj, "__dict__", None)
+        if not state:
+            return None
+        carried: dict[str, Any] = {}
+        for name, value in state.items():
+            if name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+                if not is_fake and self._keep(value):
+                    if not self._is_literal(value):
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads {name!r} off a tensor, but a rebuilt "
+                            f"tensor is a FakeTensor, which stores its own state there"
+                        )
+                    # A literal can match an unrelated guard's interned value by
+                    # id, so this may not be a guard read. If it is, the loaded
+                    # guard sees the FakeTensor's own value and never passes.
+                    self._warn_dropped_tensor_attribute(name, value)
+                continue
+            if name.startswith("_dynamo_") and not self._keep(value):
+                # Rebuilding TENSOR_MATCH reads Dynamo's markings off the loaded
+                # tensor, and its check cannot take a _Missing in place of one.
+                continue
+            carried[name] = self._prune(value, "unguarded tensor attribute")
+        return carried or None
+
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
+        for attr in self._unguarded_attributes(obj).values():
+            self.missing_values[id(attr)] = attr
+
+    def _unguarded_attributes(self, obj: Any) -> dict[str, Any]:
+        """The ``__dict__`` values nothing guards, which are prunable.
+
+        Reaching an object through the guard tree does not mean its whole state
+        is needed, only the attributes a guard actually reads. The rest becomes
+        the _Missing sentinel, which is what keeps an unpicklable bystander (a
+        generator, a live iterator, a C handle) from taking the frame down.
+        What an nn.Module itself reads back at load stays: the containers in
+        _NN_MODULE_STATE_ATTRS. Precondition: the caller has checked that
+        unpickling obj reads nothing but its ``__dict__`` back (nn.Module's
+        __setstate__, or ``_pickles_from_dict``), since any other hook may read
+        anything.
+        """
+        unguarded = {}
+        for name, attr in obj.__dict__.items():
+            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if name in _NN_MODULE_STATE_ATTRS:
+                continue
+            if id(attr) in self.guard_tree_values:
+                continue
+            if callable(attr):
+                continue
+            if _is_shared_constant(attr):
+                continue
+            if id(attr) in self._verbatim_elements:
+                continue
+            if id(attr) in self._whole_compared_values:
+                continue
+            unguarded[name] = attr
+        return unguarded
+
+
+_PORTABLE_IDENTITY_GUARD_TYPES = frozenset(
+    ("ID_MATCH", "CLASS_MATCH", "FUNCTION_MATCH", "MODULE_MATCH")
+)
+
+
+def _is_nested_named_tuple_type(obj: object) -> bool:
+    return (
+        inspect.isclass(obj)
+        and issubclass(obj, tuple)
+        and hasattr(obj, "_fields")
+        and obj.__qualname__ != obj.__name__
+    )
+
+
+def _is_registered_custom_op_def(value: object) -> bool:
+    return isinstance(value, CustomOpDef) and OPDEFS.get(value._qualname) is value
+
+
+def _resolves_by_reference(value: object) -> bool:
+    """Whether unpickling ``value`` in another process yields that process's
+    canonical object, so an identity guard rebuilt at load checks the right id.
+    """
+    if isinstance(value, types.ModuleType):
+        return sys.modules.get(value.__name__) is value
+    if isinstance(value, enum.Enum):
+        owner = type(value)
+        # Not owner.__dict__: a member named like an Enum attribute (name,
+        # value) is stored behind a descriptor there. A composite Flag member
+        # has no name on Python 3.10.
+        return (
+            _resolves_by_reference(owner)
+            and isinstance(value.name, str)
+            and getattr(owner, value.name, None) is value
+        )
+    if _is_nested_named_tuple_type(value):
+        # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
+        return False
+    if isinstance(value, type) and type(value).__qualname__ != type(value).__name__:
+        # GuardsStatePickler.reducer_override refuses a nested or local metaclass.
+        return False
+    if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
+        return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
+    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
+
+
+def _pickles_as_its_own_global(value: object) -> bool:
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
+    if isinstance(value, (torch.Tensor, torch.nn.Module)):
+        return False
+    try:
+        cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
+            return False
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        module_name = getattr(value, "__module__", None)
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        # The reduction is user code, possibly O(size), and this runs per guard:
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(_GUARDS_PROTOCOL)
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
+    except Exception:
+        return False
+
+
+def is_portable_identity_guard(
+    guard_type: str, derived_guard_types: Sequence[str], value: object
+) -> bool:
+    """An identity guard on an object pickled by reference survives
+    serialization: the load rebuilds it against the loading process's object.
+    """
+    return (
+        guard_type in _PORTABLE_IDENTITY_GUARD_TYPES
+        and all(
+            d in _PORTABLE_IDENTITY_GUARD_TYPES
+            or d not in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            for d in derived_guard_types
+        )
+        and _resolves_by_reference(value)
+    )
+
+
+def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
+    try:
+        return builder.get(guard)
+    except Exception:
+        # A value the guard cannot read is never portable.
+        return None
+
+
+_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
+
+
+def _portable_function_metadata(
+    guard_type: str, value: object
+) -> tuple[Callable[..., None], NamedTuple] | None:
+    if guard_type == "CLOSURE_MATCH":
+        if (code := _function_code_metadata(value)) is not None:
+            return GuardBuilder.FUNCTION_CODE_MATCH, code
+    if guard_type in _PORTABLE_FUNCTION_GUARD_TYPES:
+        if (method := _native_method_metadata(value)) is not None:
+            return GuardBuilder.NATIVE_METHOD_MATCH, method
+    return None
+
+
+def is_portable_function_guard(guard_type: str, value: object) -> bool:
+    """An identity guard on a function, or on a builtin bound to a class, that
+    ``to_portable_function_guard`` rewrites into a by-value check for
+    serialization."""
+    return _portable_function_metadata(guard_type, value) is not None
+
+
+def to_portable_function_guard(guard: Guard, builder: GuardBuilder) -> Guard:
+    guard_type = guard.create_fn_name()
+    if guard_type not in _PORTABLE_FUNCTION_GUARD_TYPES:
+        return guard
+    portable = _portable_function_metadata(guard_type, _guard_value(builder, guard))
+    if portable is None:
+        return guard
+    create_fn, expected = portable
+    return dataclasses.replace(
+        guard,
+        create_fn=functools.partial(create_fn, expected=expected),
+        guard_types=None,
+        code_list=None,
+        obj_weakref=None,
+        guarded_class_weakref=None,
+        _hash=None,
+    )
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
@@ -4509,7 +5772,13 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
         is_global=is_global,
         orig_guard=guard,
+        code_parts=tuple(guard.code_list or ()),
     )
+
+
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_PROTOCOL = pickle.DEFAULT_PROTOCOL
 
 
 def pickle_guards_state(
@@ -4521,38 +5790,68 @@ def pickle_guards_state(
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
 
-    leaves = pytree.tree_leaves(state.output_graph.local_scope)
-    for leaf in leaves:
-        if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
-            base = leaf.__self__
-            if id(base) not in guard_tree_values:
-                try:
-                    type(base).__new__(type(base))
-                    empty_values[id(base)] = base
-                except:  # noqa: E722
-                    pass
-        elif id(leaf) not in guard_tree_values:
-            # TODO See if we have lift this branch as the first one.
-            # Prune more objects in pytree hierarchy.
-            missing_values[id(leaf)] = leaf
-    pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
-
-    if all(
-        torch.compiler.keep_portable_guards_unsafe(
-            [
-                make_guard_filter_entry(guard, builder)
-                for guard in state.output_graph.guards
-            ]
-        )
-    ):
-        # Prune more values in AOT precompile when complex pickling structure is not needed.
-        state.output_graph.guard_on_key_order = set()
-        state.output_graph.global_scope = {}
-
+    # Anything raised while walking or dumping the state means a guarded value
+    # cannot be serialized, which is a bypass (an error under
+    # strict_precompile), never a compiler crash. A PackageError raised inside
+    # reducer_override already carries its message. tree_leaves is inside the
+    # try too: it recurses into the local values, so a deep pytree in a local
+    # overflows there rather than in dump.
     try:
+        leaves = pytree.tree_leaves(state.output_graph.local_scope)
+        for leaf in leaves:
+            if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
+                base = leaf.__self__
+                if id(base) not in guard_tree_values:
+                    try:
+                        type(base).__new__(type(base))
+                        empty_values[id(base)] = base
+                    except:  # noqa: E722
+                        pass
+            elif id(leaf) not in guard_tree_values and not _is_shared_constant(leaf):
+                # TODO See if we have lift this branch as the first one.
+                # Prune more objects in pytree hierarchy.
+                missing_values[id(leaf)] = leaf
+        pickler = GuardsStatePickler(
+            guard_tree_values,
+            empty_values,
+            missing_values,
+            builder.value_guarded_containers,
+            buf,
+            protocol=_GUARDS_PROTOCOL,
+        )
+
+        if all(
+            torch.compiler.keep_portable_guards_unsafe(
+                [
+                    make_guard_filter_entry(guard, builder)
+                    for guard in state.output_graph.guards
+                ]
+            )
+        ):
+            # Prune more values in AOT precompile when complex pickling
+            # structure is not needed.
+            state.output_graph.guard_on_key_order = set()
+            state.output_graph.global_scope = {}
+
         pickler.dump(state)
-    except AttributeError as e:
-        raise torch._dynamo.exc.PackageError(str(e)) from e
+    except torch._dynamo.exc.PackageError:
+        raise
+    except RecursionError as e:
+        # A deep (but finite) guarded object graph, or a __reduce__ that never
+        # memoizes, overflows the recursion limit inside dump: a serialization
+        # limit, not a compiler bug. Reporting WHERE it overflowed is skipped
+        # deliberately, since walking the object graph would recurse again off
+        # an already exhausted stack.
+        raise torch._dynamo.exc.PackageError(
+            "exceeded the recursion limit while pickling guard state"
+        ) from e
+    except Exception as e:
+        # Deliberately broad, AssertionError included: GradScaler.__getstate__
+        # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
+        # assert in __reduce__ and properties. Each is a legitimate limit of
+        # what a package can carry, reported as a bypass rather than failing
+        # the compile.
+        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
     return buf.getvalue()
 
 
@@ -4614,7 +5913,10 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
-                    elif (
+                    elif g.guard_type not in (
+                        "TYPE_MATCH",
+                        "BUILTIN_MATCH",
+                    ) and (
                         g.guard_type
                         in (
                             "ID_MATCH",
@@ -4642,6 +5944,7 @@ class CheckFunctionManager:
         # before the guard sanity check so GlobalStateGuard.check() sees
         # the true runtime state.
         with torch._C.DisableTorchFunction():
+            builder: GuardBuilder | None = None
             if guard_filter_fn:
                 # If we're filtering guards, we need to build it an extra time first
                 # because filtering depends on the builder/guard_manager results
@@ -4665,6 +5968,24 @@ class CheckFunctionManager:
                     raise AssertionError("All filter_results entries must be bool")
                 sorted_guards = [
                     guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+                ]
+            if save_guards and any(
+                guard.create_fn_name() in _PORTABLE_FUNCTION_GUARD_TYPES
+                for guard in sorted_guards
+            ):
+                if builder is None:
+                    # The rewrite only reads guarded values from the scope,
+                    # so a builder with no guards built is enough.
+                    builder, _ = self.build_guards(
+                        [],
+                        existing_diff_guard_sources,
+                        f_code,
+                        output_graph,
+                        False,
+                    )
+                sorted_guards = [
+                    to_portable_function_guard(guard, builder)
+                    for guard in sorted_guards
                 ]
 
             # Redo the guards because filtering relies on the results from the last guard builder.
@@ -4781,6 +6102,8 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    # serialize_guards still accepts an ID_MATCH, FUNCTION_MATCH, CLASS_MATCH or
+    # MODULE_MATCH that is_portable_identity_guard accepts.
     UNSUPPORTED_SERIALIZATION_GUARD_TYPES: tuple[LiteralString, ...] = (
         "DICT_VERSION",
         "NN_MODULE",
@@ -4805,10 +6128,14 @@ class CheckFunctionManager:
             # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
             # a chance that the guard is unserializable
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
-                if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw
-                    obj = builder.get(guard)
-                    raise_local_type_error(obj)
+                if guard._unserializable is not None:
+                    raise_local_type_error(guard._unserializable)
+            elif guard_type in _PORTABLE_IDENTITY_GUARD_TYPES and (
+                is_portable_identity_guard(
+                    guard_type, derived_guard_types, _guard_value(builder, guard)
+                )
+            ):
+                continue
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
@@ -4836,11 +6163,19 @@ class CheckFunctionManager:
             if name := get_global_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
-                # Leave out the builtins dict key, as we will special handle
-                # it later because the guarded code rarely use the entire
-                # builtin dict in the common case.
+                # The builtins dict is carried only for the keys a guard reads
+                # (used_builtin_vars): guarded code rarely uses the whole dict.
                 if name != builtins_dict_name:
                     used_global_vars.add(name)
+                else:
+                    while isinstance(source, ChainedSource):
+                        if (
+                            isinstance(source, DictGetItemSource)
+                            and isinstance(source.base, GlobalSource)
+                            and isinstance(source.index, str)
+                        ):
+                            self.used_builtin_vars.add(source.index)
+                        source = source.base
             elif name := get_local_source_name(source):
                 if not isinstance(name, str):
                     raise AssertionError(f"Expected str, got {type(name)}")
@@ -4876,6 +6211,16 @@ class CheckFunctionManager:
 
             return x
 
+        def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+            if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
+                fingerprint = builder.saved_tensors_hooks_fingerprint
+                if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
+                    raise AssertionError(
+                        "AUTOGRAD_SAVED_TENSORS_HOOKS was serialized without being built"
+                    )
+                return functools.partial(x, hooks_fingerprint=fingerprint)
+            return normalize_create_fn(x)
+
         global_scope_state = {
             k: v
             for k, v in output_graph_guards_state.global_scope.items()
@@ -4903,7 +6248,7 @@ class CheckFunctionManager:
                         guard,
                         obj_weakref=None,
                         guarded_class_weakref=None,
-                        create_fn=normalize_create_fn(guard.create_fn),
+                        create_fn=portable_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
                 )
@@ -4934,6 +6279,10 @@ class CheckFunctionManager:
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper(local_state=self.guard_build_local_state)
         guard_manager.diff_guard_sources = existing_diff_guard_sources
+        # The recursive-dict-tag fast path snapshots tensor metadata of its own
+        # accord, so it has to know to snapshot the relative form too; otherwise an
+        # unchanged tag accepts a tensor the TENSOR_MATCH leaf would reject.
+        guard_manager.root.set_compile_on_one_rank(output_graph.compile_on_one_rank)
 
         w_builder = None
 
@@ -5185,7 +6534,9 @@ class CheckFunctionManager:
 
         self.guard_manager.finalize()
 
-        globals_for_guard_fn = {"G": builder.scope["G"]}
+        # The dict the guards are rooted at, so a fail reason evaluated here reads
+        # what the guards read; on the eager path this is the frame's globals.
+        globals_for_guard_fn = {"G": builder.runtime_global_scope}
         # Guard manager construction is complete. Ensure we did not miss to
         # insert a guard in cpp guard manager.
         if len(code_parts) != 0:
@@ -5204,7 +6555,9 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
+        self.guard_manager.no_tensor_aliasing_sources = (
+            builder.no_tensor_aliasing_sources
+        )
 
     def invalidate(self, obj_str: str) -> None:
         # Some tests reveal that CheckFunctionManager has no attribute
@@ -5323,6 +6676,111 @@ def make_torch_function_mode_stack_guard(
 
 
 Scope = TypeAliasType("Scope", dict[str, object])
+_MISSING_SOURCE_MEMBER = object()
+_BUILTIN_GETITEM_METHODS = (
+    bytearray.__getitem__,
+    bytes.__getitem__,
+    collections.deque.__getitem__,
+    collections.OrderedDict.__getitem__,
+    dict.__getitem__,
+    list.__getitem__,
+    range.__getitem__,
+    str.__getitem__,
+    tuple.__getitem__,
+)
+_TUPLE_ITERATOR_TYPE = type(iter(()))
+
+
+class _GuardSourceLookupError(Exception):
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _has_builtin_getitem(value: Any) -> bool:
+    getitem = inspect.getattr_static(type(value), "__getitem__", None)
+    if not any(getitem is method for method in _BUILTIN_GETITEM_METHODS):
+        return False
+    return not (
+        isinstance(value, dict)
+        and inspect.getattr_static(type(value), "__missing__", None) is not None
+    )
+
+
+def _is_unavailable_getitem_error(value: Any, error: Exception) -> bool:
+    return isinstance(error, (LookupError, TypeError)) and (
+        _has_builtin_getitem(value)
+        or (
+            isinstance(error, TypeError)
+            and inspect.getattr_static(type(value), "__getitem__", None) is None
+        )
+    )
+
+
+def _is_statically_missing_attribute(value: Any, member: str) -> bool:
+    return (
+        inspect.getattr_static(value, member, _MISSING_SOURCE_MEMBER)
+        is _MISSING_SOURCE_MEMBER
+        and inspect.getattr_static(type(value), "__getattr__", None) is None
+        and inspect.getattr_static(
+            type(value), "__getattribute__", object.__getattribute__
+        )
+        is object.__getattribute__
+    )
+
+
+def _raise_if_unavailable_guard_source(
+    source: Source,
+    base_value: Any,
+    error: Exception,
+) -> None:
+    unavailable = False
+    if isinstance(source, (GlobalSource, LocalSource)) and isinstance(error, KeyError):
+        unavailable = True
+    elif isinstance(source, AttrSource) and isinstance(error, AttributeError):
+        unavailable = _is_statically_missing_attribute(base_value, source.member)
+    elif isinstance(source, DefaultsSource):
+        if isinstance(error, AttributeError):
+            unavailable = _is_statically_missing_attribute(base_value, source.field)
+        else:
+            unavailable = isinstance(error, (LookupError, TypeError)) and (
+                base_value is None or _has_builtin_getitem(base_value)
+            )
+    elif isinstance(source, (ConstDictKeySource, ListGetItemSource)):
+        unavailable = isinstance(error, (LookupError, TypeError))
+    elif isinstance(source, NonSerializableSetGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and (
+            isinstance(base_value, (frozenset, set))
+            or (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__iter__", None) is None
+            )
+        )
+    elif isinstance(source, TupleIteratorGetItemSource):
+        unavailable = isinstance(error, (LookupError, TypeError)) and isinstance(
+            base_value, _TUPLE_ITERATOR_TYPE
+        )
+    elif isinstance(source, DictSubclassGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = isinstance(error, TypeError) and not isinstance(
+                base_value, dict
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, DictGetItemSource):
+        if isinstance(source.index, Source):
+            unavailable = (
+                isinstance(error, TypeError)
+                and inspect.getattr_static(type(base_value), "__getitem__", None)
+                is None
+            )
+        else:
+            unavailable = _is_unavailable_getitem_error(base_value, error)
+    elif isinstance(source, GetItemSource):
+        unavailable = _is_unavailable_getitem_error(base_value, error)
+
+    if unavailable:
+        raise _GuardSourceLookupError(error) from error
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(
@@ -5332,17 +6790,45 @@ def recompilation_reason_for_no_tensor_aliasing_guard(
         raise AssertionError("guard_manager.global_scope must not be None")
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
+    source_eval_failures: list[str] = []
+    cache: dict[Source, Any] = {}
     for tensor_source in guard_manager.no_tensor_aliasing_sources:
-        global_scope["__compile_source__"] = tensor_source
-        tensor_id = id(eval(tensor_source, global_scope, scope))
-        ids_to_source[tensor_id].append(tensor_source)
+        tensor_source_name = tensor_source.name
+        global_scope["__compile_source__"] = tensor_source_name
+        try:
+            tensor = tensor_source.get_value(
+                global_scope,
+                dict(scope),
+                cache,
+                on_error=_raise_if_unavailable_guard_source,
+            )
+        except _GuardSourceLookupError as e:
+            # The compiled source path may no longer exist after container
+            # structure or object type changes; keep explaining other sources.
+            error = e.error
+            source_eval_failures.append(
+                f"{tensor_source_name} ({type(error).__name__}: {error})"
+            )
+            continue
+        tensor_id = id(tensor)
+        ids_to_source[tensor_id].append(tensor_source_name)
 
     duplicate_tensors = [
         f"{ids_to_source[key]}" for key in ids_to_source if len(ids_to_source[key]) > 1
     ]
 
-    reason = ", ".join(duplicate_tensors)
-    return [f"Duplicate tensors found: {reason}"]
+    reasons: list[str] = []
+    if duplicate_tensors:
+        reason = ", ".join(duplicate_tensors)
+        reasons.append(f"Duplicate tensors found: {reason}")
+    if source_eval_failures:
+        reason = ", ".join(source_eval_failures)
+        reasons.append(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate: " + reason
+        )
+    if not reasons:
+        reasons.append("NO_TENSOR_ALIASING guard failed")
+    return reasons
 
 
 def strip_local_scope(s: str) -> str:
@@ -5724,6 +7210,20 @@ def make_dupe_guard(
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
+    """
+    Guard that `name` stays absent from the instance __dict__ of the object at
+    `source`. Python reads the instance __dict__ before nn.Module.__getattr__
+    (or a user __getattr__), so a value resolved from the registries or through
+    such a hook is only valid while the dict lacks `name`.
+    """
+    install_guard(
+        source.make_guard(
+            functools.partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        )
+    )
 
 
 def install_guard(*guards: Guard, skip: int = 0) -> None:

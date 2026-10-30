@@ -96,6 +96,7 @@ from .utils import (
     _is_tangent,
     call_and_expect_output_descs,
     maybe_to_fresh_input,
+    shift_static_input_indices,
     simple_wraps,
     without_output_descs,
 )
@@ -1150,6 +1151,8 @@ def create_functionalized_fn(
                 flat_outs, outs_spec = pytree.tree_flatten(f_outs)
                 flat_outs = [from_fun(o) for o in flat_outs]
                 num_outs = len(meta.output_info)
+                # User outputs come after the inputs mutated outside the graph.
+                num_mutated_runtime_inps = meta.num_mutated_inp_runtime_indices
 
                 for i in range(num_outs):
                     info = meta.output_info[i]
@@ -1163,7 +1166,7 @@ def create_functionalized_fn(
                         == MutationType.MUTATED_IN_GRAPH
                     ):
                         fw_args = args[0] if trace_joint else args
-                        flat_outs[i] = fw_args[info.base_idx]
+                        flat_outs[num_mutated_runtime_inps + i] = fw_args[info.base_idx]
                 return pytree.tree_unflatten(flat_outs, outs_spec), f_outs_descs
 
             return pytree.tree_map(from_fun, f_outs), f_outs_descs
@@ -1191,6 +1194,7 @@ def handle_effect_tokens_fn(
     *,
     meta: ViewAndMutationMeta,
     trace_joint: bool,
+    inner_meta: ViewAndMutationMeta,
 ) -> Any:
     num_tokens = len(meta.tokens)
 
@@ -1290,10 +1294,10 @@ def handle_effect_tokens_fn(
         args = [*additional_fwd_token_inputs, *args]
         args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
 
-        if num_tokens > 0:
-            meta.static_input_indices = [
-                idx + num_tokens for idx in meta.static_input_indices
-            ]
+    # The token inputs shift every traced input, so the static input indices of
+    # the traced graph (inner_meta; the unwrapped inputs when there are
+    # tensor-subclass inputs) shift with them until the tokens are unlifted.
+    shift_static_input_indices(inner_meta, num_tokens)
     return inner_fn, args, args_descs
 
 

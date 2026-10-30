@@ -9,6 +9,7 @@ from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Partial, Replicate, Shard
 from torch.distributed.tensor._api import DTensor
@@ -31,7 +32,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DEVICE_TYPE,
     MLPModule,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -191,7 +191,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = DEVICE_TYPE
+        self.device_type = torch.accelerator.current_accelerator().type
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
@@ -412,7 +412,7 @@ class DTensorExportTest(TestCase):
                 if "val" not in node.meta:
                     raise AssertionError(f"Expected 'val' in node.meta for {node}")
                 fake_val = node.meta["val"]
-                if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
+                if is_fake_tensor(fake_val):
                     res.append(list(fake_val.shape))
 
         self.assertEqual(str(res), answer)

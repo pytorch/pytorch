@@ -3,7 +3,11 @@ import torch
 from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import FSDP_DEVICES
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class Model(torch.nn.Module):
@@ -35,6 +39,8 @@ class Model(torch.nn.Module):
 
 
 class TestSymbolicTracing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_symbolic_tracing_outputs(self):
         """
         Tests running ``tracer.trace()`` inside ``patch_tracer()`` by checking

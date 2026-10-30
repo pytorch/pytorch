@@ -4,22 +4,16 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/native/Sorting.h>
-#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/arange.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/sort_native.h>
-#include <ATen/ops/zeros.h>
 #endif
-
-#include <limits>
 
 namespace at::native {
 
@@ -58,9 +52,6 @@ void sort_cuda_kernel(
   TOTENSOR(self_base, self);
   TOTENSOR(values_base, values);
   TOTENSOR(indices_base, indices);
-
-  TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
-    "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
   TORCH_CHECK_TYPE(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,

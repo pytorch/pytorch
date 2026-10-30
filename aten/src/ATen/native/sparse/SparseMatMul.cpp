@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -9,7 +8,6 @@
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <c10/util/irange.h>
-#include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,7 +42,7 @@ void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
       `Bi` is the row indices
   */
   for (const auto i : c10::irange(n_row)) {
-    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+    for (const auto jj : c10::irange(Ap[i], Ap[i + 1])) {
       Bi[jj] = i;
     }
   }
@@ -69,9 +67,9 @@ int64_t _csr_matmult_maxnnz(
   for (const auto i : c10::irange(n_row)) {
     int64_t row_nnz = 0;
 
-    for (int64_t jj = Ap[i]; jj < Ap[i + 1]; jj++) {
+    for (const auto jj : c10::irange(Ap[i], Ap[i + 1])) {
       int64_t j = Aj[jj];
-      for (int64_t kk = Bp[j]; kk < Bp[j + 1]; kk++) {
+      for (const auto kk : c10::irange(Bp[j], Bp[j + 1])) {
         int64_t k = Bj[kk];
         if (mask[k] != i) {
           mask[k] = i;

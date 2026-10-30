@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Download issue number artifact (workflow_run only)
         if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: triage-completed-data
           run-id: ${{ github.event.workflow_run.id }}
@@ -66,35 +66,17 @@ jobs:
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: steps.gate.outputs.proceed == 'true'
         with:
           fetch-depth: 1
 
-      - name: Setup GitHub MCP Server
+      - name: Pre-pull GitHub MCP Server
         if: steps.gate.outputs.proceed == 'true'
-        run: |
-          mkdir -p /tmp/mcp-config
-          cat > /tmp/mcp-config/mcp-servers.json << 'EOF'
-          {
-            "mcpServers": {
-              "github": {
-                "command": "docker",
-                "args": [
-                  "run",
-                  "-i",
-                  "--rm",
-                  "-e",
-                  "GITHUB_PERSONAL_ACCESS_TOKEN",
-                  "ghcr.io/github/github-mcp-server:v0.30.1"
-                ],
-                "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
-                }
-              }
-            }
-          }
-          EOF
+        env:
+          # claude-code-action v1.0.89 injects this image when GitHub MCP tools are allowed.
+          GITHUB_MCP_IMAGE: "ghcr.io/github/github-mcp-server:sha-23fa0dd"
+        run: docker pull "$GITHUB_MCP_IMAGE"
 
       - name: Configure AWS credentials via OIDC
         if: steps.gate.outputs.proceed == 'true'
@@ -119,8 +101,7 @@ jobs:
           allowed_bots: "*"
           claude_args: |
             --model global.anthropic.claude-sonnet-5
-            --mcp-config /tmp/mcp-config/mcp-servers.json
-            --allowedTools "mcp__github__issue_read,mcp__github__get_issue,mcp__github__issue_write,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
+            --allowedTools "mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
           prompt: |
             /distributed-triage #${{ steps.issue.outputs.number }}
 

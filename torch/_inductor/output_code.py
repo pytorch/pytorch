@@ -126,7 +126,7 @@ class OutputCode:
         raise NotImplementedError(type(self))
 
     # TODO: Get rid of this
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         raise NotImplementedError(type(self))
 
 
@@ -529,6 +529,8 @@ class CompiledFxGraph(OutputCode):
         repr=False
     )  # Do not display graph
     cache_linemap: list[tuple[int, str]] | None
+    # See PyCodeCache.load_by_key_path.
+    kernel_sources: dict[str, tuple[str, str]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -554,6 +556,7 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
@@ -608,6 +611,7 @@ class CompiledFxGraph(OutputCode):
         self.inductor_provenance_mapping_str = inductor_provenance_mapping_str
         self.inductor_provenance_stack_traces_str = inductor_provenance_stack_traces_str
         self.cache_linemap = graph.cache_linemap
+        self.kernel_sources = graph.wrapper_code.kernel_sources
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
         self.device_idxs = OrderedSet(graph.device_idxs)
@@ -644,6 +648,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
@@ -993,7 +998,7 @@ class CompiledFxGraph(OutputCode):
 
             self.current_callable = wrapped_callable
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
@@ -1033,6 +1038,14 @@ class CompiledFxGraph(OutputCode):
         from torch._inductor.codecache import PyCodeCache
 
         artifact_path = self.write_to_disk()
+        kernel_sources = self.kernel_sources
+        if kernel_sources:
+            # The module may already be on disk as someone's hand-edited copy (e.g. a
+            # standalone_compile artifact saved unpacked). Its defs must then compile
+            # themselves, not bind the kernels built from this entry's sources.
+            with open(artifact_path) as f:
+                if f.read() != self.source_code:
+                    kernel_sources = {}
 
         try:
             with dynamo_timed(
@@ -1044,6 +1057,7 @@ class CompiledFxGraph(OutputCode):
                     artifact_path,
                     self.cache_linemap,
                     constants.unwrap(self),
+                    kernel_sources=kernel_sources,
                 )
                 self.current_callable = code_cache.call
                 self.recursively_apply_fns = getattr(
@@ -1164,7 +1178,7 @@ class CompiledAOTI(OutputCode):
         if self.current_callable is None:
             self.__post_init__()
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         pass
 
 
@@ -1186,7 +1200,7 @@ class MockFXGraphCacheOutput(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         return self.gm(inputs)
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         pass
 
 
@@ -1321,7 +1335,7 @@ class RegionalOutputCode(OutputCode):
             gm = fn(gm, **kwargs)
         self._graph_module = gm
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         """Regional inductor doesn't use triton bundles directly."""
 
     def prepare_for_serialization(self) -> None:
