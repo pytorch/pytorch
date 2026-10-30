@@ -994,7 +994,8 @@ PyTorch attaches these built-in hooks to new process groups:
   operations into the flight recorder for backends without native recording.
   Disabled by `TORCH_FR_BUFFER_SIZE=0`.
 - {class}`~torch.distributed.distributed_c10d.NanCheckHook` checks operation
-  inputs for NaNs. Enabled by `TORCH_DIST_NAN_CHECK=1`.
+  inputs for NaNs. Enabled by `TORCH_DIST_NAN_CHECK=1`, and for the `nccl`
+  (nccl2) and `nccl-lazy` backends by `TORCH_NCCL_NAN_CHECK=1`.
 - {class}`~torch.distributed.distributed_c10d.HealthCheckHook` reports aborted
   backends through the `/c10d_health_check` debug server endpoint.
 

@@ -4769,6 +4769,26 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_set_default_timeout",
+              &::c10d::nccl2::ProcessGroupNCCL::setTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_is_initialized",
+              &::c10d::nccl2::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL>&
+                     self,
+                 bool enable_nan_check) {
+                // No native checker: toggles the NanCheckHook attached at
+                // group creation.
+                ::c10d::NanCheckHook::setEnabled(self.get(), enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "register_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
@@ -5546,7 +5566,9 @@ fabricating 0..size-1, which would collide the dump files of a subgroup.)")
       "NanCheckHook",
       R"(
 Checks the inputs of a process group's operations for NaNs using pre-hooks.
-Attached automatically to new process groups when ``TORCH_DIST_NAN_CHECK=1``.)")
+Attached automatically to new process groups when ``TORCH_DIST_NAN_CHECK=1``,
+and to the CUDA backend of ``nccl`` (nccl2) and ``nccl-lazy`` groups for
+``TORCH_NCCL_NAN_CHECK``.)")
       .def_static(
           "attach",
           &::c10d::NanCheckHook::attach,
@@ -5559,6 +5581,23 @@ TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
 a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
+      .def_static(
+          "_attach_toggleable",
+          [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+             const c10::intrusive_ptr<::c10d::Backend>& backend,
+             const c10::Device& device,
+             bool enabled) {
+            return ::c10d::NanCheckHook::attachToggleable(
+                pg, backend, device.type(), enabled);
+          },
+          py::arg("pg"),
+          py::arg("backend"),
+          py::arg("device"),
+          py::arg("enabled"),
+          R"(
+Attach a NaN check limited to tensors of ``device``'s type. Used for
+``TORCH_NCCL_NAN_CHECK`` on NCCL backends without a native checker; nccl2's
+``_set_enable_nan_check`` toggles it.)")
       .def(
           "remove",
           &::c10d::NanCheckHook::remove,

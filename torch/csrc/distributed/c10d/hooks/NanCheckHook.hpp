@@ -8,7 +8,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
+#include <optional>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
@@ -23,6 +25,21 @@ class TORCH_API NanCheckHook
   static std::shared_ptr<NanCheckHook> attach(
       const c10::intrusive_ptr<ProcessGroup>& pg);
 
+  // Attaches a check scoped to `device_type` tensors that setEnabled() can
+  // toggle through `backend`, one of the group's backends. Backs
+  // TORCH_NCCL_NAN_CHECK and _set_enable_nan_check for NCCL backends without a
+  // native checker. Attached even when disabled, so toggling never touches the
+  // group's hook map.
+  static std::shared_ptr<NanCheckHook> attachToggleable(
+      const c10::intrusive_ptr<ProcessGroup>& pg,
+      const c10::intrusive_ptr<Backend>& backend,
+      c10::DeviceType device_type,
+      bool enabled);
+
+  // Enables or disables the check attachToggleable() attached for `backend`.
+  // Safe while operations are being issued.
+  static void setEnabled(const Backend* backend, bool enable);
+
   NanCheckHook(const NanCheckHook&) = delete;
   NanCheckHook(NanCheckHook&&) = delete;
   NanCheckHook& operator=(const NanCheckHook&) = delete;
@@ -33,14 +50,19 @@ class TORCH_API NanCheckHook
   void remove();
 
  private:
-  explicit NanCheckHook(const c10::intrusive_ptr<ProcessGroup>& pg);
+  NanCheckHook(
+      const c10::intrusive_ptr<ProcessGroup>& pg,
+      std::optional<c10::DeviceType> device_type,
+      bool enabled);
   void onPre(const PreHookArgs& args) const;
 
   // Weak: the group owns the hook, so an owning pointer back would keep the
   // group alive forever.
   c10::weak_intrusive_ptr<ProcessGroup> pg_;
-  int rank_;
   int64_t hook_id_;
+  // Unset checks tensors on every device.
+  std::optional<c10::DeviceType> device_type_;
+  std::atomic<bool> enabled_;
 };
 
 } // namespace c10d

@@ -744,12 +744,18 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
     def test_new_group_defers_comm(self) -> None:
         group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
         backend = group._get_backend(self.device)
+        # nccl-lazy does not bind _is_initialized.
+        has_is_initialized = self.backend_str() == "nccl2"
         self.assertFalse(backend.supports_splitting)
         self.assertEqual(backend.comm_ptr, 0)
+        if has_is_initialized:
+            self.assertFalse(backend._is_initialized())
 
         t = torch.ones(1, device=self.device)
         dist.all_reduce(t, group=group)
         self.assertNotEqual(backend.comm_ptr, 0)
+        if has_is_initialized:
+            self.assertTrue(backend._is_initialized())
         self.assertEqual(t, torch.full_like(t, self.world_size))
 
         # Every member initialized it on the all_reduce, so it can be split.
@@ -1188,6 +1194,41 @@ class ProcessGroupNCCL2ConfigTracingNonblockingTest(ProcessGroupNCCL2ConfigTraci
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
         os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
         super()._init_pg(rank, world_size, rdvz_file)
+
+
+class ProcessGroupNCCL2CompatBindingsTest(_ProcessGroupNCCL2OptionsTest):
+    """ProcessGroupNCCL pybind members that callers use without hasattr guards."""
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_set_default_timeout(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        timeout = backend.options._timeout
+        backend._set_default_timeout(timedelta(seconds=23))
+        try:
+            self.assertEqual(backend.options._timeout, timedelta(seconds=23))
+            self._check_all_reduce()
+        finally:
+            backend._set_default_timeout(timeout)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_is_initialized(self) -> None:
+        # Only the initialized state is shared: ProcessGroupNCCL2 creates its
+        # communicator in the constructor, ProcessGroupNCCL on first use.
+        pg = dist.new_group()
+        try:
+            backend = dist.get_backend_impl(pg, device=self.device)
+            dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            self.assertTrue(backend._is_initialized())
+        finally:
+            dist.destroy_process_group(pg)
+
+
+class ProcessGroupNCCLLegacyCompatBindingsTest(ProcessGroupNCCL2CompatBindingsTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):

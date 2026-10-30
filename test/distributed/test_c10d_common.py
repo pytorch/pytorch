@@ -390,6 +390,8 @@ class BackendEntryPointTest(TestCase):
             dist.Backend._plugins["NCCL"].creator_fn,
             expected_creator,
         )
+        # Stock ProcessGroupNCCL checks natively; nccl2 needs the hook.
+        self.assertEqual("nccl" in c10d._NAN_CHECK_HOOK_BACKENDS, nccl2_override != "0")
         self.assertEqual(
             dist.Backend.backend_type_map["nccl"],
             dist.ProcessGroup.BackendType.NCCL,
