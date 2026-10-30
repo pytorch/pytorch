@@ -59,6 +59,9 @@ def _native_worker(rank, connection, progress_thread):
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
+        part = NIXLRemoteBuffer.deserialize(remote_source.slice(400, 800).serialize())
+        transport.read(other_memory.to_mutable_view(0, 800), part)
+        torch.testing.assert_close(other_target[:200], target[100:300])
         connection.send_bytes(b"finished")
         if _receive(connection) != b"finished":
             raise AssertionError("unexpected control-plane message")
@@ -89,6 +92,13 @@ def _native_worker(rank, connection, progress_thread):
     connection.close()
 
 
+def _run_worker(worker, *args):
+    # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
+    # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
+    os.environ.setdefault("UCX_MODULES", "^efa,rdmacm")
+    worker(*args)
+
+
 @instantiate_parametrized_tests
 @unittest.skipUnless(
     os.environ.get("TORCH_TEST_NIXL") == "1",
@@ -101,7 +111,8 @@ class TestNIXLNative(TestCase):
         connections = context.Pipe()
         processes = [
             context.Process(
-                target=_native_worker, args=(rank, connections[rank], progress_thread)
+                target=_run_worker,
+                args=(_native_worker, rank, connections[rank], progress_thread),
             )
             for rank in range(2)
         ]

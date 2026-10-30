@@ -13,6 +13,8 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -21,6 +23,24 @@ class MemoryView(Protocol):
     """A read-only view of registered memory."""
 
     def size(self) -> int: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a view of a byte range of this one.
+
+        ``offset`` is relative to this view and defaults to 0; ``length``
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this view.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``view[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
+        """
+        ...
 
 
 @runtime_checkable
@@ -45,6 +65,25 @@ class RemoteBuffer(Protocol):
 
     @classmethod
     def deserialize(cls, data: bytes) -> Self: ...
+
+    def slice(self, offset: int | None = None, length: int | None = None) -> Self:
+        """Return a descriptor for a byte range of this one.
+
+        ``offset`` is relative to this descriptor and defaults to 0; ``length``
+        defaults to the rest. Raises ``ValueError`` unless the range lies within
+        this descriptor. The result shares this descriptor's registration and
+        lifetime, and does not restrict access to the rest of the registration.
+        """
+        ...
+
+    def __getitem__(self, key: builtins.slice) -> Self:
+        """Return ``buffer[a:b]``, a byte range of this one.
+
+        Negative bounds count from the end and out-of-range bounds are clamped.
+        Raises ``TypeError`` for a non-slice key and ``ValueError`` for a step
+        other than 1.
+        """
+        ...
 
 
 @runtime_checkable
