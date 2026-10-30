@@ -5197,54 +5197,18 @@ class CppFakeTensorModeBindingsTest(TestCase):
 
     def _installed(self):
         return (
-            torch._C._current_cpp_fake_tensor_mode(),
+            torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
             torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.Fake),
         )
 
-    def test_mode_state(self):
+    def test_create(self):
         mode, _ = self._make_mode()
-        self.assertTrue(mode.static_shapes)
-        self.assertEqual(mode.epoch, 0)
-        self.assertFalse(mode.allow_non_fake_inputs)
-        self.assertFalse(mode.allow_scalar_outputs)
-        self.assertEqual(
-            mode.allow_unsafe_data_ptr_access,
-            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
-        )
-        mode.epoch = 3
-        mode.allow_non_fake_inputs = True
-        mode.allow_scalar_outputs = True
-        mode.static_shapes = False
-        self.assertEqual(mode.epoch, 3)
-        self.assertTrue(mode.allow_non_fake_inputs)
-        self.assertTrue(mode.allow_scalar_outputs)
-        self.assertFalse(mode.static_shapes)
-
-        symbolic_mode, _ = self._make_mode(ShapeEnv())
-        self.assertFalse(symbolic_mode.static_shapes)
-
-    def test_fake_dispatch_mode_slot(self):
-        _, wrapper = self._make_mode()
-        fake = torch._C._TorchDispatchModeKey.FAKE
-
-        self.assertEqual(self._installed(), (None, False))
-        torch._C._set_dispatch_mode(wrapper)
-        try:
-            self.assertEqual(self._installed(), (wrapper, True))
-            self.assertIs(torch._C._get_dispatch_mode(fake), wrapper)
-            self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
-            self.assertEqual(self._installed(), (None, False))
-            self.assertIsNone(torch._C._get_dispatch_mode(fake))
-            self.assertIsNone(torch._C._unset_dispatch_mode(fake))
-            torch._C._set_dispatch_mode(wrapper)
-            # Entering a Python FakeTensorMode suspends the C++ mode, and
-            # exiting it restores the C++ mode, like nested Python modes.
-            with FakeTensorMode():
-                self.assertEqual(self._installed(), (None, False))
-            self.assertEqual(self._installed(), (wrapper, True))
-        finally:
-            torch._C._unset_dispatch_mode(fake)
-        self.assertEqual(self._installed(), (None, False))
+        self.assertTrue(mode.allow_meta)
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            mode, _ = self._make_mode(ShapeEnv())
+        self.assertFalse(mode.allow_meta)
+        with self.assertRaisesRegex(RuntimeError, "Expected a Python wrapper"):
+            torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
 
     def test_from_meta_and_device(self):
         mode, wrapper = self._make_mode()
@@ -5261,12 +5225,37 @@ class CppFakeTensorModeBindingsTest(TestCase):
 
     def test_unsafe_data_ptr_access(self):
         mode, _ = self._make_mode()
+        self.assertEqual(
+            mode.allow_unsafe_data_ptr_access,
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
+        )
         mode.allow_unsafe_data_ptr_access = False
         fake = torch._C._from_meta_and_device(
             torch.empty(2, device="meta"), torch.device("cpu"), mode
         )
         with self.assertRaisesRegex(RuntimeError, "data pointer"):
             fake.data_ptr()
+
+    def test_fake_dispatch_mode_slot(self):
+        _, wrapper = self._make_mode()
+        fake = torch._C._TorchDispatchModeKey.FAKE
+
+        self.assertEqual(self._installed(), (None, False))
+        torch._C._set_dispatch_mode(wrapper)
+        try:
+            self.assertEqual(self._installed(), (wrapper, True))
+            self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
+            self.assertEqual(self._installed(), (None, False))
+            self.assertIsNone(torch._C._unset_dispatch_mode(fake))
+            torch._C._set_dispatch_mode(wrapper)
+            # Entering a Python FakeTensorMode suspends the C++ mode, and
+            # exiting it restores the C++ mode, like nested Python modes.
+            with FakeTensorMode() as py_mode:
+                self.assertEqual(self._installed(), (py_mode, False))
+            self.assertEqual(self._installed(), (wrapper, True))
+        finally:
+            torch._C._unset_dispatch_mode(fake)
+        self.assertEqual(self._installed(), (None, False))
 
 
 if __name__ == "__main__":
