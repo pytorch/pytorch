@@ -963,7 +963,10 @@ class TestReplicationStager(DTensorContinuousTestBase):
 
     @classmethod
     def backend_str(cls) -> str:
-        return "cpu:gloo,cuda:nccl"
+        if device_type == "cpu":
+            return "gloo"
+        curr_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """
