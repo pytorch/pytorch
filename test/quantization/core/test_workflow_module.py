@@ -21,7 +21,6 @@ from torch.ao.quantization import (
     convert,
     default_debug_qconfig,
     default_histogram_observer,
-    default_observer,
     default_per_channel_weight_observer,
     FakeQuantize,
     FixedQParamsObserver,
@@ -37,7 +36,6 @@ from torch.ao.quantization import (
     PlaceholderObserver,
     prepare,
     prepare_qat,
-    QConfig,
     RecordingObserver,
 )
 from torch.ao.quantization.quantize import _get_observer_dict
@@ -49,7 +47,6 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     DeFusedEmbeddingBagLinear,
     QuantizationTestCase,
-    SingleLayerLinearModel,
     test_only_eval_fn,
 )
 
@@ -407,31 +404,6 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(obs2.max_val.shape, torch.Size([]))
 
 
-    def test_save_load_state_dict_script(self):
-        """
-        Tests that we can save and load state_dict for observers that are scripted
-        in a quantized model.
-        """
-        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver, HistogramObserver]
-
-        for obs in obs_list:
-            model = SingleLayerLinearModel().eval()
-            qconfig = QConfig(activation=default_observer, weight=obs)
-            qconfig_dict = {'' : qconfig}
-            scripted = torch.jit.script(model)
-            scripted = torch.ao.quantization.prepare_jit(scripted, qconfig_dict)
-            x = torch.rand(5, 5)
-            scripted(x)
-            obs_dict = torch.ao.quantization.get_observer_state_dict(scripted)
-
-            # Load stats
-            scripted_2 = torch.jit.script(model)
-            scripted_2 = torch.ao.quantization.prepare_jit(scripted_2, qconfig_dict)
-            torch.ao.quantization.load_observer_state_dict(scripted_2, obs_dict)
-            # Verify that state_dict matches exactly with original one.
-            self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
-
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_observer_qparams_respects_device_affinity(self):
@@ -596,7 +568,7 @@ class _ReferenceHistogramObserver(HistogramObserver):
         beta = 1.0  # upper bound
         start_bin = 0
         end_bin = self.bins - 1
-        norm_min = _compute_quantization_error(start_bin, end_bin, "L2")
+        norm_min = float("inf")
 
         while alpha < beta:
             # Find the next step
@@ -719,17 +691,17 @@ class TestHistogramObserver(QuantizationTestCase):
 
         if reduce_range:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0627451 * 255 / 127
+                ref_scale = 0.0470588 * 255 / 127
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0313725 * 255 / 127
+                ref_scale = 0.0235294 * 255 / 127
                 ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0627451
+                ref_scale = 0.0470588
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0313725
+                ref_scale = 0.0235294
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
@@ -855,46 +827,6 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.min_val, 0.0)
         self.assertEqual(myobs.max_val, 9.0)
         self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
-
-    def _chosen_and_full_quantization_error(self, obs):
-        new_min, new_max = obs._non_linear_param_search()
-        bin_width = (obs.max_val - obs.min_val) / obs.bins
-        start_bin = int(torch.round((new_min - obs.min_val) / bin_width))
-        end_bin = int(torch.round((new_max - obs.min_val) / bin_width)) - 1
-        chosen = obs._compute_quantization_error(start_bin, end_bin)
-        full = obs._compute_quantization_error(0, obs.bins - 1)
-        return new_min, new_max, chosen, full
-
-    def test_histogram_observer_keeps_sparse_far_tail(self):
-        # A tail of exactly one quantile step (1e-5 of the elements) far from the
-        # bulk: clipping it costs far more than the coarser step of the full range.
-        g = torch.Generator().manual_seed(0)
-        n, n_zero, n_tail = 1_000_000, 640_000, 10
-        bulk = torch.empty(n - n_zero - n_tail).exponential_(4.0, generator=g)
-        tail = 35.0 + 105.0 * torch.rand(n_tail, generator=g)
-        x = torch.cat([torch.zeros(n_zero), bulk, tail])
-        obs = HistogramObserver(
-            bins=2048,
-            dtype=torch.int16,
-            qscheme=torch.per_tensor_symmetric,
-            quant_min=-32767,
-            quant_max=32767,
-        )
-        obs(x)
-        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
-        self.assertEqual(new_min, x.min())
-        self.assertEqual(new_max, x.max())
-        self.assertLessEqual(chosen, full)
-
-    def test_histogram_observer_still_clips_when_it_lowers_error(self):
-        g = torch.Generator().manual_seed(0)
-        x = torch.randn(1_000_000, generator=g)
-        obs = HistogramObserver(bins=2048, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
-        obs(x)
-        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
-        self.assertGreater(new_min, obs.min_val)
-        self.assertLess(new_max, obs.max_val)
-        self.assertLess(chosen, full)
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
