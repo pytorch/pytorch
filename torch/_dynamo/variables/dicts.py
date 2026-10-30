@@ -182,10 +182,7 @@ class ConstDictVariable(VariableTracker):
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
@@ -203,7 +200,7 @@ class ConstDictVariable(VariableTracker):
         finally:
             self._checking_python_constant = False
 
-    def as_python_constant(self, *, guard: bool = True) -> dict[Any, Any]:
+    def as_python_constant(self) -> dict[Any, Any]:
         items = {}
         for k, v in self.items.items():
             is_constant, key = k.vt.try_as_python_constant()
@@ -953,9 +950,7 @@ class OrderedDictVariable(ConstDictVariable):
         "popitem": Method(popitem),
     }
 
-    def as_python_constant(
-        self, *, guard: bool = True
-    ) -> "collections.OrderedDict[Any, Any]":
+    def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
 
     @staticmethod

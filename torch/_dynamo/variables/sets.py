@@ -154,10 +154,7 @@ class BaseSetVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
+    def is_python_constant(self) -> bool:
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real set, re-hashing the elements (wrong for elements
         # with a side-effecting __hash__).  Check element constness directly.
@@ -589,7 +586,7 @@ class SetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return set
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -838,7 +835,7 @@ class OrderedSetClassVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def as_python_constant(self, *, guard: bool = True) -> type[OrderedSet[Any]]:
+    def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
     def call_method(
@@ -956,7 +953,7 @@ class OrderedSetVariable(BaseSetVariable):
         items = ", ".join(tracked_repr(tx, item.vt) for item in self.items)
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
-    def as_python_constant(self, *, guard: bool = True) -> OrderedSet[Any]:
+    def as_python_constant(self) -> OrderedSet[Any]:
         items = []
         for item in self.items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -1181,7 +1178,7 @@ class FrozensetVariable(BaseSetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()
@@ -1326,7 +1323,7 @@ class DictKeySetVariable(BaseSetVariable):
 
         return dict_keys
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         items = set()
         for item in self.set_items:
             is_constant, value = item.vt.try_as_python_constant()

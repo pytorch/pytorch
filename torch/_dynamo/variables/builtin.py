@@ -479,7 +479,7 @@ class BaseBuiltinVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self._fn
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1146,7 +1146,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return f"{self.__class__.__name__}({name})"
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
+    def as_python_constant(self) -> Any:
         return self.fn
 
     def get_real_python_backed_value(self) -> Any:

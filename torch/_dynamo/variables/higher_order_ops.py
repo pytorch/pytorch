@@ -2378,7 +2378,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ],
         )
 
-    def as_python_constant(self, *, guard: bool = True) -> HigherOrderOperator:
+    def as_python_constant(self) -> HigherOrderOperator:
         return self.value
 
 

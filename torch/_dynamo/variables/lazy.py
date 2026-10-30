@@ -194,20 +194,14 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def is_realized(self) -> bool:
         return self._cache.vt is not None
 
-    def as_python_constant(self, *, guard: bool = True) -> Any:
-        return self.realize().as_python_constant(guard=guard)
+    def as_python_constant(self) -> Any:
+        return self.realize().as_python_constant()
 
-    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
-        if not guard:
-            with self._without_guards():
-                return self.try_as_python_constant()
-        return self.realize().try_as_python_constant(guard=guard)
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        return self.realize().try_as_python_constant()
 
-    def is_python_constant(self, *, guard: bool = True) -> bool:
-        if not guard:
-            with self._without_guards():
-                return self.is_python_constant()
-        return self.realize().is_python_constant(guard=guard)
+    def is_python_constant(self) -> bool:
+        return self.realize().is_python_constant()
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         if kwargs.get("_cache", self._cache) is not self._cache:
@@ -269,7 +263,6 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
-    _without_guards = staticmethod(VariableTracker._without_guards)
     __repr__ = __str__
 
     @classmethod
