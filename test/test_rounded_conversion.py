@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    slowTest,
     TestCase,
 )
 
@@ -537,6 +538,32 @@ class TestRoundedConversion(TestCase):
 
         x = torch.randn(4, device=device)
         self.assertEqual(torch.jit.script(fn)(x), fn(x), atol=0, rtol=0)
+
+    @onlyAccelerator
+    @slowTest
+    def test_exhaustive_float32(self, device):
+        # Every float32 input, comparing the accelerator (which uses hardware
+        # instructions where available) with the CPU's software conversion.
+        chunk = 1 << 28
+        for start in range(0, 1 << 32, chunk):
+            x = torch.arange(start, start + chunk, dtype=torch.int64).to(torch.int32)
+            x = x.view(torch.float32)
+            x_dev = x.to(device)
+            for dst in (
+                torch.float16,
+                torch.bfloat16,
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float8_e8m0fnu,
+            ):
+                for mode in MODES:
+                    actual = x_dev.to(dst, round=mode).cpu().float()
+                    expected = x.to(dst, round=mode).float()
+                    same = (actual == expected) & (
+                        torch.signbit(actual) == torch.signbit(expected)
+                    )
+                    same |= actual.isnan() & expected.isnan()
+                    self.assertTrue(same.all(), f"{dst} {mode} from 0x{start:08x}")
 
     @onlyAccelerator
     def test_cross_device(self, device):
