@@ -1435,7 +1435,7 @@ class GetAttrVariable(VariableTracker):
     def as_proxy(self) -> Any:
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         constant = self.obj.as_python_constant()
         try:
             return getattr(constant, self.name)
@@ -1546,7 +1546,7 @@ class CallMethodVariable(VariableTracker):
         except (AsPythonConstantNotImplementedError, AttributeError):
             return types.MethodType
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         return getattr(self.obj.as_python_constant(), self.method_name)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1609,7 +1609,7 @@ class PythonModuleVariable(VariableTracker):
     def python_type(self) -> type[types.ModuleType]:
         return types.ModuleType
 
-    def as_python_constant(self) -> types.ModuleType:
+    def as_python_constant(self, *, guard: bool = True) -> types.ModuleType:
         return self.value
 
     def get_real_python_backed_value(self) -> types.ModuleType:
@@ -1726,7 +1726,7 @@ class TypingVariable(VariableTracker):
         else:
             return SourcelessBuilder.create(tx, value)
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         return self.value
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1961,7 +1961,7 @@ class NumpyVariable(VariableTracker):
             ],
         )
 
-    def as_python_constant(self) -> BuiltinFunctionType:
+    def as_python_constant(self, *, guard: bool = True) -> BuiltinFunctionType:
         # The declared type is what callers rely on (they call the result), but
         # the builder also routes numpy dtypes and `np._CopyMode` here, so this
         # is a widening the annotation already claimed before `value` was typed.
@@ -2330,7 +2330,7 @@ class ConstantLikeVariable(VariableTracker):
 
         return f"{t.__module__}.{t.__qualname__}"
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         return self.value
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -2619,7 +2619,7 @@ class RandomVariable(VariableTracker):
     def python_type(self) -> type[random.Random]:
         return random.Random
 
-    def as_python_constant(self) -> random.Random:
+    def as_python_constant(self, *, guard: bool = True) -> random.Random:
         return self.random
 
     @staticmethod

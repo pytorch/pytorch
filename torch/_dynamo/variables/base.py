@@ -16,12 +16,13 @@ computations.
 from __future__ import annotations
 
 import collections
+import contextlib
 import dataclasses
 import functools
 import inspect
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, ValuesView
+from collections.abc import Callable, ItemsView, Iterator, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum, IntFlag
 from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, TypeAlias
@@ -1974,8 +1975,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # (and not execute user code)
         return type_qualified_name(type_)
 
-    def as_python_constant(self) -> Any:
-        """For constants"""
+    def as_python_constant(self, *, guard: bool = True) -> Any:
+        r"""as_python_constant(*, guard=True) -> Any
+
+        Return a compile-time Python value, or raise ``NotImplementedError``.
+
+        Args:
+            guard (bool): If ``False``, run the same conversion without installing
+              guards. This is unsafe; use ``True`` when safety is required.
+              Default: ``True``.
+
+        Lazy realization and cache updates still occur with ``guard=False``.
+        A later guarded call may reuse that unguarded trace state.
+        """
         raise AsPythonConstantNotImplementedError(self)
 
     def guard_as_python_constant(self) -> Any:
@@ -1990,12 +2002,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 hints=[],
             )
 
-    def is_python_constant(self) -> bool:
+    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
+        r"""try_as_python_constant(*, guard=True) -> tuple[bool, Any]
+
+        Call :meth:`as_python_constant` once, returning ``(True, value)`` on
+        success or ``(False, None)`` for ``NotImplementedError``.
+        """
         try:
-            self.as_python_constant()
-            return True
+            return True, self.as_python_constant(guard=guard)
         except NotImplementedError:
-            return False
+            return False, None
+
+    def is_python_constant(self, *, guard: bool = True) -> bool:
+        return self.try_as_python_constant(guard=guard)[0]
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _without_guards() -> Iterator[None]:
+        from torch._guards import TracingContext
+
+        context = TracingContext.try_get()
+        if context is None:
+            yield
+            return
+        shape_env = context.fake_mode.shape_env if context.fake_mode else None
+        with (
+            context.guards_context.skip_guard_install(),
+            shape_env.suppress_guards() if shape_env else contextlib.nullcontext(),
+        ):
+            yield
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.
@@ -3477,6 +3512,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
             active.add(key)
             try:
+                if method == "as_python_constant" and not kwargs.get("guard", True):
+                    kwargs["guard"] = True
+                    with self._without_guards():
+                        return original_method(self, *args, **kwargs)
                 return original_method(self, *args, **kwargs)
             finally:
                 active.discard(key)

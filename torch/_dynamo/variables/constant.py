@@ -137,10 +137,10 @@ class ConstantVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
-    def as_python_constant(self) -> Any:
+    def as_python_constant(self, *, guard: bool = True) -> Any:
         return self.value
 
-    def is_python_constant(self) -> Literal[True]:
+    def is_python_constant(self, *, guard: bool = True) -> Literal[True]:
         return True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
@@ -953,11 +953,14 @@ class FakeIdVariable(VariableTracker):
         self.value = value
         self.kind = kind
 
-    def as_python_constant(self) -> int:
+    def as_python_constant(self, *, guard: bool = True) -> int:
         return self.value
 
-    def is_python_constant(self) -> bool:
+    def is_python_constant(self, *, guard: bool = True) -> bool:
         return False
+
+    def try_as_python_constant(self, *, guard: bool = True) -> tuple[bool, Any]:
+        return False, None
 
     def python_type(self) -> type:
         return int

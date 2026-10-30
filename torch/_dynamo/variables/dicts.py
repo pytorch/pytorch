@@ -55,6 +55,7 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -181,7 +182,10 @@ class ConstDictVariable(VariableTracker):
             items.append(f"{key_str}: {val_str}")
         return "{" + ", ".join(items) + "}"
 
-    def is_python_constant(self) -> bool:
+    def is_python_constant(self, *, guard: bool = True) -> bool:
+        if not guard:
+            with self._without_guards():
+                return self.is_python_constant()
         # Avoid the base implementation, which probes as_python_constant() and
         # thus rebuilds a real dict, re-hashing the keys (wrong for keys with a
         # side-effecting __hash__).  Check element constness directly instead.
@@ -199,11 +203,17 @@ class ConstDictVariable(VariableTracker):
         finally:
             self._checking_python_constant = False
 
-    def as_python_constant(self) -> dict[Any, Any]:
-        return {
-            k.vt.as_python_constant(): v.as_python_constant()
-            for k, v in self.items.items()
-        }
+    def as_python_constant(self, *, guard: bool = True) -> dict[Any, Any]:
+        items = {}
+        for k, v in self.items.items():
+            is_constant, key = k.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            is_constant, value = v.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items[key] = value
+        return items
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = [
@@ -943,7 +953,9 @@ class OrderedDictVariable(ConstDictVariable):
         "popitem": Method(popitem),
     }
 
-    def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
+    def as_python_constant(
+        self, *, guard: bool = True
+    ) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
 
     @staticmethod
