@@ -90,8 +90,8 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # override them.
 CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
 
-# The Inductor options whose compiles Inductor's caches never file, so a
-# DynamoTracer capture refuses them.
+# Options under which a compile saves no cache entry. A DynamoTracer artifact
+# ships the cache entries each graph's compile saves, so a capture refuses them.
 UNCACHED_INDUCTOR_OPTIONS = ("freezing", "force_disable_caches", "fx_wrapper")
 
 
