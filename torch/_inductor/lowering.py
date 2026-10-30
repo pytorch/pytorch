@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 import os
+import struct
 import sys
 import warnings
 from collections import defaultdict
@@ -8126,20 +8127,44 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.mul], broadcast=True)
+@register_lowering([aten.mul], type_promotion_kind=None)
 def mul(a, b):
+    for tensor, scalar in ((a, b), (b, a)):
+        if (
+            isinstance(tensor, TensorBox)
+            and isinstance(scalar, TensorBox)
+            and scalar.get_device_or_error().type == "cpu"
+            and not scalar.get_size()
+            and is_strict_cuda_triton(tensor.get_device())
+            and get_promoted_dtype(
+                a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            )
+            == torch.float64
+        ):
+            # CUDA puts CPU scalars first in its symmetric multiplication kernel.
+            a, b = scalar, tensor
+            break
+    (a, b), _ = transform_args(
+        [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
+    )
     for tensor, scalar in ((a, b), (b, a)):
         if (
             isinstance(tensor, TensorBox)
             and isinstance(scalar, float)
             and math.isnan(scalar)
             and is_strict_cuda_triton(tensor.get_device())
-            and tensor.get_dtype() in (torch.float16, torch.bfloat16, torch.float32)
+            and tensor.get_dtype()
+            in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
         ):
-            # CUDA arithmetic canonicalizes NaNs; constant folding preserves their payload.
+            # CUDA gives a CPU scalar NaN priority on either side of multiplication.
             dtype = tensor.get_dtype()
-            int_dtype = torch.int16 if dtype.itemsize == 2 else torch.int32
-            bits = (1 << (dtype.itemsize * 8 - 1)) - 1
+            int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
+            if dtype == torch.float64:
+                bits = (
+                    struct.unpack("q", struct.pack("d", scalar))[0] | 0x0008000000000000
+                )
+            else:
+                bits = (1 << (dtype.itemsize * 8 - 1)) - 1
             return to_dtype_bitcast(full_like(tensor, bits, dtype=int_dtype), dtype)
         if (
             isinstance(tensor, TensorBox)
