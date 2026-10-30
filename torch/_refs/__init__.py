@@ -5924,15 +5924,6 @@ def meshgrid(
                 f"Expected exactly 1 tensor list/tuple, got {len(tensors)}"
             )
         tensors = tuple(tensors[0])
-    if len(tensors) == 0:
-        torch._check(
-            indexing == "xy" or indexing == "ij",
-            lambda: (
-                'torch.meshgrid: indexing must be one of "xy" or "ij", '
-                f"but received: {indexing}"
-            ),
-        )
-        return []
 
     torch._check(
         builtins.all(isinstance(a, TensorLike) for a in tensors),

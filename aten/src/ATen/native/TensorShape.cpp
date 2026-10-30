@@ -4214,15 +4214,13 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 std::vector<Tensor> meshgrid(TensorList tensors, std::string_view indexing) {
   int64_t size = tensors.size();
 
-  if (size > 1) {
-    for (const auto i : c10::irange(size - 1)) {
-      TORCH_CHECK(
-          tensors[i].dtype() == tensors[i + 1].dtype(),
-          "meshgrid expects all tensors to have the same dtype");
-      TORCH_CHECK(
-          tensors[i].device() == tensors[i + 1].device(),
-          "meshgrid expects all tensors to have the same device");
-    }
+  for (const auto i : c10::irange(size - 1)) {
+    TORCH_CHECK(
+        tensors[i].dtype() == tensors[i + 1].dtype(),
+        "meshgrid expects all tensors to have the same dtype");
+    TORCH_CHECK(
+        tensors[i].device() == tensors[i + 1].device(),
+        "meshgrid expects all tensors to have the same device");
   }
 
   // Input tensors is of type TensorList, which is an alias to a
@@ -4271,11 +4269,6 @@ std::vector<Tensor> meshgrid(TensorList tensors, std::string_view indexing) {
         "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
         "but received: ",
         indexing);
-  }
-
-  // Empty return is after the indexing check so bad indexing still raises.
-  if (size == 0) {
-    return {};
   }
 
   std::vector<c10::SymInt> shape(size);

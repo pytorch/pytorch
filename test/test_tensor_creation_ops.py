@@ -1499,6 +1499,9 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.meshgrid(indexing='ij'), ())
         self.assertEqual(torch.meshgrid([], indexing='xy'), ())
         self.assertEqual(torch.meshgrid(*[], indexing='ij'), ())
+        self.assertEqual(torch.meshgrid(), ())
+        self.assertEqual(torch.meshgrid([]), ())
+        self.assertEqual(torch.meshgrid(*[]), ())
         with self.assertRaisesRegex(RuntimeError,
                                     'indexing must be one of "xy" or "ij"'):
             torch.meshgrid(indexing='foo')
