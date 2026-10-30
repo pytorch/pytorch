@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 from functools import partial, wraps
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 
 
 if not dist.is_available():
@@ -127,6 +130,72 @@ class TestObjectCollectives(DistributedTestBase):
             dist.all_gather_object(
                 object_list=output, obj=with_comms, weights_only=True
             )
+
+    def _run_object_collectives(self, group):
+        expected = list(range(self.world_size))
+        output = [None] * self.world_size
+        dist.all_gather_object(output, self.rank, group=group)
+        self.assertEqual(output, expected)
+
+        output = [None] * self.world_size if self.rank == 0 else None
+        dist.gather_object(self.rank, output, dst=0, group=group)
+        if self.rank == 0:
+            self.assertEqual(output, expected)
+
+        object_list = [self.rank]
+        dist.broadcast_object_list(object_list, src=0, group=group)
+        self.assertEqual(object_list, [0])
+
+        output = [None]
+        dist.scatter_object_list(
+            output, expected if self.rank == 0 else None, src=0, group=group
+        )
+        self.assertEqual(output, [self.rank])
+
+        object_list = [self.rank]
+        if self.rank == 0:
+            dist.send_object_list(object_list, dst=1, group=group)
+        elif self.rank == 1:
+            dist.recv_object_list(object_list, src=0, group=group)
+            self.assertEqual(object_list, [0])
+
+    @skipIfHpu
+    @unittest.skipIf(device_type == "cpu", "requires an accelerator")
+    @parametrize("mixed", [False, True])
+    def test_object_collectives_bound_device(self, mixed):
+        if device_count < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+
+        backend = self.backend(device_type)
+        if mixed:
+            backend = f"cpu:gloo,{device_type}:{backend}"
+        bound_device = torch.device(device_type, self.rank)
+        dist.init_process_group(
+            backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=bound_device,
+        )
+        try:
+            # Mixed groups stage object tensors on cpu, others on the bound device.
+            expected_device = torch.device("cpu") if mixed else bound_device
+            subgroup = dist.new_group()
+            # The current device differs from the device the groups are bound to.
+            with torch.accelerator.device_index((self.rank + 1) % self.world_size):
+                for group in (None, subgroup):
+                    self.assertEqual(
+                        c10d._get_object_coll_tensor_device(group), expected_device
+                    )
+                    with mock.patch.object(
+                        c10d, "_object_to_tensor", wraps=c10d._object_to_tensor
+                    ) as object_to_tensor:
+                        self._run_object_collectives(group)
+                    self.assertTrue(object_to_tensor.called)
+                    for call in object_to_tensor.call_args_list:
+                        self.assertEqual(call.args[1], expected_device)
+        finally:
+            dist.destroy_process_group()
 
     # Test Object Collectives With Sub Pg
 

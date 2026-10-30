@@ -19,6 +19,7 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
+from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch.nested._internal.nested_tensor import (
     _rebuild_njt,
     buffer_from_jagged,
@@ -57,6 +58,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -317,6 +319,7 @@ def convert_nt_to_jagged(nt):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(NestedTensorTestCase):
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
@@ -907,6 +910,7 @@ class TestNestedTensor(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorDeviceType(NestedTensorTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
@@ -3141,6 +3145,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
 
 @markDynamoStrictTest
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorAutograd(NestedTensorTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
@@ -3963,6 +3968,7 @@ def get_tolerances(
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 @markDynamoStrictTest
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorSubclass(NestedTensorTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
@@ -8155,26 +8161,41 @@ torch.cuda.synchronize()
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
 
         # === Verify that computation fusion happens. ===
-        # Fallback op call -> fusion didn't happen.
+        # Each fused op is gated on the backend features its kernel needs:
+        # _jagged_to_padded_dense_forward on INDIRECT_INDEXING and
+        # _padded_dense_to_jagged_forward on BUCKETIZE + INDIRECT_INDEXING.
+        # CPU (CppScheduling) fuses the former but falls back for the latter,
+        # which does not declare BUCKETIZE.
+        has_indirect_indexing = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        has_bucketize = has_backend_feature(
+            torch.device(device), BackendFeature.BUCKETIZE
+        )
+        fused = has_indirect_indexing and has_bucketize
+
+        # Fallback op call -> fusion didn't happen. get_kernel_metadata emits
+        # op calls in comment blocks even for fused kernels, so ignore comments.
         fallback_op_calls_present = any(
-            "torch.ops.aten._padded_dense_to_jagged_forward.default("
-            in generated_code[i]
-            or "torch.ops.aten._jagged_to_padded_dense_forward.default("
-            in generated_code[i]
-            for i in range(len(generated_code))
+            not line.lstrip().startswith("#")
+            and (
+                "torch.ops.aten._padded_dense_to_jagged_forward.default(" in line
+                or "torch.ops.aten._jagged_to_padded_dense_forward.default(" in line
+            )
+            for generated_code_item in generated_code
+            for line in generated_code_item.splitlines()
         )
 
-        # NB: Fusion isn't supported on CPU.
-        self.assertEqual("cuda" in device, not fallback_op_calls_present)
+        self.assertEqual(fused, not fallback_op_calls_present)
 
         for i in range(len(generated_code)):
             # Examine buffer construction lines in the generated code to determine
-            # whether fusion occurred. If fusion happens, a 3D buffer with shape
+            # whether fusion occurred. If both ops fuse, a 3D buffer with shape
             # (B, max_seqlen, D) should never be materialized.
             buffer_constructions = [
                 line.strip()
                 for line in generated_code[i].split("\n")
-                if "empty_strided_cuda(" in line
+                if f"empty_strided_{torch.device(device).type}(" in line
             ]
 
             buffer_dims = [
@@ -8183,7 +8204,7 @@ torch.cuda.synchronize()
                 for t in buffer_constructions
             ]
 
-            if "cuda" in device:
+            if fused:
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)
@@ -8984,7 +9005,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # mean(): weird bug
     XFailRule(
         error_type=torch._dynamo.exc.BackendCompilerFailed,
-        error_msg="'NestedIntNode' object has no attribute 'sub'",
+        error_msg="'NestedIntNode' object has no attribute 'sym_float'",
         op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
@@ -9037,6 +9058,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this
     def _gen_grad_outputs(self, out_val):
@@ -9284,6 +9306,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 from torch.nested._internal.nested_int import NestedIntNode
 
 
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
         a = torch.SymInt(NestedIntNode(1, 1))
