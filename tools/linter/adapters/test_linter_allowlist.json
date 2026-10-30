@@ -4,7 +4,6 @@
   "test/ao/sparsity/test_structured_sparsifier.py",
   "test/autograd/test_complex.py",
   "test/autograd/test_node_lifecycle.py",
-  "test/backends/xeon/test_launch.py",
   "test/benchmark_utils/test_benchmark_utils.py",
   "test/cpp_extensions/libtorch_agn_2_10_extension/test_version_compatibility.py",
   "test/cpp_extensions/python_agnostic_extension/test/test_python_agnostic.py",
