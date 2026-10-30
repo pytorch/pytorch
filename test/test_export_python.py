@@ -13,17 +13,19 @@ import uuid
 import torch
 from torch.compiler import PrecompileError
 from torch.compiler.precompile import no_compilation
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 # export_python serves an artifact by importing the module its function was captured
 # from, so each test writes its functions into a fresh importable module.
 _MODULE = """
+import os
+
 import torch
 
 def scaled(x, *, scale=2.0):
@@ -50,6 +52,34 @@ def breaks(x):
     y = x.sin()
     print("graph break")
     return y.cos()
+
+def flaky(x, fail):
+    y = x.sin()
+    print("graph break")
+    if fail:
+        raise ValueError("first call failed")
+    return y.cos()
+
+@torch.compile(backend="eager")
+def compiled_double(x):
+    return x * 2
+
+def calls_compiled(x):
+    return compiled_double(x) + 1
+
+def bump(x):
+    x.mul_(2)
+    return x + 1
+
+_ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
+
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "scaled.py"))
+def decorated_scaled(x):
+    return (x * 2.0).relu()
+
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "outer.py"))
+def decorated_outer(x):
+    return inner(x * 2) + 1
 
 def shifted(x):
     return x * 7.25 + 1
@@ -80,9 +110,6 @@ def _edit_graph_code(path, old, new):
 
 
 def _in_a_fresh_process(test, body):
-    # An edited file is another version of the capture, which a process that already
-    # serves the captured version refuses, so edits are checked where an agent would
-    # run them: in the next process.
     script = (
         f"import sys, torch\nsys.path.insert(0, {test.dir!r})\n"
         f"import {test.module_name} as m\n{textwrap.dedent(body)}\nprint('served')\n"
@@ -159,27 +186,50 @@ class TestExportPython(_ExportPythonTestCase):
 
     def test_a_new_process_serves_the_file_without_compiling(self):
         path = os.path.join(self.dir, "breaks.py")
-        x = torch.randn(4)
-        self._export("breaks", path)(x)
-        script = textwrap.dedent(
+        self._export("breaks", path)(torch.randn(4))
+        _in_a_fresh_process(
+            self,
             f"""
-            import sys, torch
-            sys.path.insert(0, {self.dir!r})
-            import {self.module_name} as m
             from torch.compiler.precompile import no_compilation
             run = torch.compiler.export_python(path={path!r})(m.breaks)
-            x = torch.load({os.path.join(self.dir, "x.pt")!r})
+            x = torch.randn(4)
             with no_compilation():
                 torch.testing.assert_close(run(x), x.sin().cos())
-            print("served")
+            """,
+        )
+
+    def test_the_decorator_serves_here_and_in_a_new_process(self):
+        # The module binds export_python's wrapper under each decorated name, which
+        # loading looks the captured function up through.
+        x = torch.randn(4)
+        for fn, expected in [
+            (self.module.decorated_scaled, (x * 2.0).relu()),
+            (self.module.decorated_outer, (x * 2).sin().cos() + 1),
+        ]:
+            self.assertEqual(fn(x), expected)
+            with no_compilation():
+                self.assertEqual(fn(x), expected)
+        _in_a_fresh_process(
+            self,
             """
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            with no_compilation():
+                torch.testing.assert_close(m.decorated_scaled(x), (x * 2.0).relu())
+                torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
+            """,
         )
-        torch.save(x, os.path.join(self.dir, "x.pt"))
-        out = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("served", out.stdout)
+
+    def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
+        path = os.path.join(self.dir, "flaky.py")
+        run = self._export("flaky", path)
+        x = torch.randn(4)
+        with self.assertRaisesRegex(ValueError, "first call failed"):
+            run(x, True)
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(run(x, False), x.sin().cos())
+        with no_compilation():
+            self.assertEqual(run(x, False), x.sin().cos())
 
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
@@ -194,7 +244,10 @@ class TestExportPython(_ExportPythonTestCase):
         path = os.path.join(self.dir, "scaled.py")
         run = self._export("scaled", path)
         run(torch.randn(8))
-        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "no captured variant"),
+        ):
             run(torch.randn(3, 3))
 
     def test_an_edited_file_runs_the_edit(self):
@@ -219,8 +272,17 @@ class TestExportPython(_ExportPythonTestCase):
         path = os.path.join(self.dir, "shifted.py")
         x = torch.randn(8)
         self._export("shifted", path)(x)
+        with self.assertNoLogs("torch.compiler._export_python", "INFO"):
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
         os.remove(path + ".cache")
-        self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        with self.assertLogs("torch.compiler._export_python", "INFO") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("serving it without the cache", logs.output[0])
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "delete .* to recapture"),
+        ):
+            self._export("shifted", path)(x)
 
     def test_check_catches_an_edit_that_changes_the_numerics(self):
         path = os.path.join(self.dir, "shifted.py")
@@ -231,17 +293,36 @@ class TestExportPython(_ExportPythonTestCase):
         _in_a_fresh_process(
             self,
             f"""
-            x = torch.ones(8)
-            run = torch.compiler.export_python(path={path!r})(m.shifted)
-            torch.testing.assert_close(run(x), x * 7.5 + 1)
             checked = torch.compiler.export_python(path={path!r}, check=True)(m.shifted)
             try:
-                checked(x)
+                checked(torch.ones(8))
             except torch.compiler.PrecompileError as e:
                 if "does not match eager shifted" not in str(e):
                     raise
             else:
                 raise AssertionError("the check did not catch the edit")
+            """,
+        )
+
+    def test_check_runs_fn_eagerly_and_compares_in_place_writes(self):
+        x = torch.randn(4)
+        compiled = os.path.join(self.dir, "calls_compiled.py")
+        bump = os.path.join(self.dir, "bump.py")
+        self._export("calls_compiled", compiled)(x)
+        self._export("bump", bump)(x.clone())
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            # The eager run of a torch.compile'd callee compiles nothing.
+            run = torch.compiler.export_python(path={compiled!r}, check=True)
+            with no_compilation():
+                torch.testing.assert_close(run(m.calls_compiled)(x), x * 2 + 1)
+            # The copy is taken before the artifact doubles y, so eager doubles it too.
+            y = x.clone()
+            out = torch.compiler.export_python(path={bump!r}, check=True)(m.bump)(y)
+            torch.testing.assert_close((out, y), (x * 2 + 1, x * 2))
             """,
         )
 
@@ -275,7 +356,7 @@ class TestExportPython(_ExportPythonTestCase):
             torch.compiler.export_python(path=os.path.join(self.dir, "f.py"))(fn)
 
 
-@unittest.skipUnless(TEST_CUDA, "needs CUDA")
+@unittest.skipUnless(HAS_CUDA_AND_TRITON, "needs CUDA and Triton")
 class TestExportPythonCUDA(_ExportPythonTestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -284,15 +365,14 @@ class TestExportPythonCUDA(_ExportPythonTestCase):
         x = torch.randn(64, 1024, device="cuda")
         ref = self._export("reduce", path)(x)
         with open(path) as f:
-            src = f.read()
+            graph_code = f.read().partition("GRAPH_SOURCES = {}")[2]
         # Compile-time tuning wrote each kernel's launch config into the graph code.
-        row = re.search(r"^    '(triton_\w+)': (\{.*\}),$", src, re.MULTILINE)
+        row = re.search(r"^    '(triton_\w+)': (\{.*\}),$", graph_code, re.MULTILINE)
         self.assertIsNotNone(row, "no KERNEL_CONFIGS row in the graph code")
         name, config = row.group(1), ast.literal_eval(row.group(2))
         warps = 8 if config["num_warps"] != 8 else 4
         edited = {**config, "num_warps": warps}
-        with open(path, "w") as f:
-            f.write(src.replace(row.group(0), f"    {name!r}: {edited!r},"))
+        _edit_graph_code(path, row.group(0), f"    {name!r}: {edited!r},")
         torch.save((x, ref), os.path.join(self.dir, "io.pt"))
         _in_a_fresh_process(
             self,
