@@ -234,7 +234,8 @@ def meta__transformer_encoder_layer_fwd(
     # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
     if guard_or_false(src.numel() == 0):
         return src.clone()
-    return torch.empty_like(src)
+    # The kernel's result comes out of layer_norm / addmm, so it is contiguous.
+    return torch.empty_like(src, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
@@ -293,6 +294,15 @@ def cummaxmin(self, dim):
 @register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
 @out_wrapper()
 def logcumsumexp(self, dim):
+    # torch._check rather than _check_not_implemented: a NotImplementedError
+    # from a meta kernel means "no meta implementation", which makes FakeTensor
+    # fall back to the real kernel and Dynamo graph break, so the input would
+    # only be rejected by running it eagerly. This rejects it while tracing.
+    torch._check(
+        self.dtype.is_floating_point or self.dtype.is_complex,
+        lambda: "logcumsumexp(): input dtype should be either floating point or "
+        f"complex. Got {self.dtype} instead.",
+    )
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
@@ -565,6 +575,12 @@ def meta_randint_low(
 @register_meta([aten.rand.default, aten.rand.out])
 @out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
+    if dtype is not None:
+        torch._check_not_implemented(
+            dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+            or dtype.is_complex,
+            lambda: f'"check_uniform_bounds" not implemented for {dtype}',
+        )
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -3945,19 +3961,27 @@ def nonzero(self):
     )
 
 
+def _check_index_tensor_types(indices):
+    # Mirrors checkIndexTensorTypes(allow_int=true) in
+    # aten/src/ATen/native/IndexingUtils.h
+    for index in indices:
+        if index is not None:
+            torch._check_index(
+                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+            )
+
+
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
+    _check_index_tensor_types(indices)
     result: list[Tensor | None] = []
     for i, index in enumerate(indices):
         if index is not None:
-            torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, int, byte or bool tensors",
-            )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.uint8, torch.bool]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
@@ -4166,7 +4190,13 @@ def meta_randint_like(self, high, **kwargs):
     )
 
 
-@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
+@register_meta(
+    [
+        aten._fused_adam_.default,
+        aten._fused_adamw_.default,
+        aten._fused_adamw_.tensor_lr,
+    ]
+)
 def meta__fused_adam_(
     self,
     grads,
@@ -4290,7 +4320,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    expected_dim = 2 if w.fake_device.type == "xpu" else 4
+    is_xpu = device_hint(w) == "xpu"
+    expected_dim = 2 if is_xpu else 4
     torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
@@ -4300,7 +4331,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    dim_n = w.size(0) if w.fake_device.type == "xpu" else w.size(0) * 8
+    dim_n = w.size(0) if is_xpu else w.size(0) * 8
     return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
@@ -4759,8 +4790,6 @@ def meta_median(input):
 )
 @out_wrapper("values", "indices")
 def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    if device_hint(input) == "cuda":
-        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -5017,6 +5046,7 @@ def meta_rrelu_with_noise_(
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return torch.empty_like(self)
 
 
@@ -5037,12 +5067,13 @@ def meta__masked_scale(self, mask, scale):
 @register_meta(aten.masked_scatter_)
 def meta_masked_scatter_(self, mask, source):
     torch._check(
-        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
-    )
-    torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
         f"dtypes but got {self.dtype} and {source.dtype}",
+    )
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: f"masked_scatter_ only supports boolean masks, but got mask with dtype {mask.dtype}",
     )
     return self
 
@@ -5062,6 +5093,7 @@ def meta_masked_scatter_backward(self, mask, sizes):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return self
 
 
@@ -5962,11 +5994,11 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
-    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
-    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
+    # Only CPU, CUDA and XPU sample 5D bicubic; the trace refuses it elsewhere, as
+    # eager does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
         interpolation_mode != GridSamplerInterpolation.BICUBIC.value
-        or device_hint(input) in ("cpu", "cuda"),
+        or device_hint(input) in ("cpu", "cuda", "xpu"),
         lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
         f"on {device_hint(input)}",
     )
@@ -6081,6 +6113,24 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+
+    # Only check direct symbols. A compound expression may overflow before its
+    # generated C++ check.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        is_int = isinstance(fill_value, torch.SymInt)
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
+            lower = -info.max if is_int and not dtype.is_signed else info.min
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
 
     return torch.empty(size, *args, **kwargs)
 
@@ -6763,41 +6813,10 @@ def meta__scaled_dot_product_attention_math_for_mps(
     scale: float | None = None,
     enable_gqa: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    def ensure_4d(x):
-        if x.dim() == 3:
-            return x.unsqueeze(0), True
-        elif x.dim() > 4:
-            batch_size = 1
-            for i in range(x.dim() - 3):
-                batch_size *= x.shape[i]
-            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
-        else:
-            return x, False
-
-    q_, unsqueezed = ensure_4d(query)
-    k_, _ = ensure_4d(key)
-    v_, _ = ensure_4d(value)
-
-    batch_size, num_head, q_size, _ = q_.shape
-    _, _, max_seq_length, value_head_size = v_.shape
-
-    def sdpa_general_mps():
-        out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
-        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
-        if unsqueezed:
-            if query.dim() == 3:
-                out = out.squeeze(0)
-                attn = attn.squeeze(0)
-            else:
-                out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
-                attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
-                out = out.view(out_shape)
-                attn = attn.view(attn_shape)
-        return out, attn
-
-    # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
-    # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
-    return sdpa_general_mps()
+    batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
+    out = query.new_empty((*batch_shape, *query.shape[-3:-1], value.size(-1)))
+    # The attention weights are never materialized; the kernel returns an empty tensor.
+    return out, query.new_empty(0)
 
 
 @register_meta([aten._scaled_dot_product_efficient_attention])
@@ -7339,6 +7358,20 @@ def _check_scaled_mm_sizes(
             )
         )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
 
+        # On XPU, e8m0fnu scales are used for *both* MXFP8 (1x32 blocks) and
+        # DeepSeek-style (1x128/128x128 blocks) blockwise recipes.
+        if (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+            and self.dtype != torch.float4_e2m1fn_x2
+            and device_hint(self) == "xpu"
+        ):
+            num_k_blocks_check = ceil_div(_k, 32)
+            is_blockwise_scaling = (
+                scale_a.numel() == m * num_k_blocks_check
+                or scale_b.numel() == n * num_k_blocks_check
+            )
+
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
             torch._check(
@@ -7417,9 +7450,15 @@ def _check_scaled_mm_sizes(
                 )
         else:
             torch._check(
-                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-                lambda: "For rowwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+                (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+                or (
+                    device_hint(self) == "xpu"
+                    and scale_a.dtype == torch.float8_e8m0fnu
+                    and scale_b.dtype == torch.float8_e8m0fnu
+                ),
+                lambda: "For rowwise scaling, both scales must be float32. For blockwise scaling, both scales must be float32, or (XPU only) float8_e8m0fnu.",
             )
+            is_e8m0fnu_scale = scale_a.dtype == torch.float8_e8m0fnu
             # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
@@ -7427,12 +7466,12 @@ def _check_scaled_mm_sizes(
             )
 
             if (
-                scale_a.size(0) == m
+                not is_e8m0fnu_scale
+                and scale_a.size(0) == m
                 and scale_a.size(1) == 1
                 and scale_b.size(0) == 1
                 and scale_b.size(1) == n
             ):
-                # rowwise scaling
                 torch._check(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
@@ -9406,6 +9445,7 @@ cpp_meta_supports_symint_ops = {
     aten.as_strided_.default,
     aten.zeros.default,
     aten.detach.default,
+    aten.alias.default,
     aten.view_as_real.default,
     aten.view_as_complex.default,
     aten.set_.source_Storage_storage_offset,
@@ -9414,6 +9454,16 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
+    aten.add.Tensor,
+    aten.sub.Tensor,
+    aten.mul.Tensor,
+    aten.div.Tensor,
+    aten.add_.Tensor,
+    aten.bitwise_and.Tensor,
+    aten.le.Tensor,
+    aten.le.Scalar,
+    aten.eq.Tensor,
+    aten.ne.Scalar,
 }
 
 
