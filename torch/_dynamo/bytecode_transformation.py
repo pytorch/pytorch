@@ -84,6 +84,7 @@ class Instruction:
     target: Optional["Instruction"] = None
     exn_tab_entry: InstructionExnTabEntry | None = None
     argrepr: str | None = None
+    is_method_load: bool = False
 
     def __hash__(self) -> int:
         return id(self)
@@ -1192,6 +1193,7 @@ def remove_load_attr_method_variant(instructions: list[Instruction]) -> None:
     new_insts: list[Instruction] = []
     for inst in instructions:
         if inst.opname == "LOAD_ATTR" and inst.arg is not None and inst.arg % 2:
+            inst.is_method_load = True
             replace_insts = [
                 create_instruction("LOAD_ATTR", arg=inst.arg & ~1, argval=inst.argval),
                 create_instruction("PUSH_NULL"),
@@ -1700,6 +1702,7 @@ def _clone_instructions(instructions: Sequence[Instruction]) -> list[Instruction
             i.target,
             i.exn_tab_entry,
             i.argrepr,
+            i.is_method_load,
         )
         for i in instructions
     ]
