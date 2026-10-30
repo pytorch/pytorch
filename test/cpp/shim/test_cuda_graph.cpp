@@ -17,11 +17,18 @@ namespace {
 
 constexpr int32_t kThreadLocal = cudaStreamCaptureModeThreadLocal;
 
+bool uses_cuda_malloc_async() {
+  return c10::cuda::CUDACachingAllocator::name() == "cudaMallocAsync";
+}
+
 class AOTICudaGraphTest : public ::testing::Test {
  protected:
   void SetUp() override {
     if (c10::cuda::device_count() == 0) {
       GTEST_SKIP() << "CUDA is not available";
+    }
+    if (uses_cuda_malloc_async()) {
+      GTEST_SKIP() << "Capture isn't supported with cudaMallocAsync";
     }
     ASSERT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool_), AOTI_TORCH_SUCCESS);
     ASSERT_EQ(aoti_torch_create_cuda_graph(0, 8, &graph_), AOTI_TORCH_SUCCESS);
@@ -43,22 +50,29 @@ class AOTICudaGraphTest : public ::testing::Test {
   at::Tensor capture(
       Fn fn,
       CUDAGraphHandle graph = nullptr,
-      int32_t mode = kThreadLocal) {
+      int32_t mode = kThreadLocal,
+      CUDAMemPoolHandle pool = nullptr,
+      std::optional<at::cuda::CUDAStream> stream = std::nullopt) {
     graph = graph != nullptr ? graph : graph_;
-    at::cuda::CUDAStreamGuard guard(*capture_stream_);
+    pool = pool != nullptr ? pool : pool_;
+    at::cuda::CUDAStreamGuard guard(stream.value_or(*capture_stream_));
     EXPECT_EQ(
-        aoti_torch_cuda_graph_capture_begin(graph, pool_, mode),
+        aoti_torch_cuda_graph_capture_begin(graph, pool, mode),
         AOTI_TORCH_SUCCESS);
-    auto out = fn();
+    at::Tensor out;
+    try {
+      out = fn();
+    } catch (...) {
+      // TearDown deletes the pool, which an open capture forbids.
+      (void)aoti_torch_cuda_graph_capture_end(graph);
+      throw;
+    }
     EXPECT_EQ(aoti_torch_cuda_graph_capture_end(graph), AOTI_TORCH_SUCCESS);
     return out;
   }
 
   bool stream_is_capturing() {
-    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
-    EXPECT_EQ(
-        cudaStreamIsCapturing(capture_stream_->stream(), &status), cudaSuccess);
-    return status != cudaStreamCaptureStatusNone;
+    return capture_stream_->is_capturing();
   }
 
   AOTITorchError replay(CUDAGraphHandle graph = nullptr) {
@@ -203,16 +217,21 @@ TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
   }
   CUDAMemPoolHandle pool = nullptr;
   ASSERT_EQ(aoti_torch_create_cuda_mem_pool(1, &pool), AOTI_TORCH_SUCCESS);
-  at::Tensor y;
   {
-    // The capture uses device 1's default generator, which nothing created.
-    at::cuda::CUDAStreamGuard guard(at::cuda::getStreamFromPool(false, 1));
-    ASSERT_EQ(
+    // A pool on device 1 while device 0 is current.
+    at::cuda::CUDAStreamGuard guard(*capture_stream_);
+    EXPECT_EQ(
         aoti_torch_cuda_graph_capture_begin(graph_, pool, kThreadLocal),
-        AOTI_TORCH_SUCCESS);
-    y = at::rand({1024}, at::Device(at::kCUDA, 1));
-    ASSERT_EQ(aoti_torch_cuda_graph_capture_end(graph_), AOTI_TORCH_SUCCESS);
+        AOTI_TORCH_FAILURE);
+    EXPECT_FALSE(stream_is_capturing());
   }
+  // The capture uses device 1's default generator, which nothing created.
+  auto y = capture(
+      [] { return at::rand({1024}, at::Device(at::kCUDA, 1)); },
+      graph_,
+      kThreadLocal,
+      pool,
+      at::cuda::getStreamFromPool(false, 1));
   // A replay runs on the current stream of the capture's device.
   c10::cuda::CUDAGuard device_guard(0);
   auto replay_stream = at::cuda::getStreamFromPool(false, 1);
@@ -253,24 +272,24 @@ TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
     auto src_handles = handles(src);
     auto n = static_cast<int64_t>(dst.size());
     ASSERT_EQ(
-        aoti_torch_foreach_copy_(
+        aoti_torch__foreach_copy_(
             dst_handles.data(), n, src_handles.data(), n, 0),
         AOTI_TORCH_SUCCESS);
     for (size_t i = 0; i < dst.size(); ++i) {
       EXPECT_TRUE(dst[i].equal(src[i]));
     }
     EXPECT_EQ(
-        aoti_torch_foreach_copy_(
+        aoti_torch__foreach_copy_(
             dst_handles.data(), n - 1, src_handles.data(), n, 0),
         AOTI_TORCH_FAILURE);
     dst[0] = at::empty({3}, at::kCUDA);
     EXPECT_EQ(
-        aoti_torch_foreach_copy_(
+        aoti_torch__foreach_copy_(
             dst_handles.data(), n, src_handles.data(), n, 0),
         AOTI_TORCH_FAILURE);
   }
   EXPECT_EQ(
-      aoti_torch_foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
+      aoti_torch__foreach_copy_(nullptr, 1, nullptr, 1, 0), AOTI_TORCH_FAILURE);
 
   // Asynchronous copies from pinned host memory.
   std::vector<at::Tensor> host = {
@@ -280,7 +299,7 @@ TEST_F(AOTICudaGraphTest, ForeachCopyCopiesEachTensor) {
   auto host_handles = handles(host);
   auto device_handles = handles(device);
   ASSERT_EQ(
-      aoti_torch_foreach_copy_(
+      aoti_torch__foreach_copy_(
           device_handles.data(), 2, host_handles.data(), 2, 1),
       AOTI_TORCH_SUCCESS);
   at::cuda::getCurrentCUDAStream().synchronize();
@@ -319,43 +338,27 @@ TEST_F(AOTICudaGraphTest, ChecksTheirArguments) {
         AOTI_TORCH_FAILURE);
     EXPECT_FALSE(stream_is_capturing());
   }
+  // The rejected capture didn't touch the graph.
+  auto x = at::zeros({8}, at::kCUDA);
+  auto y = capture([&] { return x + 1; });
+  ASSERT_EQ(replay(), AOTI_TORCH_SUCCESS);
+  EXPECT_TRUE(y.equal(at::ones({8}, at::kCUDA)));
   CUDAGraphHandle graph = nullptr;
   EXPECT_EQ(aoti_torch_create_cuda_graph(0, -1, &graph), AOTI_TORCH_FAILURE);
   EXPECT_EQ(graph, nullptr);
-  if (c10::cuda::device_count() < 2) {
-    return;
-  }
-  // A pool on device 1 while device 0 is current.
-  CUDAMemPoolHandle pool = nullptr;
-  ASSERT_EQ(aoti_torch_create_cuda_mem_pool(1, &pool), AOTI_TORCH_SUCCESS);
-  at::cuda::CUDAStreamGuard guard(*capture_stream_);
-  EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_begin(graph_, pool, kThreadLocal),
-      AOTI_TORCH_FAILURE);
-  EXPECT_FALSE(stream_is_capturing());
-  EXPECT_EQ(aoti_torch_delete_cuda_mem_pool(pool), AOTI_TORCH_SUCCESS);
 }
 
 // Run with PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync.
-TEST_F(AOTICudaGraphTest, RejectsTheCudaMallocAsyncBackend) {
-  // Split so hipify keeps the name, which ROCm's allocator reports too.
-  if (c10::cuda::CUDACachingAllocator::name() !=
-      "c"
-      "udaMallocAsync") {
+TEST(AOTICudaGraphAsyncTest, RejectsTheCudaMallocAsyncBackend) {
+  if (c10::cuda::device_count() == 0 || !uses_cuda_malloc_async()) {
     GTEST_SKIP() << "Needs the cudaMallocAsync allocator backend";
   }
-  at::cuda::CUDAStreamGuard guard(*capture_stream_);
-  EXPECT_EQ(
-      aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
-      AOTI_TORCH_FAILURE);
-  EXPECT_FALSE(stream_is_capturing());
+  CUDAMemPoolHandle pool = nullptr;
+  EXPECT_EQ(aoti_torch_create_cuda_mem_pool(0, &pool), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(pool, nullptr);
 }
 
 TEST_F(AOTICudaGraphTest, EndingInvalidatedCaptureFailsButEndsIt) {
-#ifdef USE_ROCM
-  GTEST_SKIP() << "hipStreamEndCapture doesn't end an invalidated capture: "
-                  "the stream rejects work until the next capture begins";
-#endif
   at::cuda::CUDAStreamGuard guard(*capture_stream_);
   ASSERT_EQ(
       aoti_torch_cuda_graph_capture_begin(graph_, pool_, kThreadLocal),
