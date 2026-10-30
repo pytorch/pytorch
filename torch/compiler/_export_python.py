@@ -80,7 +80,7 @@ def export_python(
 
         @functools.wraps(fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            return exported(*args, **kwargs)
+            return cast(_R, exported(*args, **kwargs))
 
         return wrapped
 
