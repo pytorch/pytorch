@@ -1440,12 +1440,13 @@ class TestPartitionedScatterOpt(TestCase):
     def test_perf_atomic_contention(self):
         """
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with
-        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
-        1.5× floor catches regressions with enough slack for hardware variance.
+        moderate contention (8 slots). ROCm MI300X delivers about 1.8x, so the
+        1.5x floor there catches regressions. NVIDIA GPUs in CI deliver about
+        1.35x, so CUDA uses a 1.2x floor.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
-        MIN_SPEEDUP = 1.5
+        MIN_SPEEDUP = 1.5 if torch.version.hip else 1.2
 
         def scatter_fn(out0, out1, out2, idx, vals):
             out0 = out0.index_put([idx], vals, accumulate=True)
