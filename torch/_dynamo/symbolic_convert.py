@@ -160,7 +160,6 @@ from .utils import (
 )
 from .variables.base import (
     AttributeMutationNew,
-    NO_SUCH_SUBOBJ,
     SourceLocation,
     typestr,
     ValueMutationNew,
@@ -212,6 +211,7 @@ from .variables.object_protocol import (
     generic_delitem,
     generic_getattr,
     generic_getiter,
+    generic_getmethod,
     generic_is_true,
     generic_setitem,
     pyiter_send,
@@ -3331,43 +3331,11 @@ class InstructionTranslatorBase(
     def _load_attr(self, attr: Any, *, method: bool = False) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
-            # _PyObject_GetMethod bypasses binding only for unshadowed class descriptors.
-            if (
-                method
-                and isinstance(obj, variables.UserDefinedObjectVariable)
-                and isinstance(result, variables.BoundBuiltinMethodVariable)
-                and isinstance(result.descriptor, types.MethodDescriptorType)
-                and result.obj is obj
-            ):
-                if obj.cls_source:
-                    for name in ("__getattribute__", "__getattr__"):
-                        if obj.lookup_class_mro_attr(name) is NO_SUCH_SUBOBJ:
-                            guard = obj.cls_source.make_guard(
-                                functools.partial(GuardBuilder.HASATTR, attr=name)
-                            )
-                        else:
-                            guard = AttrSource(obj.cls_source, name).make_guard(
-                                GuardBuilder.FUNCTION_MATCH
-                            )
-                        install_guard(guard)
-                if (
-                    obj.lookup_class_mro_attr("__getattribute__")
-                    in (object.__getattribute__, defaultdict.__getattribute__)
-                    and obj.lookup_class_mro_attr("__getattr__") is NO_SUCH_SUBOBJ
-                    and obj.lookup_class_mro_attr(attr) is result.descriptor
-                    and obj.lookup_instance_dict(self, attr) is None
-                    and obj.lookup_method_descriptor(result.descriptor) is not None
-                ):
-                    if obj.cls_source:
-                        install_guard(
-                            obj.get_source_by_walking_mro(self, attr).make_guard(
-                                GuardBuilder.FUNCTION_MATCH
-                            )
-                        )
-                    result = variables.CallMethodVariable(
-                        obj, attr, source=result.source
-                    )
+            result = (
+                generic_getmethod(self, obj, attr)
+                if method
+                else generic_getattr(self, obj, attr)
+            )
         except Unsupported:
             if not obj.is_python_constant():
                 raise
