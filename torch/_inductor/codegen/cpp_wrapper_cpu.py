@@ -522,10 +522,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "User-defined CuTeDSL kernels need a CUDA device (CppWrapperGpu)"
         )
 
-    def cutedsl_jit_link_args(self) -> list[str]:
-        """Extra link arguments for user CuTeDSL kernels in JIT cpp_wrapper mode."""
-        return []
-
     def _generate_kernel_call_helper(
         self,
         kernel_name: str,
@@ -1873,9 +1869,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # their absolute paths positionally to the linker encodes them as
         # absolute DT_NEEDED entries that resolve at module load (same
         # mechanism HalideCodeCache uses for its standalone runtime).
-        extra_flags_repr = repr(
-            (*self.external_kernel_libs, *self.cutedsl_jit_link_args())
-        )
+        extra_flags_repr = repr((*self.external_kernel_libs, *self.cutedsl_link_args()))
         # Cpp entry function for JIT with cpp wrapper
         result.splice(f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(

@@ -8,9 +8,11 @@ import dataclasses
 import dis
 import functools
 import inspect
+import io
 import logging
 import operator
 import os
+import pickle
 import re
 import secrets
 import sys
@@ -331,6 +333,18 @@ class BenchmarkStorageGroup:
     device: Any
     dtype: Any
     inputs: dict[str, tuple[list[int], list[int]]]
+
+
+class _ScriptPickler(pickle.Pickler):
+    """Pickles for a run of the generated module as a script, in which __main__ is
+    that module: refuses the classes and functions of the compiling process's
+    __main__, which that run cannot import."""
+
+    def reducer_override(self, obj: Any) -> Any:
+        by_reference = inspect.isclass(obj) or inspect.isfunction(obj)
+        if by_reference and obj.__module__ == "__main__":
+            raise pickle.PicklingError(f"{obj.__qualname__} is defined in __main__")
+        return NotImplemented
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4346,6 +4360,28 @@ class PythonWrapperCodegen(CodeGen):
                     f'raise TypeError("Failed to pickle opaque type {type(value)} for variable {name}: {str(e)}")'
                 )
 
+        def add_cutedsl_launcher(name, launcher):
+            # Run as a script, the module is not loaded with its launchers: unpickling
+            # rebuilds each, importing its host function by module and qualname. The
+            # process that loaded it with them may call get_args() too
+            # (profile_bandwidth_output) and keeps them.
+            output.writeline(f"if {name!r} not in globals():")
+            with output.indent():
+                data = io.BytesIO()
+                try:
+                    _ScriptPickler(data).dump(launcher)
+                except Exception as e:
+                    msg = (
+                        f"{name}: a run of this module as a script cannot rebuild the "
+                        f"launcher of this CuTeDSL kernel ({type(e).__name__}: {e}); "
+                        "its host function and the classes of its constants must be "
+                        "importable by module and qualname, not defined in __main__ "
+                        "or inside a function"
+                    )
+                    output.writeline(f"raise RuntimeError({msg!r})")
+                else:
+                    output.writeline(f"{name} = pickle.loads({data.getvalue()!r})")
+
         # Preserve shared non-empty input storages so benchmark code does not
         # explode large aliased views into separate allocations.
         storage_groups: dict[StorageWeakRef, BenchmarkStorageGroup] = {}
@@ -4397,6 +4433,12 @@ class PythonWrapperCodegen(CodeGen):
                     # these 'global var_name' lines
                     output.writeline(f"global {name}")
                     add_torchbind_input(name, torchbind_obj)
+
+            if self.user_defined_cutedsl_launchers:
+                output.writeline("import pickle")
+                for name, launcher in self.user_defined_cutedsl_launchers.items():
+                    output.writeline(f"global {name}")
+                    add_cutedsl_launcher(name, launcher)
 
             # Generate shared storage buffers for aliased inputs
             for group in storage_groups.values():
@@ -5099,7 +5141,8 @@ class PythonWrapperCodegen(CodeGen):
         The host function cannot be written out as source, so the generated module
         gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
         (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
-        ``arg_names`` positionally, with ``constant_args`` bound here.
+        ``arg_names`` positionally, with ``constant_args`` bound here. A run of the
+        module as a script rebuilds it in get_args() (benchmark_compiled_module).
         """
         from torch._higher_order_ops.user_kernel_hop import constant_key
 
@@ -5167,6 +5210,11 @@ class PythonWrapperCodegen(CodeGen):
             )
         args = ", ".join(arg_str(arg) for arg in runtime_args.values())
         self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+
+    def cutedsl_link_args(self) -> list[str]:
+        """Link arguments for the user CuTeDSL kernels the C++ wrapper exported (see
+        CppWrapperGpu); the Python wrapper launches them from Python."""
+        return []
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"

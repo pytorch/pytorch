@@ -1375,6 +1375,14 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
+    @cache_on_self
+    def write_cutedsl_prelude_once(self) -> None:
+        from .cutedsl.user_kernel_aot import CPP_CUDA_ERROR_CHECK, CPP_HEADERS
+
+        for header in CPP_HEADERS:
+            self.include_extra_header(header)
+        self.header.splice(CPP_CUDA_ERROR_CHECK)
+
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and
         # dual-wrapper-mode code use an explicit stream variable so the shared kernel
@@ -2033,7 +2041,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
             and current_stream_idx is not None
             and current_stream_idx != 0
         ):
-            stream = aot_stream = get_stream_name(current_stream_idx)
+            stream = get_stream_name(current_stream_idx)
+            aot_stream = self._stream_expr_for_idx(current_stream_idx)
         else:
             stream = self.write_get_raw_stream(device.index, graph_name)
             aot_stream = "stream"
@@ -2193,6 +2202,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
         wrapper_name = f"call_{prefix}"
         if prefix not in self.cutedsl_exported_kernels:
             self.cutedsl_exported_kernels[prefix] = exported
+            self.write_cutedsl_prelude_once()
             declarations = emit_cpp_declarations(exported, aot=V.graph.aot_mode)
             self.header.splice("\n".join(declarations))
             self._cutedsl_call_wrappers[wrapper_name] = CuteDSLCallWrapper(
@@ -2200,9 +2210,12 @@ static inline void ensure_triton_kernel_compiles_started() {{
             )
         return wrapper_name
 
-    def cutedsl_jit_link_args(self) -> list[str]:
-        # AOTI links them in AotCodeCompiler (codecache.cutedsl_user_kernel_link_args).
-        if V.graph.aot_mode or not self.cutedsl_exported_kernels:
+    def cutedsl_link_args(self) -> list[str]:
+        """The exported objects, the DSL's runtime archive and the flags keeping their
+        symbols private (see codegen/cutedsl/user_kernel_aot.py), for the model .so
+        (AotCodeCompiler) or the JIT module. They go through extra_flags, not the
+        object list, whose files are deleted after linking."""
+        if not self.cutedsl_exported_kernels:
             return []
         from .cutedsl.user_kernel_aot import (
             cutedsl_cache_dir,
@@ -2211,14 +2224,18 @@ static inline void ensure_triton_kernel_compiles_started() {{
         )
 
         kernels = list(self.cutedsl_exported_kernels.values())
-        return [
+        args = [
             *cutedsl_link_inputs(kernels),
             *cutedsl_link_flags(cutedsl_cache_dir(), [k.prefix for k in kernels]),
-            # The JIT wrapper does not link cudart, which the DSL's runtime shims call.
-            "-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"
-            if config.is_fbcode()
-            else "-lcudart",
         ]
+        if not V.graph.aot_mode:
+            # The JIT module does not link cudart, which the DSL's runtime shims call.
+            args.append(
+                "-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"
+                if config.is_fbcode()
+                else "-lcudart"
+            )
+        return args
 
     def generate_user_defined_cutedsl_kernel_call(
         self,
@@ -2228,9 +2245,11 @@ static inline void ensure_triton_kernel_compiles_started() {{
         constant_args: dict[str, Any],
         device: torch.device,
     ) -> None:
-        abi = self._cutedsl_call_wrappers[kernel_name].exported.abi
-        param_ctypes = {name: ctype for ctype, name in abi.params}
+        exported = self._cutedsl_call_wrappers[kernel_name].exported
+        param_ctypes = {name: ctype for ctype, name in exported.abi.params}
         call_args = []
+        tensors: list[str] = []
+        tensor_dtypes: list[Any] = []
         for name, value in runtime_args.items():
             # The launcher takes a uint64_t scalar unsigned (see CuteDSLCallWrapper).
             uint64 = param_ctypes.get(name) == "uint64_t"
@@ -2238,6 +2257,8 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 tensor = self.create_tmp_raii_handle_var_if_needed(
                     value.codegen_reference()
                 )
+                tensors.append(tensor)
+                tensor_dtypes.append(value.get_dtype())
                 call_args.append(f"{tensor}.data_ptr()")
                 layout = value.get_layout()
                 for expr in (*layout.size, *layout.stride):
@@ -2275,10 +2296,21 @@ static inline void ensure_triton_kernel_compiles_started() {{
         ):
             # Inside a user stream region: the region's stream, which its aten
             # fallbacks and kernels run on (see _generate_kernel_call_helper).
-            stream = get_stream_name(current_stream_idx)
+            stream = self._stream_expr_for_idx(current_stream_idx)
         else:
             stream = self.write_get_raw_stream(device.index, V.graph.name)
-        self.writeline(f"{kernel_name}({', '.join([*call_args, stream])});")
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            tensors, exported.prefix, tensor_dtypes, None
+        )
+        enable_kernel_profile = kernel_profile_enabled()
+        with debug_printer_manager:
+            if enable_kernel_profile:
+                self.writeline(EnterKernelProfileScopeLine(self))
+                self.write_record_function_handle(exported.prefix)
+            self.writeline(f"{kernel_name}({', '.join([*call_args, stream])});")
+            if enable_kernel_profile:
+                self.writeline(ExitKernelProfileScopeLine(self))
 
     def prepare_triton_wrapper_args(
         self, call_args: list[Any], arg_types: list[Any]
@@ -2391,8 +2423,10 @@ class CuteDSLCallWrapper:
     DeferredTritonCallWrapper. Nothing needs deferring (the kernel was exported at
     codegen time); it is generated with the Triton launchers in finalize_prefix.
 
-    Parameters: per tensor a data pointer then its dynamic sizes and strides (int64,
-    in dimension order), per scalar its value (double for a float, uint64_t for a
+    Parameters, named by position (p<i> for parameter i of the exported C wrapper) so
+    that no Python name can collide with another parameter or a local of the launch
+    block: per tensor a data pointer then its dynamic sizes and strides (int64, in
+    dimension order), per scalar its value (double for a float, uint64_t for a
     Uint64, int64_t otherwise), and the stream.
     """
 
@@ -2408,31 +2442,32 @@ class CuteDSLCallWrapper:
         params: list[str] = []
         tensor_args: dict[str, tuple[str, list[str], list[str]]] = {}
         scalar_args: dict[str, str] = {}
-        for ctype, name in abi.params:
+        for i, (ctype, name) in enumerate(abi.params):
+            arg = f"p{i}"
             if name in structs:
                 st = structs[name]
-                sizes = [f"{name}_size{j}" for j in range(st.num_dynamic_shapes)]
-                strides = [f"{name}_stride{j}" for j in range(st.num_dynamic_strides)]
-                params.append(f"void* {name}")
+                sizes = [f"{arg}_size{j}" for j in range(st.num_dynamic_shapes)]
+                strides = [f"{arg}_stride{j}" for j in range(st.num_dynamic_strides)]
+                params.append(f"void* {arg}")
                 params.extend(f"int64_t {v}" for v in (*sizes, *strides))
-                tensor_args[name] = (name, sizes, strides)
+                tensor_args[name] = (arg, sizes, strides)
             elif ctype != "cudaStream_t":
                 if ctype in ("float", "double", "__half_raw"):
-                    params.append(f"double {name}")
+                    params.append(f"double {arg}")
                 elif ctype == "uint64_t":
-                    params.append(f"uint64_t {name}")
+                    params.append(f"uint64_t {arg}")
                 else:
-                    params.append(f"int64_t {name}")
-                scalar_args[name] = name
+                    params.append(f"int64_t {arg}")
+                scalar_args[name] = arg
         # The stream comes last whatever its position in the host function.
-        params.append("cudaStream_t stream")
+        params.append("cudaStream_t cutedsl_stream")
         prefix = wrapper.prefix
         prefix.writeline(f"static inline void {self.wrapper_name}({', '.join(params)})")
         for line in emit_cpp_launch(
             self.exported,
             tensor_args=tensor_args,
             scalar_args=scalar_args,
-            stream_expr="stream",
+            stream_expr="cutedsl_stream",
             check_align=self.check_align,
         ):
             prefix.writeline(line)

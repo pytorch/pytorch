@@ -37,6 +37,8 @@ from torch.utils._ordered_set import OrderedSet
 
 
 __all__ = [
+    "CPP_CUDA_ERROR_CHECK",
+    "CPP_HEADERS",
     "ConstantParamSpec",
     "CuteDSLExportedKernel",
     "CuteDSLExportError",
@@ -597,6 +599,22 @@ def _fake_args(specs: Sequence[ParamSpec]) -> list[Any]:
     return args
 
 
+# export_to_c gives its C wrapper's parameters the host function's names, next to the
+# names it declares there itself (4.4.2: the module parameter, the ret and args
+# locals). Those and the C++ keywords that are not Python keywords do not compile.
+_UNEXPORTABLE_NAMES = frozenset(
+    """module ret args alignas alignof and_eq asm auto bitand bitor bool case catch
+    char char8_t char16_t char32_t compl concept const consteval constexpr constinit
+    const_cast co_await co_return co_yield decltype default delete do double
+    dynamic_cast enum explicit export extern false float friend goto inline int long
+    mutable namespace new noexcept not_eq nullptr operator or_eq private protected
+    public register reinterpret_cast requires short signed sizeof static
+    static_assert static_cast struct switch template this thread_local throw true
+    typedef typeid typename union unsigned using virtual void volatile wchar_t xor
+    xor_eq""".split()
+)
+
+
 def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> None:
     params = list(inspect.signature(inspect.unwrap(host_fn)).parameters)
     names = [s.name for s in specs]
@@ -607,6 +625,17 @@ def _check_specs(host_fn: Callable[..., Any], specs: Sequence[ParamSpec]) -> Non
         )
     if sum(isinstance(s, StreamParamSpec) for s in specs) > 1:
         raise ValueError(f"{host_fn.__name__}: more than one stream parameter")
+    unexportable = [
+        s.name
+        for s in specs
+        if not isinstance(s, ConstantParamSpec) and s.name in _UNEXPORTABLE_NAMES
+    ]
+    if unexportable:
+        raise ValueError(
+            f"{host_fn.__name__}: rename parameters {unexportable}: export_to_c gives "
+            "its C wrapper's parameters the host function's names, which must not be "
+            "C++ keywords or module, ret or args (names that wrapper declares itself)"
+        )
     for s in specs:
         if isinstance(s, ScalarParamSpec):
             scalar_ctype(s.annotation)  # fail before a compile the export would reject
@@ -762,23 +791,14 @@ def _cpp_str(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-# Once per translation unit (repeating it is harmless). export_to_c headers print and
-# carry on when a CUDA call fails; make those failures throw so a failed module load
-# becomes an AOTI runtime error instead of a later illegal launch.
-_CPP_PRELUDE = r"""#include <cstdint>
-#include <iostream>
-#include <mutex>
-#include <stdexcept>
-#include <string>
-#ifndef AOTI_RUNTIME_CHECK
-#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
-  do {                                \
-    if (!(EXPR)) {                    \
-      throw std::runtime_error(MSG);  \
-    }                                 \
-  } while (0)
-#endif
-#undef CUTE_DSL_CUDA_ERROR_CHECK
+# Standard headers the declarations and launches below use.
+CPP_HEADERS = ("cstdint", "exception", "iostream", "mutex", "string")
+
+# Defined once per wrapper, before the first export_to_c header (whose own definition
+# is #ifndef-guarded). Those headers print and carry on when a CUDA call fails; this
+# makes the failure throw, so a failed module load becomes an AOTI runtime error
+# instead of a later illegal launch.
+CPP_CUDA_ERROR_CHECK = r"""
 #define CUTE_DSL_CUDA_ERROR_CHECK(err)                                     \
   do {                                                                     \
     const cudaError_t cutedsl_err_ = (err);                                \
@@ -787,12 +807,13 @@ _CPP_PRELUDE = r"""#include <cstdint>
         std::string("CuTeDSL kernel module: ") +                           \
             cudaGetErrorName(cutedsl_err_) + ": " +                        \
             cudaGetErrorString(cutedsl_err_));                             \
-  } while (0)"""
+  } while (0)
+""".strip()
 
 
 def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list[str]:
     """File-scope C++ for one exported kernel, to emit once per prefix before any
-    launch (e.g. into the wrapper header): the CUTE_DSL_CUDA_ERROR_CHECK predefine,
+    launch (e.g. into the wrapper header), after CPP_HEADERS and CPP_CUDA_ERROR_CHECK:
     the export_to_c header, ``<prefix>_module_ref`` and ``<prefix>_module()``, which
     returns the module.
 
@@ -816,7 +837,6 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
     unload_error = _cpp_str(f"Failed to unload CuTeDSL kernel module {p}: ")
     header_name = os.path.basename(exported.header_path)
     return [
-        *_CPP_PRELUDE.splitlines(),
         f"// CuTeDSL user kernel {p}: export_to_c header {header_name}",
         f"#ifndef CUTEDSL_DECLARED_{p}",
         f"#define CUTEDSL_DECLARED_{p}",

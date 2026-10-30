@@ -1534,18 +1534,20 @@ def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
 
     This is a denylist of consumers known to observe placement: ``as_strided``, whose
-    storage offset is relative to the storage, and user-defined Triton kernels, which
-    are opaque and may need an aligned base, for example to build a TMA descriptor on
-    the host or on the device. Other opaque consumers, such as custom ops and extern
-    fallback kernels, are intentionally not included. Views are followed through
-    single- and multi-output view ops.
+    storage offset is relative to the storage, and user-defined kernels of any DSL,
+    which are opaque and may need an aligned base, for example to build a TMA
+    descriptor on the host or on the device. Other opaque consumers, such as custom
+    ops and extern fallback kernels, are intentionally not included. Views are
+    followed through single- and multi-output view ops.
     """
+    from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
+
     storage = get_node_storage(node)
     if storage is None:
         return False
     placement_dependent = (
         aten.as_strided.default,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
+        *(info.functional for info in user_kernel_hop_infos()),
     )
     pending = [node]
     seen = OrderedSet([node])
