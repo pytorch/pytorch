@@ -445,12 +445,6 @@ void* CUDASymmetricMemoryAllocator::alloc(
       "stream. Allocate the buffer with "
       "torch.distributed._symmetric_memory.empty() before starting capture.");
   void* alloc_base = nullptr;
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  CUmemAllocationProp prop = {};
-  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  prop.location.id = device_idx;
   bool has_fabric_support = at::cuda::get_fabric_access(device_idx);
   LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support "
             << has_fabric_support;
@@ -459,11 +453,16 @@ void* CUDASymmetricMemoryAllocator::alloc(
         ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
         : Expandable_Segments_Handle_Type::POSIX_FD;
   }
-  if (handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD) {
-    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-  } else {
-    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
-  }
+  [[maybe_unused]] const bool use_fabric =
+      handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  CUmemAllocationProp prop = {};
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  prop.location.id = device_idx;
+  prop.requestedHandleTypes =
+      use_fabric ? kMemHandleTypeFabric : kMemHandleTypePosixFd;
 
   auto driver_api = c10::cuda::DriverAPI::get();
   int rdma_flag = 0;
@@ -501,17 +500,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.location.type = hipMemLocationTypeDevice;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
-  bool has_fabric_support = at::cuda::get_fabric_access(device_idx);
-  LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support " << has_fabric_support;
-  if (handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
-    handle_type_ = has_fabric_support ? Expandable_Segments_Handle_Type::FABRIC_HANDLE : Expandable_Segments_Handle_Type::POSIX_FD;
-  }
   // The handle type is fixed at creation: hipMemAllocationProp carries a single
   // handle type rather than a mask, and ROCm rejects any combined value.
   prop.requestedHandleType =
-      handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD
-      ? kMemHandleTypePosixFd
-      : kMemHandleTypeFabric;
+      use_fabric ? kMemHandleTypeFabric : kMemHandleTypePosixFd;
 
   size_t granularity;
   C10_CUDA_CHECK(hipMemGetAllocationGranularity(
