@@ -3009,6 +3009,41 @@ class cuda(cutlass):
     # wildcard entries; existing rows in a loaded file still satisfy lookups.
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
+    # Compile-time TunableOp integration for GEMMs, on both backends TunableOp
+    # supports: hipBLASLt on ROCm and cuBLASLt on CUDA. "tune" tunes GEMMs during
+    # autotuning and records the solutions; with aten_tunableop_ladder it also
+    # tunes a range of sizes of each GEMM's dynamic dim, otherwise only the
+    # traced shape. "reuse" instead borrows the nearest recorded shape, benchmarks
+    # it against the default kernel, and records the winner. Run as separate
+    # passes: "tune" builds the results file, "reuse" consumes it.
+    # pyrefly: ignore [bad-assignment]
+    autotune_tunableop_mode: Literal["off", "tune", "reuse"] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE", "off"
+    )  # type: ignore[assignment]
+
+    # Seconds allowed per GEMM for compile-time TunableOp work. hipBLASLt tuning
+    # can hang, which subprocess isolation alone does not fix, so the wait is
+    # bounded.
+    autotune_tunableop_timeout: float = float(
+        os.environ.get("TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_TIMEOUT", "900")
+    )
+
+    # Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim,
+    # or only the traced shape. The ladder is what gives runtime a chance of an
+    # exact hit on a size the compile never saw, and is also nearly all of the
+    # tuning cost -- on the heavier merge nets, the difference between minutes
+    # and hours.
+    aten_tunableop_ladder: bool = (
+        os.environ.get("INDUCTOR_ATEN_TUNABLEOP_LADDER", "1") == "1"
+    )
+
+    # Per-bucket pre-tune timing for the ladder above. One line per bucket is
+    # noise in a normal compile but is the only record of what a bucket costs
+    # when it SUCCEEDS; the ladder's other logs report failures only.
+    aten_tunableop_pretune_debug: bool = (
+        os.environ.get("INDUCTOR_ATEN_TUNABLEOP_PRETUNE_DEBUG", "0") == "1"
+    )
+
 
 @inherit_fields_from(cutlass)
 class xpu(cutlass):

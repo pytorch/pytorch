@@ -7288,6 +7288,12 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
+                # aten won this GEMM, so its tuned solutions are what runtime will
+                # look up. Widen the recorded coverage across the dynamic dim.
+                from . import tunableop
+
+                tunableop.maybe_range_pretune(min_node_unfused)
+
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]

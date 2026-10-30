@@ -10,6 +10,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/cuda/CUDAContextLight.h>
+#include <ATen/cuda/tunable/GemmLdRules.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -49,6 +51,34 @@
 namespace at::cuda::tunable {
 
 namespace {
+
+// Hard kill switches for compile-time borrowing, read once at startup. Env-only
+// and separate from the mutable policy members: fixed before main(), so unlike
+// those it cannot let one caller's policy change what other callers see.
+// Checked at the point of action so it holds even for a caller that never
+// consults IsNearestMatchEnabled()/IsRecordBorrowedEnabled().
+//
+// Both follow PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED: unset leaves the decision to
+// the reuse pass, 0 forces the feature off for the whole process, 1 defers to
+// the pass as well, and check_env warns on anything else. NEAREST_MATCH_ENABLED
+// governs borrowing, RECORD_BORROWED_ENABLED governs recording a borrow, in
+// memory as well as in the results file. Both are kept out of the user-facing
+// table in README.md: the mechanism they govern has no public entry point yet,
+// and documenting them there would promise a contract before there is a feature
+// to attach it to. Add them when it goes public.
+bool NearestMatchDisabledByEnv() {
+  static const bool disabled =
+      !c10::utils::check_env("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED")
+           .value_or(true);
+  return disabled;
+}
+
+bool RecordBorrowedDisabledByEnv() {
+  static const bool disabled =
+      !c10::utils::check_env("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED")
+           .value_or(true);
+  return disabled;
+}
 
 // Matches a tunableop params signature against a wildcard pattern. Both
 // strings are split on '_' and compared token-by-token; '*' in the pattern
@@ -170,6 +200,78 @@ ResultEntry TuningResultsManager::LookupWildcardFallback(
   }
   return ResultEntry::Null();
 }
+
+ResultEntry TuningResultsManager::LookupNearest(const std::string& op_signature,
+    const std::string& params_signature) {
+  // No runtime-flag gate here. TunableOp dispatch resolves shapes through
+  // Lookup and never reaches this, so calling it is itself the opt-in; the
+  // reuse pass is the only caller and already decides whether borrowing
+  // applies. The env kill switch is honoured regardless of the caller.
+  if (NearestMatchDisabledByEnv()) {
+    return ResultEntry::Null();
+  }
+
+  const GemmShape q = ParseGemmShape(SplitUnderscore(params_signature));
+  if (!q.ok) {
+    TUNABLE_LOG3("unparsable params_signature, no nearest match for ", op_signature, ",", params_signature);
+    return ResultEntry::Null();
+  }
+
+  // Copy out under the lock, then parse and match without it: splitting each
+  // candidate signature allocates, and by design the query is not memoized, so
+  // holding lock_ for the whole scan would serialize every concurrent
+  // Lookup/Add on string parsing.
+  std::vector<std::pair<std::string, ResultEntry>> candidates;
+  {
+    std::scoped_lock l{lock_};
+    auto kernel_map_it = results_.find(op_signature);
+    if (kernel_map_it == results_.cend()) {
+      return ResultEntry::Null();
+    }
+    candidates.reserve(kernel_map_it->second.size());
+    for (const auto& [cand_sig, cand_result] : kernel_map_it->second) {
+      candidates.emplace_back(cand_sig, cand_result);
+    }
+  }
+
+  // Deliberately not memoized: the result is unmeasured for this shape, and the
+  // caller is expected to validate it and persist the outcome instead.
+  const ResultEntry* best = nullptr;
+  std::string best_sig;
+  int64_t best_delta = std::numeric_limits<int64_t>::max();
+  for (const auto& [cand_sig, cand_result] : candidates) {
+    // Normal tuning records Default when it wins, so Default entries sit in the
+    // map alongside specialized ones. Borrowing exists to find a specialized
+    // kernel worth validating: a near Default would otherwise mask a farther
+    // specialized donor, and the validator would then benchmark Default against
+    // Default and persist it. Missing here is cheap -- the caller already falls
+    // back to Default when there is no match.
+    if (cand_result == ResultEntry::Default()) {
+      continue;
+    }
+    int64_t delta = 0;
+    if (!NearestLargerMatch(q, ParseGemmShape(SplitUnderscore(cand_sig)), delta)) {
+      continue;
+    }
+    // Deterministic across builds: the map iterates in hash order, so an
+    // absolute-delta tie between donors rounding different dims must not
+    // depend on it. Lexicographically smallest signature wins ties.
+    if (delta < best_delta || (delta == best_delta && (best == nullptr || cand_sig < best_sig))) {
+      best = &cand_result;
+      best_sig = cand_sig;
+      best_delta = delta;
+    }
+  }
+
+  if (best == nullptr) {
+    TUNABLE_LOG3("no nearest match for ", op_signature, ",", params_signature);
+    return ResultEntry::Null();
+  }
+  TUNABLE_LOG3("nearest match for ", op_signature, ",", params_signature, " -> ", *best,
+      " from ", best_sig, " (delta ", best_delta, ")");
+  return *best;
+}
+
 void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
@@ -188,7 +290,10 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
   TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", it->second);
 }
 
-void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
+void TuningResultsManager::AddAndMaybePersist(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry best,
+    bool force_persist) {
   bool is_new = false;
   ResultEntry inserted = ResultEntry::Null();
 
@@ -205,7 +310,8 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
    if (!is_new) return;  // only write once per unique (op, params)
 
    TuningContext* ctx = getTuningContext();
-  if (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled()) {
+  if (force_persist ||
+      (ctx->IsTuningEnabled() && !ctx->IsRecordUntunedEnabled())) {
     InitRealtimeAppend(ctx->GetFilename(), ctx->GetTuningResultsValidator().GetAllValidators());
 
     if (is_new && realtime_out_ && realtime_out_->good()) {
@@ -213,6 +319,10 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
     }
   }
 
+}
+
+void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
+  AddAndMaybePersist(op_signature, params_signature, std::move(best), /*force_persist=*/false);
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
@@ -246,6 +356,25 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
+}
+
+void TuningResultsManager::RecordBorrowed(const std::string& op_signature,
+    const std::string& params_signature,
+    ResultEntry entry) {
+  // Honoured for every caller, not just one that remembers to ask. Drops the
+  // record entirely, map included, rather than only skipping the file write:
+  // a kill switch that still mutated shared state would be a worse contract
+  // than one that does nothing.
+  if (RecordBorrowedDisabledByEnv()) {
+    return;
+  }
+  // Otherwise always persists, and deliberately reads none of the mutable
+  // tuning flags: the reuse pass runs with tuning off and suppresses
+  // RecordUntuned for this shape precisely so it can record the borrow here,
+  // and nothing bulk-writes results_ at process exit. Keeping the override
+  // local to this entry point means recording a borrow cannot change what any
+  // other Add() caller writes.
+  AddAndMaybePersist(op_signature, params_signature, std::move(entry), /*force_persist=*/true);
 }
 
 void TuningResultsManager::ClearUntuned() {
@@ -589,6 +718,8 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
     record_untuned_enable_{false},
+    nearest_match_enable_{false},
+    record_borrowed_enable_{false},
     manager_initialized_{false},
     numerics_check_enable_{false},
     max_tuning_duration_ms_{30},
@@ -705,6 +836,42 @@ std::ofstream& TuningContext::GetUntunedFile(){
     untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::app);
   }
   return untuned_file_;
+}
+
+void TuningContext::EnableNearestMatch(bool value) {
+  nearest_match_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Nearest Match for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Nearest Match for TunableOp");
+  }
+}
+
+bool TuningContext::IsNearestMatchEnabled() const {
+  // Same kill switch LookupNearest itself applies, so the pass's own check and
+  // the enforcement point cannot disagree. The member is the reuse pass's policy.
+  if (NearestMatchDisabledByEnv()) {
+    return false;
+  }
+  return nearest_match_enable_;
+}
+
+void TuningContext::EnableRecordBorrowed(bool value) {
+  record_borrowed_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Record Borrowed for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Record Borrowed for TunableOp");
+  }
+}
+
+bool TuningContext::IsRecordBorrowedEnabled() const {
+  // Kill switch mirroring IsNearestMatchEnabled above; RecordBorrowed applies
+  // the same one itself.
+  if (RecordBorrowedDisabledByEnv()) {
+    return false;
+  }
+  return record_borrowed_enable_;
 }
 
 
