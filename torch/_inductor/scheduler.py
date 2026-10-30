@@ -12408,7 +12408,7 @@ class Scheduler:
                 for line in stack_trace.strip().split("\n"):
                     cudagraphs_log.debug("         %s", line)
 
-    def codegen(self) -> None:
+    def codegen(self, *, enclosing_device: torch.device | None = None) -> None:
         from .optimize_indexing import remove_redundant_argreduce_indices
 
         with dynamo_timed("Scheduler.codegen"):
@@ -12424,7 +12424,7 @@ class Scheduler:
                 return (
                     self._codegen_partitions()
                     if torch._inductor.config.graph_partition
-                    else self._codegen(self.nodes)
+                    else self._codegen(self.nodes, enclosing_device=enclosing_device)
                 )
             finally:
                 from .codegen.simd import SIMDScheduling
@@ -12597,7 +12597,31 @@ class Scheduler:
                     f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
                 )
 
-    def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
+    def _inherited_device(
+        self, nodes: list[BaseSchedulerNode], enclosing_device: torch.device | None
+    ) -> torch.device | None:
+        """enclosing_device, if codegen can rely on the caller's guard for every
+        node instead of entering its own."""
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        device = enclosing_device
+        if (
+            device is None
+            # These emit setup at the guard (see codegen_device_guard_enter).
+            or config.triton.autotune_at_compile_time
+            or _coor_enabled()
+            or self._has_multi_stream_nodes()
+            or any(n.get_device() not in (None, device) for n in nodes)
+        ):
+            return None
+        return device
+
+    def _codegen(
+        self,
+        nodes: list[BaseSchedulerNode],
+        *,
+        enclosing_device: torch.device | None = None,
+    ) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
             import torch._dynamo.convert_frame
 
@@ -12619,7 +12643,10 @@ class Scheduler:
                     )
                 seen.add(key)
 
-        self.current_device = self.default_device_context
+        start_device = self.default_device_context or self._inherited_device(
+            nodes, enclosing_device
+        )
+        self.current_device = start_device
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
         previous_nodes_by_stream: dict[
@@ -12818,10 +12845,10 @@ class Scheduler:
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
 
-        if self.current_device != self.default_device_context:
-            # when default_device_context is not None, we are codegen
-            # for graph partitions and all nodes must be on
-            # the same default device.
+        if self.current_device != start_device:
+            # when start_device is not None (graph partitions, or a subgraph
+            # called inside its caller's device guard), all nodes must be on
+            # that device.
             if self.current_device is None:
                 raise AssertionError("expected current_device to be set")
             if device_need_guard(self.current_device.type):
