@@ -81,8 +81,8 @@ class TransportTestMixin:
             remote = type(descriptor).deserialize(descriptor.serialize())
             part = remote.slice(16, 16)
             part = type(part).deserialize(part.serialize())
-            self.assertEqual(part, remote[16:32])
-            self.assertEqual(part, remote[-48:-32])
+            self.assertEqual(part.serialize(), remote[16:32].serialize())
+            self.assertEqual(part.serialize(), remote[-48:-32].serialize())
 
             first.write(source_memory.to_view()[8:24], part)
             self.assertEqual(destination[16:32], source[8:24])
@@ -94,7 +94,8 @@ class TransportTestMixin:
             first.read(view.slice(0, 4), part.slice(4)[:4])
             self.assertEqual(read_target[8:12], source[12:16])
             self.assertEqual(read_target[:8].count_nonzero(), 0)
-            self.assertEqual(part[4:100], part.slice(4))
+            self.assertEqual(read_target[12:].count_nonzero(), 0)
+            self.assertEqual(part[4:100].serialize(), part.slice(4).serialize())
             self.assertEqual(source_memory.to_view()[60:100].size(), 4)
             self.assertEqual(source_memory.to_view()[40:20].size(), 0)
             with self.assertRaisesRegex(ValueError, "does not fit"):
