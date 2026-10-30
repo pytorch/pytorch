@@ -335,6 +335,18 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [x])
 
+    class OperandStrides(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return x.sum(0) + y.sum(0)
+
+            def false_fn(x, y):
+                return x.amax(0) - y.amax(0)
+
+            # Eager gives both operands a.t()'s column-major strides. Inductor
+            # lays out x row-major (it follows b) and pads y's leading stride.
+            return torch.cond(p, true_fn, false_fn, (a.t() + b, a.t().relu()))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -401,6 +413,17 @@ class CondTests(TestCase):
             # inner dim 19500 triggers stride padding
             inputs=(torch.randn(15, 19500),),
             device=GPU_TYPE,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_operand_strides(self, device):
+        # The branches are compiled for the operands' eager strides. 8261 rows
+        # trigger stride padding on GPU.
+        self._run_test(
+            model=CondModels.OperandStrides(),
+            inputs=(torch.randn(19, 8261), torch.randn(8261, 19)),
+            device=device,
         )
 
     @requires_gpu
