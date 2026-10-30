@@ -72,7 +72,7 @@ class FlyDSLAOTBackend(ExternalAOTBackend):
             object_path=object_path,
             header_path=header_path,
             link_libraries=("libamdhip64.so",),
-            link_options=("-lamdhip64", "-pthread", "-ldl"),
+            link_options=("-pthread", "-ldl"),
             payload={
                 "prefix": request.prefix,
                 "calling_convention": "typed_header",
