@@ -10,6 +10,7 @@ def pip_install(package):
 
 try:
     from transformers import (
+        AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
         StaticCache,
@@ -21,6 +22,7 @@ except ModuleNotFoundError:
     pip_install("git+https://github.com/huggingface/transformers.git#egg=transformers")
 finally:
     from transformers import (
+        AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
         StaticCache,
@@ -78,9 +80,14 @@ class TextGenerationBenchmark(Benchmark):
         prompt_length=INPUT_LENGTH,
         inference_mode="generate",
         decode_length=DECODE_LENGTH,
+        dtype=None,
+        tp_size=1,
     ):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device)
+        if tp_size > 1:
+            model = load_tensor_parallel_model(model_name, dtype, tp_size)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device)
         model.eval()
 
         model.generation_config.do_sample = False
@@ -119,7 +126,54 @@ class TextGenerationBenchmark(Benchmark):
                 device=device,
                 dtype=torch.long,
             )
+        if tp_size > 1:
+            # Every rank of the TP group must serve the same request.
+            for tensor in example_inputs.values():
+                torch.distributed.broadcast(tensor, src=0)
         return model, example_inputs
+
+
+def load_tensor_parallel_model(model_name, dtype, tp_size):
+    config = AutoConfig.from_pretrained(model_name)
+    text_config = config.get_text_config(decoder=True)
+    num_heads = text_config.num_attention_heads
+    num_kv_heads = getattr(text_config, "num_key_value_heads", None) or num_heads
+    if num_heads % tp_size or num_kv_heads % tp_size:
+        raise ValueError(
+            f"--tp-size={tp_size} must divide {model_name}'s {num_heads} attention "
+            f"heads and {num_kv_heads} KV heads"
+        )
+    with torch.device("meta"):
+        meta_model = AutoModelForCausalLM.from_config(config)
+    # A tied weight such as lm_head's is the replicated input embedding, so
+    # gathering the output of a module planned as sharded would duplicate it.
+    tp_plan = {
+        name: style
+        for name, style in meta_model.tp_plan.items()
+        if f"{name}.weight" not in meta_model.all_tied_weights_keys
+    }
+    # tp_plan shards onto the already initialized process group and places each
+    # rank's shard on its LOCAL_RANK device; it rejects device_map.
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, dtype=dtype, tp_plan=tp_plan, tp_size=tp_size
+    )
+    tp_module = "transformers.integrations.tensor_parallel"
+    tp_forward_hooks = [
+        hook
+        for module in model.modules()
+        for hook in module._forward_hooks.values()
+        if hook.__module__ == tp_module
+    ]
+    if model.tp_size != tp_size or not tp_forward_hooks:
+        raise RuntimeError(f"{model_name} was not loaded tensor-parallel")
+    # The TP plan registers module backward hooks that all-reduce gradients of
+    # replicated parameters such as q_norm. They do nothing without autograd, and
+    # Dynamo cannot trace module backward hooks unless compiled autograd is on.
+    for module in model.modules():
+        for key, hook in list(module._backward_hooks.items()):
+            if hook.__module__ == tp_module:
+                del module._backward_hooks[key]
+    return model
 
 
 # TextGenerationPrefillModel relies on StaticCache internals from this release.
@@ -134,6 +188,14 @@ class TextGenerationPrefillModel(torch.nn.Module):
         self.prompt_length = prompt_length
         self.cache_capacity = cache_capacity
         self.cache = None
+
+    def copy_sharing_weights(self):
+        # Copies share parameters and module hooks, including HF's TP hooks; each
+        # copy allocates its own cache, so requests on one cannot disturb another.
+        copy = TextGenerationPrefillModel(
+            self.model, self.batch_size, self.prompt_length, self.cache_capacity
+        )
+        return copy.train(self.training)
 
     def prepare_for_prefill(self, input_ids):
         expected_shape = (self.batch_size, self.prompt_length)
@@ -247,6 +309,13 @@ PREFILL_MODELS = {
 # gemma-2-2b is excluded: its sliding-window cache layers track their length in a
 # Python int, so compiled decode recompiles every step.
 DECODE_MODELS = {
+    "meta-llama/Llama-3.2-1B",
+    "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3.5-0.8B",
+}
+
+
+TP_MODELS = {
     "meta-llama/Llama-3.2-1B",
     "Qwen/Qwen3-0.6B",
     "Qwen/Qwen3.5-0.8B",
