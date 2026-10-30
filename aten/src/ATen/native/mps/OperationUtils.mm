@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/metal/common.h>
+#include <bit>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -1031,6 +1032,29 @@ static bool isInnerContiguous(const TensorIteratorBase& iter) {
   return iter.ndim() >= 2 && !iter.is_contiguous() && iter.has_contiguous_first_dim();
 }
 
+// Returns `inner` if `from` broadcasts into `into` as from[(i / inner) % from.numel()], i.e. its sizes are a run of
+// `into`'s sizes padded with ones on both sides, and 0 otherwise.
+static int64_t denseBroadcastInner(const Tensor& from, const Tensor& into) {
+  if (!from.is_contiguous() || !into.is_contiguous()) {
+    return 0;
+  }
+  const auto offset = into.dim() - from.dim();
+  auto d = into.dim() - 1;
+  int64_t inner = 1;
+  for (; d >= offset && from.size(d - offset) == 1; --d) {
+    inner *= into.size(d);
+  }
+  while (d >= offset && from.size(d - offset) == into.size(d)) {
+    --d;
+  }
+  for (; d >= offset; --d) {
+    if (from.size(d - offset) != 1) {
+      return 0;
+    }
+  }
+  return inner;
+}
+
 // Binds outer sizes then each operand's outer strides in kernel buffer order,
 // returning the next free buffer index for the caller's packed dims.
 static unsigned bindInnerContiguousOuter(id<MTLComputeCommandEncoder> encoder,
@@ -1346,32 +1370,37 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   bool broadcast_on_lhs = false;
   bool scalar_on_lhs = false;
   int64_t broadcast_numel = 0;
+  int64_t broadcast_inner = 0;
 
   const bool input_is_full = input.numel() == out.numel();
   const bool other_is_full = other.numel() == out.numel();
-  const bool input_is_bc = is_dense_broadcastable(input, out) && !input_is_full;
-  const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
+  const auto input_bc_inner = input_is_full ? 0 : denseBroadcastInner(input, out);
+  const auto other_bc_inner = other_is_full ? 0 : denseBroadcastInner(other, out);
+  // input and other are the full tensors even when iter is a 32-bit chunk of them
+  const bool is_split = iter.numel() != out.numel();
 
   // Scalar/broadcast specializations are skipped when the user-facing output
   // dtype differs from the kernel's natural output: only the strided castout
   // variant is registered for that combination.
   if (!output_cast_needed) {
-    if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
+    if (input_bc_inner && other_is_full && other.is_contiguous() && out.is_contiguous()) {
       broadcast_numel = input.numel();
+      broadcast_inner = input_bc_inner;
       if (broadcast_numel == 1) {
         use_scalar_kernel = true;
         scalar_on_lhs = true;
       } else {
-        use_broadcast_kernel = true;
+        use_broadcast_kernel = !is_split;
         broadcast_on_lhs = true;
       }
-    } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
+    } else if (other_bc_inner && input_is_full && input.is_contiguous() && out.is_contiguous()) {
       broadcast_numel = other.numel();
+      broadcast_inner = other_bc_inner;
       if (broadcast_numel == 1) {
         use_scalar_kernel = true;
         scalar_on_lhs = false;
       } else {
-        use_broadcast_kernel = true;
+        use_broadcast_kernel = !is_split;
         broadcast_on_lhs = false;
       }
     }
@@ -1545,7 +1574,12 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else if (use_broadcast_kernel) {
-        mtl_setArgs<3>(computeEncoder, broadcast_numel);
+        // Magic number and shift for broadcast_index in c10/metal/indexing.h
+        const uint64_t inner = broadcast_inner;
+        const uint32_t shift = std::bit_width(inner - 1);
+        const auto magic = static_cast<uint32_t>((uint64_t{1} << 32) * ((uint64_t{1} << shift) - inner) / inner + 1);
+        const auto bcast = c10::metal::vec3<uint32_t>{static_cast<uint32_t>(broadcast_numel), magic, shift};
+        mtl_setArgs<3>(computeEncoder, bcast);
         if (cast_needed) {
           std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
                                                  static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
