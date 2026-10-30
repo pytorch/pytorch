@@ -58,14 +58,20 @@ from .utils import (
     unwrap_if_wrapper,
 )
 from .variables import (
+    BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    BytesBuiltinVariable,
+    ComplexBuiltinVariable,
     DictBuiltinVariable,
+    FloatBuiltinVariable,
+    FrozenSetBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
     InspectSignatureVariable,
+    IntBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     LocalGeneratorFunctionVariable,
@@ -76,9 +82,12 @@ from .variables import (
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SetAttrBuiltinVariable,
+    SetBuiltinVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
+    StrBuiltinVariable,
     TorchInGraphFunctionVariable,
+    TupleBuiltinVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -4129,13 +4138,22 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bool: BoolBuiltinVariable,
     bytearray: ByteArrayBuiltinVariable,
+    bytes: BytesBuiltinVariable,
+    complex: ComplexBuiltinVariable,
     dict: DictBuiltinVariable,
+    float: FloatBuiltinVariable,
+    frozenset: FrozenSetBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
+    int: IntBuiltinVariable,
     iter: IterBuiltinVariable,
     list: ListBuiltinVariable,
+    set: SetBuiltinVariable,
     setattr: SetAttrBuiltinVariable,
+    str: StrBuiltinVariable,
+    tuple: TupleBuiltinVariable,
 }
 
 

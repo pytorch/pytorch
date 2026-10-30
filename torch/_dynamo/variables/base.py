@@ -2606,6 +2606,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
             return generic_hash(tx, self)
 
+        # Remove this once #199814 is merged
+        # if name == "__new__":
+        #     # Supported __new__ methods
+        #     breakpoint()
+        #     if self.fn is object and len(args) == 1:
+        #         if len(kwargs) != 0:
+        #             raise AssertionError(
+        #                 f"object.__new__ expects no kwargs, got {len(kwargs)}"
+        #             )
+        #         return tx.output.side_effects.track_new_user_defined_object(
+        #             self,
+        #             args[0],
+        #             args[1:],
+        #             tx=tx,
+        #         )
+
         if name == "__subclasscheck__" and len(args) == 1 and not kwargs:
             if (self_py := self.as_python_constant()) and (
                 derived_py := args[0].as_python_constant()
