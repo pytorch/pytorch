@@ -749,7 +749,7 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_unmatched_enter_autocast_aot_eager_raises(self):
-        from torch._functorch._aot_autograd.utils import _get_autocast_nesting
+        from torch.amp.autocast_mode import _get_autocast_nesting
 
         # Unmatched _enter_autocast leaves autocast enabled in the graph.
         # AOT backends used to drop set_autocast_enabled and silently miscompile;
@@ -758,22 +758,16 @@ class GraphModule(torch.nn.Module):
             torch.amp.autocast_mode._enter_autocast("cpu")
             return x + 1
 
-        prior_enabled = torch.is_autocast_enabled("cpu")
-        prior_dtype = torch.get_autocast_dtype("cpu")
-        prior_cache = torch.is_autocast_cache_enabled()
         prior_nesting = _get_autocast_nesting()
-        try:
-            compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
-            with self.assertRaisesRegex(RuntimeError, "left the autocast state"):
-                compiled(torch.randn(2))
-            self.assertEqual(_get_autocast_nesting(), prior_nesting)
-        finally:
-            torch.set_autocast_enabled("cpu", prior_enabled)
-            torch.set_autocast_dtype("cpu", prior_dtype)
-            torch.set_autocast_cache_enabled(prior_cache)
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
+            compiled(torch.randn(2))
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
     def test_enter_exit_autocast_graph_break_aot_eager_raises(self):
-        from torch._functorch._aot_autograd.utils import _get_autocast_nesting
+        from torch.amp.autocast_mode import _get_autocast_nesting
 
         # Graph break between enter and exit splits the context across graphs.
         # Graph 0 ends with set_autocast_enabled(..., True); AOT rejects that.
@@ -785,23 +779,16 @@ class GraphModule(torch.nn.Module):
             torch.amp.autocast_mode._exit_autocast(m)
             return x
 
-        prior_enabled = torch.is_autocast_enabled("cpu")
-        prior_dtype = torch.get_autocast_dtype("cpu")
-        prior_cache = torch.is_autocast_cache_enabled()
         prior_nesting = _get_autocast_nesting()
-        try:
-            compiled = torch.compile(f, backend="aot_eager", fullgraph=False)
-            x = torch.randn(3, 3, dtype=torch.float32)
-            y = torch.randn(3, 3, dtype=torch.float32)
-            z = torch.randn(3, 3, dtype=torch.float32)
-            with self.assertRaisesRegex(RuntimeError, "left the autocast state"):
-                compiled(x, y, z)
-            self.assertEqual(_get_autocast_nesting(), prior_nesting)
-            self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
-        finally:
-            torch.set_autocast_enabled("cpu", prior_enabled)
-            torch.set_autocast_dtype("cpu", prior_dtype)
-            torch.set_autocast_cache_enabled(prior_cache)
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=False)
+        x = torch.randn(3, 3, dtype=torch.float32)
+        y = torch.randn(3, 3, dtype=torch.float32)
+        z = torch.randn(3, 3, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
+            compiled(x, y, z)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
     def test__enter__exit_autocast_graph_break_explicit_dtype(self):
         def f(x):

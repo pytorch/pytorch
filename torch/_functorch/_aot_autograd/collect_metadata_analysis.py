@@ -262,14 +262,28 @@ def run_functionalized_fw_and_collect_metadata(
                         fake_mode.epoch += 1
                         fake_mode.reset_nt_tensor_id_counter()
 
-                if _get_autocast_states() != prior_autocast_states:
+                current_autocast_states = _get_autocast_states()
+                if current_autocast_states != prior_autocast_states:
+                    mismatches = []
+                    for device_type, (prior_enabled, prior_dtype) in prior_autocast_states.items():
+                        cur_enabled, cur_dtype = current_autocast_states[device_type]
+                        if prior_enabled != cur_enabled:
+                            mismatches.append(
+                                f"  {device_type} autocast enabled: was {prior_enabled!r}, became {cur_enabled!r}"
+                            )
+                        if prior_dtype != cur_dtype:
+                            mismatches.append(
+                                f"  {device_type} autocast dtype: was {prior_dtype!r}, became {cur_dtype!r}"
+                            )
                     raise RuntimeError(
                         "AOTAutograd detected that the traced graph left the autocast state "
-                        "changed (enabled flag and/or dtype). This often means an unbalanced "
-                        "torch.autocast / _enter_autocast/_exit_autocast, or a graph break "
-                        "between enter and exit that splits the context across graphs. "
-                        "Keep autocast enter/exit in the same graph, or avoid mutating "
-                        "autocast state inside the compiled region."
+                        "changed (enabled flag and/or dtype):\n"
+                        + "\n".join(mismatches)
+                        + "\nThis often means an unbalanced torch.autocast / "
+                        "_enter_autocast/_exit_autocast, or a graph break between enter and "
+                        "exit that splits the context across graphs. Keep autocast enter/exit "
+                        "in the same graph, or avoid mutating autocast state inside the "
+                        "compiled region."
                     )
             finally:
                 for device_type, (_, dtype) in prior_autocast_states.items():

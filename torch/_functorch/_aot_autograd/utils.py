@@ -21,6 +21,10 @@ from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.amp.autocast_mode import (  # noqa: F401
+    _get_autocast_nesting,
+    _set_autocast_nesting,
+)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
@@ -112,26 +116,6 @@ def _get_autocast_states() -> dict[str, tuple[bool, torch.dtype]]:
         )
         for device_type in torch._C._autocast_supported_devices()
     }
-
-
-def _get_autocast_nesting() -> int:
-    # No public getter; peek via increment/decrement (TLS, single-threaded).
-    nesting = torch.autocast_increment_nesting() - 1
-    torch.autocast_decrement_nesting()
-    return nesting
-
-
-def _set_autocast_nesting(target: int) -> None:
-    while True:
-        current = _get_autocast_nesting()
-        if current == target:
-            return
-        if current > target:
-            # Match autocast.__exit__: clear the cast cache when leaving nesting 0.
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-        else:
-            torch.autocast_increment_nesting()
 
 
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
