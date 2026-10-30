@@ -66,6 +66,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_clear_fake_constant,
     maybe_get_fake_constant,
+    maybe_get_fake_mode,
     unset_fake_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
@@ -275,6 +276,11 @@ class Match:
         self.targets = {}
         self.ctx = ctx
         self.replacement_graph = None
+        # Legacy HOP patterns omit view metadata. Keep its dependencies separate
+        # from the arguments passed to the registered replacement function.
+        self.auto_functionalized_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        self.metadata_users: OrderedSet[torch.fx.Node] = OrderedSet()
+        self.replacement_extra_args: list[torch.fx.Node] = []
 
     @property
     def graph(self) -> torch.fx.Graph:
@@ -289,6 +295,322 @@ class Match:
         self.nodes.extend(other.nodes)
         self.kwargs.update(other.kwargs)
         self.targets.update(other.targets)
+        self.auto_functionalized_nodes.update(other.auto_functionalized_nodes)
+        self.metadata_users.update(other.metadata_users)
+
+    def _view_metadata_by_input(self) -> dict[torch.fx.Node, Any] | None:
+        metadata_by_input = {}
+        for node in self.auto_functionalized_nodes:
+            tensor_bases = node.args[1]
+            if tensor_bases is None:
+                continue
+            if not isinstance(tensor_bases, dict):
+                return None
+            for name, metadata in tensor_bases.items():
+                if metadata is None:
+                    continue
+                inputs = node.kwargs[name]
+                if isinstance(inputs, (list, tuple)):
+                    if not isinstance(metadata, (list, tuple)) or len(inputs) != len(
+                        metadata
+                    ):
+                        return None
+                    entries = zip(inputs, metadata)
+                else:
+                    entries = [(inputs, metadata)]
+                for value, entry in entries:
+                    if entry is None:
+                        continue
+                    if value in metadata_by_input and metadata_by_input[value] != entry:
+                        return None
+                    metadata_by_input[value] = entry
+        return metadata_by_input
+
+    def preserve_auto_functionalized_metadata(
+        self, replacement: torch.fx.GraphModule, args: Sequence[Any]
+    ) -> bool:
+        """Preserve captured bases and infer replacement-local view metadata.
+
+        Extra placeholders retain original base/geometry dependencies without
+        changing the registered Python function's signature. Replacement-local
+        views require both a read-only schema alias and matching fake storage.
+        """
+        if not self.auto_functionalized_nodes:
+            return True
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        metadata_by_input = self._view_metadata_by_input()
+        if metadata_by_input is None:
+            return False
+
+        placeholders = [n for n in replacement.graph.nodes if n.op == "placeholder"]
+        original_inputs = dict(zip(placeholders, args))
+        captured_bases = OrderedSet(entry[0] for entry in metadata_by_input.values())
+        unknown = object()
+        roots = {}
+
+        def find_root(value):
+            if value in roots:
+                return roots[value]
+            root = infer_root(value)
+            roots[value] = root
+            return root
+
+        def infer_root(value):
+            if value in original_inputs:
+                original = original_inputs[value]
+                if original in metadata_by_input:
+                    return metadata_by_input[original][0]
+                return original if original in captured_bases else unknown
+            if not isinstance(value, torch.fx.Node):
+                return unknown
+            result = value.meta.get("val")
+            if not is_fake_tensor(result):
+                return unknown
+            producer = value
+            return_index = 0
+            indexed = value.target is operator.getitem
+            if indexed:
+                if len(value.args) != 2:
+                    return unknown
+                index = value.args[1]
+                if type(index) is not int:
+                    return unknown
+                producer, return_index = value.args[0], index
+            if (
+                not isinstance(producer, torch.fx.Node)
+                or producer.op != "call_function"
+                or not isinstance(producer.target, torch._ops.OpOverload)
+                or producer.target.namespace not in ("aten", "prims")
+            ):
+                return unknown
+            schema = producer.target._schema
+            if schema.is_mutable or not schema.returns:
+                return unknown
+            list_return = len(schema.returns) == 1 and isinstance(
+                schema.returns[0].type, torch.ListType
+            )
+            if list_return:
+                if not indexed or not isinstance(
+                    schema.returns[0].type.getElementType(), torch.TensorType
+                ):
+                    return unknown
+                return_index = 0
+            elif indexed:
+                if len(schema.returns) == 1 or not (
+                    -len(schema.returns) <= return_index < len(schema.returns)
+                ):
+                    return unknown
+                return_index %= len(schema.returns)
+            elif len(schema.returns) != 1:
+                return unknown
+            returned = schema.returns[return_index]
+            if not list_return and not isinstance(returned.type, torch.TensorType):
+                return unknown
+
+            schema_info = torch._C._SchemaInfo(schema)
+            output_arg = torch._C._SchemaArgument(
+                torch._C._SchemaArgType.output, return_index
+            )
+            aliases = []
+            for i, argument in enumerate(schema.arguments):
+                actual = (
+                    producer.args[i]
+                    if i < len(producer.args)
+                    else producer.kwargs.get(argument.name, argument.default_value)
+                )
+                declared_alias = schema_info.may_contain_alias(
+                    output_arg,
+                    torch._C._SchemaArgument(torch._C._SchemaArgType.input, i),
+                )
+                if declared_alias:
+                    # A unique Tensor input is required, not an ambiguous list
+                    # or wildcard relationship to several arguments.
+                    if not isinstance(actual, torch.fx.Node) or not isinstance(
+                        actual.meta.get("val"), torch.Tensor
+                    ):
+                        return unknown
+                    aliases.append(actual)
+                actual_values = torch.fx.map_arg(actual, _get_match_node_value)
+                for tensor in pytree.tree_leaves(actual_values):
+                    if not isinstance(tensor, torch.Tensor):
+                        continue
+                    if not is_fake_tensor(tensor) or maybe_get_fake_mode(
+                        tensor
+                    ) is not maybe_get_fake_mode(result):
+                        return unknown
+                    # pyrefly: ignore [missing-attribute]
+                    shares_storage = torch._C._is_alias_of(result, tensor)
+                    if shares_storage != declared_alias:
+                        # Alias schemas can also copy (reshape/contiguous), and
+                        # some undeclared aliases exist (aten::_unsafe_view).
+                        return unknown
+            if returned.alias_info is None:
+                return value if not aliases and not indexed else unknown
+            if len(aliases) != 1:
+                return unknown
+            return find_root(aliases[0])
+
+        # Reuse traced symbolic expressions. Reading geometry from a tensor at
+        # runtime would observe a potentially compacted backend layout.
+        symbolic_nodes = {}
+        for n in replacement.graph.nodes:
+            if isinstance(n.meta.get("val"), torch.SymInt):
+                symbolic_nodes.setdefault(n.meta["val"].node.expr, n)
+
+        def view_metadata(value, root):
+            from torch._prims_common import compute_required_storage_length
+
+            tensor = value.meta.get("val")
+            base = _get_match_node_value(root)
+            if (
+                not is_fake_tensor(base)
+                or base.element_size() != tensor.element_size()
+                or base.dtype != tensor.dtype
+                or base.is_conj() != tensor.is_conj()
+                or base.is_neg() != tensor.is_neg()
+            ):
+                return unknown
+            extent = compute_required_storage_length(
+                base.size(),
+                base.stride(),
+                base.storage_offset(),  # pyrefly: ignore [bad-argument-type]
+            )
+            view_extent = compute_required_storage_length(
+                tensor.size(), tensor.stride(), tensor.storage_offset()
+            )
+            if not guard_or_false(view_extent <= extent):
+                return unknown
+
+            def resolve_expr(expr):
+                from torch.fx.experimental.proxy_tensor import _sympy_handlers
+
+                if expr in symbolic_nodes and symbolic_nodes[expr] < value:
+                    return symbolic_nodes[expr]
+                if expr.is_Integer:
+                    return int(expr)
+                target = _sympy_handlers().get(expr.func)
+                if target is None:
+                    return unknown
+                inputs = [resolve_expr(arg) for arg in expr.args]
+                if any(arg is unknown for arg in inputs):
+                    return unknown
+
+                def emit(*args):
+                    with replacement.graph.inserting_before(value):
+                        result = replacement.graph.call_function(target, args)
+                    result.meta["val"] = target(
+                        *torch.fx.map_arg(args, _get_match_node_value)
+                    )
+                    return result
+
+                result = (
+                    functools.reduce(emit, inputs) if len(inputs) > 2 else emit(*inputs)
+                )
+                symbolic_nodes[expr] = result
+                return result
+
+            def geometry(number):
+                return (
+                    resolve_expr(number.node.expr)
+                    if isinstance(number, torch.SymInt)
+                    else number
+                )
+
+            entry = (
+                root,
+                tuple(geometry(n) for n in tensor.size()),
+                tuple(geometry(n) for n in tensor.stride()),
+                geometry(tensor.storage_offset()),
+            )
+            if any(v is unknown for v in pytree.tree_leaves(entry)):
+                return unknown
+            return entry
+
+        updates = []
+        for node in replacement.graph.nodes:
+            if node.target is not torch.ops.higher_order.auto_functionalized:
+                continue
+            if len(node.args) != 1:
+                # An explicitly metadata-bearing replacement owns its protocol.
+                continue
+            metadata = {}
+            mutable_names, _ = get_mutable_args(node.args[0])
+            for name in mutable_names:
+                values = node.kwargs[name]
+                inputs = values if isinstance(values, (list, tuple)) else [values]
+                entries = []
+                for value in inputs:
+                    if value is None:
+                        entries.append(None)
+                    elif value in original_inputs:
+                        entries.append(metadata_by_input.get(original_inputs[value]))
+                    else:
+                        root = find_root(value)
+                        if root is unknown:
+                            return False
+                        entry = None if root is value else view_metadata(value, root)
+                        if entry is unknown:
+                            return False
+                        entries.append(entry)
+                if any(entry is not None for entry in entries):
+                    metadata[name] = (
+                        entries if isinstance(values, (list, tuple)) else entries[0]
+                    )
+            if metadata:
+                updates.append((node, metadata))
+
+        first_output = min(node for node in self.output_nodes() if node is not None)
+        if any(not node < first_output for node in self.replacement_extra_args):
+            return False
+        for node, metadata in updates:
+            if any(
+                isinstance(value, torch.fx.Node)
+                and not value
+                < (node if value.graph is replacement.graph else first_output)
+                for value in pytree.tree_leaves(metadata)
+            ):
+                return False
+        if not updates:
+            return True
+
+        extra_placeholders = {}
+        first_op = next(n for n in replacement.graph.nodes if n.op != "placeholder")
+
+        def add_input(node):
+            if node.graph is replacement.graph:
+                return node
+            if node not in extra_placeholders:
+                with replacement.graph.inserting_before(first_op):
+                    placeholder = replacement.graph.placeholder(
+                        f"view_metadata_{len(extra_placeholders)}"
+                    )
+                placeholder.meta = node.meta.copy()
+                extra_placeholders[node] = placeholder
+                self.replacement_extra_args.append(node)
+            return extra_placeholders[node]
+
+        for node, metadata in updates:
+            node.args = (node.args[0], torch.fx.map_arg(metadata, add_input))
+            if "eager_input_vals" in node.meta:
+                eager_args, eager_kwargs = node.meta["eager_input_vals"]
+                node.meta["eager_input_vals"] = (
+                    (eager_args[0], torch.fx.map_arg(metadata, _get_match_node_value)),
+                    eager_kwargs,
+                )
+        replacement.recompile()
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        fake_args = [
+            _get_match_node_value(node)
+            for node in replacement.graph.nodes
+            if node.op == "placeholder"
+        ]
+        fake_mode = torch._dynamo.utils.detect_fake_mode(fake_args)
+        if fake_mode is None:
+            raise AssertionError("fake_mode is None")
+        FakeTensorProp(replacement, fake_mode).propagate_dont_convert_inputs(*fake_args)
+        return True
 
     def bundle(self) -> Match:
         # Wrap args in an extra list
@@ -540,7 +862,13 @@ class PatternExpr(ABC):
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
-            return MatchContext([self], graph=node.graph).match(self, node)
+            match = MatchContext([self], graph=node.graph).match(self, node)
+            if (
+                is_match(match)
+                and not match.metadata_users <= match.auto_functionalized_nodes
+            ):
+                return FailedMatch("unmatched view metadata users")
+            return match
         except FailedMatch as e:
             # Drop the traceback: the caller keeps the returned FailedMatch in a
             # local, and its traceback would hold this frame and, via f_back, the
@@ -1075,13 +1403,36 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        if not self._match_fns(node) or len(node.args) != len(self.args):
+        if not self._match_fns(node):
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
-        if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users {}", self)
-
         _args = node.args
+        omitted_metadata = (
+            node.target is torch.ops.higher_order.auto_functionalized
+            and len(self.args) == 1
+            and len(_args) == 2
+        )
+        if omitted_metadata:
+            _args = _args[:1]
+        if len(_args) != len(self.args):
+            return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+
+        metadata_users = OrderedSet()
+        if not self._match_users(node, ctx):
+            metadata_users = OrderedSet(
+                [
+                    user
+                    for user in node.users
+                    if user.target is torch.ops.higher_order.auto_functionalized
+                    and len(user.args) == 2
+                    and all(
+                        value is not node for value in pytree.tree_leaves(user.kwargs)
+                    )
+                ]
+            )
+            if len(node.users) - len(metadata_users) != self.users:
+                return FailedMatch("multiple_users {}", self)
+
         _kwargs = node.kwargs
         if len(_kwargs) < len(self.kwargs):
             from torch.fx.operator_schemas import normalize_function
@@ -1113,6 +1464,9 @@ class _TargetArgsExpr(_TargetExpr):
             raise AssertionError("node_items and self_items length mismatch")
 
         m = Match(ctx, self)
+        if omitted_metadata:
+            m.auto_functionalized_nodes.add(node)
+        m.metadata_users.update(metadata_users)
         for pattern, child_node in zip(self_items, node_items):
             if isinstance(pattern, PatternExpr):
                 child_match = ctx.match(pattern, child_node)
@@ -1363,7 +1717,13 @@ class MultiOutputPattern(PatternExpr):
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
-            return MatchContext(self.outputs, graph=node.graph).match(self, node)
+            match = MatchContext(self.outputs, graph=node.graph).match(self, node)
+            if (
+                is_match(match)
+                and not match.metadata_users <= match.auto_functionalized_nodes
+            ):
+                return FailedMatch("unmatched view metadata users")
+            return match
         except FailedMatch as e:
             # See PatternExpr.match.
             return e.with_traceback(None)
@@ -1562,6 +1922,15 @@ class ReplacementPatternEntry(PatternEntry):
         """
         Inserts the replacement graph into the toplevel graph at the match
         """
+
+        if (
+            isinstance(match, Match)
+            and match.auto_functionalized_nodes
+            and replacement_graph is not match.replacement_graph
+        ):
+            raise FailedMatch(
+                "view metadata replacements must be traced through register_replacement"
+            )
 
         added_replacement_nodes: list[torch.fx.Node] = []
         custom_context = _common_custom_context(match.nodes)
@@ -1805,7 +2174,8 @@ class ReplacementPatternEntry(PatternEntry):
             match,
             graph,
             match.replacement_graph,
-            self.normalize_args(*match.args, **match.kwargs),
+            self.normalize_args(*match.args, **match.kwargs)
+            + match.replacement_extra_args,
             pass_name=self.pattern_name or "replace_with_graph",
         )
 
@@ -2085,6 +2455,15 @@ def register_replacement(
                 _get_match_node_value,
             )
         )
+        view_metadata = match._view_metadata_by_input()
+        if view_metadata is None:
+            return False
+        view_metadata_values = {
+            id(_get_match_node_value(node)): torch.fx.map_arg(
+                metadata, _get_match_node_value
+            )
+            for node, metadata in view_metadata.items()
+        }
 
         sym_args: list[torch.SymInt] = []
         fake_mode = torch._dynamo.utils.detect_fake_mode(args)
@@ -2104,13 +2483,36 @@ def register_replacement(
                     invalid_args = True
                     return arg
 
-                refreshed_arg = torch.empty_strided(
-                    arg.size(),
-                    arg.stride(),
-                    dtype=arg.dtype,
-                    device=arg.device,
-                    requires_grad=grad,
-                )
+                if match.auto_functionalized_nodes:
+                    from torch._prims_common import clone_preserve_strides
+
+                    # Search and replacement functions can observe offsets while
+                    # tracing, before view metadata is restored to their HOPs.
+                    metadata = view_metadata_values.get(id(arg))
+                    base = metadata[0] if metadata is not None else None
+                    if metadata is not None:
+                        _, size, stride, offset = metadata
+                        geometry = (*arg.size(), *arg.stride(), arg.storage_offset())
+                        if (
+                            len(size) != arg.ndim
+                            or len(stride) != arg.ndim
+                            or not all(
+                                guard_or_false(a == b)
+                                for a, b in zip(geometry, (*size, *stride, offset))
+                            )
+                        ):
+                            invalid_args = True
+                            return arg
+                    refreshed_arg = clone_preserve_strides(arg, base=base).detach()
+                    refreshed_arg.requires_grad_(grad)
+                else:
+                    refreshed_arg = torch.empty_strided(
+                        arg.size(),
+                        arg.stride(),
+                        dtype=arg.dtype,
+                        device=arg.device,
+                        requires_grad=grad,
+                    )
                 for v in itertools.chain(refreshed_arg.shape, refreshed_arg.stride()):
                     if isinstance(v, torch.SymInt) and all(
                         statically_known_true(v != a) for a in sym_args
@@ -2130,7 +2532,12 @@ def register_replacement(
             # same shapes across layers.
             specific_arg_info = _trace_arg_info(argnames_static, args)
             specific_argnames = specific_arg_info.flat_argnames
-            cached = specific_pattern_cache.lookup(args, fake_mode.shape_env)
+            # This cache's tensor key does not include storage offsets.
+            cached = (
+                None
+                if match.auto_functionalized_nodes
+                else specific_pattern_cache.lookup(args, fake_mode.shape_env)
+            )
             specific_pattern = cached[0].get(cached[1]) if cached else None
 
             if specific_pattern is None:
@@ -2221,9 +2628,61 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(
-                    replace_fn, args, get_decomp_fn=get_decomp_fn
+                symbolic_metadata = OrderedSet(
+                    node
+                    for node in pytree.tree_leaves(view_metadata)
+                    if isinstance(node, torch.fx.Node)
+                    and isinstance(_get_match_node_value(node), torch.SymInt)
                 )
+                if symbolic_metadata:
+                    # Geometry must come from the captured expressions, not
+                    # metadata queries on an input that a backend can compact.
+                    def replace_with_metadata(*inputs: Any) -> Any:
+                        return replace_fn(*inputs[: len(args)])
+
+                    match.replacement_graph = trace_fn(
+                        replace_with_metadata,
+                        args + [_get_match_node_value(n) for n in symbolic_metadata],
+                        get_decomp_fn=get_decomp_fn,
+                    )
+                    if trace_fn is joint_fwd_bwd:
+                        replacement_graph = match.replacement_graph.graph
+                        placeholders = [
+                            n for n in replacement_graph.nodes if n.op == "placeholder"
+                        ]
+                        num_primals = len(pytree.tree_leaves(args))
+                        num_metadata = len(symbolic_metadata)
+                        # Application passes original primals and tangents first,
+                        # followed by the metadata dependencies.
+                        cursor = placeholders[-1]
+                        for placeholder in placeholders[
+                            num_primals : num_primals + num_metadata
+                        ]:
+                            cursor.append(placeholder)
+                            cursor = placeholder
+                        output = next(
+                            n for n in replacement_graph.nodes if n.op == "output"
+                        )
+                        outputs = output.args[0]
+                        if not isinstance(outputs, (list, tuple)) or any(
+                            grad is not None for grad in outputs[-num_metadata:]
+                        ):
+                            return False
+                        # The added scalar primals have no gradients and are not
+                        # outputs of the original joint pattern.
+                        output.args = (outputs[:-num_metadata],)
+                        match.replacement_graph.recompile()
+                    match.replacement_extra_args.extend(symbolic_metadata)
+                else:
+                    match.replacement_graph = trace_fn(
+                        replace_fn, args, get_decomp_fn=get_decomp_fn
+                    )
+                if not match.preserve_auto_functionalized_metadata(
+                    match.replacement_graph,
+                    normalize_args(**structured_match_kwargs)
+                    + match.replacement_extra_args,
+                ):
+                    return False
                 _use_current_device_node(match.replacement_graph)
                 match.kwargs = structured_match_kwargs
                 if len(match.nodes) == 1:
@@ -2856,6 +3315,14 @@ class PatternMatcherPass:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
+                    # Arbitrary handlers can bypass replacement graph insertion,
+                    # so they must explicitly match the metadata argument.
+                    if (
+                        is_match(m)
+                        and m.auto_functionalized_nodes
+                        and not isinstance(entry, ReplacementPatternEntry)
+                    ):
+                        continue
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)

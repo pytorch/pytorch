@@ -229,11 +229,7 @@ class FunctionalTensor(torch.Tensor):
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
 
-        if (
-            torch._export.config.enable_auto_functionalized_v2_for_export
-            and torch.is_inference_mode_enabled()
-            and torch._inductor.config.enable_auto_functionalized_v2
-        ):
+        if torch.is_inference_mode_enabled():
             storage = out.elem.untyped_storage()
             if out.is_base_tensor():
                 out._inference_mode_base = None
