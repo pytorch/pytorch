@@ -776,6 +776,7 @@ def make_pointwise(
     override_fn_when_input_bool: Callable[..., Any] | None = None,
     allow_alpha: bool = False,
     use_fma_for_alpha: bool = False,
+    strict_sub_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
@@ -804,6 +805,30 @@ def make_pointwise(
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
+                if strict_sub_alpha and any(
+                    is_strict_cuda_triton(inp.get_device()) for inp in inputs
+                ):
+                    dtype = inputs[0].get_dtype()
+                    if dtype.is_floating_point:
+                        compute_dtype = (
+                            torch.float32
+                            if dtype in (torch.float16, torch.bfloat16)
+                            else dtype
+                        )
+
+                        def sub_fma(a, b):
+                            scale = (
+                                ops.index_expr(-alpha, compute_dtype)
+                                if isinstance(alpha, sympy.Basic)
+                                else ops.constant(-alpha, compute_dtype)
+                            )
+                            return ops.fma(
+                                ops.to_dtype(b, compute_dtype),
+                                scale,
+                                ops.to_dtype(a, compute_dtype),
+                            )
+
+                        return make_pointwise(sub_fma)(*inputs)
                 # Use FMA for add-with-alpha on Triton GPU floating-point.
                 # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
@@ -1206,6 +1231,7 @@ def register_pointwise(
     override_fn_when_input_bool=None,
     allow_alpha=False,
     use_fma_for_alpha=False,
+    strict_sub_alpha=False,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
 ):
@@ -1227,6 +1253,7 @@ def register_pointwise(
         override_fn_when_input_bool=override_fn_when_input_bool,
         allow_alpha=allow_alpha,
         use_fma_for_alpha=use_fma_for_alpha,
+        strict_sub_alpha=strict_sub_alpha,
         triton_fallback=triton_fallback,
         round_scalars_to_tensor_dtype=round_scalars_to_tensor_dtype,
     )
@@ -1259,6 +1286,13 @@ def ldexp_lowering(x: TensorBox, n: TensorBox):
 
     x_dtype = x.get_dtype()
     n_dtype = n.get_dtype()
+
+    if (
+        is_strict_cuda_triton(x.get_device())
+        and x_dtype in (torch.float16, torch.bfloat16)
+        and n_dtype == x_dtype
+    ):
+        return mul(x, pow(full_like(n, 2), n))
 
     x_is_float = x_dtype.is_floating_point
     n_is_int = not n_dtype.is_floating_point and n_dtype != torch.bool
@@ -7802,7 +7836,11 @@ def pow(a, b):
         if a == 1:
             return full_like(b, 1)
 
-        if a == 2 and is_float_dtype(b.get_dtype()):
+        if (
+            a == 2
+            and is_float_dtype(b.get_dtype())
+            and not is_strict_cuda_triton(b.get_device())
+        ):
             return exp2(b)
 
     if is_integer_pow:
@@ -7973,6 +8011,21 @@ def div_mode(a, b, rounding_mode=None):
 
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
+    for tensor, scalar in ((a, b), (b, a)):
+        if (
+            isinstance(tensor, TensorBox)
+            and isinstance(scalar, (int, float))
+            and is_strict_cuda_triton(tensor.get_device())
+            and tensor.get_dtype() in (torch.float16, torch.bfloat16)
+        ):
+            # CUDA keeps CPU scalars at opmath precision, unlike tensor inputs.
+            def scalar_mul(x):
+                return ops.mul(
+                    ops.to_dtype(x, torch.float32),
+                    ops.constant(scalar, torch.float32),
+                )
+
+            return make_pointwise(scalar_mul)(tensor)
     both_bool = is_boolean_type(a) and is_boolean_type(b)
     if both_bool:
         return logical_and(a, b)
@@ -8657,7 +8710,12 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+sub = register_pointwise(
+    aten.sub,
+    allow_alpha=True,
+    round_scalars_to_tensor_dtype=True,
+    strict_sub_alpha=True,
+)
 
 
 @register_lowering(aten.addcmul, broadcast=True)
