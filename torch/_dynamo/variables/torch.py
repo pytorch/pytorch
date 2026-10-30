@@ -2993,26 +2993,46 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # PrivateUse1 backends (e.g. npu) register after torch import; probe
         # once for the stream/synchronize/exchange_device handlers below. This
         # function is cached on first compile, so backends must register their
-        # device module before the first compile.
+        # device module before the first compile (a missed registration is a
+        # silent, permanent loss of the routing below).
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
         privateuse1_backend_mod = (
             getattr(torch, privateuse1_backend_name, None)
             if privateuse1_backend_name != "privateuseone"
             else None
         )
+        # trace_rules dispatches torch.* calls through a static rule map, and
+        # torch.<backend>.* is not listed there, so the handlers below would be
+        # unreachable: those calls would be inlined as UserFunctionVariable.
+        # allow_in_graph registers the backend functions so routing dispatches
+        # them to this handler table. It survives trace_rules cache clears
+        # (e.g. from torch.distributed.init_process_group) and is weakref
+        # managed.
+        from ..decorators import allow_in_graph
 
-        extra_current_stream_fns = []
+        privateuse1_backend_fns: dict[str, Callable[..., Any]] = {}
         if privateuse1_backend_mod is not None:
-            extra_fn = getattr(privateuse1_backend_mod, "current_stream", None)
-            if callable(extra_fn):
-                extra_current_stream_fns.append(extra_fn)
+            for fn_name in (
+                "current_stream",
+                "synchronize",
+                "_exchange_device",
+                "_maybe_exchange_device",
+            ):
+                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
+                if callable(backend_fn):
+                    privateuse1_backend_fns[fn_name] = backend_fn
+                    allow_in_graph(backend_fn)
 
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
             torch.mtia.current_stream,
             torch.xpu.current_stream,
-            *extra_current_stream_fns,
+            *(
+                [privateuse1_backend_fns["current_stream"]]
+                if "current_stream" in privateuse1_backend_fns
+                else []
+            ),
         )
         def handle_current_stream(
             self,
@@ -3068,10 +3088,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
         }
-        if privateuse1_backend_mod is not None:
-            sync_fn = getattr(privateuse1_backend_mod, "synchronize", None)
-            if callable(sync_fn):
-                _synchronize_fn_to_device_type[sync_fn] = privateuse1_backend_name
+        if "synchronize" in privateuse1_backend_fns:
+            _synchronize_fn_to_device_type[
+                privateuse1_backend_fns["synchronize"]
+            ] = privateuse1_backend_name
 
         @register(
             torch.accelerator.synchronize,
@@ -3440,31 +3460,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # exchange_device_helper additionally requires the backend to
             # provide current_device / set_device (guard source + cleanup hook).
             for fn_name in ("_exchange_device", "_maybe_exchange_device"):
-                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
-                if callable(backend_fn):
+                backend_fn = privateuse1_backend_fns.get(fn_name)
+                if backend_fn is not None:
                     handlers[backend_fn] = _make_exchange_device_handler(
                         cast(Callable[[int], int | None], backend_fn),
                         privateuse1_backend_name,
                     )
 
-            # trace_rules routes torch.* functions through its static rule map,
-            # and torch.<backend>.* is not listed there, so the handlers above
-            # would be unreachable: those calls would be inlined as
-            # UserFunctionVariable instead. allow_in_graph registers the
-            # backend functions so routing dispatches them to this handler
-            # table. It survives trace_rules cache clears (e.g. from
-            # torch.distributed.init_process_group) and is weakref-managed.
-            from ..decorators import allow_in_graph
-
-            for fn_name in (
-                "current_stream",
-                "synchronize",
-                "_exchange_device",
-                "_maybe_exchange_device",
-            ):
-                backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
-                if callable(backend_fn):
-                    allow_in_graph(backend_fn)
+            # Every allow_in_graph'ed function must dispatch to a handler:
+            # otherwise it is emitted as a raw FX call_function node that fails
+            # at runtime, since stream/synchronize/exchange_device return
+            # non-tensor values that cannot be traced as graph outputs.
+            missing_handlers = [
+                fn for fn in privateuse1_backend_fns.values() if fn not in handlers
+            ]
+            if missing_handlers:
+                raise AssertionError(
+                    f"no dynamo handler registered for: {missing_handlers}"
+                )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
         def handle_override_optimization_hint(
