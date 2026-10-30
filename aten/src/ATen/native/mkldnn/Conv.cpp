@@ -40,6 +40,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -767,7 +768,7 @@ Tensor _mkldnn_convolution_transpose(
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_const_tensor(bias);
-    ideep::convolution_transpose_forward::compute_v3(
+    mkldnn::convolution_transpose_forward_compute_v3(
         x,
         w,
         b,
@@ -781,7 +782,7 @@ Tensor _mkldnn_convolution_transpose(
         use_channels_last,
         op_attr);
   } else {
-    ideep::convolution_transpose_forward::compute_v3(
+    mkldnn::convolution_transpose_forward_compute_v3(
         x,
         w,
         output_sizes,
@@ -1080,7 +1081,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
-  ideep::convolution_transpose_backward_data::compute_v3(
+  mkldnn::convolution_transpose_backward_data_compute_v3(
       grad_y,
       w,
       input_size.vec(),
@@ -1127,7 +1128,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (bias_defined) {
-    ideep::convolution_transpose_backward_weights::compute_v3(
+    mkldnn::convolution_transpose_backward_weights_compute_v3(
         x,
         grad_y,
         weight_size.vec(),
@@ -1141,7 +1142,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         is_channels_last,
         op_attr);
   } else {
-    ideep::convolution_transpose_backward_weights::compute_v3(
+    mkldnn::convolution_transpose_backward_weights_compute_v3(
         x,
         grad_y,
         weight_size.vec(),
