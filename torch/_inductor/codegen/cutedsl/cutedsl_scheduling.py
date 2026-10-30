@@ -21,7 +21,6 @@ from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
-
 log = logging.getLogger(__name__)
 
 
@@ -99,22 +98,53 @@ class CuteDSLScheduling(BaseScheduling):
 
             _, _, kernel_path = get_path(code_hash(src_code_str), "py")
 
-            compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline(f"async_compile.cutedsl({kernel_name!r}, r'''")
-            compile_wrapper.splice(src_code_str, strip=True)
-            if precompile_metadata is not None:
-                compile_wrapper.writeline(
-                    f"''', precompile_metadata={precompile_metadata!r})"
+            if getattr(V.graph, "aot_mode", False):
+                if precompile_metadata is None:
+                    raise NotImplementedError(
+                        "CuteDSL AOT requires static tensor metadata"
+                    )
+                from .aot import (
+                    compile_cutedsl_external_source,
+                )
+
+                artifact, _spec = compile_cutedsl_external_source(
+                    kernel_name,
+                    src_code_str,
+                    precompile_metadata,
+                )
+                # compile_cutedsl_external_source already exported; publish it
+                # through the shared graph-local path.
+                from torch._inductor.codegen.external_aot import (
+                    get_external_aot_backend,
+                    publish_external_aot_artifact,
+                )
+
+                backend = get_external_aot_backend("cutedsl")
+                publish_external_aot_artifact(
+                    wrapper,
+                    kernel_name,
+                    artifact,
+                    backend.make_deferred_call(artifact),
                 )
             else:
-                compile_wrapper.writeline("''')")
+                compile_wrapper = IndentedBuffer()
+                compile_wrapper.writeline(
+                    f"async_compile.cutedsl({kernel_name!r}, r'''"
+                )
+                compile_wrapper.splice(src_code_str, strip=True)
+                if precompile_metadata is not None:
+                    compile_wrapper.writeline(
+                        f"''', precompile_metadata={precompile_metadata!r})"
+                    )
+                else:
+                    compile_wrapper.writeline("''')")
 
-            metadata_comment = f"# kernel path: {kernel_path}"
-            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment += "\n" + origins + "\n" + detailed_origins
-            wrapper.define_kernel(
-                kernel_name, compile_wrapper.getvalue(), metadata_comment
-            )
+                metadata_comment = f"# kernel path: {kernel_path}"
+                origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+                metadata_comment += "\n" + origins + "\n" + detailed_origins
+                wrapper.define_kernel(
+                    kernel_name, compile_wrapper.getvalue(), metadata_comment
+                )
         return kernel_name
 
     def codegen_template(
@@ -207,12 +237,22 @@ class CuteDSLScheduling(BaseScheduling):
             device_capability = torch.cuda.get_device_capability(device_index)
 
         metadata: dict[str, object] = {
+            "template_name": ctb.template.name,
+            "tensor_names": tuple(
+                arg_name.removeprefix("arg_")
+                for arg_name, _ in kernel._template_input_args
+            ),
             "precompile_shapes": precompile_shapes,
             "precompile_strides": precompile_strides,
             "precompile_dtypes": precompile_dtypes,
             "device_index": device_index,
             "device_capability": device_capability,
         }
+        template_kwargs = getattr(kernel, "_template_kwargs", {})
+        if "AOT_ARG_NAMES" in template_kwargs:
+            metadata["aot_arg_names"] = tuple(
+                template_kwargs["AOT_ARG_NAMES"]
+            )
 
         hw_info = self._build_hw_info(kernel)
         if hw_info is not None:

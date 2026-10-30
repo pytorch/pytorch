@@ -37,7 +37,6 @@ from .aux_scalars import CuteDSLAuxScalarBindings
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 from .lane_analysis import classify_lane_expr
 
-
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
 MAIN_SUFFIX = "main"
 
@@ -250,8 +249,7 @@ class CuteDSLTemplateKernel(Kernel):
     def gen_imports(self, uses_inline_asm: bool = False) -> str:
         """Generate common imports for CuteDSL templates."""
         imports = IndentedBuffer()
-        imports.splice(
-            """
+        imports.splice("""
             import torch
             import cutlass
             import cutlass.cute as cute
@@ -260,8 +258,7 @@ class CuteDSLTemplateKernel(Kernel):
             from cutlass._mlir.dialects import math as mlir_math
             import operator
             from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
-            """
-        )
+            """)
         if uses_inline_asm:
             imports.splice(
                 "from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_elementwise_intrinsic"
@@ -517,6 +514,25 @@ class CuteDSLTemplateKernel(Kernel):
         we generate reinterpret_tensor() calls to properly handle the views.
         """
         wrapper = V.graph.wrapper_code
+        if getattr(V.graph, "aot_mode", False):
+            from torch._inductor.codegen.external_aot import (
+                get_external_aot_backend,
+            )
+
+            binding = {"output": self.output_node}
+            for arg_name, input_node in self._template_input_args:
+                capture = self._get_reinterpret_view(input_node)
+                binding[arg_name.removeprefix("arg_")] = (
+                    capture if capture is not None else input_node
+                )
+            artifact = wrapper.external_aot_artifacts[name]
+            get_external_aot_backend("cutedsl").emit_call(
+                wrapper,
+                artifact,
+                binding,
+                device=self.output_node.get_device(),
+            )
+            return
 
         # Build call args matching the signature generated in `def_kernel`
         call_args = []
@@ -892,15 +908,13 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             if len(coord_items) == 1
             else f"({', '.join(coord_items)})"
         )
-        self.kernel.body.splice(
-            f"""
+        self.kernel.body.splice(f"""
             {aligned_idx} = cute.assume({vector_idx}[0], divby={vec_size})
             {source_tile} = cute.local_tile({var}, {tiler}, {coord})
             {aligned_ptr} = cute.make_ptr({cute_dtype}, {source_tile}.iterator.toint(), {source_tile}.iterator.memspace, assumed_align=min(16, {vec_size} * {var_dtype.itemsize}))
             {aligned_source} = cute.make_tensor({aligned_ptr}, {source_tile}.layout)
             cute.autovec_copy({source_view}, {val_frag})
-            """
-        )
+            """)
 
     @staticmethod
     def _can_emit_uniform_load(idx_vars: list[CuteDSLIndexFragment]) -> bool:
@@ -938,11 +952,15 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         )
         with self.kernel.body.indent():
             load_indices = [
-                idx.code
-                if idx.is_static_int
-                else f"{idx.code}[0]"
-                if idx.is_lane_uniform
-                else f"{idx.code}[load_idx]"
+                (
+                    idx.code
+                    if idx.is_static_int
+                    else (
+                        f"{idx.code}[0]"
+                        if idx.is_lane_uniform
+                        else f"{idx.code}[load_idx]"
+                    )
+                )
                 for idx in idx_vars
             ]
             self.kernel.body.writeline(
