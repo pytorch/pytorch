@@ -9,9 +9,11 @@ from collections.abc import Callable
 from typing import cast, TypeVar
 from typing_extensions import ParamSpec
 
+import torch
 from torch._precompile import (
     _DynamoCapture,
     _matching_cache,
+    _parse_artifact_metadata,
     _read_artifact,
     _runnable_from_pair,
     capture,
@@ -86,6 +88,8 @@ def export_python(
             ``torch.compile(dynamic=)``.
     """
 
+    torch._C._log_api_usage_once("torch.compiler.export_python")
+
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         exported = _ExportedPython(fn, path, backend, dynamic)
 
@@ -133,11 +137,17 @@ class _ExportedPython:
         python_code, _ = _read_artifact(self._path, None)
         cache = _matching_cache(python_code, self._cache_path)
         if cache is None:
-            stale = (
-                f"{self._path} does not match its cache {self._cache_path} (edited "
-                "after capture, or the cache is missing)"
-            )
-            if self._backend == "inductor" and is_compilation_forbidden():
+            if os.path.exists(self._cache_path):
+                stale = (
+                    f"{self._path} was edited after capture, so its cache "
+                    f"{self._cache_path} does not match it"
+                )
+            else:
+                stale = f"{self._path} has no cache at {self._cache_path}"
+            # The artifact's own backend: the decorator's may have changed since.
+            if is_compilation_forbidden() and (
+                _parse_artifact_metadata(python_code)["BACKEND"] == "inductor"
+            ):
                 raise PrecompileError(
                     f"export_python: {stale}, and no_compilation() serves an inductor "
                     "artifact only with its own cache. Serve it outside "
