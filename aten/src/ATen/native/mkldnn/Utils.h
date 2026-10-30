@@ -99,6 +99,7 @@ inline bool is_arm_neoverse() {
   return (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 &&
           (cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1 ||
            cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v2 ||
+           cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v3 ||
            cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_n1 ||
            cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_n2));
 }
