@@ -933,8 +933,8 @@ Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
 """
-    + r"""
-.. note:: When inputs are on a CUDA device, this function synchronizes that device with the CPU.
+    + rf"""
+.. note:: {common_notes["sync_note"]}
           So does :func:`torch.linalg.ldl_factor_ex`: it skips checking ``info`` by default, but the
           factorization itself synchronizes, as its Bunch-Kaufman pivoting is data-dependent.
 """
