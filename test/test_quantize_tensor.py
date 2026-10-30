@@ -740,8 +740,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 "contiguous",
                 side_effect=AssertionError("materialized input"),
             ):
-                canonical = _canonicalize_matrix_input(data_hp, matrix_layout)
-            self.assertEqual(canonical.input.data_ptr(), data_hp.data_ptr())
+                matrix_input = _canonicalize_matrix_input(data_hp, matrix_layout)
+            self.assertEqual(matrix_input.data_ptr(), data_hp.data_ptr())
         qdata, scales = _quantize_mxfp8_tma(data_hp, dim, square, swizzled)
         self.assertEqual(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
