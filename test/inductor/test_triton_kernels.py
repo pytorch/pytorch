@@ -332,8 +332,6 @@ class KernelTests(_KernelTestsBase):
 
 @requires_triton()
 class KernelTestsArgReductionSemantics(_KernelTestsBase):
-    hw_classification = HardwareClassification.CUDA
-
     @inductor_config.patch(strict_signed_zero=True)
     def test_dim_max_min_reuse_argreduce_value(self, device):
         dtypes = [torch.float32, torch.float16]
@@ -535,7 +533,9 @@ class KernelTestsCompilation(_KernelTestsBase):
         "case",
         ["e8m0", "complex", "meta", "sparse", "fp8", "fp8_uint8", "cpu_output"],
     )
-    def test_triton_kernel_functional_decomposition_before_type_fallback(self, device, case):
+    def test_triton_kernel_functional_decomposition_before_type_fallback(
+        self, device, case
+    ):
         import torch._inductor.codegen.triton_utils as triton_utils
         import torch._inductor.lowering as lowering
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -907,8 +907,6 @@ def forward(self, x_1, output_1):
 
 @requires_triton()
 class KernelTestsFloatingPointRewrites(_KernelTestsBase):
-    hw_classification = HardwareClassification.CUDA
-
     def test_fp_self_sub_rewrite_preserves_nonfinite_semantics(self, device):
         def fn(x):
             a = x * x
@@ -3314,7 +3312,9 @@ def forward(self, arg0_1, arg1_1):
             torch.compile(f, fullgraph=True)(x, y)
 
     @onlyAccelerator
-    def test_triton_kernel_autotune_config_maxnreg_conflicts_with_launch_kwarg(self, device):
+    def test_triton_kernel_autotune_config_maxnreg_conflicts_with_launch_kwarg(
+        self, device
+    ):
         # Same as above for a Config's maxnreg, which is a Config attribute
         # rather than a kwarg: direct Triton raises on the duplicate keyword.
         add_kernel = triton.autotune(
@@ -3596,7 +3596,9 @@ def forward(self, arg0_1, arg1_1):
 
     @onlyCUDA
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
-    def test_triton_kernel_autotune_config_maxnreg(self, device, autotune_at_compile_time):
+    def test_triton_kernel_autotune_config_maxnreg(
+        self, device, autotune_at_compile_time
+    ):
         # A triton.Config's maxnreg must survive serialization into the
         # generated code, config deduplication, and reach triton.compile. The
         # capped config differs from the first one ONLY in maxnreg, so both
@@ -4169,88 +4171,69 @@ class KernelTestsPrecisionAndConstexpr(_KernelTestsBase):
         self.assertNotIn("maybe_param", ttir_str)
 
 
-def _run_triton_kernel_with_imported_symbol(self, device):
-    @triton.jit
-    def add_kernel_with_imported_symbol(
-        in_ptr,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr + offsets, mask=mask)
-        output = fast_dividef(x, 3.14)
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    def f(x):
-        out = torch.empty_like(x)
-        n_elements = x.numel()
-        add_kernel_with_imported_symbol[(n_elements,)](
-            x, out, n_elements, BLOCK_SIZE=16
-        )
-        return out
-
-    x = torch.randn(4, device=device)
-    eager_out = f(x)
-    compiled_out = torch.compile(f)(x)
-
-    self.assertEqual(compiled_out, eager_out)
-
-
-def _run_triton_kernel_with_imported_symbol_with_custom_name(self, device):
-    @triton.jit
-    def add_kernel_with_imported_symbol(
-        in_ptr,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr + offsets, mask=mask)
-        output = my_fast_dividef(x, 3.14)
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    def f(x):
-        out = torch.empty_like(x)
-        n_elements = x.numel()
-        add_kernel_with_imported_symbol[(n_elements,)](
-            x, out, n_elements, BLOCK_SIZE=16
-        )
-        return out
-
-    x = torch.randn(4, device=device)
-    eager_out = f(x)
-    compiled_out = torch.compile(f)(x)
-
-    self.assertEqual(compiled_out, eager_out)
-
-
 @requires_triton()
-class KernelTestsLibdeviceNvidia(torch._inductor.test_case.TestCase):
-    hw_classification = HardwareClassification.CUDA
+class KernelTestsImportedSymbols(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_triton_kernel_with_imported_symbol(self, device):
-        _run_triton_kernel_with_imported_symbol(self, device)
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device=device)
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
 
     def test_triton_kernel_with_imported_symbol_with_custom_name(self, device):
-        _run_triton_kernel_with_imported_symbol_with_custom_name(self, device)
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = my_fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
 
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
 
-@requires_triton()
-class KernelTestsLibdeviceIntel(torch._inductor.test_case.TestCase):
-    hw_classification = HardwareClassification.XPU
+        x = torch.randn(4, device=device)
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
 
-    def test_triton_kernel_with_imported_symbol(self, device):
-        _run_triton_kernel_with_imported_symbol(self, device)
-
-    def test_triton_kernel_with_imported_symbol_with_custom_name(self, device):
-        _run_triton_kernel_with_imported_symbol_with_custom_name(self, device)
+        self.assertEqual(compiled_out, eager_out)
 
 
 def make_mutation_test(fn):
@@ -6245,8 +6228,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
 @requires_triton()
 class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     def test_wrap_triton_triton_interpret_eager(self, device):
         script = """
 import os
@@ -7302,8 +7283,6 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 @requires_triton()
 class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -7825,14 +7804,9 @@ instantiate_device_type_tests(
     only_for=("cuda",),
 )
 instantiate_device_type_tests(
-    KernelTestsLibdeviceNvidia,
+    KernelTestsImportedSymbols,
     globals(),
-    only_for=("cuda",),
-)
-instantiate_device_type_tests(
-    KernelTestsLibdeviceIntel,
-    globals(),
-    only_for=("xpu",),
+    only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
