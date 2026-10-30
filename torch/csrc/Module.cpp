@@ -53,6 +53,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Export.h>
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -2938,6 +2939,41 @@ Call this whenever a new thread is created in order to propagate values from
     return py::reinterpret_steal<py::object>(
         torch::utils::fake_tensor_to_list(t));
   });
+
+  // A C++ FakeTensorMode, owned by its Python CppFakeTensorMode wrapper; see
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  py::class_<c10::FakeTensorMode, std::shared_ptr<c10::FakeTensorMode>>(
+      py_module, "_CppFakeTensorMode")
+      .def(
+          py::init([](const py::object& converter,
+                      const py::object& shape_env,
+                      const py::object& wrapper) {
+            std::shared_ptr<c10::SafePyObject> shape_env_obj;
+            if (!shape_env.is_none()) {
+              shape_env_obj = std::make_shared<c10::SafePyObject>(
+                  shape_env.inc_ref().ptr(), getPyInterpreter());
+            }
+            auto functorch_config =
+                py::module::import("torch._functorch.config");
+            auto mode = std::make_shared<c10::FakeTensorMode>(
+                std::move(shape_env_obj),
+                std::make_shared<c10::SafePyObject>(
+                    converter.inc_ref().ptr(), getPyInterpreter()),
+                functorch_config.attr("fake_tensor_allow_meta").cast<bool>());
+            TORCH_CHECK(!wrapper.is_none(), "Expected a Python wrapper");
+            PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
+            if (weakref == nullptr) {
+              throw py::error_already_set();
+            }
+            mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
+                weakref, getPyInterpreter());
+            return mode;
+          }),
+          py::arg("converter"),
+          py::arg("shape_env"),
+          py::arg("wrapper"))
+      .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_);
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
