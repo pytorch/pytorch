@@ -82,7 +82,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
       wStart += dilationW;
 
     // maxIndex remains in "channels-first"/contiguous
-    int64_t maxIndex = tStart * iheight * iwidth + hStart * iwidth + wStart;
+    int64_t maxIndex = (int64_t(tStart) * iheight + hStart) * iwidth + wStart;
 
     if (!channels_last) {
         inputData += slice * itime * iheight * iwidth;
@@ -99,7 +99,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
         for (int w = wStart; w < wEnd; w += dilationW)
         {
           scalar_t val;
-          int index = t * iheight * iwidth + h * iwidth + w;
+          int64_t index = (int64_t(t) * iheight + h) * iwidth + w;
           if (!channels_last) {
             val = inputData[index];
           } else {

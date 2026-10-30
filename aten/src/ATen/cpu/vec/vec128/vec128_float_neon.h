@@ -293,7 +293,7 @@ class Vectorized<float> {
   Vectorized<float> angle() const {
     auto zero = Vectorized<float>(0);
     auto pi = Vectorized<float>(c10::pi<float>);
-    auto tmp = blendv(zero, pi, *this < zero);
+    auto tmp = blendv(zero, pi, pi.copysign(*this) < zero);
     return blendv(tmp, *this, isnan());
   }
   Vectorized<float> real() const {

@@ -278,6 +278,26 @@ class TestFlopsFx(TestCase):
 
 
 class TestUtils(TestCase):
+    @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
+    def test_is_big_gpu_min_sms_config(self):
+        # https://github.com/pytorch/pytorch/issues/201471
+        jetson_like = types.SimpleNamespace(multi_processor_count=20, major=8, minor=7)
+        # The result is cached per (device, threshold); make sure the mocked
+        # GPU neither reads a cached real result nor leaks into later tests.
+        inductor_utils._is_big_gpu.cache_clear()
+        self.addCleanup(inductor_utils._is_big_gpu.cache_clear)
+        with mock.patch.object(
+            inductor_utils.DeviceProperties, "create", return_value=jetson_like
+        ):
+            device = torch.device("cuda", 0)
+            # Default threshold (68) excludes a 20-SM GPU.
+            with inductor_config.patch(max_autotune_gemm_min_sms=None):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=16):
+                self.assertTrue(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=21):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
             os.path.dirname(os.path.abspath(torch.__file__))

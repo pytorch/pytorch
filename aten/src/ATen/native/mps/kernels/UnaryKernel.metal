@@ -13,7 +13,8 @@ struct angle_functor {
   }
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(isnan(x) ? x : x < 0 ? M_PI_F : 0.0);
+    const bool neg = ::metal::signbit(static_cast<opmath_t<T>>(x));
+    return T(isnan(x) ? x : neg ? M_PI_F : 0.0);
   }
   template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
   inline float operator()(const T x) {
@@ -100,6 +101,29 @@ struct sigmoid_functor {
   }
 };
 
+// eps comes in the result dtype and eps < 0 means no clamping, see logit_out.
+// hi is rounded to that dtype to match CPU's `scalar_t(1) - eps`.
+struct logit_functor {
+  template <typename T, typename E>
+  inline E operator()(const T x, const E eps) {
+    float z = static_cast<float>(x);
+    const float lo = static_cast<float>(eps);
+    if (lo >= 0.0f) {
+      const float hi = static_cast<float>(E(1.0f - lo));
+      z = z < lo ? lo : (z > hi ? hi : z);
+    }
+    if IF_CONSTEXPR (::metal::is_same_v<E, float>) {
+      return static_cast<E>(::precise::log(z / (1.0f - z)));
+    } else {
+      // fast:: is identical to precise after rounding to half/bfloat,
+      // checked over all 65536 input bit patterns of each dtype with
+      // eps in {none, 1e-6, 1e-3, 0.2, 0.6}
+      return static_cast<E>(
+          ::metal::fast::log(::metal::fast::divide(z, 1.0f - z)));
+    }
+  }
+};
+
 struct abs_functor {
   // precise:: has only float candidates, so bfloat converts unambiguously
   // (unqualified abs is ambiguous for bfloat: float vs half), and abs is
@@ -134,6 +158,18 @@ struct sgn_functor {
     const auto z = float2(x);
     const auto m = c10::metal::hypot(z.x, z.y);
     return m == 0 ? T(0, 0) : T(z / m);
+  }
+};
+
+struct signbit_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, bool> operator()(
+      const T x) {
+    return ::metal::signbit(float(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, bool> operator()(const T x) {
+    return x < T(0);
   }
 };
 
@@ -555,11 +591,7 @@ struct log1p_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // TODO: Implement proper log1p algorithm
-    auto magnitude = c10::metal::hypot(1.0f + x.x, x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == -1 && x.y == 0) ? 0 : ::precise::atan2(x.y, 1.0 + x.x);
-    return T(real, imag);
+    return T(c10::metal::log1p(float2(x)));
   }
   inline float operator()(const bool x) {
     return x ? M_LN2_F : 0;
@@ -764,6 +796,13 @@ struct pow_scalar_functor {
   }
 };
 
+struct frac_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return static_cast<T>(float(x) - trunc(float(x)));
+  }
+};
+
 struct round_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -808,6 +847,10 @@ REGISTER_ROUNDING_OPS(float);
 REGISTER_ROUNDING_OPS(half);
 REGISTER_ROUNDING_OPS(bfloat);
 
+REGISTER_UNARY_OP(frac, float, float);
+REGISTER_UNARY_OP(frac, half, half);
+REGISTER_UNARY_OP(frac, bfloat, bfloat);
+
 REGISTER_UNARY_OP(sqr, char, char);
 REGISTER_UNARY_OP(sqr, uchar, uchar);
 REGISTER_UNARY_OP(sqr, short, short);
@@ -844,6 +887,15 @@ REGISTER_UNARY_OP(logical_not, float, bool);
 REGISTER_UNARY_OP(logical_not, bfloat, bool);
 REGISTER_UNARY_OP(logical_not, float2, bool);
 REGISTER_UNARY_OP(logical_not, half2, bool);
+
+// Unsigned and bool inputs never reach the stub, see signbit_out
+REGISTER_UNARY_OP(signbit, char, bool);
+REGISTER_UNARY_OP(signbit, short, bool);
+REGISTER_UNARY_OP(signbit, int, bool);
+REGISTER_UNARY_OP(signbit, long, bool);
+REGISTER_UNARY_OP(signbit, half, bool);
+REGISTER_UNARY_OP(signbit, bfloat, bool);
+REGISTER_UNARY_OP(signbit, float, bool);
 
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);
@@ -970,6 +1022,16 @@ REGISTER_UNARY_ALPHA_OP(polygamma, char, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, short, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, int, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, long, int, float);
+
+REGISTER_UNARY_ALPHA_OP(logit, bfloat, bfloat, bfloat);
+REGISTER_UNARY_ALPHA_OP(logit, half, half, half);
+REGISTER_UNARY_ALPHA_OP(logit, float, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, bool, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, uchar, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, char, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, short, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, int, float, float);
+REGISTER_UNARY_ALPHA_OP(logit, long, float, float);
 
 // Replacement values are computed per-dtype on the host and ride at float
 // (exact for half/bfloat extrema), mirroring the CUDA kernel's

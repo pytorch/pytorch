@@ -221,7 +221,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
             "autotune_hints", ()
         )
-        MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
+        MAX_R0_BLOCK = self._max_r0_block(device_major)
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
             register_intensive = True
@@ -399,6 +399,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             triton_config_tiled_reduction,
             triton_native_persistent_bmm_configs,
             triton_native_persistent_mm_configs,
+            unique_configs,
         )
 
         inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -493,32 +494,35 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             )
         ]
 
+        max_autotune_configs = list(configs)
+
         # Defer to more autotuning for 3d tiling
         if "y" in size_hints:
             pass
-        elif not max_autotune_enabled:
-            if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-                if (
-                    rnumel > 1024
-                    or xnumel // 8 < 128
-                    or inductor_meta.get("RSPLIT_SIZE")
-                ):
-                    configs = configs[:1]
-                else:
-                    configs = self._persistent_inner_config(
-                        size_hints,
-                        rnumel,
-                        xnumel,
-                        inductor_meta,
-                        reduction_hint,
-                        warp_size,
-                    )
-            elif reduction_hint == ReductionHint.OUTER:
-                configs = configs[-1:]
-            elif reduction_hint == ReductionHint.OUTER_TINY:
-                configs = tiny_configs
-        else:
-            configs = self._persistent_max_autotune_extras(configs, tiny_configs)
+        elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
+                configs = configs[:1]
+            else:
+                configs = self._persistent_inner_config(
+                    size_hints,
+                    rnumel,
+                    xnumel,
+                    inductor_meta,
+                    reduction_hint,
+                    warp_size,
+                )
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+
+        if max_autotune_enabled and "y" not in size_hints:
+            configs = unique_configs(
+                configs
+                + self._persistent_max_autotune_extras(
+                    max_autotune_configs, tiny_configs
+                )
+            )
 
         for c in configs:
             for p in size_hints:
@@ -530,6 +534,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     # ------------------------------------------------------------------
     # Hook methods for device-specific overrides
     # ------------------------------------------------------------------
+
+    def _max_r0_block(self, device_major: int | None) -> int:
+        """Architecture cap on R0_BLOCK, before workload-specific limits."""
+        # SM100+ (B200/GB200) needs the smaller cap.
+        return 1024 if device_major is not None and device_major >= 10 else 2048
 
     def _get_outer_config(
         self,
@@ -740,6 +749,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 @register_codegen_heuristic("reduction", "hip", register=torch.version.hip is not None)
 class ROCmReductionHeuristic(ReductionHeuristic):
     """Reduction configs for ROCm/HIP devices."""
+
+    def _max_r0_block(self, device_major: int | None) -> int:
+        # gfx major is not an NVIDIA SM version, so keep the default cap.
+        return 2048
 
     def _get_outer_config(
         self,
