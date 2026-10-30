@@ -444,6 +444,7 @@ else:
             tensors of size :math:`S_0 \ldots S_{N-1}``, then the
             output will also have :math:`N` tensors, where each tensor
             is of shape :math:`(S_0, ..., S_{N-1})`.
+            An empty input returns an empty tuple.
 
         Example::
 
@@ -495,8 +496,6 @@ def _meshgrid(*tensors, indexing: str | None):
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
-    if len(tensors) == 0:
-        return ()
 
     # Continue allowing call of old method that takes no indexing
     # kwarg for forward compatibility reasons.

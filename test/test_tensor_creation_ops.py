@@ -1414,9 +1414,23 @@ class TestTensorCreation(TestCase):
         self.assertEqual(int(y), 3)
 
     def test_meshgrid_empty(self):
-        self.assertEqual(torch.meshgrid(), ())
-        self.assertEqual(torch.meshgrid(*[]), ())
-        self.assertEqual(torch.meshgrid([]), ())
+        self.assertEqual(torch.meshgrid(indexing='ij'), ())
+        self.assertEqual(torch.meshgrid([], indexing='xy'), ())
+        self.assertEqual(torch.meshgrid(*[], indexing='ij'), ())
+        with self.assertRaisesRegex(RuntimeError,
+                                    'indexing must be one of "xy" or "ij"'):
+            torch.meshgrid(indexing='foo')
+        with self.assertRaisesRegex(RuntimeError,
+                                    'indexing must be one of "xy" or "ij"'):
+            torch.meshgrid([], indexing='foo')
+        aten_empty = torch.ops.aten.meshgrid([], indexing='ij')
+        self.assertEqual(aten_empty, [])
+        self.assertEqual(torch._refs.meshgrid([], indexing='ij'), aten_empty)
+
+        def scripted_meshgrid_empty():
+            return torch.meshgrid([], indexing='ij')
+
+        self.assertEqual(torch.jit.script(scripted_meshgrid_empty)(), ())
 
     def test_meshgrid_unsupported_indexing(self):
         with self.assertRaisesRegex(RuntimeError,
@@ -1444,6 +1458,9 @@ class TestTensorCreation(TestCase):
         with self.assertWarnsOnceRegex(
                 UserWarning, '.*will be required to pass the indexing arg.*'):
             torch.meshgrid(torch.tensor([1, 2]))
+        self.assertEqual(torch.meshgrid(), ())
+        self.assertEqual(torch.meshgrid([]), ())
+        self.assertEqual(torch.meshgrid(*[]), ())
 
     def test_meshgrid_default_indexing(self, device):
         a = torch.tensor(1, device=device)
