@@ -685,11 +685,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
             # METH_STATIC C functions stored directly in a type dict, e.g.
             # tuple.__new__; the receiver is the class itself.
             return obj.call_method(tx, name, args, kwargs)
-        if is_torch_class(descriptor.__objclass__):
-            # TorchInGraphFunctionVariable records the descriptor itself in the
-            # graph, so a tensor subclass override never runs.
-            fn = VariableTracker.build(tx, descriptor)
-            return fn.call_function(tx, [obj, *args], kwargs)
         method = obj.lookup_method_descriptor(descriptor)
         if method is not None:
             # PyCFunction errors use the bound qualname; valid calls need no guard on it.
@@ -704,6 +699,12 @@ class BoundBuiltinMethodVariable(VariableTracker):
             )
             if result is not None:
                 return result
+        if is_torch_class(descriptor.__objclass__):
+            # Keep specialized handlers such as the autograd engine's callback
+            # above this fallback. Tensor descriptors still go through trace_rules
+            # so subclass overrides cannot replace their graph operation.
+            fn = VariableTracker.build(tx, descriptor)
+            return fn.call_function(tx, [obj, *args], kwargs)
         if mro_lookup(obj.python_type(), name) is descriptor:
             # Nothing overrides it, so name lookup reaches the same C method.
             return obj.call_method(tx, name, args, kwargs)
@@ -727,9 +728,19 @@ class BoundBuiltinMethodVariable(VariableTracker):
             # METH_STATIC functions are already bound, e.g. tuple.__new__.
             codegen.append_output(load_descriptor)
             return
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
-        )
+        if self.method_load_qualname is not None and isinstance(
+            self.obj, UserDefinedObjectVariable
+        ):
+            # LOAD_METHOD selected descriptor + self before evaluating arguments.
+            # Binding across a graph break would change its TypeError qualname.
+            self.obj.install_method_load_guards()
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("functools", "partial")
+            )
+        else:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(__name__, "_bind_builtin_method")
+            )
         codegen.append_output(load_descriptor)
         codegen(self.obj)
         codegen.extend_output(create_call_function(2, False))
