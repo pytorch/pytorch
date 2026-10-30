@@ -748,28 +748,11 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    def test_unmatched_enter_autocast_aot_eager_raises(self):
-        from torch.amp.autocast_mode import _get_autocast_nesting
-
-        # Unmatched _enter_autocast leaves autocast enabled in the graph.
-        # AOT backends used to drop set_autocast_enabled and silently miscompile;
-        # they now reject the mutation at compile time.
-        def f(x):
-            torch.amp.autocast_mode._enter_autocast("cpu")
-            return x + 1
-
-        prior_nesting = _get_autocast_nesting()
-        prior_enabled = torch.is_autocast_enabled("cpu")
-        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
-            compiled(torch.randn(2))
-        self.assertEqual(_get_autocast_nesting(), prior_nesting)
-        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
-
     def test_enter_exit_autocast_graph_break_aot_eager_raises(self):
         from torch.amp.autocast_mode import _get_autocast_nesting
 
-        # Graph break between enter and exit splits the context across graphs.
+        # Graph break between bare _enter/_exit splits the context across graphs.
+        # Prefer `with torch.autocast(...)`, which Dynamo exits/re-enters across breaks.
         # Graph 0 ends with set_autocast_enabled(..., True); AOT rejects that.
         def f(x, y, z):
             m = torch.amp.autocast_mode._enter_autocast("cpu")

@@ -24,10 +24,7 @@ import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
-from torch.amp.autocast_mode import (
-    _get_autocast_nesting as _autocast_nesting,
-    _set_autocast_nesting as _restore_autocast_nesting,
-)
+from torch.amp.autocast_mode import _get_autocast_nesting, _set_autocast_nesting
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     HardwareClassification,
     IS_WINDOWS,
@@ -71,7 +68,7 @@ def _autocast_state_specs() -> tuple[_AutocastStateSpec, ...]:
             torch.is_autocast_cache_enabled,
             torch.set_autocast_cache_enabled,
         ),
-        ("autocast nesting depth", _autocast_nesting, _restore_autocast_nesting),
+        ("autocast nesting depth", _get_autocast_nesting, _set_autocast_nesting),
     )
 
 

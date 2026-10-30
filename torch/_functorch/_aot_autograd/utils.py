@@ -21,10 +21,6 @@ from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
-from torch.amp.autocast_mode import (  # noqa: F401
-    _get_autocast_nesting,
-    _set_autocast_nesting,
-)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 

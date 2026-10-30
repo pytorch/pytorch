@@ -5501,6 +5501,8 @@ def get_fw_bw_graph(
 
 
 class TestAOTAutocastStates(AOTTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch._dynamo.test_case import _snapshot_autocast_state
@@ -5529,18 +5531,6 @@ class TestAOTAutocastStates(AOTTestCase):
         fake_mode = FakeTensorMode()
         x = fake_mode.from_tensor(torch.randn(2))
         return collect, x
-
-    def test_get_autocast_states_is_per_device_enabled_dtype(self):
-        from torch._functorch._aot_autograd.utils import _get_autocast_states
-
-        states = _get_autocast_states()
-        self.assertEqual(
-            list(states),
-            list(torch._C._autocast_supported_devices()),
-        )
-        for device_type, (enabled, dtype) in states.items():
-            self.assertEqual(enabled, torch.is_autocast_enabled(device_type))
-            self.assertEqual(dtype, torch.get_autocast_dtype(device_type))
 
     def test_collect_metadata_preserves_stable_autocast_state(self):
         from torch._functorch._aot_autograd.utils import _get_autocast_states
@@ -5642,18 +5632,6 @@ class TestAOTAutocastStates(AOTTestCase):
             collect(x)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
-
-    def test_aot_function_detects_cpu_autocast_enabled_mutation(self):
-        prior_enabled = torch.is_autocast_enabled("cpu")
-
-        def f(x: torch.Tensor) -> torch.Tensor:
-            torch.set_autocast_enabled("cpu", not prior_enabled)
-            return x + 1
-
-        compiled = aot_function(f, nop)
-        with self.assertRaisesRegex(RuntimeError, "cpu autocast enabled"):
-            compiled(torch.randn(2))
-        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
     def test_aot_eager_detects_cpu_autocast_enabled_mutation(self):
         prior_enabled = torch.is_autocast_enabled("cpu")

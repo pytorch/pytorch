@@ -23,6 +23,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.amp.autocast_mode import _get_autocast_nesting, _set_autocast_nesting
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -61,14 +62,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import (
-    _get_autocast_nesting,
-    _get_autocast_states,
-    _set_autocast_nesting,
-    KNOWN_TYPES,
-    simple_wraps,
-    strict_zip,
-)
+from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
 if TYPE_CHECKING:
@@ -279,11 +273,11 @@ def run_functionalized_fw_and_collect_metadata(
                         "AOTAutograd detected that the traced graph left the autocast state "
                         "changed (enabled flag and/or dtype):\n"
                         + "\n".join(mismatches)
-                        + "\nThis often means an unbalanced torch.autocast / "
-                        "_enter_autocast/_exit_autocast, or a graph break between enter and "
-                        "exit that splits the context across graphs. Keep autocast enter/exit "
-                        "in the same graph, or avoid mutating autocast state inside the "
-                        "compiled region."
+                        + "\nPrefer `with torch.autocast(...)`, which Dynamo can exit and "
+                        "re-enter across graph breaks. Bare `_enter_autocast`/`_exit_autocast`, "
+                        "`__enter__`/`__exit__`, or `torch.set_autocast_enabled`/"
+                        "`set_autocast_dtype` that leave the graph unbalanced are not "
+                        "supported under AOT."
                     )
             finally:
                 for device_type, (_, dtype) in prior_autocast_states.items():
