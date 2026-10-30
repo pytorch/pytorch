@@ -874,6 +874,29 @@ class _DynamoCapture(Capture[_P, _R]):
         if exc[0] is None and error is not None:
             raise error
 
+    def _release_live_compile(self) -> None:
+        """Drop the live Dynamo compile this finished capture left in the process.
+
+        Every frame the capture compiled keeps cache entries on its code object, and
+        each graph-break continuation is bound as a resume function in its module's
+        globals. Loading the artifact here binds those same resume names, and an
+        installed artifact refuses frames with live entries, so the capturing process
+        could not serve its own artifact. Only what this capture compiled is
+        released; a later torch.compile of these frames recompiles them.
+        """
+        from torch._C._dynamo.eval_frame import reset_code
+        from torch._dynamo.utils import CleanupHook
+
+        for code, entry in self._session._package._codes.items():
+            reset_code(code)
+            module = sys.modules.get(entry.python_module)
+            if not entry.install_to_global or module is None:
+                continue
+            scope = vars(module)
+            for name in entry.function_names:
+                CleanupHook.disown(scope, name)
+                scope.pop(name, None)
+
     def summary(self) -> PrecompileSummary:
         r"""Coverage, recompilation, failure and guard information for everything
         captured so far.
