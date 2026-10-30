@@ -436,6 +436,7 @@ def layer_norm(
     weight: Tensor | None = ...,
     bias: Tensor | None = ...,
     eps: float = ...,
+    dim: int | Sequence[int] | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["layer_norm"]
