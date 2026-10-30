@@ -221,13 +221,13 @@ def run_functionalized_fw_and_collect_metadata(
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         # ExcludeDispatchKeyGuard restores autocast enabled TLS on exit, so enabled
-        # mutations are not checked. Autocast dtypes (every _autocast_supported_devices()
-        # entry) and nesting depth are independent TLS: both are compared after f and
-        # restored in finally. Raising on nesting mismatch (like dtype) avoids a silent
-        # metadata-only restore that would leave the later graph-capture run unbalanced.
-        # Cache is forced off by disable_autocast_cache and restored on exit. Note: an
-        # unbalanced _enter_autocast that also changes dtype still fails the dtype check
-        # (including across graph breaks).
+        # mutations are not checked. Autocast dtypes are independent TLS and are
+        # checked for every _autocast_supported_devices() entry. Nesting is restored
+        # (not raised on) in finally: Dynamo intentionally emits unbalanced
+        # increment/decrement across graph breaks, and graph capture restores nesting
+        # the same way in _create_graph. Cache is forced off by disable_autocast_cache
+        # and restored on exit. Note: an unbalanced _enter_autocast that also changes
+        # dtype still fails the dtype check (including across graph breaks).
         with disable_above:
             try:
                 with mode, suppress_pending, disable_autocast_cache():
@@ -273,17 +273,6 @@ def run_functionalized_fw_and_collect_metadata(
                         + "\nPrefer `with torch.autocast(...)` so dtype is restored before "
                         "the graph exits, or avoid calling torch.set_autocast_dtype inside "
                         "the compiled region."
-                    )
-
-                current_autocast_nesting = _get_autocast_nesting()
-                if current_autocast_nesting != prior_autocast_nesting:
-                    raise RuntimeError(
-                        "AOTAutograd detected that the traced graph left autocast nesting "
-                        f"changed: was {prior_autocast_nesting}, became "
-                        f"{current_autocast_nesting}. Prefer `with torch.autocast(...)` so "
-                        "nesting is restored before the graph exits, or avoid calling "
-                        "torch.autocast_increment_nesting / torch.autocast_decrement_nesting "
-                        "inside the compiled region."
                     )
             finally:
                 for device_type, dtype in prior_autocast_dtypes.items():

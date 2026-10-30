@@ -5532,7 +5532,7 @@ class TestAOTAutocastStates(AOTTestCase):
         x = fake_mode.from_tensor(torch.randn(2))
         return collect, x
 
-    @parametrize("device_type", ["cpu", "mtia"])
+    @parametrize("device_type", list(torch._C._autocast_supported_devices()))
     def test_collect_metadata_detects_autocast_dtype_mutation(self, device_type: str):
         from torch.amp.autocast_mode import _get_autocast_nesting
 
@@ -5577,7 +5577,7 @@ class TestAOTAutocastStates(AOTTestCase):
         collect(x)
         self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
 
-    def test_collect_metadata_detects_autocast_nesting_mutation(self):
+    def test_collect_metadata_restores_autocast_nesting(self):
         from torch.amp.autocast_mode import _get_autocast_nesting
 
         prior_nesting = _get_autocast_nesting()
@@ -5587,8 +5587,7 @@ class TestAOTAutocastStates(AOTTestCase):
             return [x + 1]
 
         collect, x = self._collect_metadata(f)
-        with self.assertRaisesRegex(RuntimeError, "autocast nesting"):
-            collect(x)
+        collect(x)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     def test_collect_metadata_restores_autocast_nesting_when_forward_raises(self):
@@ -5605,7 +5604,7 @@ class TestAOTAutocastStates(AOTTestCase):
             collect(x)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
-    def test_aot_function_detects_autocast_nesting_mutation(self):
+    def test_aot_function_restores_autocast_nesting(self):
         from torch.amp.autocast_mode import _get_autocast_nesting
 
         prior_nesting = _get_autocast_nesting()
@@ -5616,8 +5615,33 @@ class TestAOTAutocastStates(AOTTestCase):
 
         x = torch.randn(2)
         compiled = aot_function(f, nop)
-        with self.assertRaisesRegex(RuntimeError, "autocast nesting"):
-            compiled(x)
+        out = compiled(x)
+        self.assertEqual(out, x + 1)
+        self.assertEqual(_get_autocast_nesting(), prior_nesting)
+
+    def test_enter_exit_autocast_graph_break_aot_eager(self):
+        # Dynamo splits unmanaged _enter/_exit_autocast across graphs so each
+        # AOT graph has unbalanced nesting; nesting must be restored, not raised.
+        from torch.amp.autocast_mode import _get_autocast_nesting
+
+        def f(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            m = torch.amp.autocast_mode._enter_autocast("cpu")
+            x = x @ y
+            torch._dynamo.graph_break()
+            x = x @ z
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        prior_nesting = _get_autocast_nesting()
+        prior_enabled = torch.is_autocast_enabled("cpu")
+        x = torch.randn(3, 3, dtype=torch.float32)
+        y = torch.randn(3, 3, dtype=torch.float32)
+        z = torch.randn(3, 3, dtype=torch.float32)
+        out = f(x, y, z)
+        opt_out = torch.compile(f, backend="aot_eager", fullgraph=False)(x, y, z)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(out.dtype, opt_out.dtype)
+        self.assertEqual(torch.is_autocast_enabled("cpu"), prior_enabled)
         self.assertEqual(_get_autocast_nesting(), prior_nesting)
 
     @parametrize("cache_enabled", [True, False])
