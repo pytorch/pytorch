@@ -210,6 +210,13 @@ def _make_nd_quantize_input(layout, device):
     raise ValueError(f"unknown quantization test layout: {layout}")
 
 
+def _assert_bitwise_eq(a: torch.Tensor, b: torch.Tensor) -> None:
+    # Repeating uint8 views at each call site is verbose; self.assertEqual
+    # on floats misses wrong signs on zero and NaN encodings.
+    # TODO: Use this helper for other qdata checks in a future PR.
+    torch.testing.assert_close(a.view(torch.uint8), b.view(torch.uint8), rtol=0, atol=0)
+
+
 class TestMXFP8ReferenceNumerics(TestCase):
     def test_f32_to_e8m0_rceil(self, device):
         # copied from
@@ -282,11 +289,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = F.quantize_tensor(
             data_hp, **_MXFP8_KWARGS, swizzle_type=swizzle_type
         )
-        # Note: we are using assertEqual on float values instead of casting
-        # to uint8 to more clearly express intent and keep the code simple.
-        # This will not catch wrong signs on zero and NaN encodings, and that
-        # is an acceptable price to pay for simpler code.
-        self.assertEqual(qdata, qdata_ref)
+        _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales, scales_ref)
         if len(shape) == 3:
@@ -334,7 +337,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             **{**_MXFP8_KWARGS, "dim": (-1, -2)},
             swizzle_type=SwizzleType.SWIZZLE_32_4_4,
         )
-        self.assertEqual(qdata, qdata_ref)
+        _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(qdata.shape, shape)
         self.assertEqual(qdata.stride(), qdata_ref.stride())
         M, K = shape[-2:]
@@ -408,8 +411,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
             stride_m = (1, M)
             scale_k_shape = (1, scale_bytes)
             scale_m_shape = (scale_bytes, 1)
-        self.assertEqual(qdata_k, qdata_k_ref)
-        self.assertEqual(qdata_m, qdata_m_ref)
+        _assert_bitwise_eq(qdata_k, qdata_k_ref)
+        _assert_bitwise_eq(qdata_m, qdata_m_ref)
         self.assertEqual(scales_k, scales_k_ref)
         self.assertEqual(scales_m, scales_m_ref)
         self.assertEqual(qdata_k.shape, shape)
@@ -453,7 +456,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             swizzle_type=SwizzleType.SWIZZLE_32_4_4,
             scaling_type_use_square_block_size=True,
         )
-        self.assertEqual(qdata, qdata_ref)
+        _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
         if len(shape) == 3:
             scale_shape = (3, 2 * 2 * 512, 1) if transposed else (3, 1, 2 * 2 * 512)
