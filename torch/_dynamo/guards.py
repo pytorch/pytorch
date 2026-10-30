@@ -5266,7 +5266,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                pytype = obj.pytype or (torch.nn.Parameter if is_param else torch.Tensor)
+                default = torch.nn.Parameter if is_param else torch.Tensor
+                pytype = obj.pytype or default
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
