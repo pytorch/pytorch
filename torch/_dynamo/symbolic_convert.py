@@ -2383,8 +2383,7 @@ class InstructionTranslatorBase(
             if name in self.f_code.co_freevars:
                 msg = f"cannot access free variable '{name}' where it is not associated with a value in enclosing scope"
                 raise_observed_exception(NameError, self, args=[msg])
-            msg = f"cannot access local variable '{name}' where it is not associated with a value"
-            raise_observed_exception(UnboundLocalError, self, args=[msg])
+            self._raise_unbound_local_error(name)
         contents_var = self.output.side_effects.load_cell(cell)
         self.push(contents_var)
 

@@ -702,8 +702,10 @@ class CellVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .object_protocol import mro_lookup
+
         # cell has no __dict__, so anything not on the type does not exist.
-        if not hasattr(types.CellType, name):
+        if mro_lookup(types.CellType, name) is NO_SUCH_SUBOBJ:
             raise_observed_exception(
                 AttributeError, tx, args=[f"'cell' object has no attribute '{name}'"]
             )
