@@ -22,6 +22,7 @@ class CaptureTracker {
     return active_captures_ != 0;
   }
   AllocationContext allocationContext(cudaStream_t request_stream) const;
+  cudaStream_t reuseStream(cudaStream_t stream) const;
   void recordAllocation(const void* block, const AllocationContext& context);
   void recordFree(const void* block, cudaStream_t free_stream);
 
@@ -29,6 +30,8 @@ class CaptureTracker {
   struct CaptureTreeNode {
     std::optional<CaptureId_t> parent_capture_id;
     CaptureId_t root_capture_id{};
+    // Used only to remove the alias when this capture ends.
+    cudaStream_t primary_stream{};
     size_t invalid_capture_free_count{0};
   };
 
@@ -41,6 +44,7 @@ class CaptureTracker {
 
   int active_captures_{0};
   ska::flat_hash_map<CaptureId_t, CaptureTreeNode> capture_tree_;
+  ska::flat_hash_map<cudaStream_t, cudaStream_t> reuse_stream_aliases_;
   ska::flat_hash_map<const void*, CaptureId_t> block_allocation_captures_;
 };
 
