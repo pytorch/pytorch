@@ -423,6 +423,10 @@ class HuggingfaceRunner(BenchmarkRunner):
             model = model_cls(config)
         return model
 
+    @download_retry_decorator
+    def _download_config(self, model_name):
+        return AutoConfig.from_pretrained(model_name)
+
     def validate_args(self, args):
         if args.hf_inference_mode != "prefill":
             if args.prompt_length is not None:
@@ -483,19 +487,18 @@ class HuggingfaceRunner(BenchmarkRunner):
             raise ValueError(
                 "--hf-inference-mode=prefill requires --backend or --inductor"
             )
-        if args.prompt_length is not None:
-            # Checked here so an invalid flag isn't recorded as a model failure.
-            for name in [args.only] if args.only else self.iter_model_names(args):
-                output_length = HF_LLM_MODELS[name].OUTPUT_LENGTH
-                total_length = args.prompt_length + output_length
-                config = AutoConfig.from_pretrained(name).get_text_config(decoder=True)
-                context_length = getattr(config, "max_position_embeddings", None)
-                if context_length is not None and total_length > context_length:
-                    raise ValueError(
-                        f"--prompt-length={args.prompt_length} plus {output_length} "
-                        f"generated-token slots exceeds {name}'s context length "
-                        f"{context_length}"
-                    )
+        if args.prompt_length is not None and args.only:
+            # Each child validates its model so config fetches cannot abort a sweep.
+            output_length = HF_LLM_MODELS[args.only].OUTPUT_LENGTH
+            total_length = args.prompt_length + output_length
+            config = self._download_config(args.only).get_text_config(decoder=True)
+            context_length = getattr(config, "max_position_embeddings", None)
+            if context_length is not None and total_length > context_length:
+                raise ValueError(
+                    f"--prompt-length={args.prompt_length} plus {output_length} "
+                    f"generated-token slots exceeds {args.only}'s context length "
+                    f"{context_length}"
+                )
 
     def get_performance_workload(self):
         if self.args.hf_inference_mode == "prefill":
@@ -504,7 +507,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             return self.generate, None
         return super().get_performance_workload()
 
-    def use_model_forward_for_compilation(self):
+    def use_model_forward_for_accuracy(self):
         return self.args.hf_inference_mode == "prefill"
 
     def get_request_tokens(self, example_inputs):
