@@ -767,6 +767,7 @@ def _call_while_loop(
     hop_name: str,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
+    from torch._subclasses.fake_tensor import maybe_clear_fake_constant
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -832,9 +833,8 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
-                cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
-                cloned_carry.proxy.node.meta["example_value"].constant = None
+                cloned_carry = cast(TensorVariable, carry.clone())
+                maybe_clear_fake_constant(cloned_carry.proxy.node.meta["example_value"])
                 return cloned_carry
 
         # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
@@ -2355,7 +2355,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -5742,10 +5744,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:

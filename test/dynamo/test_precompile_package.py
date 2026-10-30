@@ -1502,8 +1502,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             and value.__name__ == name
             and not reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, name), value)
         ]
-        heap_types = ["ExceptionGroup"] if sys.version_info >= (3, 11) else []
-        self.assertEqual(refused, heap_types)
+        self.assertEqual(refused, ["ExceptionGroup"])
 
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
@@ -1841,8 +1840,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # stores the function under its own name, is pinned last.
         def minted(key, qualname):
             code = _user_op.__code__.replace(co_name=qualname.rpartition(".")[2])
-            if sys.version_info >= (3, 11):
-                code = code.replace(co_qualname=qualname)
+            code = code.replace(co_qualname=qualname)
             fn = types.FunctionType(code, globals(), "__annotate__")
             fn.__qualname__ = qualname
             return type("Cfg", (), {key: fn})
@@ -2702,6 +2700,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
+        import torch._inductor.config as inductor_config
         from torch._dynamo.precompile_package import _capture_config
 
         def flags():
@@ -2710,9 +2709,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 functorch_config.bypass_autograd_cache_key,
                 functorch_config.force_non_lazy_backward_lowering,
                 torch._dynamo.config.allow_empty_graphs,
+                inductor_config.triton.autotune_at_compile_time,
+                inductor_config.triton.multi_kernel,
             )
 
-        ambient = (False, False, False, False)
+        ambient, captured = (False,) * 5 + (1,), (True,) * 5 + (0,)
         with (
             functorch_config.patch(
                 bundled_autograd_cache=False,
@@ -2720,16 +2721,35 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 force_non_lazy_backward_lowering=False,
             ),
             torch._dynamo.config.patch(allow_empty_graphs=False),
+            inductor_config.patch(
+                {
+                    "triton.autotune_at_compile_time": False,
+                    "triton.multi_kernel": 1,
+                }
+            ),
         ):
             self.assertEqual(flags(), ambient)
-            with _capture_config():
-                self.assertEqual(flags(), (True, True, True, True))
-            self.assertEqual(flags(), ambient)
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertLogs(precompile_package.log, "WARNING") as logs:
+                with _capture_config(lowers_kernels=True):
+                    self.assertEqual(flags(), captured)
+                self.assertEqual(flags(), ambient)
 
-            with self.assertRaisesRegex(RuntimeError, "boom"):
-                with _capture_config():
-                    raise RuntimeError("boom")
-            self.assertEqual(flags(), ambient)
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    with _capture_config(lowers_kernels=True):
+                        raise RuntimeError("boom")
+                self.assertEqual(flags(), ambient)
+            self.assertEqual(len(logs.records), 2)
+            self.assertIn("autotune_at_compile_time=False", logs.output[0])
+            self.assertIn("multi_kernel=1 to 0", logs.output[1])
+            with (
+                self.assertLogs(precompile_package.log, "WARNING") as logs,
+                inductor_config.patch("triton.multi_kernel", 2),
+                _capture_config(lowers_kernels=True),
+            ):
+                self.assertEqual(inductor_config.triton.multi_kernel, 0)
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("multi_kernel=2 to 0", logs.output[0])
 
             # Config values are per thread, so a worker entering the scope
             # patches only itself and the main thread stays ambient.
@@ -2738,7 +2758,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             def hold():
                 seen.append(flags())
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     seen.append(flags())
                     entered.set()
                     release.wait(10)
@@ -2751,9 +2771,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             release.set()
             worker.join(10)
             self.assertFalse(worker.is_alive())
-            self.assertEqual(seen[1], (True, True, True, True))
+            self.assertEqual(seen[1], captured)
             self.assertEqual(seen[0], seen[2])
             self.assertNotEqual(seen[0], seen[1])
+
+    def test_eager_capture_keeps_triton_config_silently(self):
+        import torch._inductor.config as inductor_config
+
+        def fn(x):
+            return (
+                x + 1,
+                inductor_config.triton.autotune_at_compile_time,
+                inductor_config.triton.multi_kernel,
+            )
+
+        ambient = {
+            "triton.autotune_at_compile_time": False,
+            "triton.multi_kernel": 1,
+        }
+        session = precompile_package.precompile_capture(fn, backend="eager")
+        with inductor_config.patch(ambient):
+            torch._logging._internal.warning_once.cache_clear()
+            with self.assertNoLogs(precompile_package.log, "WARNING"):
+                with session as call:
+                    _, *seen = call(torch.ones(2))
+        self.assertEqual(seen, [False, 1])
 
     def test_capture_config_refuses_disabled_caches_and_honours_strict(self):
         import torch._functorch.config as functorch_config
@@ -2764,15 +2806,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # a capture with caches forced off would record nothing; say so up front.
         with torch.compiler.config.patch(force_disable_caches=True):
             with self.assertRaisesRegex(PackageError, "force_disable_caches"):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     pass
 
         with functorch_config.patch(strict_autograd_cache=False):
             with torch._dynamo.config.patch(strict_precompile=False):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertFalse(functorch_config.strict_autograd_cache)
             with torch._dynamo.config.patch(strict_precompile=True):
-                with _capture_config():
+                with _capture_config(lowers_kernels=True):
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 

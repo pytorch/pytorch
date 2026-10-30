@@ -10,7 +10,7 @@ using S = ck::Sequence<Is...>;
 
 namespace at::native {
 
-void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+bool dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
@@ -21,7 +21,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   if (use_padding) {
     if (m <= 128) {
       if(transa_ && transb_) {
-         gemm_impl<
+         return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -57,7 +57,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(transa_ && !transb_) {
-        gemm_impl<
+        return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -93,7 +93,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -129,7 +129,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
            at::BFloat16,
             256,
             128,
@@ -170,7 +170,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
     } else {
       if(transa_ && transb_) {
-        gemm_impl<
+        return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -206,7 +206,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -242,7 +242,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -278,7 +278,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -320,7 +320,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   } else {
     {
       if(transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -356,7 +356,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -392,7 +392,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -428,7 +428,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && !transb_) {
-          gemm_impl<
+          return gemm_impl<
             at::BFloat16,
             256,
             128,
@@ -470,7 +470,7 @@ void dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 }
 
-void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+bool dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
@@ -481,7 +481,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
   if (use_padding) {
       if(transa_ && transb_) { // col , col
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -516,7 +516,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(transa_ && !transb_) { // row, col
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -551,7 +551,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && transb_) { //col, row
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -586,7 +586,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && !transb_) { //row, row
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -625,7 +625,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       }
   } else {
          if(transa_ && transb_) { // col , col
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -660,7 +660,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(transa_ && !transb_) { // row, col
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -695,7 +695,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && transb_) { //col, row
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -730,7 +730,7 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
             (CUDABLAS_GEMM_ARGS(at::BFloat16));
       }
       else if(!transa_ && !transb_) { //row, row
-          gemm_impl_wmma<
+          return gemm_impl_wmma<
             at::BFloat16,
             256,
             128,
@@ -771,21 +771,18 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 
 template <>
-void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+bool gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   static const std::vector<std::string> wmma_archs = {
     "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
 #if ROCM_VERSION >= 70000
     "gfx1150", "gfx1151"
 #endif
   };
-  // Keep in sync with torch_filter_ck_gemm_arches (cmake/public/utils.cmake)
-  // and at::Context::ckGemmSupported().
-  static const std::vector<std::string> supported_archs = {"gfx90a", "gfx942", "gfx950"};
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
-    dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    return dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
-  else if (at::detail::getCUDAHooks().isGPUArch(supported_archs)) {
-    dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  else if (at::globalContext().ckGemmSupported()) {
+    return dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
   else {
     TORCH_CHECK(false, "gemm_internal_ck<at::BFloat16> unsupported gfx arch");
