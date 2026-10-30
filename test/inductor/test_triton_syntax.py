@@ -7,6 +7,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._triton import has_triton
 
 
@@ -14,17 +15,15 @@ class TestTritonSyntacticallyValid(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
+    @requires_triton()
     def test_triton_sqrt(self, device):
         # https://github.com/pytorch/pytorch/issues/142328
         import math
 
         import torch.nn as nn
 
-        try:
-            device_module = torch.get_device_module(device)
-            supports_bf16 = device_module.is_bf16_supported(including_emulation=False)
-        except Exception:
-            supports_bf16 = False
+        device_module = torch.get_device_module(device)
+        supports_bf16 = device_module.is_bf16_supported(including_emulation=False)
 
         dtype = torch.bfloat16 if supports_bf16 else torch.float16
 
