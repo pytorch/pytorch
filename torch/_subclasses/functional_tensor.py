@@ -457,9 +457,11 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Controls whether invoke_subgraph keeps input mutations in its graph.
         self._keep_input_mutations = _keep_input_mutations
 
-        self._storage_to_base: weakref.WeakKeyDictionary[
-            torch.storage.UntypedStorage, FunctionalTensor | None
-        ] = weakref.WeakKeyDictionary()
+        # Views keep their bases alive through _inference_mode_base. The mode
+        # must not own the bases, which would also keep their storages alive.
+        self._storage_to_base: weakref.WeakValueDictionary[
+            torch.storage.UntypedStorage, FunctionalTensor
+        ] = weakref.WeakValueDictionary()
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self) -> Self:

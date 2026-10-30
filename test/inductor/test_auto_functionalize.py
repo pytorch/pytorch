@@ -3113,6 +3113,106 @@ class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
                 self.assertEqual(gm(inp), fn(inp), atol=0, rtol=0)
                 self.assertEqual(inp, x + offset)
 
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("kind", ["legacy", "explicit_metadata", "varargs"])
+    @parametrize("with_metadata", [False, True])
+    def test_graph_handler_view_metadata(self, device, kind, with_metadata):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            CallFunctionVarArgs,
+            KeywordArg,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensorMode,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            def partial(out):
+                out[:2].add_(100)
+
+            for name in ("partial", "replacement"):
+                lib.define(f"{name}(Tensor(a!) out) -> ()")
+                lib.impl(name, partial, "CompositeExplicitAutograd")
+                torch.library.register_fake(f"mylib::{name}", lambda out: None, lib=lib)
+            op = torch.ops.mylib.partial.default
+            replacement_op = torch.ops.mylib.replacement.default
+
+            def fn(x):
+                base = x + 10
+                out = base[1:, ::2] if with_metadata else base
+                op(out)
+                return base, out, base[:, 1::2]
+
+            x = torch.arange(48, device=device, dtype=torch.float32).reshape(6, 8)
+            gm = make_fx(
+                dispatch_functionalize(fn, mode=FunctionalTensorMode()),
+                tracing_mode="fake",
+            )(x)
+            original_hop = next(
+                iter(
+                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+            )
+            original_args = original_hop.args
+            self.assertEqual(len(original_args), 2 if with_metadata else 1)
+            if kind == "varargs":
+                pattern = CallFunctionVarArgs(auto_functionalized)
+            else:
+                pattern_args = (
+                    (op, KeywordArg("view_metadata"))
+                    if kind == "explicit_metadata"
+                    else (op,)
+                )
+                pattern = CallFunction(
+                    auto_functionalized, *pattern_args, out=KeywordArg("out")
+                )
+            patterns = PatternMatcherPass()
+            calls = []
+
+            @register_graph_pattern(pattern, pass_dict=patterns)
+            def handler(match, *args, **kwargs):
+                calls.append(True)
+                if kind == "varargs":
+                    self.assertIs(args[0], op)
+                    hop_args = (replacement_op, *args[1:])
+                else:
+                    metadata = kwargs.pop("view_metadata", None)
+                    hop_args = (
+                        (replacement_op, metadata) if metadata else (replacement_op,)
+                    )
+                old = match.output_node()
+                new = match.graph.call_function(auto_functionalized, hop_args, kwargs)
+                new.meta = old.meta.copy()
+                old.replace_all_uses_with(new)
+                match.erase_nodes()
+
+            expected_count = int(
+                kind == "varargs"
+                or (kind == "explicit_metadata" and with_metadata)
+                or (kind == "legacy" and not with_metadata)
+            )
+            self.assertEqual(patterns.apply(gm.graph), expected_count)
+            self.assertEqual(len(calls), expected_count)
+            gm.graph.lint()
+            gm.recompile()
+            hop = next(
+                iter(
+                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+            )
+            self.assertIs(hop.args[0], replacement_op if expected_count else op)
+            self.assertEqual(hop.args[1:], original_args[1:])
+            for offset in (0, 100):
+                inp = x + offset
+                self.assertEqual(gm(inp), fn(inp), atol=0, rtol=0)
+                self.assertEqual(inp, x + offset)
+
     @parametrize("kind", ["graph_handler", "external_metadata_user"])
     def test_pattern_replacement_rejects_unowned_view_metadata(self, device, kind):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized

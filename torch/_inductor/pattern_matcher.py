@@ -63,6 +63,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
     is_fake_tensor,
     maybe_clear_fake_constant,
     maybe_get_fake_constant,
@@ -2303,7 +2304,7 @@ def _get_match_node_value(node: torch.fx.Node) -> Any:
 class _SpecificPatternCache:
     """
     check_fn's retraced specific patterns, keyed by input metadata.  Entries
-    for static shapes stay valid across compiles.  Symbolic sizes are keyed by
+    for static shapes stay valid across compiles.  Symbolic metadata is keyed by
     their sympy exprs, which (like the SymInts the cached pattern's
     expected_meta embeds) only mean something within one ShapeEnv, so those
     entries are dropped as soon as a different ShapeEnv shows up.
@@ -2320,16 +2321,27 @@ class _SpecificPatternCache:
         """The (table, key) to cache args under, or None if not cacheable."""
         key: list[Any] = []
         symbolic = False
+
+        def symint_key(value: Any) -> Any:
+            nonlocal symbolic
+            if isinstance(value, torch.SymInt):
+                symbolic = True
+                return value.node.expr
+            return value
+
         for arg in args:
             if isinstance(arg, torch.Tensor):
+                # Storage extent and offset are observable while tracing views.
+                metadata = extract_tensor_metadata(arg)
                 meta: list[Any] = []
-                for s in itertools.chain(arg.shape, arg.stride()):
-                    if isinstance(s, torch.SymInt):
-                        symbolic = True
-                        meta.append(s.node.expr)
-                    else:
-                        meta.append(s)
-                key.append((tuple(meta), arg.dtype, arg.device, arg.requires_grad))
+                for field in dataclasses.fields(metadata):
+                    value = getattr(metadata, field.name)
+                    meta.append(
+                        tuple(symint_key(v) for v in value)
+                        if isinstance(value, tuple)
+                        else symint_key(value)
+                    )
+                key.append(tuple(meta))
             elif isinstance(arg, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbolic = True
                 key.append(arg.node.expr)
@@ -2532,12 +2544,7 @@ def register_replacement(
             # same shapes across layers.
             specific_arg_info = _trace_arg_info(argnames_static, args)
             specific_argnames = specific_arg_info.flat_argnames
-            # This cache's tensor key does not include storage offsets.
-            cached = (
-                None
-                if match.auto_functionalized_nodes
-                else specific_pattern_cache.lookup(args, fake_mode.shape_env)
-            )
+            cached = specific_pattern_cache.lookup(args, fake_mode.shape_env)
             specific_pattern = cached[0].get(cached[1]) if cached else None
 
             if specific_pattern is None:
@@ -2999,6 +3006,14 @@ def register_graph_pattern(
     """
     Register a pattern that runs a function on the FX graph, allowing
     custom transformation code.
+
+    Handlers that match auto_functionalized nodes with view metadata must
+    explicitly match its second positional argument, for example with
+    KeywordArg("view_metadata"), or use CallFunctionVarArgs. The handler owns
+    preservation of those base and layout dependencies when editing the graph.
+    One-argument patterns still match nodes without view metadata, but are
+    skipped for metadata-bearing nodes. Use register_replacement to preserve
+    view metadata automatically when tracing a replacement function.
     """
 
     def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
