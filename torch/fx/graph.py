@@ -226,6 +226,10 @@ class _Namespace:
             self._obj_to_name[obj] = candidate
         return candidate
 
+    def reserve_name(self, name: str) -> None:
+        """Mark ``name`` as taken, so that no name created later shadows it."""
+        self._used_names.add(name)
+
     def associate_name_with_obj(self, name: str, obj: object) -> None:
         """Associate a unique name with an object.
 
@@ -549,13 +553,26 @@ class CodeGen:
             global_name = namespace.create_name(name_hint, obj)
 
             if global_name in globals_:
-                if globals_[global_name] != obj:
+                # Identity first: ``nan != nan``, so the same ``nan`` object
+                # must be recognized without an equality comparison.
+                if globals_[global_name] is not obj and globals_[global_name] != obj:
                     raise AssertionError(
                         f"Global name {global_name} already assigned to different object"
                     )
                 return global_name
             globals_[global_name] = obj
             return global_name
+
+        # Placeholders become the parameters of the generated function, and a
+        # parameter shadows any global of the same name inside the body. Reserve
+        # their names first so that a colliding global, e.g. the ``nan`` or
+        # ``inf`` builtin, is given a different one.
+        # See https://github.com/pytorch/pytorch/issues/198072
+        for node in nodes:
+            if node.op == "placeholder" and isinstance(node.target, str):
+                raw_name = node.target.replace("*", "")
+                if raw_name != node.name:
+                    namespace.reserve_name(raw_name)
 
         # Pre-fill the globals table with registered builtins.
         for name, (_, obj) in _custom_builtins.items():
@@ -658,6 +675,18 @@ class CodeGen:
                 for n, t in opaque_types.items():
                     add_global(n, t)
                 return obj_repr
+            elif isinstance(arg, float) and not math.isfinite(arg):
+                # Refer to the ``nan``/``inf`` globals by the name they were
+                # given, which is not ``nan``/``inf`` when a placeholder of
+                # that name shadows them.
+                if math.isnan(arg):
+                    return blue(add_global("nan", math.nan))
+                inf_name = add_global("inf", math.inf)
+                return blue(inf_name if arg > 0 else f"-{inf_name}")
+            elif isinstance(arg, torch.device):
+                # Same for the ``device`` global.
+                device_name = add_global("device", torch.device)
+                return blue(f"{device_name}{repr(arg)[len('device'):]}")
             else:
                 return blue(repr(arg))
 
