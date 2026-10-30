@@ -959,6 +959,9 @@ class FakeIdVariable(VariableTracker):
     def is_python_constant(self) -> bool:
         return False
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        return False, None
+
     def python_type(self) -> type:
         return int
 

@@ -107,6 +107,9 @@ class CustomClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        return False, None
+
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CustomClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
