@@ -122,8 +122,8 @@ class _InstanceNorm(_NormBase):
             else:
                 warnings.warn(
                     f"input's size at dim={feature_dim} does not match num_features. "
-                    "You can silence this warning by not passing in num_features, "
-                    "which is not used because affine=False",
+                    f"Set num_features={input.size(feature_dim)} to match "
+                    "the number of channels in the input.",
                     stacklevel=2,
                 )
 

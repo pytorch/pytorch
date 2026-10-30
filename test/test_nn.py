@@ -7727,18 +7727,22 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("no_batch_dim", [True, False])
     @parametrize_test("affine", [True, False])
     def test_instancenorm_raises_error_if_input_channels_is_not_num_features(self, device, instance_norm_cls, no_batch_dim, affine):
-        inst_norm = instance_norm_cls(4, affine=affine)
+        inst_norm = instance_norm_cls(4, affine=affine, device=device)
         size = [2] * inst_norm._get_no_batch_dim()
         if not no_batch_dim:
             size = [3] + size
-        t = torch.randn(size)
+        t = torch.randn(size, device=device)
         if affine:
             with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
                 inst_norm(t)
         else:
-            with warnings.catch_warnings(record=True) as w:
-                inst_norm(t)
-            self.assertIn("which is not used because affine=False", str(w[0].message))
+            msg = r"Set num_features=2 to match the number of channels in the input\."
+            with self.assertWarnsRegex(UserWarning, msg):
+                result = inst_norm(t)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                expected = instance_norm_cls(2, affine=False, device=device)(t)
+            self.assertEqual(result, expected)
 
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
