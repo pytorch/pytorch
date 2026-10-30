@@ -2942,5 +2942,6 @@ register_user_kernel_hop(
         get_kernel_name=get_triton_kernel_name,
         functional_dense=triton_kernel_wrapper_functional_dense,
         reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
+        serializable=True,
     )
 )
