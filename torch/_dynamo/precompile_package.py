@@ -90,11 +90,13 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # override them.
 CAPTURE_INDUCTOR_PATCH = {"bundled_autotune_remote_cache": False}
 
+# The Inductor options whose compiles Inductor's caches never file, so a
+# DynamoTracer capture refuses them.
+UNCACHED_INDUCTOR_OPTIONS = ("freezing", "force_disable_caches", "fx_wrapper")
+
 
 def _check_capture_options(options: Mapping[str, object]) -> None:
-    uncached = [
-        k for k in ("freezing", "force_disable_caches", "fx_wrapper") if options.get(k)
-    ]
+    uncached = [k for k in UNCACHED_INDUCTOR_OPTIONS if options.get(k)]
     if uncached:
         raise PackageError(
             f"a DynamoTracer capture cannot compile with {uncached} on: the "
