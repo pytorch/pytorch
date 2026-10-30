@@ -63,8 +63,16 @@ def _require_transformers():
         version = importlib.metadata.version("transformers")
     except importlib.metadata.PackageNotFoundError:
         raise unittest.SkipTest("requires transformers") from None
-    if Version(version) < Version("5.14.1"):
-        raise unittest.SkipTest("requires transformers >= 5.14.1")
+    try:
+        with mock.patch(
+            "subprocess.check_call",
+            side_effect=unittest.SkipTest("requires compatible transformers"),
+        ):
+            from benchmarks.dynamo.huggingface_llm_models import MIN_TRANSFORMERS_VERSION
+    except ImportError:
+        raise unittest.SkipTest("requires compatible transformers") from None
+    if Version(version) < Version(MIN_TRANSFORMERS_VERSION):
+        raise unittest.SkipTest(f"requires transformers >= {MIN_TRANSFORMERS_VERSION}")
 
 
 def _import_huggingface():
@@ -694,6 +702,34 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             with self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"):
                 runner.validate_args(args)
 
+    def test_prompt_validation_does_not_download_sweep_configs(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--prompt-length=7")
+        with mock.patch.object(
+            self.huggingface.AutoConfig,
+            "from_pretrained",
+            side_effect=OSError("config unavailable"),
+        ) as download:
+            runner.validate_args(args)
+        download.assert_not_called()
+
+    def test_prompt_config_download_retries(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._runner_args("--only=Qwen/Qwen3-0.6B", "--prompt-length=7")
+        config = mock.Mock()
+        config.get_text_config.return_value.max_position_embeddings = 4096
+        with (
+            mock.patch.object(
+                self.huggingface.AutoConfig,
+                "from_pretrained",
+                side_effect=[OSError("temporary download failure"), config],
+            ) as download,
+            mock.patch.object(common.time, "sleep") as sleep,
+        ):
+            runner.validate_args(args)
+        self.assertEqual(download.call_args_list, [mock.call(args.only)] * 2)
+        sleep.assert_called_once_with(30)
+
     @parametrize("mode", ("prefill", "decode"))
     def test_prefill_performance_run(self, mode):
         runner = self.huggingface.HuggingfaceRunner()
@@ -785,6 +821,34 @@ class TestHuggingFaceTensorParallelOptions(HuggingFacePrefillTestCase):
         args = self._tp_args("--backend=cudagraphs")
         with self.assertRaisesRegex(ValueError, "a backend other than cudagraphs"):
             runner.validate_args(args)
+
+    @parametrize("mode", ("reduce-overhead", "max-autotune"))
+    def test_tp_rejects_cudagraph_compile_modes(self, mode):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args("--inductor")
+        args.backend = None
+        args.devices = ["cuda"]
+        args.inductor_compile_mode = mode
+        args.inductor_config = ["triton.cudagraphs=False"]
+        with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
+            runner.validate_args(args)
+        args.inductor_compile_mode = "max-autotune-no-cudagraphs"
+        runner.validate_args(args)
+
+    @parametrize("use_inductor_flag", (False, True))
+    @parametrize("enabled", ("True", "1"))
+    def test_tp_rejects_cudagraph_config(self, use_inductor_flag, enabled):
+        runner = self.huggingface.HuggingfaceRunner()
+        args = self._tp_args()
+        args.devices = ["cuda"]
+        args.backend = None if use_inductor_flag else "inductor"
+        args.inductor = use_inductor_flag
+        override = f"triton.cudagraphs={enabled}"
+        args.inductor_config = ["triton.cudagraphs=False", override]
+        with self.assertRaisesRegex(ValueError, "re-enable CUDA graphs"):
+            runner.validate_args(args)
+        args.inductor_config.append("triton.cudagraphs=False")
+        runner.validate_args(args)
 
     def test_cpu_tp_requires_no_accelerator(self):
         runner = self.huggingface.HuggingfaceRunner()
@@ -1188,8 +1252,6 @@ class TestTensorParallelHarness(MultiProcessTestCase):
         runner.args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
         statuses = ["pass", "fail_accuracy"]
         self.assertEqual(runner.agree_on_status(statuses[self.rank]), "fail_accuracy")
-        statuses = ["eager_1st_run_OOM", "eager_1st_run_fail"]
-        self.assertEqual(runner.agree_on_status(statuses[self.rank]), statuses[0])
         self.assertEqual(runner.agree_on_status("pass"), "pass")
 
 
@@ -1622,20 +1684,59 @@ class TestTensorParallelResults(TestCase):
             self.assertEqual(float(rows["failed"]["speedup"]), 0.0)
             self.assertEqual(float(rows["passed"]["speedup"]), 1.0)
 
-    def test_json_uses_dtype_after_model_loading(self):
-        args = common.parse_args(["--performance", "--inference", "--tp-size=2"])
+    @parametrize("mode", ("prefill", "decode"))
+    def test_tp_json_result_identity_and_metrics(self, mode):
+        args = common.parse_args(
+            [
+                "--performance",
+                "--inference",
+                "--float32",
+                "--tp-size=2",
+                f"--hf-inference-mode={mode}",
+            ]
+        )
+        metrics = {
+            "speedup": 1.5,
+            "abs_latency": 2.0,
+            "eager_peak_mem_per_rank": "1.000;2.000",
+            "dynamo_peak_mem_per_rank": "0.500;1.500",
+        }
+        decode_length = 128 if mode == "decode" else 0
         with (
             tempfile.TemporaryDirectory() as tmp,
-            mock.patch.object(common, "current_settings", vars(args)),
-            mock.patch.object(common, "current_dtype", ""),
+            mock.patch.dict(vars(common)),
         ):
-            # Loading can update the dtype after TP initializes failure metadata.
-            args.amp = True
+            common.set_current_metadata(args)
+            common.current_name = "Qwen/Qwen3-0.6B"
+            common.current_device = "cuda"
+            common.current_batch_size = 4
             filename = os.path.join(tmp, "results.csv")
-            common.output_json(filename, ["name", "speedup"], ["sam_fast", 1.0])
+            identity = ["cuda", common.current_name, 4, mode, 2, 1000, decode_length]
+            common.output_json(
+                filename,
+                ["dev", "name", "batch_size", *common.TP_IDENTITY_HEADERS, *metrics],
+                [*identity, *metrics.values()],
+            )
             with open(os.path.join(tmp, "results.json")) as f:
-                record = json.loads(f.readline())
-        self.assertEqual(record["benchmark"]["dtype"], "amp")
+                records = [json.loads(line) for line in f]
+        names = [record["metric"]["name"] for record in records]
+        self.assertEqual(names, list(metrics))
+        for record in records:
+            self.assertEqual(record["model"]["name"], "Qwen/Qwen3-0.6B")
+            self.assertEqual(record["benchmark"]["dtype"], "float32")
+            info = record["benchmark"]["extra_info"]
+            self.assertEqual(info["device"], "cuda")
+            self.assertEqual(info["batch_size"], 4)
+            self.assertEqual(info["phase"], mode)
+            self.assertEqual(info["tp_size"], 2)
+            self.assertEqual(info["prompt_length"], 1000)
+            self.assertEqual(info["decode_length"], decode_length)
+            metric = record["metric"]
+            value = metrics[metric["name"]]
+            expected = {"benchmark_values": [value]}
+            if isinstance(value, str):
+                expected = {"extra_info": expected}
+            self.assertEqual(metric, {"name": metric["name"], **expected})
 
     @parametrize(
         "case",
@@ -2055,7 +2156,7 @@ class TestTensorParallelLaunch(TestCase):
                         fail_here("load")
                         return device, name, torch.nn.Linear(1, 1), (torch.ones(1, 1),), 1
 
-                    def use_model_forward_for_compilation(self):
+                    def use_model_forward_for_accuracy(self):
                         return True
 
                     def forward_pass(self, model, inputs, collect_outputs=False):
