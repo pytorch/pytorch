@@ -3105,21 +3105,22 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = get_raw_stream_name(device_idx)
         if config.triton.autotune_at_compile_time:
-            # compile-on-one-rank: resolve at runtime so the autotune block matches the
-            # rank-agnostic call() body (see codegen_device_guard_enter).
-            autotune_idx = (
-                V.graph.device_ops.current_device_idx_expr()
-                if _coor_enabled()
-                else device_idx
-            )
-            self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({autotune_idx})"
-            )
+            self._write_autotune_get_raw_stream(name, device_idx)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
         self.writeline(f"{name} = get_raw_stream({_coor_device_idx_ref(device_idx)})")
         return name
+
+    def _write_autotune_get_raw_stream(self, name: str, device_idx: int) -> None:
+        # compile-on-one-rank: resolve at runtime so the autotune block matches the
+        # rank-agnostic call() body (see codegen_device_guard_enter).
+        autotune_idx = (
+            V.graph.device_ops.current_device_idx_expr()
+            if _coor_enabled()
+            else device_idx
+        )
+        self.kernel_autotune_calls.writeline(f"{name} = get_raw_stream({autotune_idx})")
 
     def get_codegened_graph(self):
         return self.codegened_graph_stack[-1]
@@ -3214,8 +3215,8 @@ class PythonWrapperCodegen(CodeGen):
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
-            self.kernel_autotune_calls.writeline(
-                f"{get_raw_stream_name(device_idx)} = get_raw_stream({autotune_idx})"
+            self._write_autotune_get_raw_stream(
+                get_raw_stream_name(device_idx), device_idx
             )
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
@@ -3617,8 +3618,9 @@ class PythonWrapperCodegen(CodeGen):
         kernel_defs = self.multi_kernel_state.kernel_defs
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(kernel_defs)
-        else:
-            self.header.splice(kernel_defs)
+            if V.graph.cpp_wrapper:
+                return
+        self.header.splice(kernel_defs)
 
     def _generate(self, is_inference):
         if config.profile_bandwidth:
@@ -5636,6 +5638,8 @@ class PythonWrapperCodegen(CodeGen):
             # LRU-cached stream0 variable which captured the default stream.
             self.write_get_raw_stream_header()
             stream_name = "raw_stream"
+            if config.triton.autotune_at_compile_time:
+                self._write_autotune_get_raw_stream(stream_name, device.index)
             self.writeline(
                 f"{stream_name} = get_raw_stream({_coor_device_idx_ref(device.index)})"
             )
