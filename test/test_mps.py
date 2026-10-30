@@ -14845,13 +14845,17 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d", "_segment_reduce"] or (
             op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
         )
         if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
+        if op.name == "_segment_reduce" and dtype is not None:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+            cpu_sample.input = cpu_sample.input.detach().to(dtype).requires_grad_(mps_sample.input.requires_grad)
+        else:
+            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -15608,6 +15612,20 @@ class TestComplex(TestCase):
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
+
+    @dtypes(torch.bfloat16)
+    @parametrize("inner", [1, 2])
+    def test_segment_reduce_forward(self, device, dtype, inner):
+        # inner=1 uses threadgroups; inner=2 uses the serial strided reduction.
+        data = torch.ones((2, 4098, inner), dtype=dtype, device=device)[:, ::2]
+        data[:, 2] = 2.
+        data[1, 1026] = 0.
+        offsets = torch.tensor([[1, 1025, 1025, 2049]] * 2, dtype=torch.int32, device=device)
+        reference = data.cpu().float()
+        for reduce in ("sum", "mean", "min", "max", "prod"):
+            result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
+            expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
+            self.assertEqual(result, expected.to(dtype=dtype))
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod

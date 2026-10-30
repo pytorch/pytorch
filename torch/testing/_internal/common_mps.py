@@ -236,8 +236,6 @@ if torch.backends.mps.is_available():
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
             # bool prod is excluded via dtypesIfMPS in the OpInfo, and mean doesn't list bool.
             "scatter_reduceprod": [torch.int64],
-            "_segment_reducelengths": None,
-            "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.log_ndtr": None,
@@ -565,6 +563,9 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
+            # Native segment_reduce backward is deferred to a follow-up.
+            "_segment_reducelengths": None,
+            "_segment_reduceoffsets": None,
             # topk index gather is flaky on fp16 - whether duplicates appear
             # in the seeded sample input depends on prior test order's RNG
             # draws, so we skip rather than xfail.
