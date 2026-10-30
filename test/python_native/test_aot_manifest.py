@@ -29,6 +29,7 @@ DECLARATION = """\
 ATEN_OP = "fakeop"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "kernel.py"
+ARCHS = ("sm_90",)
 
 
 def kernel_precompile_grid():

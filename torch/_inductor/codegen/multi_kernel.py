@@ -29,9 +29,13 @@ class MultiKernelState:
     V.graph.wrapper_code has a reference to MultiKernelState instance.
     """
 
-    def __init__(self):
+    def __init__(self, parent: "MultiKernelState | None" = None):
         self.subkernel_to_kernel_name = {}
         self.kernel_defs = IndentedBuffer()
+        # Subgraph definitions land in the parent's output module, so number
+        # them from the root state to avoid shadowing the parent's.
+        self._root: MultiKernelState = self if parent is None else parent._root
+        self._num_names = 0
 
     def define_kernel(
         self,
@@ -66,7 +70,8 @@ class MultiKernelState:
             return self.subkernel_to_kernel_name[kernel_names]
 
         # name the multi kernel based on the first kernel
-        multi_kernel_name = f"multi_kernel_{len(self.subkernel_to_kernel_name)}"
+        multi_kernel_name = f"multi_kernel_{self._root._num_names}"
+        self._root._num_names += 1
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
