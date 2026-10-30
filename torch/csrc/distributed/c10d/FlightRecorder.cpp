@@ -109,10 +109,13 @@ FlightRecorder<c10::Event>* getFlightRecorder(const std::string& backend) {
   if (backend.empty() || backend == kDefaultFRBackend) {
     return FlightRecorder<c10::Event>::get();
   }
-  static std::mutex mutex;
-  static std::unordered_map<std::string, FlightRecorder<c10::Event>*> registry;
-  std::lock_guard<std::mutex> lock(mutex);
-  auto& instance = registry[backend];
+  // Leaked: detached threads such as the nccl2 heartbeat monitor may call
+  // this during static destruction.
+  static auto* mutex = new std::mutex();
+  static auto* registry =
+      new std::unordered_map<std::string, FlightRecorder<c10::Event>*>();
+  std::lock_guard<std::mutex> lock(*mutex);
+  auto& instance = (*registry)[backend];
   if (instance == nullptr) {
     // Intentionally leaked on exit, like FlightRecorder::get(): entries hold
     // Python state that may already have been destructed.
@@ -157,12 +160,17 @@ void dump_fr_trace_file(
     bool includeStackTraces,
     bool onlyActive,
     const std::string& backend) {
-  // Serialize writes so concurrent dumps cannot interleave into the same
-  // file, but take the trace before locking: dump() can block on device APIs
-  // and must not hold up an unrelated caller.
+  // Take the trace before locking: dump() can block on device APIs and must
+  // not hold up an unrelated caller.
+  write_fr_trace_file(
+      rank,
+      dump_fr_trace(
+          includeCollectives, includeStackTraces, onlyActive, backend));
+}
+
+void write_fr_trace_file(int rank, const std::string& trace) {
+  // Serialize writes so concurrent dumps cannot interleave into the same file.
   static std::mutex writeDebugInfoMutex;
-  auto trace = dump_fr_trace(
-      includeCollectives, includeStackTraces, onlyActive, backend);
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   DebugInfoWriter& writer = DebugInfoWriter::getWriter(rank);
   LOG(INFO) << "Dumping Flight Recorder trace to " << writer.getWriterTarget();

@@ -502,6 +502,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
+  stall_watchdog_for_testing_ = false;
   revoked_ = false;
   revokeLock.unlock();
 

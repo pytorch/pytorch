@@ -206,6 +206,17 @@ ncclResult_t DefaultNcclApi::commGetAsyncError(
   return ncclCommGetAsyncError(comm, asyncError);
 }
 
+ncclResult_t DefaultNcclApi::commTryGetAsyncError(
+    ncclComm_t comm,
+    ncclResult_t* asyncError) {
+  std::unique_lock<std::mutex> lock(api_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    *asyncError = ncclInProgress;
+    return ncclSuccess;
+  }
+  return ncclCommGetAsyncError(comm, asyncError);
+}
+
 ncclResult_t DefaultNcclApi::commSplit(
     ncclComm_t comm,
     int color,

@@ -20,6 +20,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
+#include <torch/csrc/distributed/c10d/nccl2/HeartbeatMonitor.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
 
@@ -144,6 +145,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_c10d_->enable_reconfigure || supportsReconfigure(),
       "nccl2 reconfigure requires NCCL 2.28 or later (RCCL 2.30.7 or later "
       "on ROCm)");
+  // Before any comm exists, so that a malformed env fails group creation
+  // without leaking one.
+  if (!blocking_wait_) {
+    initHeartbeatMonitor();
+  }
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
