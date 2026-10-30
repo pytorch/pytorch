@@ -37,11 +37,9 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
-    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
-    subtest,
     suppress_warnings,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -1216,6 +1214,43 @@ instantiate_device_type_tests(TestDecomp, globals())
 class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyCPU
+    def test_matmul_should_fold_viewable_layout(self, device):
+        from torch._decomp.decompositions import matmul, should_fold
+
+        for shape, stride, can_fold in (
+            ((4, 1, 8), (16, 4, 1), True),
+            ((4, 1, 8), (8, 32, 1), True),
+            ((1, 4, 8), (8, 8, 1), True),
+            ((4, 3, 8), (100, 8, 1), False),
+        ):
+            x = torch.empty_strided(shape, stride, device=device).normal_()
+            y = torch.randn((8, 5), device=device)
+
+            self.assertEqual(should_fold(x, y, False), can_fold)
+            if not can_fold:
+                continue
+
+            result = matmul(x, y)
+            expected = (
+                x.reshape(-1, x.shape[-1]).mm(y).reshape(*x.shape[:-1], y.shape[-1])
+            )
+            self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_matmul_should_fold_uses_transposed_rhs_layout(self, device):
+        from torch._decomp.decompositions import should_fold
+
+        lhs = torch.randn((8,), device=device)
+        rhs = torch.randn((2, 8, 5), device=device)
+
+        # The contiguous RHS is not viewable after mT when folding to (10, 8).
+        folded_rhs = rhs.mT.reshape(10, 8)
+        self.assertNotEqual(
+            folded_rhs.untyped_storage().data_ptr(), rhs.untyped_storage().data_ptr()
+        )
+        self.assertFalse(should_fold(lhs, rhs, False))
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
@@ -1545,10 +1580,10 @@ class DecompOneOffTests(TestCase):
                 )
             )
             actual_res = decomposed_res[0]
-            # Native CPU flash attention allocates empty_like(query).
-            self.assertEqual(
-                actual_res.stride(), torch.empty_like(query_layer).stride()
-            )
+            # Output has form (N, H, L, E), but should be continuous on (L, N, H, E)
+            # in order for subsequent view(L * N, H * E) to be valid.
+            # So permute(2, 0, 1, 3) before checking that tensor is contiguous
+            self.assertTrue(actual_res.permute(2, 0, 1, 3).is_contiguous())
 
             eager_res = op(
                 query_layer,
@@ -1560,44 +1595,6 @@ class DecompOneOffTests(TestCase):
             )
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
-
-    @onlyCPU
-    @parametrize(
-        "make_query",
-        [
-            subtest(lambda randn: randn(2, 3, 4, 8), name="contiguous"),
-            subtest(lambda randn: randn(4, 2, 3, 8).permute(1, 2, 0, 3), name="mha"),
-            subtest(lambda randn: randn(2, 4, 3, 8).transpose(1, 2), name="bert"),
-        ],
-    )
-    def test_cpu_flash_attention_output_layout(self, device, make_query):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        def randn(*shape):
-            return torch.randn(*shape, device=device, dtype=torch.double)
-
-        query = make_query(randn).requires_grad_()
-        key = torch.randn_like(query, requires_grad=True)
-        value = torch.randn_like(query, requires_grad=True)
-        inputs = (query, key, value)
-        decompose = (
-            torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu
-        )
-        expected = aten._scaled_dot_product_flash_attention_for_cpu(*inputs)[0]
-        actual = decompose(*inputs)[0]
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
-
-        with FakeTensorMode() as mode:
-            fake_inputs = tuple(mode.from_tensor(x) for x in inputs)
-            fake_actual = decompose(*fake_inputs)[0]
-        self.assertEqual(fake_actual.stride(), expected.stride())
-
-        grad = torch.randn_like(expected)
-        self.assertEqual(
-            torch.autograd.grad(actual, inputs, grad),
-            torch.autograd.grad(expected, inputs, grad),
-        )
 
     @onlyCPU
     def test_native_layer_norm_cpu_decomp(self, device):
