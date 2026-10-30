@@ -6667,14 +6667,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
                 _, module = registered_module
                 side_effects = self.output.side_effects
-                for fglobals_vt in side_effects.store_attr_mutations:
-                    if (
-                        isinstance(fglobals_vt, PythonModuleVariable)
-                        and fglobals_vt.value is module
-                        and side_effects.has_pending_mutation_of_attr(
-                            fglobals_vt, name
-                        )
-                    ):
+                if module in side_effects:
+                    fglobals_vt = side_effects[module]
+                    if side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                         self.push(side_effects.load_attr(fglobals_vt, name))
                         return
                 return self.load_builtin(inst)

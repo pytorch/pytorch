@@ -27,3 +27,7 @@ def builtin_only(x):
         return x[0] + size
 
     return x + size
+
+
+def read_global_flag(x):
+    return x + global_flag

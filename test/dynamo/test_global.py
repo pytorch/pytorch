@@ -362,8 +362,16 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         except ImportError:
             import mock_store_global_crossfile_inline as mock_module
 
+        from torch._dynamo.guards import GuardBuilder
+
+        builtin_helper = mock_module.builtin_only
+        global_helper = mock_module.read_global_flag
+
         def fn(x):
-            return mock_module.builtin_only(x)
+            return builtin_helper(x)
+
+        def fn_with_global(x):
+            return global_helper(x)
 
         x = torch.randn(4, 4)
         explanation = torch._dynamo.explain(fn)(x)
@@ -372,10 +380,20 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         graph_output, = explanation.graphs[0](x)
         self.assertTrue(same(graph_output, x + 4))
 
-        module_alias = "__import_" + mock_module.__name__.replace(".", "_dot_")
+        control = torch._dynamo.explain(fn_with_global)(x)
+        self.assertEqual(control.graph_count, 1)
+        control_output, = control.graphs[0](x)
+        self.assertTrue(same(control_output, x))
+        control_module_sources = [
+            guard.originating_source
+            for guard in control.out_guards
+            if guard.inner_create_fn() is GuardBuilder.MODULE_MATCH
+        ]
+        self.assertTrue(control_module_sources)
         self.assertFalse(
             any(
-                module_alias in guard.name
+                guard.inner_create_fn() is GuardBuilder.MODULE_MATCH
+                and guard.originating_source in control_module_sources
                 for guard in explanation.out_guards
             )
         )
