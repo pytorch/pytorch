@@ -81,6 +81,7 @@ _REUSE_BLOCKING_ENV = (
     ("PYTORCH_TUNABLEOP_NEAREST_MATCH_ENABLED", "0"),
     ("PYTORCH_TUNABLEOP_RECORD_BORROWED_ENABLED", "0"),
 )
+_NO_FILE_ENV = (("PYTORCH_TUNABLEOP_FILENAME", ""),)
 _env_warned: OrderedSet[str] = OrderedSet()
 _warned_faults: OrderedSet[str] = OrderedSet()
 
@@ -103,7 +104,7 @@ def _warn_if_env_blocks(
     if blocking and kind not in _env_warned:
         _env_warned.add(kind)
         log.warning(
-            "TunableOp %s: %s overrides the flags the worker sets. Unset it.",
+            "TunableOp %s: %s is set in the environment. Unset it.",
             consequence,
             " and ".join(blocking),
         )
@@ -391,7 +392,13 @@ def _shutdown_locked(graceful: bool = True) -> None:
 
 
 def _insert_device_ordinal(filename: str, device: int) -> str:
-    """Mirror of TuningContext::SetFilename(filename, insert_device_ordinal=true)."""
+    """Mirror of TuningContext::SetFilename(filename, insert_device_ordinal=true).
+
+    Copied, not delegated: the C++ takes the ordinal from current_device(), so
+    letting it derive the name would mean switching the parent to the job's
+    device here and creating a context on it inside the lock -- the work the
+    worker exists to keep out of the parent.
+    """
     if not filename:
         # SetFilename returns early on an empty name, which is how an empty
         # PYTORCH_TUNABLEOP_FILENAME turns persistence off. Appending an
@@ -564,9 +571,11 @@ def submit(job: BenchmarkJob, timeout: float | None = None) -> Outcome:
         with _worker_lock:
             # Under the lock: two threads must not pin different filenames.
             filename = _resolve_and_pin_filename_locked(device)
-            if not filename and "no-file" not in _env_warned:
-                _env_warned.add("no-file")
-                log.warning("No TunableOp results file; nothing is persisted.")
+            if not filename:
+                _warn_if_env_blocks(
+                    _NO_FILE_ENV,
+                    "has no results file, so nothing is recorded or reused",
+                )
             stamped = _StampedJob(job, device, filename, settings)
             worker = _get_worker_locked((device, filename))
             try:
