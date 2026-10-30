@@ -22,6 +22,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
 from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -842,7 +843,7 @@ def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     args = node.args
     if target is torch.ops.higher_order.with_effects:
         target, args = args[1], args[2:]
-    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+    if is_user_kernel_mutation_hop(target):
         written = [node.kwargs["kwargs"]]
     elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
         written = [

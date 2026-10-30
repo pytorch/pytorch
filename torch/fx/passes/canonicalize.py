@@ -94,9 +94,12 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
+        # User-kernel mutation HOPs (triton_kernel_wrapper_mutation, ...) mutate
+        # tensors via kwargs but are not detected by is_impure() or
+        # trailing-underscore checks.
+        from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
+
+        if is_user_kernel_mutation_hop(node.target):
             return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,

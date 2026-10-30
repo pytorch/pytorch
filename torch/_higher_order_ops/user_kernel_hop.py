@@ -9,8 +9,9 @@ the kernel object: how to launch it, how to find its write set, and how to captu
 call to it (the HOPifier).
 """
 
+import dataclasses
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
@@ -34,6 +35,7 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.utils import ReInplaceTrigger
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
 
@@ -333,6 +335,103 @@ def register_user_kernel_hop_dispatch(
     # Adds SAC support for user kernels
     redirect_to_mode(mutation_hop, _CachingTorchDispatchMode)
     redirect_to_mode(mutation_hop, _CachedTorchDispatchMode)
+
+
+###############################################################################
+# Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
+
+
+@dataclasses.dataclass(frozen=True)
+class UserKernelHOPInfo:
+    """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
+    the same way (reinplacing, the functional decomposition, Inductor's layout
+    constraint and mutation propagation, CSE, partitioning, ...).
+
+    Each DSL module registers one at import time; a pass looks a node's target up
+    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+
+    Those passes read the HOP nodes' kwargs by name, so a registered pair must be
+    traced with keyword arguments only, in this form:
+
+    - ``kwargs``: the kernel's arguments by parameter name. The mutation HOP writes
+      the tensors among them that ``get_mutated_tensors`` names.
+    - The functional HOP takes the mutation HOP's arguments plus
+      ``tensors_to_clone``, the names in ``kwargs`` whose tensors it clones and
+      writes instead, and, if any of those is a view, ``tensor_bases``: their
+      bases by name. It returns ``{name: written clone}`` for each name in
+      ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
+      may write in place.
+    - Any other argument is the DSL's own; the passes only hand it on.
+
+    Despite its name, config.triton_kernel_default_layout_constraint sets the layout
+    constraint that Inductor applies to every registered DSL's mutation HOP.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and CuTeDSL's pass cacheable=False: the cache bypasses
+    every graph that contains them.
+    """
+
+    dsl: str
+    mutation: UserKernelWrapperHOP
+    functional: UserKernelWrapperHOP
+    # (hop_kwargs, kernel_kwargs) -> names of the kernel kwargs the kernel writes.
+    # Inductor's propagate_mutation passes the mutation HOP's kwargs as lowered
+    # (each FX node replaced by its lowered value, e.g. an IR node for a tensor, in
+    # "kwargs" too) and that node's "kwargs" with each FX node replaced by its meta
+    # value. Read only the DSL's own arguments (e.g. kernel_idx) from hop_kwargs,
+    # and the kernel's arguments from kernel_kwargs.
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
+    # HOP kwargs -> kernel name, for logs and the reinplacing counters.
+    get_kernel_name: Callable[[Mapping[str, Any]], str]
+    # The functional HOP's dense impl: the post-grad decomposition traces it into
+    # clones plus the mutation HOP.
+    functional_dense: Callable[..., dict[str, Any]]
+    # Counts this DSL's reinplacing decisions.
+    reinplace_trigger: "ReInplaceTrigger"
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
+
+
+_user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+
+
+def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    from torch._dynamo.utils import ReInplaceTrigger
+
+    if not isinstance(info.reinplace_trigger, ReInplaceTrigger):
+        raise TypeError(f"{info.reinplace_trigger!r} is not a ReInplaceTrigger")
+    hops = (info.mutation, info.functional)
+    for hop in hops:
+        if not isinstance(hop, UserKernelWrapperHOP):
+            raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+        if _user_kernel_hops.get(hop, info) is not info:
+            raise AssertionError(f"{hop} is already registered as a user-kernel HOP")
+    for hop in hops:
+        _user_kernel_hops[hop] = info
+
+
+def get_user_kernel_hop_info(target: object) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``."""
+    if not isinstance(target, UserKernelWrapperHOP):
+        return None
+    return _user_kernel_hops.get(target)
+
+
+def is_user_kernel_mutation_hop(target: object) -> bool:
+    info = get_user_kernel_hop_info(target)
+    return info is not None and target is info.mutation
+
+
+def is_user_kernel_functional_hop(target: object) -> bool:
+    info = get_user_kernel_hop_info(target)
+    return info is not None and target is info.functional
+
+
+def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
+    """Every registered DSL, in registration order."""
+    return list(dict.fromkeys(_user_kernel_hops.values()))
 
 
 ###############################################################################
