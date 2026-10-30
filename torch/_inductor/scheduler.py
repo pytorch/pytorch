@@ -7521,6 +7521,8 @@ class Scheduler:
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
                 ):
                     return False
+                if not choice.supports_epilogue_fusion:
+                    return False
                 # Choices can support different inputs, e.g. persistent+TMA
                 # templates cannot fuse producers into TMA-loaded inputs.
                 return required_producer_inputs <= _producer_fusion_enabled_inputs(
@@ -7707,7 +7709,7 @@ class Scheduler:
                     continue
 
                 # pyrefly: ignore [missing-attribute]
-                if is_nvgemm and not choice.supports_epilogue_fusion:
+                if not choice.supports_epilogue_fusion:
                     continue
 
                 # NVGEMM doesn't support producer fusion. Skip NVGEMM choices in

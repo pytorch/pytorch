@@ -843,6 +843,10 @@ cutedsl_enable_autotuning: bool = (
 # the kernel's own analytic pick.
 flydsl_enable_autotuning: bool = os.environ.get("FLYDSL_ENABLE_AUTOTUNING", "0") == "1"
 
+# Emit Proton instrumentation scopes in generated Gluon kernels, for
+# per-scope profiling. Adds significant runtime overhead.
+gluon_enable_proton_profiling: bool = False
+
 # DEPRECATED. This setting is ignored.
 autotune_fallback_to_aten = False
 
@@ -2181,6 +2185,20 @@ def tlx_mode_default() -> Literal["allow", "force"] | None:
     return DEFAULT_MODE
 
 
+def gluon_mode_default() -> Literal["allow", "force"] | None:
+    modes: dict[str, Literal["allow", "force"] | None] = {
+        "off": None,
+        "allow": "allow",
+        "force": "force",
+    }
+    mode = os.environ.get("TORCHINDUCTOR_GLUON_MODE", "off")
+    if mode not in modes:
+        raise ValueError(
+            f"TORCHINDUCTOR_GLUON_MODE={mode!r} is not one of {tuple(modes)}"
+        )
+    return modes[mode]
+
+
 class triton:
     """
     Config specific to codegen/triton.py
@@ -2192,6 +2210,13 @@ class triton:
     # unless the active Triton ships the integration (the import in
     # heuristics/template/tlx.py fails cleanly otherwise).
     tlx_mode: Literal["allow", "force"] | None = tlx_mode_default()
+
+    # Gluon templates (NVidia SM100-SM109 only), set by TORCHINDUCTOR_GLUON_MODE.
+    # None (off) means Gluon is never considered; "allow" lets Gluon templates
+    # compete with Triton templates via autotuning; "force" uses Gluon
+    # templates in place of Triton templates wherever they apply (unlike
+    # tlx_mode, epilogue fusion is not forced).
+    gluon_mode: Literal["allow", "force"] | None = gluon_mode_default()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"

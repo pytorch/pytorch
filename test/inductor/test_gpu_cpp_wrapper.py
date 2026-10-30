@@ -589,6 +589,7 @@ class TestGpuWrapper(InductorTestCase):
         ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
 
         self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
+        self.assertIn("kernel_args_, stream_, false, 8);", prefix.getvalue())
 
     @parametrize(
         "triton_meta,expected",

@@ -1,0 +1,9 @@
+{% macro assign_maybe_constexpr(name, value_expr, prefix) -%}
+    {%- set value_str = value_expr | string -%}
+    {%- set sentinel = "__NOT_A_NUMBER__" -%}
+    {%- set as_int = value_str | int(default=sentinel) -%}
+    {%- set as_float = value_str | float(default=sentinel) -%}
+    {%- set is_constexpr = (as_int != sentinel) or (as_float != sentinel) -%}
+    {%- set annotation = ":" ~ prefix ~ ".constexpr" if is_constexpr else "" -%}
+    {{ name }}{{ annotation }} = {{ value_expr }}
+{%- endmacro %}

@@ -7,12 +7,14 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.codegen.gluon.gluon_template import GluonTemplate
 from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
+from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
@@ -25,6 +27,7 @@ from ..select_algorithm import (
 from ..utils import (
     _descriptor_shape_fits_in_int32,
     _tma_descriptor_max_offset_fits_in_int32,
+    can_use_tma,
     get_gpu_shared_memory,
     get_num_sms,
     GPU_ALIGN_BYTES,
@@ -41,6 +44,7 @@ from .mm_common import (
     _is_static_problem,
     check_supported_striding,
     load_kernel_template,
+    persistent_gluon_grouped_mm_grid,
     persistent_grouped_mm_grid,
 )
 
@@ -54,6 +58,7 @@ class Config:
     kwargs: dict[str, int]
     num_stages: int
     num_warps: int
+    num_ctas: int = 1
 
 
 _NV_CONFIGS = [
@@ -118,16 +123,86 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
+def gluon_grouped_mm_configs(dtype_AB, g, m, n, k, a_is_2d, b_is_2d):
+    from torch._inductor.heuristics.template.gluon import (
+        get_epilogue_subtile,
+        get_grouped_mm_configs,
+        prune_grouped_mm_configs,
+    )
+
+    gluon_configs = get_grouped_mm_configs(
+        dtype_AB=dtype_AB,
+        k_is_varying=a_is_2d and b_is_2d,
+    )
+    if not has_free_symbols((g, m, n, k)):
+        gluon_configs = prune_grouped_mm_configs(
+            gluon_configs,
+            int(g),
+            int(m),
+            int(n),
+            int(k),
+            a_is_2d,
+            b_is_2d,
+            get_num_sms(),
+        )
+
+    configs = []
+    for gluon_config in gluon_configs:
+        num_ctas = 2 if gluon_config.USE_TWO_CTA else 1
+        epilogue_n, epilogue_stages = get_epilogue_subtile(
+            gluon_config.BLOCK_M,
+            gluon_config.BLOCK_N,
+            gluon_config.USE_TMA_STORE,
+            gluon_config.USE_TWO_CTA,
+        )
+        configs.append(
+            Config(
+                kwargs={
+                    "BLOCK_M": gluon_config.BLOCK_M,
+                    "BLOCK_N": gluon_config.BLOCK_N,
+                    "BLOCK_K": gluon_config.BLOCK_K,
+                    "NUM_LOAD_BUFFERS": gluon_config.NUM_LOAD_BUFFERS,
+                    "NUM_ACC_BUFFERS": gluon_config.NUM_ACC_BUFFERS,
+                    "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
+                    "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
+                    "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
+                    "USE_TWO_CTA": gluon_config.USE_TWO_CTA,
+                    "EPILOGUE_N": epilogue_n,
+                    "EPILOGUE_STAGES": epilogue_stages,
+                    "NUM_PROGRAMS": get_num_sms() // num_ctas,
+                },
+                num_stages=1,  # Dummy value; NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS drive pipelining instead.
+                num_warps=gluon_config.NUM_STORE_WARPS,
+                num_ctas=num_ctas,
+            ),
+        )
+
+    return configs
+
+
+gluon_grouped_mm_template = GluonTemplate(
+    name="gluon_grouped_mm",
+    grid=persistent_gluon_grouped_mm_grid,
+    source=load_kernel_template(
+        "gluon_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
+)
+
+
 triton_grouped_mm_template = TritonTemplate(
     name="grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 cutedsl_grouped_mm_template = CuteDSLTemplate(
@@ -261,29 +336,27 @@ def get_flydsl_grouped_mm_template_kwargs(
     ]
 
 
-def has_grouped_mm_triton_support() -> bool:
+def has_grouped_mm_triton_support(device: torch.device | None) -> bool:
     if not torch.cuda.is_available():
         return False
     if torch.version.hip:
         # The grouped GEMM Triton template is supported on ROCm too. ATen
         # remains a separate autotune choice when fallback kernels are enabled.
         return True
-    return torch.cuda.get_device_capability() >= (9, 0)
+    return torch.cuda.get_device_capability(device) >= (9, 0)
 
 
-def _rocm_gcn_arch() -> str:
-    return torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).gcnArchName.split(":", 1)[0]
+def _rocm_gcn_arch(device: torch.device | None) -> str:
+    return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
-def has_rocm_fp8_hardware_support() -> bool:
+def has_rocm_fp8_hardware_support(device: torch.device | None) -> bool:
     if not torch.version.hip:
         return False
 
     # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
     # this is the production-side equivalent used to gate Triton FP8 lowering.
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
     rocm_version = tuple(int(v) for v in rocm_version_str.split(".")[:2])
     if arch.startswith("gfx94"):
@@ -298,10 +371,11 @@ def has_rocm_fp8_hardware_support() -> bool:
 def has_scaled_grouped_mm_triton_support(mat_a: TensorBox, mat_b: TensorBox) -> bool:
     if not torch.version.hip:
         return True
-    if not has_rocm_fp8_hardware_support():
+    device = mat_a.get_device()
+    if not has_rocm_fp8_hardware_support(device):
         return False
 
-    arch = _rocm_gcn_arch()
+    arch = _rocm_gcn_arch(device)
     # Match ATen's ROCm rowwise scaled grouped GEMM contract: gfx94 uses the
     # FNUZ FP8 encoding, while newer FP8-capable arches use OCP FP8.
     expected_dtype = (
@@ -400,7 +474,7 @@ def can_use_triton_kernel(
     bias: TensorBox | None,
     scale_result: TensorBox | None,
 ) -> bool:
-    if not has_grouped_mm_triton_support():
+    if not has_grouped_mm_triton_support(mat_a.get_device()):
         return False
     if not has_triton():
         return False
@@ -418,6 +492,66 @@ def can_use_triton_kernel(
         return offs is None
 
 
+def can_use_gluon_kernel(
+    mat_a: TensorBox,
+    mat_b: TensorBox,
+    offs: TensorBox | None,
+    bias: TensorBox | None,
+    scale_result: TensorBox | None,
+) -> bool:
+    if not torch.cuda.is_available() or torch.version.hip:
+        return False
+
+    # Check for Blackwell GPU (SM 10.0 or 10.3)
+    major, minor = torch.cuda.get_device_capability(mat_a.get_device())
+    if not (major == 10 and minor in [0, 3]):
+        return False
+
+    if not has_triton():
+        return False
+
+    try:
+        from triton.experimental import gluon  # noqa: F401
+    except ImportError:
+        return False
+
+    if bias is not None or scale_result is not None:
+        return False
+
+    # FIXME: Reconsider rejecting dynamic shapes here, as CuTeDSL does.
+    # We accept them to match Triton, but they cost performance: with
+    # symbolic shapes autotuning cannot compare shape-dependent
+    # configs, so it settles on a more conservative one.
+
+    if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
+        if offs is None:
+            return False
+    elif offs is not None:
+        return False
+
+    # tcgen05 reads fp32 (tf32) operands from shared memory only K-major.
+    a_is_k_major = mat_a.get_stride()[-1] == 1
+    b_is_k_major = mat_b.get_stride()[-2] == 1
+    if mat_a.get_dtype() == torch.float32 and not (a_is_k_major and b_is_k_major):
+        return False
+
+    # Gluon descriptor shapes are int32, and it has no pointer-load fallback.
+    return _descriptor_shape_fits_in_int32(
+        mat_a.get_size(), add_guards=True
+    ) and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
+
+
+def _create_balanced_grouped_mm_offsets(total, groups, alignment, dtype, device):
+    offsets = torch.arange(1, groups + 1, dtype=torch.int64, device=device)
+    offsets *= total
+    offsets += groups * alignment // 2
+    offsets //= groups * alignment
+    offsets *= alignment
+    offsets.clamp_max_(total // alignment * alignment)
+    offsets[-1] = total
+    return offsets.to(dtype=dtype)
+
+
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
@@ -430,14 +564,13 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.optimization_hint(end)
-    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
-    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
-        end_hint / noffs_hint
+    return _create_balanced_grouped_mm_offsets(
+        V.graph.sizevars.optimization_hint(end),
+        V.graph.sizevars.optimization_hint(offs_box.get_size()[0]),
+        alignment,
+        offs_box.get_dtype(),
+        offs_box.get_device(),
     )
-    offs[:-1] = (offs[:-1] / alignment).round() * alignment
-    offs[-1] = end_hint
-    return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
 def _tuned_grouped_mm_common(
@@ -552,18 +685,27 @@ def _tuned_grouped_mm_common(
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
             k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
+    a_is_k_major = mat_a.get_stride()[-1] == 1
+    b_is_k_major = mat_b.get_stride()[-2] == 1
 
     scaled = scale_a is not None
+
+    gluon_mode = inductor_config.triton.gluon_mode
+    use_gluon = (
+        is_nonzero
+        and gluon_mode is not None
+        and use_triton_template(layout)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
+        and not scaled
+    )
 
     if (
         is_nonzero
         and use_triton_template(layout)
+        and not (use_gluon and gluon_mode == "force")
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
         and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
-
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
@@ -655,6 +797,35 @@ def _tuned_grouped_mm_common(
             input_nodes,
             accumulator_type=torch.float32,
         )
+
+    if use_gluon:
+        kwargs = {
+            "A_IS_2D": a_is_2d,
+            "B_IS_2D": b_is_2d,
+            "A_IS_K_MAJOR": a_is_k_major,
+            "B_IS_K_MAJOR": b_is_k_major,
+        }
+        can_use_tma_store = can_use_tma(output_layout=layout)
+        for config in gluon_grouped_mm_configs(
+            mat_a.get_dtype(), g, m, n, k, a_is_2d, b_is_2d
+        ):
+            if config.kwargs["USE_TMA_STORE"] and not can_use_tma_store:
+                continue
+            lazy_cpp_wrapper = (
+                V.graph.cpp_wrapper
+                and inductor_config.triton.autotune_at_compile_time is False
+            )
+            if config.num_ctas > 1 and lazy_cpp_wrapper:
+                continue
+            gluon_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                num_stages=config.num_stages,
+                num_warps=config.num_warps,
+                num_ctas=config.num_ctas,
+                **(kwargs | config.kwargs),
+            )
 
     input_gen_fns = {}
     if offs is not None:
