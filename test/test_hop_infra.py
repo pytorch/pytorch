@@ -95,6 +95,8 @@ class TestHOPInfra(TestCase):
             "trace_wrapped",
             "triton_kernel_wrapper_functional",
             "triton_kernel_wrapper_mutation",
+            "cutedsl_kernel_wrapper_functional",
+            "cutedsl_kernel_wrapper_mutation",
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
             "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }

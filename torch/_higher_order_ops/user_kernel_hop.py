@@ -1,17 +1,19 @@
 """DSL-agnostic pieces of the user-kernel HOPs.
 
-A user-defined kernel (e.g. a ``@triton.jit`` kernel) is captured as a pair of HOPs:
-a mutation HOP that launches the kernel and writes its arguments in place, and a
-functional HOP that functionalization rewrites it into (clones of the written
-arguments, then the launch on the clones). Everything here is shared by every DSL's
-pair; each DSL's module (e.g. triton_kernel_wrap.py) adds the parts that depend on
-the kernel object: how to launch it, how to find its write set, and how to capture a
-call to it (the HOPifier).
+A user-defined kernel (a ``@triton.jit`` kernel, a ``@cute.jit`` host function) is
+captured as a pair of HOPs: a mutation HOP that launches the kernel and writes its
+arguments in place, and a functional HOP that functionalization rewrites it into
+(clones of the written arguments, then the launch on the clones). Everything here is
+shared by every DSL's pair; each DSL's module (triton_kernel_wrap.py,
+cutedsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to launch
+it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
+import copy
 import dataclasses
 import threading
-from collections.abc import Callable, Mapping
+import types
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
@@ -46,17 +48,169 @@ KernelT = TypeVar("KernelT")
 # Kernel Side Table
 
 
+def _has_slot_state(cls: type) -> bool:
+    """Whether cls or a base declares __slots__ other than __dict__ and __weakref__.
+    Like copyreg._slotnames, but without caching the answer on the class: Dynamo
+    replays that store after the graph, outside copyreg's try/except, and it fails
+    for built-in types such as types.SimpleNamespace."""
+    for c in cls.__mro__:
+        slots = c.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        if any(s not in ("__dict__", "__weakref__") for s in slots):
+            return True
+    return False
+
+
+def _object_state(value: object) -> dict[str, object] | None:
+    """The attributes constant_key keys an object by, and _snapshot copies: the
+    fields of a dataclass instance, or the __dict__ of a plain object (one with no
+    __slots__ attributes that is not callable or a module, of a class that does not
+    hash by value), such as a mutable config object. None for any other value,
+    cutlass values included.
+
+    Limitation: any other object with __slots__ attributes, or a callable one (a
+    functor), is keyed as itself, by identity unless its class defines equality and
+    hashing: mutating it between launches reuses the kernel compiled for its old
+    contents, and a new object with the same contents is compiled again."""
+    cls = type(value)
+    if (getattr(cls, "__module__", "") or "").startswith("cutlass"):
+        return None
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
+    if (
+        (cls.__hash__ is None or cls.__hash__ is object.__hash__)
+        and hasattr(value, "__dict__")
+        and not callable(value)
+        and not isinstance(value, types.ModuleType)
+        and not _has_slot_state(cls)
+    ):
+        return vars(value)
+    return None
+
+
+def constant_key(value: object) -> object:
+    """A hashable key for a constant kernel argument, equal for two values only when
+    they are interchangeable: lists, tuples, dicts and objects (see _object_state)
+    by type and content, floats by hex() (-0.0 is not 0.0, and every NaN is the
+    same), a cutlass Numeric by its type and Python value, other values by their own
+    equality. Any other unhashable value, and a value that contains itself, are
+    refused."""
+    return _ContentWalk().key(value)
+
+
+def _snapshot(value: object) -> object:
+    """``value`` with everything constant_key keys by content copied, so that the
+    caller mutating it later changes neither the stored value nor its key."""
+    return _ContentWalk().snapshot(value)
+
+
+class _ContentWalk:
+    """One walk of a constant kernel argument's contents, by constant_key or
+    _snapshot. A cycle would be followed forever, so entering a container that the
+    walk is already inside raises a TypeError naming the cycle."""
+
+    def __init__(self) -> None:
+        # The containers the walk is inside, outermost first, by id, each with the
+        # step it took out of it: a format and the index, key or attribute name.
+        self.path: dict[int, tuple[str, object]] = {}
+
+    def visit(
+        self,
+        container: object,
+        pairs: Iterable[tuple[object, object]],
+        step: str,
+        fn: Callable[[object], object],
+    ) -> list[object]:
+        """``fn`` of the item of each (key, item) pair of ``container``, called with
+        the container on the path; ``step`` formats the key."""
+        if id(container) in self.path:
+            start = list(self.path).index(id(container))
+            steps = list(self.path.values())[start:]
+            raise TypeError(
+                f"a constant kernel argument of type {type(container).__name__} "
+                f"refers to itself through {''.join(f.format(k) for f, k in steps)}"
+            )
+        results = []
+        for key, item in pairs:
+            self.path[id(container)] = (step, key)
+            results.append(fn(item))
+        self.path.pop(id(container), None)
+        return results
+
+    def key(self, value: object) -> object:
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.key)
+            return (type(value), tuple(items))
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.key)
+            items = self.visit(value, value.items(), "[{!r}]", self.key)
+            return (type(value), tuple(keys), tuple(items))
+        if (getattr(type(value), "__module__", "") or "").startswith("cutlass"):
+            inner = getattr(value, "value", None)
+            if isinstance(inner, (bool, int, float)):
+                return (type(value), self.key(inner))
+        if isinstance(value, float):
+            return (type(value), value.hex())
+        state = _object_state(value)
+        if state is not None:
+            items = self.visit(value, state.items(), ".{}", self.key)
+            return (type(value), tuple(state), tuple(items))
+        try:
+            hash(value)
+        except TypeError:
+            raise TypeError(
+                f"a constant kernel argument of type {type(value).__name__} is "
+                "unhashable: pass a hashable value, or a list, tuple, dict, dataclass "
+                "or plain object of them"
+            ) from None
+        return (type(value), value)
+
+    def snapshot(self, value: object) -> object:
+        if isinstance(value, (tuple, list)):
+            items = self.visit(value, enumerate(value), "[{!r}]", self.snapshot)
+            if isinstance(value, list):
+                new_list = copy.copy(value)
+                new_list[:] = items
+                return new_list
+            if all(a is b for a, b in zip(items, value)):
+                return value
+            # A namedtuple is rebuilt with _make, any other tuple from the items.
+            return getattr(type(value), "_make", type(value))(items)
+        if isinstance(value, dict):
+            keys = self.visit(value, enumerate(value), ".keys()[{!r}]", self.snapshot)
+            items = self.visit(value, value.items(), "[{!r}]", self.snapshot)
+            new_dict = copy.copy(value)
+            new_dict.clear()
+            new_dict.update(zip(keys, items))
+            return new_dict
+        state = _object_state(value)
+        if state is None:
+            return value
+        items = self.visit(value, state.items(), ".{}", self.snapshot)
+        new = copy.copy(value)
+        for name, item in zip(state, items):
+            object.__setattr__(new, name, item)
+        return new
+
+
 # We cannot put user kernels into the FX graph as the graph nodes
 # do not support arbitrary functions.
 # Use a side table.
 # We use two dicts so that fetching both the kernel and id are O(1)
 class KernelSideTable(Generic[KernelT]):
-    def __init__(self) -> None:
+    def __init__(self, dedupe_constant_args: bool = False) -> None:
         # Per instance, so that each DSL's table has its own index space.
         self.id_to_kernel: dict[int, KernelT] = {}
         self.kernel_to_id: dict[KernelT, int] = {}
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
+        # With dedupe_constant_args, equal constant args (see constant_key) share one
+        # index, so a table that is never reset does not grow with every eager launch,
+        # and each entry is a snapshot of the args it was added with.
+        self._constant_args_index: dict[object, int] | None = (
+            {} if dedupe_constant_args else None
+        )
 
     # Returns index on the table
     def add_kernel(self, kernel: KernelT) -> int:
@@ -80,8 +234,16 @@ class KernelSideTable(Generic[KernelT]):
     # for constant args.
     def add_constant_args(self, args: dict[str, object]) -> int:
         with self.lock:
+            key = None
+            if self._constant_args_index is not None:
+                key = tuple((k, constant_key(v)) for k, v in sorted(args.items()))
+                if key in self._constant_args_index:
+                    return self._constant_args_index[key]
+                args = {k: _snapshot(v) for k, v in args.items()}
             idx = len(self.constant_args)
             self.constant_args[idx] = args
+            if key is not None:
+                self._constant_args_index[key] = idx  # type: ignore[index]
             return idx
 
     # Returns the constant args
@@ -99,6 +261,8 @@ class KernelSideTable(Generic[KernelT]):
         self.id_to_kernel = {}
         self.kernel_to_id = {}
         self.constant_args = {}
+        if self._constant_args_index is not None:
+            self._constant_args_index = {}
 
 
 def store_non_graphable_args(
