@@ -7,7 +7,6 @@ import math
 import operator
 
 import torch
-from torch._dynamo.convert_frame import compile_lock
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
 from torch.utils._ordered_set import OrderedSet
@@ -1175,7 +1174,8 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
     For third-party backends that implement ``aten._weight_int8pack_mm``;
     the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist is
     part of the FX-graph cache key, so changing it produces new cache
-    entries instead of reusing stale ones.
+    entries instead of reusing stale ones, with the unlocked-path
+    exceptions below.
 
     The allowlist is only mutated while holding
     ``torch._dynamo.convert_frame.compile_lock``, so a registration
@@ -1183,12 +1183,23 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
     of changing the allowlist between the cache key and the matcher.
     The lock is held across that interval by the standard torch.compile
     path (dynamo acquires it around backend invocation) and, explicitly,
-    by ``compile_fx_backward``; compiles invoked directly through
-    ``compile_fx`` without dynamo do not take it. NB: calling this from
-    a package's ``__init__`` while another thread compiles can deadlock
-    if that compile's backend initialization imports the same package;
-    register from a post-import initialization step instead.
+    by ``compile_fx_backward``. Two kinds of path hash and match without
+    it, so a registration can still land between a key and the compile
+    filed under it: direct ``compile_fx`` entry points
+    (``torch._inductor.compile``, ``standalone_compile``,
+    ``compile_to_python``) take no lock at all, and with the
+    AOTAutograd cache a lazily-lowered backward is saved under the
+    forward-time key after ``compile_fx_backward`` releases the lock, so
+    a registration landing between the forward compile and the first
+    ``.backward()`` is captured in that entry; that window is shared by
+    every process-global compile input (``config`` included).
+    NB: calling this from a package's ``__init__`` while another thread
+    compiles can deadlock if that compile's backend initialization
+    imports the same package; register from a post-import initialization
+    step instead.
     """
+    from torch._dynamo.convert_frame import compile_lock
+
     _validate_woq_device_type(device_type)
     with compile_lock:
         _woq_int8pack_fusion_devices.add(device_type)
@@ -1197,8 +1208,11 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
 def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
     """Disable the WOQ int8pack-mm fusion on ``device_type`` (e.g. teardown).
 
-    Serialized against in-flight compilations like the register function.
+    Serialized against in-flight compilations like the register function,
+    and subject to the same unlocked-path exceptions documented there.
     """
+    from torch._dynamo.convert_frame import compile_lock
+
     _validate_woq_device_type(device_type)
     with compile_lock:
         _woq_int8pack_fusion_devices.discard(device_type)
@@ -1218,7 +1232,10 @@ def _patch_woq_int8pack_fusion_devices(devices):
 
     Used by ``_run_in_child`` so the worker's pattern matching follows the
     parent's allowlist. Mutated in place so ``from ... import`` references
-    observe the change.
+    observe the change. The swap and restore assume ``compile_lock`` is
+    held (true on the torch.compile path, which wraps the serialized
+    compile); on the unlocked direct ``compile_fx`` paths a concurrent
+    registration could interleave with them.
     """
     saved = OrderedSet(_woq_int8pack_fusion_devices)
     _woq_int8pack_fusion_devices.clear()

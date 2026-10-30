@@ -2011,6 +2011,15 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
         released below at key-hashing time waits for the compile to finish.
         """
 
+        # The hook must be called first from codecache's
+        # FxGraphHashDetails, which requires the AOTAutograd cache to stay
+        # bypassed: setUp patches config.freezing=True and the autograd
+        # cache hard-bypasses frozen graphs (check_cacheable). Were it
+        # active, AOTAutogradCacheDetails would call the hook inside
+        # autograd_cache_key's broad ``except Exception``, which would
+        # swallow the assertFalse below and make this test falsely pass.
+        self.assertTrue(config.freezing)
+
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
@@ -2040,7 +2049,9 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
                 key_hashed.set()
                 # The registration thread was released the moment the key
                 # was hashed; it must not complete while this compile
-                # still holds compile_lock.
+                # still holds compile_lock. The 1 s timeout is the
+                # detection window for a lock-free implementation and is
+                # deliberately conservative.
                 self.assertFalse(
                     register_done.wait(1.0),
                     "register_woq_int8pack_fusion_device mutated the "
@@ -2073,9 +2084,13 @@ class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
         # Phase 2: back to the phase-1 registry state, so the compile hits
         # the entry saved under that key: the pattern pass is skipped and
         # the returned artifact is the non-fused one the key promised.
-        self._test_common(
-            M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07
-        )
+        def phase2_check():
+            matcher_check(0)
+            # matcher_check(0) alone would also pass if the pattern pass
+            # re-ran and simply failed to match, so pin the hit itself.
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self._test_common(M().eval(), (x, w, s), phase2_check, atol=0.001, rtol=0.07)
 
 
 instantiate_device_type_tests(
