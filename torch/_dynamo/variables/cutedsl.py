@@ -22,12 +22,14 @@ from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
 
+import torch
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     _may_overlap,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
     CuteDSLKernel,
+    is_dsl_runtime_object,
     MutatesArgs,
     RAW_CALL_MUTATES_ARGS,
     TraceableCuteDSLKernelWrapper,
@@ -60,6 +62,13 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             hints=[],
         )
 
+    def raise_modified(self, name: str, key: str, path: str) -> Never:
+        # Dynamo applies a write made in the region only after the graph runs.
+        self.raise_unsupported(
+            f"{name}(): {path}, reached through {key!r}, is modified earlier in the "
+            "compiled region, and the kernel would not see the change"
+        )
+
     def get_value(self, val: VariableTracker) -> Any:
         return val.as_python_constant()
 
@@ -75,6 +84,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         realized = val.realize()
         if isinstance(realized, BaseListVariable):
             return [leaf for item in realized.items for leaf in self.leaves(item)]
+        # An object constant's contents are checked on the real object, in
+        # guard_contents.
         return [val]
 
     def specialize_nested(
@@ -148,6 +159,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 "an object Dynamo can pass as itself (such as a config object made "
                 "outside the compiled region), or a tuple or list of these"
             )
+        # guard_contents finds a write made earlier in the region to an object the
+        # snapshot holds, or to its class, whatever path the region took. This also
+        # finds one to anything else the region reached through this argument, such
+        # as a list held by its class (cfg.items[0] = 1).
         side_effects = tx.output.side_effects
         for other in side_effects.id_to_variable.values():
             if not side_effects.is_modified(other):
@@ -156,35 +171,59 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             while isinstance(source, ChainedSource) and source != val.source:
                 source = source.base
             if source == val.source:
-                # Dynamo applies the change only after the graph runs.
-                self.raise_unsupported(
-                    f"{name}(): the {val.python_type_name()} in {key!r}, or an "
-                    "object reached through it, is modified earlier in the compiled "
-                    "region, and the kernel would not see the change"
-                )
-        self.guard_contents(val.source, obj, tx)
+                self.raise_modified(name, key, other.source.name)
+        self.guard_contents(val.source, obj, tx, name, key)
         return obj
 
     def guard_contents(
-        self, source: "Source", value: object, tx: "InstructionTranslatorBase"
+        self,
+        source: "Source",
+        value: object,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        key: str,
     ) -> None:
         """Guard ``value``, read from ``source``, on what the side table keys and
         snapshots it by (see constant_key): a list, tuple or dict on its type and
         length or keys, an object (see _object_state) on its type and, for a plain
-        object, its attribute names, then each item or attribute in turn; a Python
-        constant on its value; anything else (a function, a class, a cutlass value)
-        on its identity. A change made to the object between calls then recompiles,
-        as eager recompiles the kernel for it, instead of launching with the old
-        snapshot."""
+        object, its attribute names, then each item, dict key or attribute in turn;
+        a Python constant on its value; anything else (a function, a class, a
+        cutlass value) on its identity. A change made to the object between calls
+        then recompiles, as eager recompiles the kernel for it, instead of launching
+        with the old snapshot.
+
+        Graph-breaks on what the snapshot cannot stand for: a value that the region
+        modified earlier, or whose class it modified, through whatever path; and a
+        tensor or a DSL object, which, as in a container, would be baked into the
+        side table. ``name`` and ``key`` name the kernel and the parameter."""
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
+        side_effects = tx.output.side_effects
+        if value in side_effects and side_effects.is_modified(side_effects[value]):
+            self.raise_modified(name, key, source.name)
+        # An attribute that an object does not hold is read from its class.
+        classes = value.__mro__ if isinstance(value, type) else type(value).__mro__
+        for cls in classes:
+            if cls in side_effects and side_effects.is_modified(side_effects[cls]):
+                self.raise_modified(name, key, f"class {cls.__name__} of {source.name}")
+        if isinstance(value, torch.Tensor):
+            self.raise_unsupported(
+                f"{name}(): {key!r} holds a tensor inside a container "
+                f"({source.name}); pass each tensor as its own argument"
+            )
+        if is_dsl_runtime_object(type(value)):
+            self.raise_unsupported(
+                f"{name}(): pass torch.Tensor and Python values, not "
+                f"{type(value).__name__} ({source.name}, in {key!r}); PT2 converts "
+                "tensors and supplies the stream"
+            )
         if ConstantVariable.is_base_literal(value):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         elif isinstance(value, (tuple, list)):
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             for i, item in enumerate(value):
-                self.guard_contents(GetItemSource(source, i), item, tx)
+                self.guard_contents(GetItemSource(source, i), item, tx, name, key)
         elif isinstance(value, dict):
             # constant_key keys a dict by its items in order.
             tx.output.guard_on_key_order.add(source)
@@ -192,27 +231,32 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 source.make_guard(GuardBuilder.TYPE_MATCH),
                 source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
             )
-            for i, item in enumerate(dict.values(value)):
-                item_source = DictGetItemSource(source, ConstDictKeySource(source, i))
-                self.guard_contents(item_source, item, tx)
+            for i, (item_key, item) in enumerate(dict.items(value)):
+                # constant_key keys an object key by its contents, which
+                # DICT_KEYS_MATCH, an equality check, does not see.
+                key_source = ConstDictKeySource(source, i)
+                self.guard_contents(key_source, item_key, tx, name, key)
+                item_source = DictGetItemSource(source, key_source)
+                self.guard_contents(item_source, item, tx, name, key)
         elif (state := _object_state(value)) is not None:
             install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
             if dataclasses.is_dataclass(value):
                 for attr, item in state.items():
-                    self.guard_contents(AttrSource(source, attr), item, tx)
+                    self.guard_contents(AttrSource(source, attr), item, tx, name, key)
             else:
                 # Read through __dict__: an attribute name can be a keyword or dotted
                 # (an argparse dest), which AttrSource cannot take; DictGetItemSource
                 # takes any exact str.
                 if any(type(attr) is not str for attr in state):
                     self.raise_unsupported(
-                        f"cannot guard {source.name}: it has an attribute whose name "
-                        "is not an exact str"
+                        f"{name}(): cannot guard {source.name}, in {key!r}: it has an "
+                        "attribute whose name is not an exact str"
                     )
                 dict_source = AttrSource(source, "__dict__")
                 install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
                 for attr, item in state.items():
-                    self.guard_contents(DictGetItemSource(dict_source, attr), item, tx)
+                    item_source = DictGetItemSource(dict_source, attr)
+                    self.guard_contents(item_source, item, tx, name, key)
         else:
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
