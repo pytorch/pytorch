@@ -1398,6 +1398,21 @@ class CPUReproTests(TestCase):
                 self.common(fn, (_x,))
 
     @requires_vectorization
+    def test_acosh_large_float64(self):
+        # https://github.com/pytorch/pytorch/issues/198134
+        x = torch.tensor(
+            [1.0, 2.0, 1.34e154, 1.35e154, 1e200, 1e308], dtype=torch.double
+        ).repeat(3, 6)
+        self.assertFalse(torch.acosh(x).isinf().any())
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for simdlen in bit_widths:
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(torch.acosh, (x,))
+                check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
     def test_asinh_with_corner_inputs(self):
         # https://github.com/pytorch/pytorch/issues/142345
 

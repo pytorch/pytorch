@@ -201,9 +201,9 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_acosdx_u10sve(values)), map(std::acos));
   }
+  // Sleef acoshd returns inf above sqrt(DBL_MAX), where std::acosh is finite.
   Vectorized<double> acosh() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_acoshdx_u10sve(values)), map(std::acosh));
+    return map(std::acosh);
   }
   Vectorized<double> asin() const {
     return USE_SLEEF(

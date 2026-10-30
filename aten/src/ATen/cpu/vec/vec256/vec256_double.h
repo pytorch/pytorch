@@ -151,8 +151,9 @@ class Vectorized<double> {
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd4_u10(values));
   }
+  // Sleef acoshd returns inf above sqrt(DBL_MAX), where std::acosh is finite.
   Vectorized<double> acosh() const {
-    return Vectorized<double>(Sleef_acoshd4_u10(values));
+    return map(std::acosh);
   }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind4_u10(values));
