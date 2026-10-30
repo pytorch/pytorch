@@ -4896,7 +4896,7 @@ def recv_object_list(
         use_batch (bool, optional): If True, use batch p2p operations instead of
             regular send operations. This avoids initializing 2-rank communicators and
             uses existing entire group communicators. See batch_isend_irecv for usage and
-            assumptions. Default is ``False``.
+            assumptions. Requires ``src`` or ``group_src``. Default is ``False``.
         weights_only (bool, optional): If ``True``, objects are deserialized with
             ``torch.load(weights_only=True)``, which restricts deserialization to
             safe types. If ``False``, ``pickle`` is used, which is insecure with
@@ -4946,8 +4946,10 @@ def recv_object_list(
         ['foo', 12, {1: 2}]
     """
     group = _group_or_default_group(group)
-    group_src = _canonicalize_group_rank(group, src, group_src)
-    _check_not_self_rank(group, group_src, "source")
+    # src=None and group_src=None means receive from any rank.
+    if src is not None or group_src is not None:
+        group_src = _canonicalize_group_rank(group, src, group_src)
+        _check_not_self_rank(group, group_src, "source")
 
     if _rank_not_in_group(group):
         _warn_not_in_group("recv_object_list")
@@ -4966,6 +4968,8 @@ def recv_object_list(
 
     # Receive object sizes
     if use_batch:
+        if group_src is None:
+            raise ValueError("use_batch=True requires src or group_src to be specified")
         work = batch_isend_irecv(
             [
                 P2POp(
@@ -4980,6 +4984,9 @@ def recv_object_list(
         rank_sizes = get_global_rank(group, group_src)
     else:
         rank_sizes = recv(object_sizes_tensor, group=group, group_src=group_src)
+        if group_src is None:
+            # Receive the objects from the same rank that sent the sizes.
+            group_src = get_group_rank(group, rank_sizes)
 
     # Tensor to receive serialized objects into.
     object_tensor = torch.empty(  # type: ignore[call-overload]
