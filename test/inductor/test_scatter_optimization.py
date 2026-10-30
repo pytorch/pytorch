@@ -24,7 +24,11 @@ from torch._inductor.utils import (
     needs_fallback_due_to_atomic_add_limitations,
     run_and_get_code,
 )
-from torch.testing._internal.common_utils import DeterministicGuard, skipIfXpu
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    runOnRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -1436,17 +1440,19 @@ class TestPartitionedScatterOpt(TestCase):
                 f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
             )
 
+    # The pass is on by default only on ROCm, and the floor below was calibrated
+    # on MI300X. Speedups on other GPUs vary (some NVIDIA CI hosts see ~1.35x).
+    @runOnRocm
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_perf_atomic_contention(self):
         """
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with
-        moderate contention (8 slots). ROCm MI300X delivers about 1.8x, so the
-        1.5x floor there catches regressions. NVIDIA GPUs in CI deliver about
-        1.35x, so CUDA uses a 1.2x floor. Other GPUs keep the 1.5x floor.
+        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
+        1.5× floor catches regressions with enough slack for hardware variance.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
-        MIN_SPEEDUP = 1.2 if GPU_TYPE == "cuda" and not torch.version.hip else 1.5
+        MIN_SPEEDUP = 1.5
 
         def scatter_fn(out0, out1, out2, idx, vals):
             out0 = out0.index_put([idx], vals, accumulate=True)
