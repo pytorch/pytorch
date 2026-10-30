@@ -389,6 +389,7 @@ jobs:
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
                      scripts/pr_review/fetch_pr_comments.py \
+                     scripts/pr_review/interdiff.py \
                      .agents/skills/pr-review/SKILL.md \
                      .agents/skills/pr-review/review-checklist.md \
                      .agents/skills/pr-review/bc-guidelines.md \

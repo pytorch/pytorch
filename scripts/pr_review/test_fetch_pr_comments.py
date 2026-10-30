@@ -399,8 +399,9 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(
             fpc.collect(api, REPO, PR, "3" * 40)["previous_review_sha"], new
         )
-        # A re-run on the same commit, no earlier review, or a malformed id: nothing to compare.
-        self.assertEqual(fpc.collect(api, REPO, PR, new)["previous_review_sha"], "")
+        # A re-run on the same commit still names it; interdiff.py writes "nothing changed".
+        self.assertEqual(fpc.collect(api, REPO, PR, new)["previous_review_sha"], new)
+        # No earlier review, or a malformed id: nothing to compare.
         self.assertEqual(
             fpc.collect(FakeApi(), REPO, PR, new)["previous_review_sha"], ""
         )

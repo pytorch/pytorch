@@ -14,7 +14,7 @@ inline. post_review.py deletes superseded inline findings nobody replied or
 reacted to, so those are normally not shown. Each inline comment's
 ``original_commit_id`` is the commit it was written against, and ``head_sha``,
 passed in by the caller, is the commit under review, and ``previous_review_sha`` is the commit
-the latest automated review saw (empty without one, or when it is ``head_sha``). Other bots and other users
+the latest automated review saw (empty without one). Other bots and other users
 are dropped. A comment's ``reactions`` are the emoji reactions of the author
 and maintainers. They are read with GraphQL, one call per 100 comments, for
 reacted comments and the latest automated review's body, up to
@@ -256,12 +256,10 @@ def collect(api: Api, repo: str, pr: int, head_sha: str = "") -> dict[str, Any]:
     ours = {r.get("id") for r in marked}
     # By id, as post_review.py orders them: submitted_at ties within a second.
     latest = max(marked, key=lambda r: r.get("id") or 0, default=None)
-    # The commit the latest automated review saw, from which the review job builds the interdiff.
-    # Empty without one, or when it is this head: a re-run on the same commit has nothing to compare.
+    # The commit the latest automated review saw, from which the review job builds the interdiff
+    # (a note when it is this head). Empty without one.
     seen = (latest or {}).get("commit_id") or ""
-    head["previous_review_sha"] = (
-        seen if re.fullmatch(r"[0-9a-f]{40}", seen) and seen != head_sha else ""
-    )
+    head["previous_review_sha"] = seen if re.fullmatch(r"[0-9a-f]{40}", seen) else ""
     roles: dict[str, str | None] = {}
 
     def role_of(login: str) -> str | None:

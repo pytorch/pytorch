@@ -149,12 +149,76 @@ class TestInterdiff(unittest.TestCase):
         self.assertEqual(out.read_text(), interdiff.NOTE_TOO_LARGE)
 
     def test_file_names_are_literal_not_pathspec_magic(self):
+        # As pathspec magic, this name means "every file but a.txt", which would pull in b.txt.
         name = ":(exclude)a.txt"
-        v2 = self.repo.commit(self.v1, {name: "new\n"})
+        v2 = self.repo.commit(self.v1, {name: "new\n", "b.txt": "x-changed\n"})
         self.checkout(v2)
         text = interdiff.interdiff(self.v1, self.b0, self.b0, [name])
         self.assertIn("+new", text)
-        self.assertNotIn("a.txt\n", text.replace(name, ""))
+        self.assertNotIn("b.txt", text)
+
+    def test_a_file_name_that_is_not_utf8_is_handled(self):
+        name = os.fsdecode(b"bad-\xff.txt")
+        v2 = self.repo.commit(self.v1, {name: "new\n"})
+        self.checkout(v2)
+        files, out = Path("files.z"), Path("out.txt")
+        files.write_bytes(os.fsencode(name) + b"\0")
+        interdiff.main(
+            [
+                "--previous",
+                self.v1,
+                "--previous-base",
+                self.b0,
+                "--base",
+                self.b0,
+                "--files",
+                str(files),
+                "--out",
+                str(out),
+                "--max-bytes",
+                "100000",
+            ]
+        )
+        self.assertIn("+new", out.read_text())
+
+    def test_a_rerun_on_the_same_commit_says_nothing_changed(self):
+        self.checkout(self.v1)
+        self.assertEqual(
+            interdiff.interdiff(self.v1, self.b0, self.b0, ["a.txt"]),
+            interdiff.NOTE_SAME,
+        )
+
+    def test_an_unexpected_failure_is_a_note_not_a_failed_step(self):
+        self.checkout(self.v1)
+        files, out = Path("files.z"), Path("out.txt")
+        files.write_bytes(b"a.txt\0")
+        original = interdiff.interdiff
+        try:
+            interdiff.interdiff = lambda *a: (_ for _ in ()).throw(ValueError("boom"))
+            self.assertEqual(
+                interdiff.main(
+                    [
+                        "--previous",
+                        self.v1,
+                        "--previous-base",
+                        self.b0,
+                        "--base",
+                        self.b0,
+                        "--files",
+                        str(files),
+                        "--out",
+                        str(out),
+                        "--max-bytes",
+                        "100000",
+                    ]
+                ),
+                0,
+            )
+        finally:
+            interdiff.interdiff = original
+        self.assertEqual(
+            out.read_text(), interdiff.NOTE_UNAVAILABLE.format(sha=self.v1)
+        )
 
 
 if __name__ == "__main__":

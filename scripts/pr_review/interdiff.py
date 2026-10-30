@@ -19,6 +19,7 @@ the size cap, writes a one-line note, so the review never fails for this file.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ NOTE_UNAVAILABLE = (
     "longer available.\n"
 )
 NOTE_NO_FILES = "# The PR changes no files.\n"
+NOTE_SAME = "# The last automated review saw this same commit: nothing changed since.\n"
 NOTE_TOO_LARGE = (
     "# The changes since the last automated review are too large to list.\n"
 )
@@ -75,7 +77,8 @@ def replay(previous: str, previous_base: str, base: str) -> tuple[str, set[str]]
     # 0 is a clean merge, 1 a merge with conflicts; anything else is an error.
     if proc.returncode not in (0, 1):
         return None
-    tree, _, rest = proc.stdout.decode().partition("\0")
+    # File names are bytes; fsdecode round-trips any of them (surrogateescape).
+    tree, _, rest = os.fsdecode(proc.stdout).partition("\0")
     return tree, {p for p in rest.split("\0") if p}
 
 
@@ -95,6 +98,8 @@ def interdiff(previous: str, previous_base: str, base: str, files: list[str]) ->
         return NOTE_NO_FILES
     if not previous_base or not all(map(has_commit, (previous, previous_base, base))):
         return NOTE_UNAVAILABLE.format(sha=previous)
+    if git("rev-parse", "HEAD").stdout.decode().strip() == previous:
+        return NOTE_SAME
     replayed = replay(previous, previous_base, base)
     if replayed is None:
         return NOTE_UNAVAILABLE.format(sha=previous)
@@ -125,10 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     global REPO
     REPO = args.repo
-    files = [f for f in args.files.read_bytes().decode().split("\0") if f]
+    files = [os.fsdecode(f) for f in args.files.read_bytes().split(b"\0") if f]
     try:
         text = interdiff(args.previous, args.previous_base, args.base, files)
-    except RuntimeError as e:
+    except Exception as e:  # noqa: BLE001 - any failure is a note, never a failed review
         print(f"::warning::interdiff not built: {e}")
         text = NOTE_UNAVAILABLE.format(sha=args.previous)
     if len(text.encode()) > args.max_bytes:

@@ -1598,6 +1598,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             # Decides which comments the review is shown.
             "scripts/pr_review/fetch_pr_comments.py",
+            # Decides which changes a re-review treats as the author's.
+            "scripts/pr_review/interdiff.py",
             # Stage A's skill. It carries the review logic, so omitting it lets
             # the whole checklist be rewritten under an unmoved hash.
             ".agents/skills/pr-review/SKILL.md",
