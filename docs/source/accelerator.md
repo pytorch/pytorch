@@ -104,7 +104,15 @@ per-backend modules, the following APIs are delegated to each backend:
     :toctree: generated
     :nosignatures:
 
+     get_rng_offset
      get_rng_state
      get_rng_state_all
      initial_seed
+     manual_seed
+     manual_seed_all
+     seed
+     seed_all
+     set_rng_offset
+     set_rng_state
+     set_rng_state_all
 ```
