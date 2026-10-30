@@ -1,7 +1,7 @@
 {# Each override receives the default source block as a callable. #}
-{% macro backward_extension(override) %}
+{%- macro backward_extension(override) -%}
 {{ override(caller) if override is defined else caller() }}
-{% endmacro -%}
+{%- endmacro -%}
 {{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
     # Sub notation for this kernel:
     #
@@ -9,10 +9,10 @@
     # LSE: logsumexp (logsumexp is always stored in fp32 regardless of the input dtype)
     # DELTA: Precomputed sum(OUT*DO, axis=-1)
     # DO: Derivative of Output, DQ: Derivative of Query, DV: Derivative of Value
-{% call backward_extension(backward_comments) %}
+{%- call backward_extension(backward_comments) %}
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
     # inductor codegen
-{% endcall %}
+{%- endcall %}
     # M: Number of queries, N: Number of keys/values
     # QK_HEAD_DIM: The dimension of the query and key embeddings
     # V_HEAD_DIM: The dimension of the value embeddings
@@ -61,10 +61,11 @@
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-{% call backward_extension(backward_program_ids) %}
+{%- call backward_extension(backward_program_ids) %}
+
     off_zq = tl.program_id(1).to(INDEX_DTYPE) # q batch idx
     off_hkv = tl.program_id(2).to(INDEX_DTYPE) # kv head idx
-{% endcall %}
+{%- endcall %}
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
@@ -76,9 +77,10 @@
     v_adj = (stride_vh * off_hkv + stride_vz * off_zkv).to(tl.int64)
     # first compute broadcasted dv of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
     # then reduce to dv of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
-{% call backward_extension(backward_dv_offset) %}
+{%- call backward_extension(backward_dv_offset) %}
     dv_adj = (stride_dvh * off_hkv + stride_dvz * off_zq).to(tl.int64)
-{% endcall %}
+{%- endcall %}
+
     # offset K, V, DV pointers for batch/kv-head
     K += k_adj
     V += v_adj
@@ -88,17 +90,18 @@
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
-{% call backward_extension(backward_dq_dispatch) %}
+{%- call backward_extension(backward_dq_dispatch) %}
+
     if pid >= NUM_KV_BLOCKS:
         off_pid = pid - NUM_KV_BLOCKS
-{% endcall %}
+{%- endcall %}
         # THIS BLOCK DOES DQ
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M2)
         SPARSE_KV_MULTIPLE = (SPARSE_KV_BLOCK_SIZE // BLOCK_N2)
-{% call backward_extension(backward_dq_owner) %}
+{%- call backward_extension(backward_dq_owner) %}
         off_hq2 = off_pid // NUM_Q_BLOCKS + off_hkv * GQA_SHARED_HEADS
         start_m2_block = off_pid % NUM_Q_BLOCKS
-{% endcall %}
+{%- endcall %}
         off_pid_mask = start_m2_block // SPARSE_Q_MULTIPLE
         stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
         stride_kv_idx_h = {{stride("KV_IDX", 1)}}
@@ -229,15 +232,15 @@
             )
 
         # Write back dQ.
-{% call backward_extension(backward_dq_store) %}
+{%- call backward_extension(backward_dq_store) %}
         dq_ptrs = DQ2 + offs_m2[:, None].to(INDEX_DTYPE) * stride_dqm + offs_k[None, :].to(INDEX_DTYPE) * stride_dqd
         dq *= SM_SCALE
         if IS_DIVISIBLE and SAFE_HEAD_DIM:
             tl.store(dq_ptrs, dq)
         else:
             tl.store(dq_ptrs, dq, mask=(offs_m2[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM))
-{% endcall %}
-{% call backward_extension(backward_dkdv_branch) %}
+{%- endcall %}
+{%- call backward_extension(backward_dkdv_branch) %}
     else:
         # THIS BLOCK DOES DK & DV
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
@@ -290,11 +293,13 @@
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
-{% call backward_extension(backward_dkdv_head_loop) %}
-{% call backward_extension(backward_dkdv_head_owner) %}
+{%- call backward_extension(backward_dkdv_head_loop) %}
+{%- call backward_extension(backward_dkdv_head_owner) %}
+
         for off_g in range(0, GQA_SHARED_HEADS):
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
-{% endcall %}
+{%- endcall %}
+
             # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
             q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
             do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
@@ -374,7 +379,8 @@
                     IS_FULL_BLOCKS=True,
                 )
 
-{% endcall %}
+{%- endcall %}
+
         # Write back dV and dK.
         dv_ptrs = DV + offs_n1[:, None].to(INDEX_DTYPE) * stride_dvm + offs_v[None, :].to(INDEX_DTYPE) * stride_dvd
 
@@ -387,9 +393,11 @@
         else:
             tl.store(dv_ptrs, dv, mask=(index_n < KV_LEN) & (index_v < V_HEAD_DIM))
 
-{% call backward_extension(backward_scale_dk) %}
+{%- call backward_extension(backward_scale_dk) %}
+
         dk *= SM_SCALE
-{% endcall %}
+{%- endcall %}
+
         if SAFE_HEAD_DIM:
             mask = index_n < KV_LEN
         else:
@@ -398,10 +406,11 @@
         # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
         # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
         tl.static_assert(dk.shape == [BLOCK_N1, QK_HEAD_DIM_ROUNDED])
-{% call backward_extension(backward_dk_store) %}
+{%- call backward_extension(backward_dk_store) %}
         {{store_output(("off_zq", "off_hkv", "index_n", "index_k"), "dk", "mask", indent_width=8, val_shape=("BLOCK_N1", "QK_HEAD_DIM_ROUNDED"))}}
-{% endcall %}
-{% endcall %}
+{%- endcall %}
+{%- endcall %}
+
 @triton.jit
 def bwd_dq_inner(
     {{gen_argdefs()}},
@@ -429,9 +438,9 @@ def bwd_dq_inner(
     hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N2), 1))
 
     kv_offset = 0
-{% call backward_extension(backward_dq_loop) %}
+{%- call backward_extension(backward_dq_loop) %}
     for start_n in range(0, hi):
-{% endcall %}
+{%- endcall %}
         dq = bwd_dq_block_mn(
             {{gen_argdefs()}},
             dq, q, K, V, desc_k, desc_v, kv_start, kv_offset, start_m2,
@@ -482,8 +491,8 @@ def bwd_dq_block_mn(
     kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
-{% call backward_extension(backward_dq_early_dp) %}
-{% endcall %}
+{%- call backward_extension(backward_dq_early_dp) %}
+{%- endcall %}
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -554,7 +563,7 @@ def bwd_dq_block_mn(
     p = tl.math.exp2(post_mod_scores - lse)
     # Compute dP and dS.
     # NB reversed order to since V is transposed
-{% call backward_extension(backward_dq_dp) %}
+{%- call backward_extension(backward_dq_dp) %}
 
 {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
@@ -566,7 +575,7 @@ def bwd_dq_block_mn(
     vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN, INDEX_DTYPE)
     {%- endif %}
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
-{% endcall %}
+{%- endcall %}
     ds = p * (dp - Di[:, None])
     # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
     {{ modification(
@@ -637,8 +646,10 @@ def bwd_dq_block_mn(
     return dq
 
 
-{% call backward_extension(backward_helpers) %}
-{% endcall %}
+{%- call backward_extension(backward_helpers) %}
+{%- endcall %}
+
+
 @triton.jit
 def bwd_dkdv_inner(
     {{gen_argdefs()}},
@@ -757,7 +768,7 @@ def bwd_dkdv_inner(
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-{% endmacro -%}
+{%- endmacro -%}
 @triton.jit
 def bwd_dkdv_block_mn(
     {{gen_argdefs()}},
@@ -770,7 +781,7 @@ def bwd_dkdv_block_mn(
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
-{% call backward_extension(backward_dkdv_q_load) %}
+{%- call backward_extension(backward_dkdv_q_load) %}
     {%- if USE_TMA %}
     q = tl.load_tensor_descriptor(
         desc_q,
@@ -783,16 +794,16 @@ def bwd_dkdv_block_mn(
     # NB reversed order since Q is transposed
     qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN, INDEX_DTYPE)
     {%- endif %}
-{% endcall %}
+{%- endcall %}
     # Load LSE before computing qk to reduce pipeline stall.
     if IS_DIVISIBLE:
         lse = tl.load(LSE + offs_m1)
     else:
         lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
-{% call backward_extension(backward_dkdv_qk) %}
+{%- call backward_extension(backward_dkdv_qk) %}
     qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
-{% endcall %}
+{%- endcall %}
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
@@ -857,7 +868,7 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     pT = tl.math.exp2(post_mod_scores - lse[None, :])
-{% call backward_extension(backward_dkdv_do_load) %}
+{%- call backward_extension(backward_dkdv_do_load) %}
 
 {%- if USE_TMA %}
     do = tl.load_tensor_descriptor(
@@ -867,25 +878,26 @@ def bwd_dkdv_block_mn(
     {%- else %}
     do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
     {%- endif %}
-{% endcall %}
-{% call backward_extension(backward_dkdv_updates) %}
-{% call backward_extension(backward_dv_update) %}
+{%- endcall %}
+{%- call backward_extension(backward_dkdv_updates) %}
+{%- call backward_extension(backward_dv_update) %}
     # Compute dV.
     ppT = pT
     dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
-{% endcall %}
+{%- endcall %}
     if IS_DIVISIBLE:
         Di = tl.load(DELTA + offs_m1)
     else:
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
     # Compute dP and dS.
-{% call backward_extension(backward_dkdv_dp) %}
+{%- call backward_extension(backward_dkdv_dp) %}
     dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
-{% endcall %}
+{%- endcall %}
     dsT = pT * (dpT - Di[None, :])
-{{ backward_dkdv_modification() }}
-{% call backward_extension(backward_dk_update) %}
+{{- backward_dkdv_modification() }}
+{%- call backward_extension(backward_dk_update) %}
     dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT), input_precision=FLOAT32_PRECISION)
-{% endcall %}
-{% endcall %}
+{%- endcall %}
+{%- endcall %}
+
     return dk, dv
