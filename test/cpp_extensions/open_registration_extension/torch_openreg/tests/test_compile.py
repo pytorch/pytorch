@@ -246,5 +246,80 @@ class TestDeviceInterface(TestCase):
         self.assertGreater(iface.device_count(), 0)
 
 
+class _RecordOnlyBackend:
+    # Compiles the graph without executing it: the emitted synchronize_device
+    # call would fail on a host without the corresponding accelerator
+    # semantics. Only the exchange_device guard and set_device cleanup hook
+    # run, through the real torch.openreg.current_device()/set_device() calls.
+    def __init__(self) -> None:
+        self.frame_count = 0
+        self.graphs: list[torch.fx.GraphModule] = []
+
+    def __call__(self, gm, example_inputs):
+        self.frame_count += 1
+        self.graphs.append(gm)
+        return lambda *args, **kwargs: None
+
+
+class TestPrivateUse1Routing(TestCase):
+    def test_stream_synchronize_exchange_routing(self):
+        # The backend calls are the first torch calls traced, so this is the
+        # ordering regression: routing must be resolved when the callable is
+        # first looked up (get_torch_obj_rule_map, rebuilt on cache clears and
+        # backend registration), not later by _get_handlers() which runs only
+        # on the first dispatch.
+        cnt = _RecordOnlyBackend()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def compiled_fn():
+            torch.openreg.current_stream()
+            torch.openreg.synchronize()
+            torch.openreg._exchange_device(0)
+            torch.openreg._maybe_exchange_device(0)
+
+        compiled_fn()
+        compiled_fn()  # second call evaluates the current_device guard
+        self.assertEqual(cnt.frame_count, 1)
+
+        graph = cnt.graphs[0]
+        call_targets = {
+            node.target for node in graph.graph.nodes if node.op == "call_function"
+        }
+        # synchronize dispatches to its handler, which emits the
+        # device-type-specific synchronize_device op.
+        self.assertIn(torch.ops.streams.synchronize_device, call_targets)
+        self.assertTrue(
+            any(
+                node.target is torch.ops.streams.synchronize_device
+                and node.args[0] == "openreg"
+                for node in graph.graph.nodes
+            )
+        )
+        # _exchange_device/_maybe_exchange_device are traced as call_function
+        # nodes; the current_device guard and set_device cleanup hook are
+        # exercised by the real backend on the second call.
+        self.assertIn(torch.openreg._exchange_device, call_targets)
+        self.assertIn(torch.openreg._maybe_exchange_device, call_targets)
+
+        from torch._dynamo import trace_rules
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        fns = (
+            torch.openreg.current_stream,
+            torch.openreg.synchronize,
+            torch.openreg._exchange_device,
+            torch.openreg._maybe_exchange_device,
+        )
+        for fn in fns:
+            self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+            self.assertIn(fn, TorchInGraphFunctionVariable._get_handlers())
+
+        # Routing is re-established after rule-map cache clears, e.g. from
+        # torch.distributed.init_process_group.
+        trace_rules.clear_lru_cache()
+        for fn in fns:
+            self.assertIs(trace_rules.lookup(fn), TorchInGraphFunctionVariable)
+
+
 if __name__ == "__main__":
     run_tests()

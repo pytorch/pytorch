@@ -50,6 +50,23 @@ def set_device(device) -> None:
 # LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
 
 
+def current_stream(device=None):
+    return torch.accelerator.current_stream(device)
+
+
+def synchronize(device=None):
+    # OpenReg is CPU-backed; there is nothing to wait on.
+    return None
+
+
+def _exchange_device(device_index):
+    return torch_openreg._C._exchangeDevice(device_index)
+
+
+def _maybe_exchange_device(device_index):
+    return torch_openreg._C._exchangeDevice(device_index)
+
+
 def init():
     _lazy_init()
 
@@ -78,7 +95,9 @@ __all__ = [
     "device",
     "device_count",
     "current_device",
+    "current_stream",
     "set_device",
+    "synchronize",
     "initial_seed",
     "is_available",
     "init",

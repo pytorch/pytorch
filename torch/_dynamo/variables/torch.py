@@ -3013,17 +3013,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if callable(backend_fn):
                     privateuse1_backend_fns[fn_name] = backend_fn
 
-        @register(
+        current_stream_fns: list[Callable[..., Any]] = [
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
             torch.mtia.current_stream,
             torch.xpu.current_stream,
-            *(
-                [privateuse1_backend_fns["current_stream"]]
-                if "current_stream" in privateuse1_backend_fns
-                else []
-            ),
-        )
+        ]
+        backend_current_stream = privateuse1_backend_fns.get("current_stream")
+        # Skip a backend function that aliases one already getting a handler
+        # here (or any function with a handler already): the alias shares that
+        # handler, and register() would raise on the duplicate.
+        if (
+            backend_current_stream is not None
+            and backend_current_stream not in current_stream_fns
+            and backend_current_stream not in handlers
+        ):
+            current_stream_fns.append(backend_current_stream)
+
+        @register(*current_stream_fns)
         def handle_current_stream(
             self,
             tx: "InstructionTranslatorBase",
@@ -3078,10 +3085,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
         }
-        if "synchronize" in privateuse1_backend_fns:
-            _synchronize_fn_to_device_type[
-                privateuse1_backend_fns["synchronize"]
-            ] = privateuse1_backend_name
+        backend_synchronize = privateuse1_backend_fns.get("synchronize")
+        # Skip a backend function that aliases an existing device's
+        # synchronize or one with a handler already: adding it would either
+        # silently remap that device's synchronize to this backend or make
+        # register() raise on the duplicate.
+        if (
+            backend_synchronize is not None
+            and backend_synchronize is not torch.accelerator.synchronize
+            and backend_synchronize not in _synchronize_fn_to_device_type
+            and backend_synchronize not in handlers
+        ):
+            _synchronize_fn_to_device_type[backend_synchronize] = privateuse1_backend_name
 
         @register(
             torch.accelerator.synchronize,
@@ -3433,40 +3448,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tx, list(args), kwargs, torch.cuda._maybe_exchange_device
             )
 
-        def _make_exchange_device_handler(
-            fn: Callable[[int], int | None], device_type: str
-        ) -> Callable[..., Any]:
-            def _handle_backend_exchange_device(
+        privateuse1_exchange_fns = [
+            privateuse1_backend_fns[name]
+            for name in ("_exchange_device", "_maybe_exchange_device")
+            if name in privateuse1_backend_fns
+            and privateuse1_backend_fns[name] not in handlers
+        ]
+        if privateuse1_exchange_fns:
+            # exchange_device_helper additionally requires the backend to
+            # provide current_device / set_device (guard source + cleanup hook).
+            @register(*privateuse1_exchange_fns)
+            def handle_backend_exchange_device(
                 self,
                 tx: "InstructionTranslatorBase",
                 *args: VariableTracker,
                 **kwargs: VariableTracker,
             ) -> VariableTracker:
-                return exchange_device_helper(tx, list(args), kwargs, fn, device_type)
-
-            return _handle_backend_exchange_device
-
-        if privateuse1_backend_mod is not None:
-            # exchange_device_helper additionally requires the backend to
-            # provide current_device / set_device (guard source + cleanup hook).
-            for fn_name in ("_exchange_device", "_maybe_exchange_device"):
-                backend_fn = privateuse1_backend_fns.get(fn_name)
-                if backend_fn is not None:
-                    handlers[backend_fn] = _make_exchange_device_handler(
-                        cast(Callable[[int], int | None], backend_fn),
-                        privateuse1_backend_name,
-                    )
-
-            # Every routed function must dispatch to a handler: otherwise it is
-            # emitted as a raw FX call_function node that fails at runtime,
-            # since stream/synchronize/exchange_device return non-tensor values
-            # that cannot be traced as graph outputs.
-            missing_handlers = [
-                fn for fn in privateuse1_backend_fns.values() if fn not in handlers
-            ]
-            if missing_handlers:
-                raise AssertionError(
-                    f"no dynamo handler registered for: {missing_handlers}"
+                return exchange_device_helper(
+                    tx, list(args), kwargs, self.value, privateuse1_backend_name
                 )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
