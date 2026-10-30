@@ -988,6 +988,9 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
+# Broadcasts at least this wide also apply realize_reads_threshold to the
+# broadcast producer, which is otherwise recomputed for every broadcast element
+realize_broadcast_reuse_threshold = 64
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
 realize_opusers_threshold = 5
