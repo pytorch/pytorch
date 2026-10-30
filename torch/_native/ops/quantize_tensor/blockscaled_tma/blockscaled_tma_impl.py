@@ -61,6 +61,24 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_m: torch.Tensor | None
 
 
+class _MatrixInputLayout(NamedTuple):
+    r"""Planned canonical shape, axis order, and output restoration metadata.
+
+    ``matrix_axes`` are in caller coordinates and ordered as the kernel's M/K
+    axes. ``input_permutation`` keeps interleaved batches in place for a TMA
+    view, but moves batches ahead of the matrix axes for a copy.
+    """
+
+    shape: tuple[int, ...]
+    dim: _SingleQuantDim
+    matrix_axes: _SingleQuantDim
+    input_permutation: tuple[int, ...]
+    use_tma_view: bool
+    batch_shape: tuple[int, ...]
+    inverse_permutation: tuple[int, ...]
+    swap_dual_outputs: bool
+
+
 class _CanonicalMatrixInput(NamedTuple):
     r"""TMA input and metadata for returning results in the caller's axis order.
 
@@ -72,25 +90,12 @@ class _CanonicalMatrixInput(NamedTuple):
 
     Attributes:
         input (Tensor): Canonical 2D or 4D matrix input, either a view or a copy.
-        dim (_SingleQuantDim): Quantization axis pair in ``input`` coordinates;
-          ``(1, 3)`` quantizes the last matrix axis of a 4D input, while
-          ``(3, 1)`` quantizes the first.
-        batch_shape (tuple[int, ...]): Sizes of batch axes in physical stride
-          order, used to unfold the output's batch dimension.
-        inverse_permutation (tuple[int, ...]): Permutation that restores the
-          original logical axis order after the batch axes are unfolded.
-        swap_dual_outputs (bool): Whether the physical matrix-axis order
-          reversed the two dual-quantization result pairs.
-        plan (BlockscaledTmaPlan, optional): Launch plan validated before any
-          input materialization; ``None`` for an empty input.
+        layout (_MatrixInputLayout): Metadata for restoring the input's logical
+          axis order after quantization.
     """
 
     input: torch.Tensor
-    dim: _SingleQuantDim
-    batch_shape: tuple[int, ...]
-    inverse_permutation: tuple[int, ...]
-    swap_dual_outputs: bool
-    plan: BlockscaledTmaPlan | None
+    layout: _MatrixInputLayout
 
 
 def _validate_blockscaled_tma_input(
@@ -128,25 +133,25 @@ def _validate_blockscaled_tma_input(
 
 def _plan_blockscaled_tma_launch(
     input: torch.Tensor,
-    batch_axes: tuple[int, ...],
-    matrix_axes: _SingleQuantDim,
-    quant_orientation_id: int,
-    is_square_scaling: bool,
+    layout: _MatrixInputLayout,
+    spec: _BlockscaledTmaSpec,
 ) -> BlockscaledTmaPlan | None:
     r"""Validate the selected TMA launch using caller axes before copying input."""
 
     if input.numel() == 0:
         return None
 
-    caller_batch_axes = tuple(sorted(batch_axes))
+    caller_batch_axes = tuple(
+        axis for axis in range(input.ndim) if axis not in layout.matrix_axes
+    )
     batch_sizes = tuple(input.shape[axis] for axis in caller_batch_axes)
-    batch_count = prod(batch_sizes)
+    batch_count = spec.B_product
     if batch_count > _CUDA_GRID_Z_MAX:
         raise ValueError(
             f"blockscaled TMA batch axes {caller_batch_axes} have sizes {batch_sizes}; "
             f"product {batch_count} exceeds CUDA grid.z limit {_CUDA_GRID_Z_MAX}"
         )
-    for axis in matrix_axes:
+    for axis in layout.matrix_axes:
         size = input.shape[axis]
         if size > _CUDA_TMA_MAX_DIM:
             raise ValueError(
@@ -154,44 +159,43 @@ def _plan_blockscaled_tma_launch(
                 f"maximum TMA dimension size is {_CUDA_TMA_MAX_DIM}"
             )
 
-    M, K = (input.shape[axis] for axis in matrix_axes)
     plan = select_blockscaled_tma_plan(
-        M,
-        K,
+        spec.M,
+        spec.K,
         input_dtype=input.dtype,
-        quant_orientation_id=quant_orientation_id,
-        is_square_scaling=is_square_scaling,
+        quant_orientation_id=spec.quant_orientation_id,
+        is_square_scaling=spec.is_square_scaling,
     )
     if plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX:
         raise ValueError(
             f"blockscaled TMA launch grid exceeds CUDA limits for input matrix axes "
-            f"{matrix_axes} with sizes ({M}, {K}): "
+            f"{layout.matrix_axes} with sizes ({spec.M}, {spec.K}): "
             f"grid=({plan.grid_k}, {plan.grid_m}, {batch_count}), "
             f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, {_CUDA_GRID_Z_MAX})"
         )
     return plan
 
 
-def _canonicalize_matrix_input(
+def _plan_matrix_input(
     input: torch.Tensor,
     dim: _SingleQuantDim,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     *,
     dual: bool,
-) -> _CanonicalMatrixInput:
-    r"""Arrange matrix and batch axes for the 2D or 4D TMA kernel.
+) -> _MatrixInputLayout:
+    r"""Plan matrix and batch axes for the 2D or 4D TMA kernel without copying.
 
-    Use a 2D or 4D TMA view when the physical strides and recipe permit. For
+    Choose a 2D or 4D TMA view when the physical strides and recipe permit. For
     batched input ``[*B0, M, *B1, K, *B2]``, a 4D view has shape
     ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), preserving
-    batch axes around the matrix axes. Otherwise, move batch axes ahead of the
-    matrix axes in physical stride order and materialize contiguous storage.
-    Batched inputs then fold those axes into ``(B_product, M, 1, K)``; 2D
-    inputs remain 2D. Trailing ``*B2`` axes can prevent a view. For single
-    quantization, materialization places the requested quantized axis last
-    (dim-k); dual quantization keeps both matrix orientations. Return
-    normalized axes and metadata to undo the permutation.
+    batch axes around the matrix axes. Otherwise, plan a contiguous copy with
+    batch axes ahead of the matrix axes in physical stride order. Batched
+    inputs then fold those axes into ``(B_product, M, 1, K)``; 2D inputs
+    remain 2D. Trailing ``*B2`` axes can prevent a view. For single
+    quantization, the copy places the requested quantized axis last (dim-k);
+    dual quantization keeps both matrix orientations. Return canonical shape,
+    quantization axes and metadata to undo the permutation.
 
     Args:
         input (Tensor): Input whose two matrix axes are specified by ``dim``.
@@ -262,21 +266,6 @@ def _canonicalize_matrix_input(
         # Dim-m kernel currently requires K % 16 == 0
         and (physical_dim_k or input.shape[fast_axis] % 16 == 0)
     )
-    kernel_axes = (
-        (physical_matrix_axes[0], physical_matrix_axes[1])
-        if use_tma_view
-        else normalized
-    )
-    if dual:
-        orientation = _QUANT_ORIENTATION_DIM_KM
-    elif use_tma_view and not physical_dim_k:
-        orientation = _QUANT_ORIENTATION_DIM_M
-    else:
-        orientation = _QUANT_ORIENTATION_DIM_K
-    plan = _plan_blockscaled_tma_launch(
-        input, batch_axes, kernel_axes, orientation, is_square_scaling
-    )
-
     if use_tma_view:
         # No-copy fast path, TMA tiles the two matrix axes; batch axes between
         # them become slice coordinates.
@@ -288,49 +277,72 @@ def _canonicalize_matrix_input(
             input.shape[axis] for axis in physical_axes[slow_pos + 1 : fast_pos]
         )
         permutation = (*batch_axes, *physical_matrix_axes)
+        slow_size, fast_size = input.shape[slow_axis], input.shape[fast_axis]
         if batch_axes:
-            matrix_input = physical_input.view(
-                outer_batch, input.shape[slow_axis], inner_batch, input.shape[fast_axis]
-            )
+            matrix_shape = (outer_batch, slow_size, inner_batch, fast_size)
             single_dim: _SingleQuantDim = (1, 3) if physical_dim_k else (3, 1)
         else:
-            matrix_input = physical_input
+            matrix_shape = (slow_size, fast_size)
             single_dim = (-2, -1) if physical_dim_k else (-1, -2)
+        input_permutation = physical_axes
+        kernel_axes = (physical_matrix_axes[0], physical_matrix_axes[1])
         swap_dual_outputs = dual and normalized != physical_matrix_axes
     else:
         # Materialization fallback, place the requested quantized axis last
         # for the dim-k kernel.
         permutation = (*batch_axes, *normalized)
-        matrix_input = (
-            input if permutation == tuple(range(ndim)) else input.permute(permutation)
-        ).contiguous()
         if batch_axes:
-            matrix_input = matrix_input.view(
+            matrix_shape = (
                 prod(input.shape[axis] for axis in batch_axes),
-                matrix_input.shape[-2],
+                input.shape[normalized[0]],
                 1,
-                matrix_input.shape[-1],
+                input.shape[normalized[1]],
             )
             single_dim = (1, 3)
         else:
+            matrix_shape = (input.shape[normalized[0]], input.shape[normalized[1]])
             single_dim = (-2, -1)
+        input_permutation = permutation
+        kernel_axes = normalized
         swap_dual_outputs = False
     if dual:
-        canonical_dim: _SingleQuantDim = (1, 3) if matrix_input.ndim == 4 else (-2, -1)
+        canonical_dim: _SingleQuantDim = (1, 3) if batch_axes else (-2, -1)
     else:
         canonical_dim = single_dim
     inverse = tuple(permutation.index(axis) for axis in range(ndim))
-    if matrix_input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
-        matrix_input = matrix_input.clone()
     batch_shape = tuple(input.shape[axis] for axis in batch_axes)
-    return _CanonicalMatrixInput(
-        matrix_input,
+    return _MatrixInputLayout(
+        matrix_shape,
         canonical_dim,
+        kernel_axes,
+        input_permutation,
+        use_tma_view,
         batch_shape,
         inverse,
         swap_dual_outputs,
-        plan,
     )
+
+
+def _canonicalize_matrix_input(
+    input: torch.Tensor, layout: _MatrixInputLayout
+) -> _CanonicalMatrixInput:
+    r"""Apply a planned TMA view or copy and align its input pointer."""
+
+    matrix_input = (
+        input
+        if layout.input_permutation == tuple(range(input.ndim))
+        else input.permute(layout.input_permutation)
+    )
+    if layout.use_tma_view:
+        if layout.batch_shape:
+            matrix_input = matrix_input.view(layout.shape)
+    else:
+        matrix_input = matrix_input.contiguous()
+        if layout.batch_shape:
+            matrix_input = matrix_input.view(layout.shape)
+    if matrix_input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
+        matrix_input = matrix_input.clone()
+    return _CanonicalMatrixInput(matrix_input, layout)
 
 
 def _restore_matrix_output(
@@ -349,54 +361,52 @@ def _restore_matrix_output(
 
     Args:
         output (_BlockscaledTmaOutput): Results with folded batch dimensions.
-        canonical (_CanonicalMatrixInput): Axis order and batch shape to restore.
+        canonical (_CanonicalMatrixInput): Input and layout metadata to restore.
     """
 
+    layout = canonical.layout
     if (
-        len(canonical.batch_shape) <= 1
-        and canonical.inverse_permutation
-        == tuple(range(len(canonical.inverse_permutation)))
-        and not canonical.swap_dual_outputs
+        len(layout.batch_shape) <= 1
+        and layout.inverse_permutation == tuple(range(len(layout.inverse_permutation)))
+        and not layout.swap_dual_outputs
     ):
         return output
     restored = []
     for tensor in output:
-        if canonical.batch_shape:
+        if layout.batch_shape:
             if tensor.shape[0] == 0:
                 # unflatten infers contiguous strides for empty tensors.
                 batch_strides = tuple(
-                    tensor.stride(0) * prod(canonical.batch_shape[axis + 1 :])
-                    for axis in range(len(canonical.batch_shape))
+                    tensor.stride(0) * prod(layout.batch_shape[axis + 1 :])
+                    for axis in range(len(layout.batch_shape))
                 )
                 tensor = tensor.as_strided(
-                    (*canonical.batch_shape, *tensor.shape[1:]),
+                    (*layout.batch_shape, *tensor.shape[1:]),
                     (*batch_strides, *tensor.stride()[1:]),
                 )
             else:
-                tensor = tensor.unflatten(0, canonical.batch_shape)
-        restored.append(tensor.permute(canonical.inverse_permutation))
-    if canonical.swap_dual_outputs:
+                tensor = tensor.unflatten(0, layout.batch_shape)
+        restored.append(tensor.permute(layout.inverse_permutation))
+    if layout.swap_dual_outputs:
         restored = restored[2:] + restored[:2]
     return cast(_BlockscaledTmaOutput, tuple(restored))
 
 
 def _build_blockscaled_tma_spec(
-    input: torch.Tensor,
+    layout: _MatrixInputLayout,
     *,
-    dim: _SingleQuantDim,
     dual: bool,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> _BlockscaledTmaSpec:
-    r"""Build a launch spec from validated canonical 2D/4D input."""
+    r"""Build a launch spec from the planned canonical 2D/4D layout."""
 
-    ndim = input.dim()
-    is_batched = ndim == 4
+    is_batched = len(layout.shape) == 4
     dim_k = (1, 3) if is_batched else (-2, -1)
-    do_dim_k = dual or dim == dim_k
-    do_dim_m = dual or dim == dim_k[::-1]
-    M, K = (input.shape[1], input.shape[3]) if is_batched else input.shape[-2:]
-    B_product = input.shape[0] * input.shape[2] if is_batched else 1
+    do_dim_k = dual or layout.dim == dim_k
+    do_dim_m = dual or layout.dim == dim_k[::-1]
+    M, K = (layout.shape[1], layout.shape[3]) if is_batched else layout.shape
+    B_product = layout.shape[0] * layout.shape[2] if is_batched else 1
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
@@ -580,18 +590,19 @@ def _blockscaled_tma_impl_on_current_device(
     *,
     dual: bool,
 ) -> _BlockscaledTmaOutput:
-    canonical = _canonicalize_matrix_input(
+    layout = _plan_matrix_input(
         input, dim, is_square_scaling, is_scale_swizzled, dual=dual
     )
     spec = _build_blockscaled_tma_spec(
-        canonical.input,
-        dim=canonical.dim,
+        layout,
         dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
+    plan = _plan_blockscaled_tma_launch(input, layout, spec)
+    canonical = _canonicalize_matrix_input(input, layout)
     input = canonical.input
-    launch = _prepare_blockscaled_tma_launch(input, spec, canonical.plan)
+    launch = _prepare_blockscaled_tma_launch(input, spec, plan)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
