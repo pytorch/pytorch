@@ -2715,6 +2715,32 @@ class TestPredispatchSerialization(TestCase):
         actual_out = loaded_ep.module()(*inp)
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
+    def test_predispatch_vmap_index_serialize_roundtrip(self):
+        """Test that indexing inside vmap, recorded as flat_apply, survives serialization round-trip."""
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexInVmap(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("base", torch.arange(10) * 3)
+
+            def forward(self, indices):
+                with TransformGetItemToIndex():
+                    return torch.vmap(lambda i: self.base[i])(indices)
+
+        m = IndexInVmap()
+        inp = (torch.tensor([0, 3, 7, 9]),)
+        ep = export(m, inp, strict=False)
+        self.assertIn("flat_apply", str(ep.graph))
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        self.assertIn("flat_apply", str(loaded_ep.graph))
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeAccelerator(TestCase):
