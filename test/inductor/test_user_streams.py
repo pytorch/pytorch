@@ -439,11 +439,11 @@ class TestUserStreamCompile(InductorTestCase):
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     def test_user_stream_context_autotune_at_compile_time(self):
         def fn(x):
-            s = torch.cuda.Stream()
-            s.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s):
+            s = device_module.Stream()
+            s.wait_stream(device_module.current_stream())
+            with device_module.stream(s):
                 y = x * 3
-            torch.cuda.current_stream().wait_stream(s)
+            device_module.current_stream().wait_stream(s)
             return x * 2 + y
 
         from torch._inductor.utils import run_and_get_code
@@ -455,7 +455,7 @@ class TestUserStreamCompile(InductorTestCase):
             blocks.append(self.kernel_autotune_calls.getvalue())
             return run_block(self)
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         with unittest.mock.patch.object(
             PythonWrapperCodegen, "generate_and_run_autotune_block", spy
         ):

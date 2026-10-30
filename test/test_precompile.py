@@ -11141,6 +11141,20 @@ class TestPrecompileCustomOpRecording(TestCase):
         (warning,) = [m for m in logs.output if qualname in m]
         self.assertIn(f"imports {name}, the modules its frames run in", warning)
 
+    def test_each_save_warns_only_about_new_unrecorded_ops(self):
+        op, qualname = self._op("in_main")
+        op._init_fn.__module__ = "__main__"
+        fn = importlib.import_module(self._module("def fn(x):\n    return x + 1\n")).fn
+        d = self.enterContext(tempfile.TemporaryDirectory())
+        paths = {"artifact_path": f"{d}/a.py", "cache_path": f"{d}/a.cache"}
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            with capture(fn, **paths, backend="eager", tracer=DynamoTracer()) as cap:
+                cap(torch.ones(4))
+                cap._session._package.graph_break_op_names.add((qualname, ""))
+                cap.save()
+                cap.save()
+        self.assertEqual(len([m for m in logs.output if qualname in m]), 1)
+
     def test_a_library_defined_op_warns_that_the_frame_modules_are_a_fallback(self):
         from torch.library import _scoped_library
 
