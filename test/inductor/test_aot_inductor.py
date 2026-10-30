@@ -65,11 +65,11 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
-    CDNA5OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    RDNA3OrLater,
     requires_triton_ptxas_compat,
     SM80OrLater,
     SM90OrLater,
@@ -2697,6 +2697,24 @@ class AOTInductorTestsTemplate:
                 "y": (Dim.DYNAMIC, Dim.STATIC),
             }
             self.check_model(model, example_inputs, dynamic_shapes=spec)
+
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                output = torch.zeros_like(x, dtype=torch.int32)
+                output[1:] = x[:-1]
+                return output
+
+        inputs = [
+            (torch.arange(size, dtype=torch.int64, device=self.device),)
+            for size in (2, 0, 1, 7, 35)
+        ]
+        self.check_model_with_multiple_inputs(
+            Model(),
+            inputs,
+            dynamic_shapes={"x": (Dim.DYNAMIC,)},
+        )
 
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
@@ -9911,10 +9929,8 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires GPU")
 
         if TEST_WITH_ROCM:
-            if CDNA5OrLater():
-                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
-            if not CDNA2OrLater():
-                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+            if not (CDNA2OrLater() or RDNA3OrLater()):
+                self.skipTest("_int4_mm needs CDNA2 or later, or RDNA3 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale_and_zeros) -> None:
@@ -9950,10 +9966,8 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest("requires Intel GPU")
 
         if TEST_WITH_ROCM:
-            if CDNA5OrLater():
-                self.skipTest("int4 mm not yet implemented for gfx1250 (needs WMMA)")
-            if not CDNA2OrLater():
-                self.skipTest("_int4_mm is supported only for CDNA2 or later")
+            if not (CDNA2OrLater() or RDNA3OrLater()):
+                self.skipTest("_int4_mm needs CDNA2 or later, or RDNA3 or later")
 
         class Model(torch.nn.Module):
             def __init__(self, weight, scale, zeros) -> None:
