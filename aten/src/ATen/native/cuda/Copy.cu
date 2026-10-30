@@ -20,6 +20,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/FloatRounding.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
@@ -178,6 +179,13 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else if (iter.dtype(1) == kDouble && (dtype == kHalf || dtype == kBFloat16 || isFloat8Type(dtype))) {
+    // The generic casts would round twice, through float.
+    AT_DISPATCH_V2(dtype, "copy_", AT_WRAP([&] {
+      gpu_kernel_nocast(iter, [] GPU_LAMBDA(double x) {
+        return c10::convert_with_rounding<scalar_t>(x, c10::RoundingMode::ToNearestEven);
+      });
+    }), kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
   } else if (isFloat8Type(dtype)) {
      float8_copy_kernel_cuda(iter);
   } else if (iter.dtype(1) == kFloat && (dtype == kBFloat16 || dtype == kHalf)) {
