@@ -98,6 +98,23 @@ static inline void check_for_unsupported_clamp_dtypes(const Scalar& s) {
       !s.isComplex(), "clamp is not supported for complex types");
 }
 
+// For Half/BFloat16, verify a clamp scalar bound is representable. CPU kernels
+// convert via .to<scalar_t>() (which checks overflow), but CUDA kernels promote
+// to opmath_t (float) first and silently bypass that check; validating here
+// keeps device behavior consistent. Limited to Half/BFloat16 -- the domain of
+// AT_DISPATCH_REDUCED_FLOATING_TYPES -- so float8/float4 result types are left
+// unaffected instead of falling through to the dispatch default and raising.
+static void check_clamp_scalar_in_reduced_float_range(
+    const Scalar& scalar,
+    ScalarType result_type) {
+  if (result_type == kHalf || result_type == kBFloat16) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(
+        result_type, "clamp_scalar_bounds_check", [&] {
+          (void)scalar.to<scalar_t>();
+        });
+  }
+}
+
 TORCH_META_FUNC(clamp)
 (const Tensor& self, const OptionalScalarRef min, const OptionalScalarRef max) {
   if (!min && !max) {
@@ -131,6 +148,12 @@ TORCH_META_FUNC(clamp)
   }
   // make sure scalars weren't complex
   check_for_unsupported_clamp_dtypes(result_type);
+  if (min) {
+    check_clamp_scalar_in_reduced_float_range(min.get(), result_type);
+  }
+  if (max) {
+    check_clamp_scalar_in_reduced_float_range(max.get(), result_type);
+  }
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
