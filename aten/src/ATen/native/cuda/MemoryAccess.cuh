@@ -88,7 +88,7 @@ struct vectorized_templated_load_helper {
     auto args_accessor = [&args] __device__(int thread_unroll_idx) -> arg_t& {
       return std::get<arg_index>(args[thread_unroll_idx]);
     };
-    self.template load_single_arg<arg_index>(args_accessor, ptr, idx);
+    self.template load_single_arg<arg_index, arg_t>(args_accessor, ptr, idx);
   }
 };
 #endif
@@ -409,7 +409,7 @@ struct vectorized_templated {
     return true;
   }
 
-  template <int arg_index, typename accessor_t>
+  template <int arg_index, typename arg_t, typename accessor_t>
   __device__ inline void load_single_arg(accessor_t to, char* ptr, int idx) {
     // extract the arg_index-th input tensor element type from the
     // variadic template argument.
@@ -426,7 +426,7 @@ struct vectorized_templated {
       auto v = load_vector<vec_size>(block_ptr, index);
 #pragma unroll
       for (int j = 0; j < vec_size; j++) {
-        to(vec_size * i + j) = c10::convert<CastToT>(v.val[j]);
+        to(vec_size * i + j) = c10::convert<arg_t>(v.val[j]);
       }
     }
   }
