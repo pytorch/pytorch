@@ -493,25 +493,29 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROpe
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
+          "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)"))) {
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto& in1_t = p_node->Input(1).toTensor();
       const auto in2_i = p_node->Input(2).toBool();
       const auto in3_i = p_node->Input(3).toBool();
       const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
-      p_node->Output(0) = at::native::to(in0_t, in1_t, in2_i, in3_i, in4_o);
+      const auto in5_o = p_node->Input(5).toOptional<std::string_view>();
+      p_node->Output(0) =
+          at::native::to(in0_t, in1_t, in2_i, in3_i, in4_o, in5_o);
     };
   }
   if (n->matches(torch::schema(
-          "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
+          "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None, *, str? round=None) -> Tensor(a)"))) {
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toScalarType();
       const auto in2_i = p_node->Input(2).toBool();
       const auto in3_i = p_node->Input(3).toBool();
       const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
-      p_node->Output(0) = at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o);
+      const auto in5_o = p_node->Input(5).toOptional<std::string_view>();
+      p_node->Output(0) =
+          at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o, in5_o);
     };
   }
   if (n->matches(torch::schema(

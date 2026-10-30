@@ -3920,6 +3920,18 @@ def convert_element_type(g: jit_utils.GraphContext, self, *args):
 
 @_onnx_symbolic("aten::to")
 def to(g: jit_utils.GraphContext, self, *args):
+    # aten::to.dtype/other (5 args), .device (6) and .dtype_layout (8) end with
+    # a round argument; the prim overloads have fewer arguments. Cast rounds to
+    # nearest even, and these opsets have no other rounding modes.
+    if len(args) in (5, 6, 8):
+        *args, round_arg = args
+        if not symbolic_helper._is_none(round_arg):
+            rounding = symbolic_helper._maybe_get_const(round_arg, "s")
+            if rounding != "to_nearest_even":
+                return symbolic_helper._onnx_unsupported(
+                    f"aten::to with round={rounding!r}", self
+                )
+
     def is_aten_to_device_only(args):
         if len(args) == 4:
             # aten::to(Tensor, Device, bool, bool, memory_format)
