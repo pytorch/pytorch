@@ -924,6 +924,30 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
             data_hp, axes[::-1], False, True
         )
+        # Protect current no-copy fast paths, not a public API guarantee.
+        if layout in {
+            "leading",
+            "leading_reverse",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "transposed_interleaved_batch",
+        }:
+            from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
+                _canonicalize_matrix_input,
+                _plan_matrix_input,
+            )
+
+            matrix_layout = _plan_matrix_input(data_hp, axes, False, True, dual=True)
+            with patch.object(
+                torch.Tensor,
+                "contiguous",
+                side_effect=AssertionError("materialized input"),
+            ):
+                matrix_input = _canonicalize_matrix_input(data_hp, matrix_layout)
+            self.assertEqual(matrix_input.data_ptr(), data_hp.data_ptr())
         qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
             data_hp,
             **{**_MXFP8_KWARGS, "dim": axes},
