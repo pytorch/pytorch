@@ -2889,13 +2889,14 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
 
 // The CPU cascade summation (see use_cascade_powsum) adds partial sums into its
 // output, so reduce half and bfloat16 into a float temporary and round once at
-// the end. Returns false when the kernel would not take that path.
+// the end. A single-element result is written once and needs no temporary.
+// Returns false when the kernel would not take that path.
 template <typename Stub>
 static bool cpu_powsum_in_float(Stub& stub, const char* name, const Tensor& result, const Tensor& self,
                                 OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
   const auto in_dtype = self.scalar_type();
   if (!self.is_cpu() || !isReducedFloatingType(in_dtype) || result.scalar_type() != in_dtype ||
-      !use_cascade_powsum(in_dtype, kFloat, ord, is_norm)) {
+      result.numel() == 1 || !use_cascade_powsum(in_dtype, kFloat, ord, is_norm, /*single_output=*/false)) {
     return false;
   }
   Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
