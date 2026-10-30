@@ -24,6 +24,7 @@ if (
 
 
 import triton.language as tl
+from triton.compiler.errors import CompilationError
 
 import torch.distributed as dist
 import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
@@ -276,6 +277,27 @@ def my_broadcast_kernel(
     pe_root,
 ):
     shmem_backend.broadcast(team_handle, dst, src, nelems, pe_root)
+
+
+@requires_shmem
+@triton.jit(do_not_specialize=["team"])
+def my_collective_status_kernel(team, dst, src, nelems, status, OP: tl.constexpr):
+    if OP == "alltoall":
+        ret = shmem_backend.alltoall(team, dst, src, nelems)
+    else:
+        ret = shmem_backend.broadcast(team, dst, src, nelems, 0)
+    tl.store(status, ret)
+
+
+@requires_shmem
+@triton.jit
+def my_collective_constexpr_team_kernel(
+    dst, src, nelems, TEAM: tl.constexpr, OP: tl.constexpr
+):
+    if OP == "alltoall":
+        shmem_backend.alltoall(TEAM, dst, src, nelems)
+    else:
+        shmem_backend.broadcast(TEAM, dst, src, nelems, 0)
 
 
 @requires_shmem
@@ -861,17 +883,17 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.tensor([expected_remote], device=self.device, dtype=dtype),
         )
 
+    # 16 B, 512 B and 8 KiB per PE: rocSHMEM alltoall switches algorithms at 512 B.
     @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
-    def test_triton_alltoall(self) -> None:
+    @parametrize("nelems_per_pe", [2, 64, 1024])
+    def test_triton_alltoall(self, nelems_per_pe: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
-        # Each PE will send 2 int64 elements to every other PE
-        nelems_per_pe = 2
         dtype = torch.int64
         # Source buffer: contains data for all PEs
         # Layout: [data_for_pe0, data_for_pe1, ...]
@@ -910,14 +932,13 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
-    def test_triton_broadcast(self) -> None:
+    @parametrize("nelems", [2, 64, 1024])
+    def test_triton_broadcast(self, nelems: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
 
-        # Configuration
-        nelems = 4  # number of elements
         dtype = torch.int64
 
         # Source buffer - only root will have meaningful data
@@ -928,8 +949,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == pe_root:
             # Root fills with specific pattern
-            for i in range(nelems):
-                src[i] = 100 + i
+            src.copy_(torch.arange(100, 100 + nelems, dtype=dtype))
         else:
             # Non-root PEs have dummy data
             src.fill_(-1)
@@ -955,10 +975,42 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results - all ranks should have the root's data
-        expected = [100 + i for i in range(nelems)]
-        torch.testing.assert_close(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
+        expected = torch.arange(100, 100 + nelems, dtype=dtype, device=self.device)
+        torch.testing.assert_close(dst, expected)
+
+    @skipIfRocmVersionLessThan((10, 2))
+    @requires_triton()
+    @parametrize("op", ["alltoall", "broadcast"])
+    def test_triton_rocshmem_runtime_nonworld_team(self, op: str) -> None:
+        if not TEST_WITH_ROCM:
+            self.skipTest("rocSHMEM-only team check")
+        self._init_device()
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        nelems = 4
+        numel = nelems * self.world_size
+        src = symm_mem.empty(numel, dtype=torch.int64, device=self.device).fill_(1)
+        dst = symm_mem.empty(numel, dtype=torch.int64, device=self.device).fill_(-1)
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
+        status = torch.zeros(1, dtype=torch.int32, device=self.device)
+        dist.barrier()
+        my_collective_status_kernel[(1,)](
+            1, dst, src, nelems, status, OP=op, launch_cooperative_grid=True
         )
+        dist.barrier()
+        self.assertNotEqual(status.item(), 0)
+        self.assertEqual(dst, torch.full_like(dst, -1))
+
+    @skipIfRocmVersionLessThan((10, 2))
+    @requires_triton()
+    @parametrize("op", ["alltoall", "broadcast"])
+    def test_triton_rocshmem_constexpr_nonworld_team(self, op: str) -> None:
+        if not TEST_WITH_ROCM:
+            self.skipTest("rocSHMEM-only team check")
+        self._init_device()
+        buf = torch.empty(4, dtype=torch.int64, device=self.device)
+        with self.assertRaisesRegex(CompilationError, "Only team 0 is supported"):
+            my_collective_constexpr_team_kernel[(1,)](buf, buf, 4, TEAM=1, OP=op)
 
     @requires_triton()
     @requires_h100()
