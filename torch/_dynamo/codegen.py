@@ -96,6 +96,17 @@ class GraphOutputEntry:
     variable: VariableTracker
 
 
+def _has_sourced_value(value: VariableTracker) -> bool:
+    has_source = False
+
+    def check(item: VariableTracker) -> None:
+        nonlocal has_source
+        has_source |= item.source is not None
+
+    VariableTracker.visit(check, value)
+    return has_source
+
+
 class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
@@ -338,8 +349,12 @@ class PyCodegen:
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
+        elif (
+            value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
+            # LOAD_CONST lets CPython intern aggregate elements. Reconstruct
+            # sourced children instead to preserve their input identity.
+            and not _has_sourced_value(value)
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
