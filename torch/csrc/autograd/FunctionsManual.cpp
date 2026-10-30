@@ -2802,15 +2802,11 @@ Tensor binary_cross_entropy_with_logits_target_backward(
 }
 
 Tensor log_sigmoid_double_backward(const Tensor& grad, const Tensor& input) {
-  if (input.is_complex()) {
-    auto z = input.sigmoid();
-    return grad * (z - 1) * z;
-  }
-  // sigmoid(x) saturates to exactly 0/1 for large |x|, and the (z - 1)
-  // factor then annihilates the finite curvature. exp(-|x|) keeps the
-  // small term instead of cancelling it.
-  auto exp_neg_abs = input.abs().neg().exp();
-  return -grad * exp_neg_abs / (1 + exp_neg_abs).pow(2);
+  // sigmoid(x) * sigmoid(-x) == z * (1 - z) where z = sigmoid(x), but without
+  // the (z - 1) factor that annihilates the finite curvature once sigmoid
+  // saturates to exactly 0/1 for large |x|. The product keeps the small term
+  // (e.g. exp(-x) on the positive side) instead of cancelling it.
+  return -grad * input.sigmoid() * input.neg().sigmoid();
 }
 
 Tensor softmax_double_backward(

@@ -12683,6 +12683,7 @@ if __name__ == '__main__':
         noncontig_out = torch.randn(2, 3, device=device).t()
         self.assertEqual(F.logsigmoid(x), F.logsigmoid(x, out=noncontig_out))
 
+    @expectedFailureMPS  # Float64 is not supported
     def test_logsigmoid_double_backward_saturation(self, device):
         # The z*(z-1) form annihilates the curvature once sigmoid saturates;
         # the finite value must survive on the positive side too (#195530).
