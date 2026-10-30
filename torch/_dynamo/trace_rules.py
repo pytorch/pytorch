@@ -1805,6 +1805,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._test_functorch_fallback",
         "torch._test_serialization_subcmul",
         "torch._to_cpu",
+        "torch._to_dtype_rounded",
         "torch._to_functional_tensor",
         "torch._to_sparse_semi_structured",
         "torch._transform_bias_rescale_qkv",

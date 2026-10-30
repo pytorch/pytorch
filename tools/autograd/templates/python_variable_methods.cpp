@@ -389,31 +389,31 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
   pybind11::gil_scoped_release no_gil;
   // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
   // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
   // are missing from the self argument while the tracer assumes that they should be populated with the
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
-  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
+  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy, std::nullopt, round);
 }
 
-static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
   pybind11::gil_scoped_release no_gil;
-  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
+  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy, std::nullopt, round);
 }
 
-static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
-  pybind11::gil_scoped_release no_gil;
-  // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(dtype, non_blocking, copy, optional_memory_format);
-}
-
-static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
-  return self.to(device, dtype, non_blocking, copy, optional_memory_format);
+  return self.to(dtype, non_blocking, copy, optional_memory_format, round);
+}
+
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format, std::optional<std::string_view> round = std::nullopt) {
+  pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
+  return self.to(device, dtype, non_blocking, copy, optional_memory_format, round);
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -971,35 +971,36 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
+    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
+    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, c10::string_view? round=None)",
   });
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<6> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-  auto parsed = parse_to_conversion(r, /*allow_copy*/ true);
+  auto parsed = parse_to_conversion(r, /*allow_copy*/ true, /*allow_round*/ true);
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
+  auto round = std::get<5>(parsed);
   auto& self_ = THPVariable_Unpack(self);
   torch::utils::maybe_initialize_device(device);
-  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
+  if (!device && !scalarType && !copy && !opt_memory_format.has_value() && !round.has_value()) {
     Py_INCREF(self);
     return self;
   } else if (!device && !scalarType) {
     return THPVariable_Wrap(
-        dispatch_to(self_, non_blocking, copy, opt_memory_format));
+        dispatch_to(self_, non_blocking, copy, opt_memory_format, round));
   } else if (!device) {
-    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format, round));
   } else if (!scalarType) {
-    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking, copy, opt_memory_format, round));
   } else {
-    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format));
+    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking, copy, opt_memory_format, round));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
