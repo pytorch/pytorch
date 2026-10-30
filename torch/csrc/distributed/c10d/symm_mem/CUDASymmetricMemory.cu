@@ -34,7 +34,7 @@ namespace c10d::symmetric_memory {
 // Shareable handle spellings, so the rendezvous code below can be written once
 // against `use_fabric_handle` instead of once per vendor per handle type.
 #if defined(USE_ROCM)
-#if ROCM_VERSION >= 71500
+#if ROCM_VERSION >= 100000
 using FabricHandleType = hipMemFabricHandle_t;
 constexpr auto kMemHandleTypeFabric = hipMemHandleTypeFabric;
 #else

@@ -160,7 +160,7 @@ bool isFabricSupported() {
   return true;
 }
 
-#elif defined(USE_ROCM) && ROCM_VERSION >= 71500
+#elif defined(USE_ROCM) && ROCM_VERSION >= 100000
 
 // Fabric handles on ROCm are UALink. Three things must hold: the GPU exposes
 // UALink, the accelerator has been provisioned to a ready state, and the loaded
@@ -281,7 +281,7 @@ bool get_fabric_access(c10::DeviceIndex dev) {
     fabricCliqueId_[dev] = kCliqueIdUnsupported;
     return false;
   }
-#elif defined(USE_ROCM) && ROCM_VERSION >= 71500
+#elif defined(USE_ROCM) && ROCM_VERSION >= 100000
   TORCH_CHECK(
       num_devices_ >= 0,
       "p2p access cache not initialized. "
