@@ -1011,7 +1011,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         # layers are asserted to have fused on every device.
         # TODO: remove this workaround when sdpa backward for XPU is merged.
         per_pattern = counters["inductor_pattern_matcher_per_pattern"]
-        if (self.device == "xpu"):
+        if self.device == "xpu":
             self.assertEqual(per_pattern["_sfdp_pattern_5_inference"], 2)
         else:
             self.assertEqual(per_pattern["_sfdp_pattern_5_training"], 2)
