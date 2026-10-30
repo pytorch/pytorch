@@ -65,7 +65,6 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
-    identity,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -266,7 +265,7 @@ class SuperVariable(VariableTracker):
         # relevant `tp_descr_get`, so we explicitly handle the cases we care
         # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
-            return LambdaVariable(identity)
+            return VariableTracker.tp_init_impl(self.objvar, tx, args, kwargs)
         elif (
             isinstance(inner_fn, types.WrapperDescriptorType)
             and inner_fn.__name__ == "__init__"
