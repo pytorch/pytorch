@@ -40,6 +40,9 @@ static_assert(
 static_assert(
     offsetof(pti_view_record_memory_copy_p2p, _view_kind) == 0,
     "base record must be first member");
+static_assert(
+    offsetof(pti_view_record_overhead, _view_kind) == 0,
+    "base record must be first member");
 
 // Mock XpuptiActivityApi that delivers hand-crafted PTI records
 // through the virtual processActivities without needing PTI runtime.
@@ -691,6 +694,32 @@ TEST_F(XpuptiActivityHandlersTest, PeerToPeerMemcpyIsGpuMemcpy) {
       std::optional<int64_t>{activity.deviceId()});
   EXPECT_TRUE(
       activity.getMetadataValue(XpuMetadataFields::kToDevice).has_value());
+}
+
+// --- Overhead Activity Tests ---
+
+TEST_F(XpuptiActivityHandlersTest, OverheadActivityReportsApiId) {
+  pti_view_record_overhead overhead_record{};
+  overhead_record._view_kind._view_kind = PTI_VIEW_COLLECTION_OVERHEAD;
+  overhead_record._overhead_kind = PTI_VIEW_OVERHEAD_KIND_TIME;
+  overhead_record._overhead_start_timestamp_ns = 100;
+  overhead_record._overhead_end_timestamp_ns = 200;
+  overhead_record._overhead_thread_id = 42;
+  overhead_record._overhead_duration_ns = 50;
+  overhead_record._overhead_count = 1;
+  overhead_record._api_id = zeEventHostSynchronize_id;
+
+  mockApi_.records.push_back(&overhead_record._view_kind);
+
+  auto traceBuffer = processAndGetTrace();
+  ASSERT_EQ(traceBuffer->activities.size(), 1);
+
+  auto& activity = *traceBuffer->activities[0];
+  EXPECT_EQ(activity.type(), ActivityType::OVERHEAD);
+  EXPECT_EQ(activity.name(), "Instrumentation");
+  EXPECT_EQ(
+      activity.getMetadataValue(XpuMetadataFields::kOverheadApiId),
+      std::optional<uint64_t>{zeEventHostSynchronize_id});
 }
 
 // --- Mixed dispatch test ---

@@ -585,6 +585,9 @@ void XpuptiActivityProfilerSession::handleOverheadActivity(
   overhead_activity->addMetadata(
       XpuFields::kOverheadCount,
       static_cast<uint64_t>(activity->_overhead_count));
+  // The Level Zero call PTI made itself that incurred the overhead.
+  overhead_activity->addMetadata(
+      XpuFields::kOverheadApiId, static_cast<uint64_t>(activity->_api_id));
 
   if (!outOfRange(overhead_activity.get())) {
     overhead_activity->log(logger);
