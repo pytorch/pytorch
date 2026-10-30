@@ -1001,6 +1001,8 @@ def angle(x: torch.Tensor) -> torch.Tensor:
     # mps has no integer signbit and integers have no -0
     is_neg = torch.signbit(x) if x.is_floating_point() else x < 0
     ret = torch.where(is_neg, pi, 0.0)
+    if is_strict_cuda_triton(x.device):
+        return torch.where(torch.isnan(x), x.to(dtype), ret)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 
