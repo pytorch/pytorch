@@ -52,19 +52,15 @@ def _graph_contains_triton_kernel_wrappers(gm: GraphModule) -> bool:
     references to the kernel_side_table which is process-local and can't be
     serialized across processes.
     """
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_functional,
-        triton_kernel_wrapper_mutation,
-    )
+    from torch._higher_order_ops.user_kernel_registry import is_user_kernel_hop
 
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if node.target in (
-                triton_kernel_wrapper_functional,
-                triton_kernel_wrapper_mutation,
-            ):
+            # Every user-kernel DSL (Triton, CuTeDSL, ...) keeps its kernels in a
+            # process-local side table.
+            if node.op == "call_function" and is_user_kernel_hop(node.target):
                 return True
     return False
 

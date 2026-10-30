@@ -1928,6 +1928,7 @@ def _get_single_replacement_node(
 def _propagate_triton_eager_input_vals(
     replacement_nodes: Sequence[torch.fx.Node],
     hop_node: torch.fx.Node,
+    mutation_hop: Any = None,
 ) -> None:
     eager_input_vals = hop_node.meta.get("eager_input_vals")
     if eager_input_vals is None:
@@ -1941,57 +1942,69 @@ def _propagate_triton_eager_input_vals(
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.
     mutation_node = _get_single_replacement_node(
-        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
+        replacement_nodes,
+        mutation_hop
+        if mutation_hop is not None
+        else torch.ops.higher_order.triton_kernel_wrapper_mutation,
     )
     mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
 
 
-def decompose_triton_kernel_wrapper_functional(graph):
-    """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
-    mutation node.
+def decompose_user_kernel_wrapper_functional(graph):
+    """Decomposes every user-kernel functional HOP (triton_kernel_wrapper_functional,
+    cutedsl_kernel_wrapper_functional, ...; see user_kernel_registry.py) into clones
+    and the underlying mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
-    # First, recursively process any subgraphs
-    apply_pass_to_subgraphs(decompose_triton_kernel_wrapper_functional, graph)
+    from torch._higher_order_ops.user_kernel_registry import user_kernel_hops
 
+    # First, recursively process any subgraphs
+    apply_pass_to_subgraphs(decompose_user_kernel_wrapper_functional, graph)
+
+    infos = user_kernel_hops()
     graph_pass = PatternMatcherPass()
 
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        # pyrefly: ignore [bad-argument-type]
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
-        )
+    for info in infos:
 
-        hop_node = match.nodes[0]
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
+        def _register(info=info):
+            @register_graph_pattern(
+                CallFunctionVarArgs(info.functional),
+                # pyrefly: ignore [bad-argument-type]
+                pass_dict=graph_pass,
+            )
+            def _(match: Match, *args, **kwargs):
+                hop_node = match.nodes[0]
+                flat_args, spec = pytree.tree_flatten((args, kwargs))
 
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+                # NB: we combine (args, kwargs) into flat args for replacing.
+                # This is replace_by_example uses make_fx which does not support
+                # tracing a function with kwargs.
+                def decomp(*flat_args):
+                    args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                    return (info.functional_dense(*args, **kwargs),)
 
-        # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
+                # pyrefly: ignore [bad-argument-type]
+                replacement_nodes = match.replace_by_example(
+                    decomp, flat_args, run_functional_passes=False
+                )
+                _propagate_triton_eager_input_vals(
+                    replacement_nodes, hop_node, info.mutation
+                )
+
+        _register()
 
     graph_pass.apply(graph)
 
-    for _ in graph.find_nodes(
-        op="call_function",
-        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        raise AssertionError("triton_kernel_wrapper_functional was not removed")
+    for info in infos:
+        for _ in graph.find_nodes(op="call_function", target=info.functional):
+            raise AssertionError(f"{info.functional.__name__} was not removed")
+
+
+# Backward-compatible name: the pass now handles every registered user-kernel DSL.
+decompose_triton_kernel_wrapper_functional = decompose_user_kernel_wrapper_functional
 
 
 def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:

@@ -784,7 +784,8 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
                 # triton_kernel_wrapper_functional (a user-defined Triton kernel already
-                # in the model) has no inductor lowering; post_grad_passes normally
+                # in the model; likewise every other registered user-kernel DSL's
+                # functional HOP) has no inductor lowering; post_grad_passes normally
                 # decomposes it into its mutation form, which lowers to a
                 # UserDefinedTritonKernel and compiles into the AOT artifact. With
                 # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
@@ -798,9 +799,13 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
                 # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
                 # mutation node" and relies on it to mark which clones are unnecessary,
                 # so without it every user Triton kernel pays a device-to-device copy.
-                if gm.graph.find_nodes(
-                    op="call_function",
-                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                from torch._higher_order_ops.user_kernel_registry import (
+                    user_kernel_functional_hops,
+                )
+
+                if any(
+                    gm.graph.find_nodes(op="call_function", target=hop)
+                    for hop in user_kernel_functional_hops()
                 ):
                     from .fx_passes.reinplace import reinplace_inplaceable_ops
                     from .fx_utils import FakeTensorUpdater
