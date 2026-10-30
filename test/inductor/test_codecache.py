@@ -31,6 +31,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, config_comms, metrics
 from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
@@ -55,7 +56,6 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     TensorMetadata,
     TensorMetadataAndValues,
-    triton_key,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -78,6 +78,7 @@ from torch._inductor.triton_bundler import (
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
@@ -97,6 +98,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -135,12 +137,6 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
-    def setUp(self):
-        super().setUp()
-        # These tests expect triton_key to be recomputed under their patches;
-        # an earlier compile may have cached (or be prefetching) the real value.
-        triton_key.clear()
-
     @parametrize("backend_precision", ("bfx9", "tf32"))
     def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
@@ -764,6 +760,25 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_bundled_autotune_remote_cache_flag_is_not_in_the_cache_key(self):
+        # Precompile capture and CompilePackage.install() turn the flag off; a
+        # hashed flag would make them miss entries a flag-on compile wrote.
+        def fn(x, y):
+            return x * 2 + (y @ y).view(25)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+        with config.patch(bundled_autotune_remote_cache=True):
+            torch.compile(fn)(a, b)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.reset()
+        with config.patch(bundled_autotune_remote_cache=False):
+            self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
@@ -2230,6 +2245,90 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    @parametrize("requires_grad", (False, True))
+    def test_with_effects_custom_op_cache_hit(self, requires_grad):
+        """
+        with_effects wrapping a custom OpOverload is as cacheable as the op
+        itself, and the effectful op still runs in program order on a hit.
+        """
+        logged = []
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::log", "(Tensor x, str tag) -> ()", lib=lib)
+            lib.impl(
+                "log",
+                lambda x, tag: logged.append((tag, x.sum().item())),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("log", lambda x, tag: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::log", _EffectType.ORDERED, lib=lib
+            )
+
+            class LogGrad(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    torch.ops.mylib.log(grad, "grad")
+                    return grad
+
+            def fn(x):
+                if requires_grad:
+                    x = LogGrad.apply(x)
+                y = x.sin()
+                torch.ops.mylib.log(y, "a")
+                z = y.cos()
+                torch.ops.mylib.log(z, "b")
+                return z.sum()
+
+            def run():
+                logged.clear()
+                x = torch.arange(8.0, requires_grad=requires_grad)
+                out = torch.compile(fn)(x)
+                if requires_grad:
+                    out.backward()
+                return out.detach(), list(logged)
+
+            num_graphs = 2 if requires_grad else 1
+            out1, log1 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            counters.clear()
+            self.reset()
+            out2, log2 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            self.assertEqual(out1, out2)
+            self.assertEqual(log1, log2)
+            expected = ["a", "b", "grad"] if requires_grad else ["a", "b"]
+            self.assertEqual([tag for tag, _ in log2], expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_with_effects_noncacheable_hop_bypass(self):
+        """
+        with_effects wrapping a non-cacheable HOP still bypasses the cache.
+        """
+
+        def fn(x):
+            torch._higher_order_ops.print("x: {}", x)
+            return x.sin()
+
+        torch.compile(fn)(torch.randn(4))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -2593,6 +2692,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @skipIfCppFakeTensor("no nestedtensor support")
     def test_cache_with_nt(self):
         def gen_nt(r):
             values = torch.randn(r, 16)
@@ -3434,7 +3534,10 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         self.assertEqual(seen_ignore_shape_env, [True])
         self.assertIsNot(seen_fake_modes[0], fake_mode)
-        self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
+        self.assertIs(
+            maybe_get_fake_mode(seen_fake_modes[0].from_tensor(torch.ones(1))),
+            seen_fake_modes[0],
+        )
         self.assertIsNotNone(seen_fake_modes[0].shape_env)
 
     def test_dynamic_shapes_from_graph_tensor_subclass_fake_mode(self):
@@ -3457,7 +3560,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         self.assertIsInstance(value_node, torch.fx.Node)
         output_example_value = value_node.meta["example_value"]
         self.assertIsInstance(output_example_value, TwoTensor)
-        fake_mode = output_example_value.a.fake_mode
+        fake_mode = maybe_get_fake_mode(output_example_value.a)
+        self.assertIsNotNone(fake_mode)
 
         seen_fake_modes = []
 
@@ -4136,7 +4240,12 @@ class TestFxGraphCacheHashing(TestCase):
         pickler = FxGraphCachePickler(gm)
         with torch._subclasses.FakeTensorMode():
             # Verify that FakeTensors get pickled into a TensorMetadata:
-            data = pickler.dumps(torch.randn(1))
+            with mock.patch.object(
+                pickler,
+                "_reduce_constant_tensor",
+                side_effect=AssertionError("fake tensor serialized as a constant"),
+            ):
+                data = pickler.dumps(torch.randn(1))
             self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
             # Different shapes:
@@ -5976,6 +6085,7 @@ class TestCompilationEventLogging(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class TestAutotuneCacheExtraOptions(TestCase):
     """
     Unit tests for extra_options preservation in _load_cached_autotuning().
@@ -5984,6 +6094,121 @@ class TestAutotuneCacheExtraOptions(TestCase):
     options alongside the standard Triton config. These tests verify that
     extra_options is correctly preserved when saving and loading from cache.
     """
+
+    @requires_triton()
+    @parametrize("other_options", [None, {"tile": (8, 16)}])
+    def test_cache_hit_returns_original_extra_options_winner(self, other_options):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for options in (other_options, {"tile": (2, 4)}):
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            cfg.extra_options = options
+            configs.append(cfg)
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIs(result, configs[1])
+        self.assertEqual(result.num_ctas, 2)
+        self.assertEqual(result.extra_options, {"tile": [2, 4]})
+
+    @requires_triton()
+    def test_cache_hit_restores_tuned_extra_options(self):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        initial = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+        initial.extra_options = {"option": 2}
+        configs_hash = hash_configs([initial])
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "kernel.py")
+            cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+            self.assertIsNotNone(cache)
+            initial.extra_options = {"option": 4}
+            cache.save(initial, time_taken_ns=1000)
+
+            candidate = Config({"XBLOCK": 128}, num_warps=4, num_stages=1, num_ctas=2)
+            candidate.extra_options = {"option": 2}
+            cache = AutotuneCache.create(
+                inductor_meta, filename, hash_configs([candidate])
+            )
+            self.assertIsNotNone(cache)
+            result = cache.read_best(inductor_meta, [candidate])
+
+        self.assertIs(result, candidate)
+        self.assertEqual(result.extra_options, {"option": 4})
+        self.assertEqual(result.num_ctas, 2)
+
+    @requires_triton()
+    @parametrize(
+        "options, winner_options",
+        [
+            ([{"option": 2}, {"option": 3}], {"option": 4}),
+            ([None, None], {"option": 4}),
+            ([None, None], None),
+            ([{"option": 4}, {"option": 4}], {"option": 4}),
+        ],
+    )
+    def test_conflicting_or_ambiguous_extra_options_reconstruct(
+        self, options, winner_options
+    ):
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        configs = []
+        for extra_options in options:
+            cfg = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+            cfg.extra_options = extra_options
+            configs.append(cfg)
+        winner = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        winner.extra_options = winner_options
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(directory, "kernel.py"),
+                hash_configs(configs),
+            )
+            self.assertIsNotNone(cache)
+            cache.save(winner, time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.kwargs, winner.kwargs)
+        self.assertEqual(result.num_warps, winner.num_warps)
+        self.assertEqual(result.num_stages, winner.num_stages)
+        self.assertEqual(result.extra_options, winner_options)
+        for cfg in configs:
+            self.assertIsNot(result, cfg)
+        self.assertEqual([cfg.extra_options for cfg in configs], options)
 
     @requires_triton()
     def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):

@@ -1,7 +1,6 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, PR-only labels, and labels requiring human decision.",
   "repo": "pytorch/pytorch",
-  "count": 284,
   "labels": [
     {
       "name": "better-on-discuss-forum",
@@ -61,7 +60,7 @@
     },
     {
       "name": "module: 64-bit",
-      "description": "Problems related to incorrectly using 32-bit integers when 64-bit is needed (e.g., 8G tensors)"
+      "description": "Large-tensor support: 32-bit index/size/offset math that breaks once numel, a dimension, or a byte offset exceeds 2**31 (e.g., 8G tensors, indexing, kernel launch grids). Do NOT use for narrowing or overflow of user-provided scalar/tensor values (e.g., an int64 argument truncated to int); use `module: int overflow` for those."
     },
     {
       "name": "module: __torch_dispatch__",
@@ -461,7 +460,7 @@
     },
     {
       "name": "module: int overflow",
-      "description": ""
+      "description": "Integer values (not tensor sizes/indices) overflowing or being silently narrowed, e.g., an int64 argument or element value truncated to int32. For large-tensor size/index issues use `module: 64-bit` instead."
     },
     {
       "name": "module: intel",
@@ -1032,10 +1031,6 @@
       "description": "Add this issue/PR to distributed oncall triage queue"
     },
     {
-      "name": "oncall: distributed checkpointing",
-      "description": "Oncall label should be attached to any issues related to distributed checkpointing."
-    },
-    {
       "name": "oncall: export",
       "description": "Add this issue/PR to Export oncall triage queue"
     },
@@ -1062,10 +1057,6 @@
     {
       "name": "oncall: r2p",
       "description": "Add this issue/PR to R2P (elastic) oncall triage queue"
-    },
-    {
-      "name": "oncall: releng",
-      "description": "In support of CI and Release Engineering"
     },
     {
       "name": "oncall: speech_infra",
