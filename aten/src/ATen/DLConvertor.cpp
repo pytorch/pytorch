@@ -180,9 +180,23 @@ Device dlDeviceToTorchDevice(
 #else
       return at::Device(DeviceType::HIP, index);
 #endif
-    case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+    case DLDeviceType::kDLOneAPI: {
+      const auto& xpu_hooks = at::detail::getXPUHooks();
+      if (data != nullptr) {
+        return xpu_hooks.getDeviceFromPtr(data);
+      }
+      // index is the SYCL global device index, see torchDeviceToDLDevice.
+      for (c10::DeviceIndex i = 0; i < xpu_hooks.getNumGPUs(); i++) {
+        if (xpu_hooks.getGlobalIdxFromDevice({DeviceType::XPU, i}) == index) {
+          return at::Device(DeviceType::XPU, i);
+        }
+      }
+      TORCH_CHECK(
+          false,
+          "Can't find the XPU device with global index ",
+          static_cast<int>(index),
+          ".");
+    }
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:
