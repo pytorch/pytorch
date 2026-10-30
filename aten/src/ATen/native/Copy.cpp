@@ -30,7 +30,6 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_foreach_copy_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
 #endif
