@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import logging
 import os
 import pickle
 import re
@@ -10,7 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -261,6 +262,13 @@ class BackendEntryPointTest(TestCase):
         self._default_device_backend_map = (
             dist.Backend.default_device_backend_map.copy()
         )
+        fr_patch = unittest.mock.patch.object(
+            c10d,
+            "_FR_SELF_RECORDING_BACKENDS",
+            set(c10d._FR_SELF_RECORDING_BACKENDS),
+        )
+        fr_patch.start()
+        self.addCleanup(fr_patch.stop)
         self._custom_backend_attrs = {
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
             "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
@@ -372,39 +380,35 @@ class BackendEntryPointTest(TestCase):
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
-    @parametrize("nccl2_override", [None, "0", "1"])
-    def test_nccl_backend_registration(self, nccl2_override):
+    def _register_nccl(self, registrar, nccl2_override):
         with unittest.mock.patch.dict(os.environ):
-            if nccl2_override is None:
+            if nccl2_override == "unset":
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
             else:
                 os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
-            c10d._register_builtin_nccl_backend()
+            getattr(c10d, registrar)()
 
-        expected_creator = (
-            c10d._create_nccl_process_group
-            if nccl2_override == "0"
-            else c10d._create_nccl2_process_group
-        )
-        self.assertIs(
-            dist.Backend._plugins["NCCL"].creator_fn,
-            expected_creator,
-        )
-        self.assertEqual(
-            dist.Backend.backend_type_map["nccl"],
-            dist.ProcessGroup.BackendType.NCCL,
-        )
+    @parametrize(
+        "registrar,nccl2_override,use_nccl2",
+        [
+            ("_register_builtin_nccl_backend", "unset", True),
+            ("_register_builtin_nccl_backend", "0", False),
+            ("_register_builtin_nccl_backend", "1", True),
+            ("_register_builtin_nccl_opt_in_backend", "unset", False),
+            ("_register_builtin_nccl_opt_in_backend", "0", False),
+            ("_register_builtin_nccl_opt_in_backend", "1", True),
+            ("_register_builtin_nccl_as_legacy", "unset", False),
+            ("_register_builtin_nccl_as_legacy", "1", False),
+        ],
+    )
+    def test_nccl_backend_registration(self, registrar, nccl2_override, use_nccl2):
+        # Start from the opposite FR state so both add and discard are checked.
+        if use_nccl2:
+            c10d._FR_SELF_RECORDING_BACKENDS.add(dist.Backend.NCCL)
+        else:
+            c10d._FR_SELF_RECORDING_BACKENDS.discard(dist.Backend.NCCL)
+        self._register_nccl(registrar, nccl2_override)
 
-    @parametrize("nccl2_override", [None, "0", "1"])
-    def test_nccl_opt_in_backend_registration(self, nccl2_override):
-        with unittest.mock.patch.dict(os.environ):
-            if nccl2_override is None:
-                os.environ.pop("TORCH_DIST_USE_NCCL2", None)
-            else:
-                os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
-            c10d._register_builtin_nccl_opt_in_backend()
-
-        use_nccl2 = nccl2_override == "1"
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
             c10d._create_nccl2_process_group
@@ -418,6 +422,117 @@ class BackendEntryPointTest(TestCase):
             dist.Backend.backend_type_map["nccl"],
             dist.ProcessGroup.BackendType.NCCL,
         )
+
+    @parametrize("default", [True, False])
+    def test_use_nccl2_from_env_warns_on_unknown_value(self, default):
+        with unittest.mock.patch.dict(os.environ, {"TORCH_DIST_USE_NCCL2": "true"}):
+            with self.assertWarnsRegex(UserWarning, "TORCH_DIST_USE_NCCL2='true'"):
+                self.assertEqual(c10d._use_nccl2_from_env(default=default), default)
+
+    def _impl_check_opts(self, group_size=2):
+        opts = c10d._DistributedBackendOptions()
+        opts.store = dist.HashStore()
+        opts.group_size = group_size
+        opts.group_id = "pg"
+        return opts
+
+    @parametrize("first", ["nccl-legacy", "nccl2"])
+    def test_nccl_impl_agreement(self, first):
+        second = "nccl2" if first == "nccl-legacy" else "nccl-legacy"
+        opts = self._impl_check_opts()
+        with self.assertNoLogs(c10d.logger, logging.WARNING):
+            c10d._check_nccl_impl_agreement(opts, first)
+            c10d._check_nccl_impl_agreement(opts, first)
+        with self.assertLogs(c10d.logger, logging.WARNING) as logs:
+            c10d._check_nccl_impl_agreement(opts, second)
+        self.assertRegex(
+            logs.output[0],
+            f"group 'pg' may mix .* this rank uses {second}, but {first} was",
+        )
+
+    def test_nccl_impl_agreement_sets_before_check(self):
+        # Publishing before checking guarantees that one rank of a mixed group
+        # sees the other key.
+        ops = []
+
+        class RecordingStore(dist.Store):
+            def set(self, key, value):
+                ops.append(("set", key))
+
+            def check(self, keys):
+                ops.append(("check", keys))
+                return False
+
+        store = RecordingStore()  # opts.store does not keep the Python object alive
+        opts = self._impl_check_opts()
+        opts.store = store
+        c10d._check_nccl_impl_agreement(opts, "nccl2")
+        self.assertEqual(
+            ops, [("set", "nccl_impl/nccl2"), ("check", ["nccl_impl/nccl-legacy"])]
+        )
+
+    def test_nccl_impl_agreement_skips_single_rank(self):
+        opts = self._impl_check_opts(group_size=1)
+        c10d._check_nccl_impl_agreement(opts, "nccl2")
+        self.assertFalse(opts.store.check(["nccl_impl/nccl2"]))
+
+    def test_nccl_impl_agreement_ignores_store_errors(self):
+        class NoCheckStore(dist.Store):
+            def set(self, key, value):
+                pass
+
+        store = NoCheckStore()
+        opts = self._impl_check_opts()
+        opts.store = store
+        with self.assertNoLogs(c10d.logger, logging.WARNING):
+            c10d._check_nccl_impl_agreement(opts, "nccl2")
+
+    @unittest.skipIf(not c10d.is_nccl_available(), "requires NCCL")
+    @parametrize(
+        "registrar,nccl2_override,backend,impl",
+        [
+            ("_register_builtin_nccl_as_legacy", "unset", "nccl", "nccl-legacy"),
+            ("_register_builtin_nccl_backend", "1", "nccl", "nccl2"),
+            ("_register_builtin_nccl_lazy_backend", "unset", "nccl-lazy", "nccl2"),
+        ],
+    )
+    def test_nccl_group_creation_checks_impl_agreement(
+        self, registrar, nccl2_override, backend, impl
+    ):
+        self._register_nccl(registrar, nccl2_override)
+        self.addCleanup(lambda: dist.is_initialized() and dist.destroy_process_group())
+        with unittest.mock.patch.object(
+            c10d,
+            "_check_nccl_impl_agreement",
+            side_effect=RuntimeError("impl check"),
+        ) as check:
+            with self.assertRaisesRegex(RuntimeError, "impl check"):
+                dist.init_process_group(
+                    backend, store=dist.HashStore(), rank=0, world_size=2
+                )
+        self.assertFalse(dist.is_initialized())
+        check.assert_called_once()
+        opts, called_impl = check.call_args.args
+        self.assertEqual(called_impl, impl)
+        self.assertEqual(opts.group_size, 2)
+
+    @unittest.skipIf(not c10d.is_nccl_available(), "requires NCCL")
+    @parametrize(
+        "creator",
+        [
+            "_create_nccl_process_group",
+            "_create_nccl2_process_group",
+            "_create_nccl_lazy_process_group",
+        ],
+    )
+    def test_nccl_split_skips_impl_agreement(self, creator):
+        opts = self._impl_check_opts()
+        opts.split_from = dist.ProcessGroupGloo(dist.HashStore(), 0, 1)
+        with unittest.mock.patch.object(c10d, "_check_nccl_impl_agreement") as check:
+            # The creators reject a non-NCCL parent after the skipped check.
+            with self.assertRaisesRegex(AssertionError, "Expected split_from"):
+                getattr(c10d, creator)(opts, None)
+        check.assert_not_called()
 
     def test_nccl2_device_uses_rank_without_local_rank(self):
         opts = c10d._DistributedBackendOptions()
@@ -693,6 +808,7 @@ class SparseGradientModule(nn.Module):
 
 class CommonDistributedDataParallelTest:
     def tearDown(self):
+        super().tearDown()
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
@@ -1730,17 +1846,66 @@ class CommonDistributedDataParallelTest:
                     ddp_model.finalize_backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_manual_backward_finalization_pickle_compatibility(self):
-        ddp_model = self._create_ddp_model()
+    def test_lazy_bucket_allocation_with_gradient_as_bucket_view(self):
+        process_group = self._get_process_group()
+
+        for set_to_none in (True, False):
+            with self.subTest(set_to_none=set_to_none):
+                model = Net()
+                eager_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                )
+                lazy_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                    lazy_bucket_allocation=True,
+                )
+                lazy_model.require_manual_backward_finalization = True
+                input = torch.full(
+                    (4, 2),
+                    self.rank + 1.0,
+                    device=self.rank,
+                )
+
+                for _ in range(2):
+                    eager_model.zero_grad(set_to_none=set_to_none)
+                    lazy_model.zero_grad(set_to_none=set_to_none)
+                    eager_model(input)[:, 0].sum().backward()
+                    lazy_model(input)[:, 0].sum().backward()
+                    lazy_model.finalize_backward()
+
+                    for eager_param, lazy_param in zip(
+                        eager_model.parameters(), lazy_model.parameters()
+                    ):
+                        self.assertIsNotNone(eager_param.grad)
+                        self.assertIsNotNone(lazy_param.grad)
+                        self.assertTrue(lazy_param.grad._is_view())
+                        self.assertEqual(eager_param.grad, lazy_param.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_pickle_compatibility(self):
+        ddp_model = self._create_ddp_model(
+            batched_grad_copy=True,
+            lazy_bucket_allocation=True,
+        )
         old_state = ddp_model.__getstate__()
         old_state.pop("_require_manual_backward_finalization")
+        old_state.pop("batched_grad_copy")
+        old_state.pop("lazy_bucket_allocation")
         restored_old = DistributedDataParallel.__new__(DistributedDataParallel)
         restored_old.__setstate__(old_state)
         self.assertFalse(restored_old.require_manual_backward_finalization)
+        self.assertFalse(restored_old.batched_grad_copy)
+        self.assertFalse(restored_old.lazy_bucket_allocation)
 
         ddp_model.require_manual_backward_finalization = True
         restored = pickle.loads(pickle.dumps(ddp_model))
         self.assertTrue(restored.require_manual_backward_finalization)
+        self.assertTrue(restored.batched_grad_copy)
+        self.assertTrue(restored.lazy_bucket_allocation)
 
         restored(torch.randn(4, 2, device=self.rank)).sum().backward()
         restored.finalize_backward()
@@ -3253,6 +3418,68 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         input_tensor = input_tensor.t()
         with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
             dist.all_to_all_single(output_tensor, input_tensor)
+
+
+@instantiate_parametrized_tests
+class CollectiveConfigTest(TestCase):
+    @contextmanager
+    def _group(self, backend="fake"):
+        if backend == "gloo" and not dist.is_gloo_available():
+            self.skipTest("Gloo is unavailable")
+        kwargs = {"store": dist.HashStore()} if backend == "gloo" else {}
+        dist.init_process_group(backend, rank=0, world_size=1, **kwargs)
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize("frontend", ["compile", "export_strict", "export_nonstrict"])
+    @parametrize("config_kind", ["omitted", "none"])
+    def test_tracing(self, name, frontend, config_kind):
+        torch._dynamo.reset()
+        collective = getattr(dist, name)
+        kwargs = {}
+        if config_kind != "omitted":
+            kwargs["config"] = None
+
+        class Module(nn.Module):
+            def forward(self, tensor):
+                output = tensor.clone()
+                if name == "all_reduce":
+                    collective(output, **kwargs)
+                elif name == "all_gather":
+                    collective([output], tensor, **kwargs)
+                elif name == "reduce_scatter":
+                    collective(output, [tensor], **kwargs)
+                else:
+                    collective(output, tensor, **kwargs)
+                return output
+
+        with self._group():
+            module = Module()
+            tensor = torch.ones(2)
+            if frontend == "compile":
+                compiled = torch.compile(module, backend="eager", fullgraph=True)
+            else:
+                compiled = torch.export.export(
+                    module, (tensor,), strict=frontend == "export_strict"
+                ).module()
+            self.assertEqual(compiled(tensor), module(tensor))
 
 
 class ReduceOpTest(TestCase):
