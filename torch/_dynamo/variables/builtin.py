@@ -2424,15 +2424,16 @@ class BuiltinVariable(BaseBuiltinVariable):
                     else:
                         msg = f"'{name}' is an invalid keyword argument for round()"
                     raise_type_error(tx, msg)
-            round_method = arg._maybe_lookup_method(tx, "__round__")
-            if round_method is None:
+            ndigits = args[0] if args else kwargs.get("ndigits")
+            no_ndigits = ndigits is None or ndigits.is_constant_none()
+            result = arg._maybe_call_special(
+                tx, "__round__", [] if no_ndigits else [ndigits]
+            )
+            if result is None:
                 raise_type_error(
                     tx, f"type {arg.python_type_name()} doesn't define __round__ method"
                 )
-            ndigits = args[0] if args else kwargs.get("ndigits")
-            if ndigits is None or ndigits.is_constant_none():
-                return round_method.call_function(tx, [], {})
-            return round_method.call_function(tx, [ndigits], {})
+            return result
 
         # Call arg.__round__()
         round_method = SourcelessBuilder.create(tx, getattr).call_function(

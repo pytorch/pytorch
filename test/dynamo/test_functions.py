@@ -5478,6 +5478,35 @@ class GraphModule(torch.nn.Module):
             torch.compile(type_method, backend="eager", fullgraph=True)(), 31
         )
 
+    def test_round_object_from_input(self):
+        class NoRound:
+            pass
+
+        class ClassRound:
+            def __round__(self, ndigits=None):
+                return ("class", ndigits)
+
+        def instance_round(*args):
+            return ("instance", args)
+
+        instance_only = NoRound()
+        instance_only.__round__ = instance_round
+        both = ClassRound()
+        both.__round__ = instance_round
+
+        def fn(t, obj):
+            try:
+                return t.sin(), round(obj), round(obj, 2)
+            except TypeError as e:
+                return t.sin(), str(e)
+
+        t = torch.ones(1)
+        for obj in (ClassRound(), both, instance_only):
+            with self.subTest(obj=obj):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(t, obj), fn(t, obj))
+
     def test_round_forwards_ndigits_like_cpython(self):
         class NoArgRound:
             def __round__(self):
