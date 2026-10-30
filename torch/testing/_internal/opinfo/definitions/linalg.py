@@ -1745,7 +1745,7 @@ op_db: list[OpInfo] = [
             # variant_test_name='grad_oriented'
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
-            # Increased difference on AVX512
+            # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
             DecorateInfo(
                 toleranceOverride(
                     {
@@ -1817,7 +1817,7 @@ op_db: list[OpInfo] = [
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
             ),
-            # Increased difference on AVX512
+            # Increased difference on AVX512 (1.5e-5 abs, 5.2e-6 rel)
             DecorateInfo(
                 toleranceOverride(
                     {
