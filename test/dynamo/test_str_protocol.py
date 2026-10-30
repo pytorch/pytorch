@@ -138,6 +138,32 @@ class FormatTests(TestCase):
         self.assertEqual(format(obj, "x"), "<x>")
         self.assertEqual(format(obj), "<>")
 
+    def test_builtin_format_symbolic_graph_breaks(self):
+        def tensor_plain(t):
+            return t + 1, format(t)
+
+        def tensor_spec(t):
+            return t + 1, format(t, ".2f")
+
+        def symint_spec(t):
+            return t + 1, format(t.shape[0], "d")
+
+        cases = [
+            (tensor_plain, torch.tensor(1.5), False),
+            (tensor_spec, torch.tensor(1.5), False),
+            (symint_spec, torch.ones(3), True),
+        ]
+        for fn, t, dynamic in cases:
+            with self.subTest(fn=fn.__name__):
+                if dynamic:
+                    torch._dynamo.mark_dynamic(t, 0)
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                with self.assertRaisesRegex(Unsupported, "format"):
+                    opt_fn(t)
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(t), fn(t))
+
     @torch._dynamo.config.patch(enable_trace_unittest=True)
     @make_dynamo_test
     def test_builtin_format_non_string_result(self):

@@ -3171,6 +3171,16 @@ class BuiltinVariable(BaseBuiltinVariable):
             if spec.is_python_constant() and spec_type != "str":
                 msg = f"format() argument 2 must be str, not {spec_type}"
                 raise_type_error(tx, msg)
+            # Tensor.__format__ and SymInt's __format__ would be proxied into the
+            # graph, where fake propagation cannot produce the formatted string.
+            if isinstance(_format_string, (TensorVariable, SymNodeVariable)):
+                unimplemented(
+                    gb_type="format() of a tensor or symbolic value",
+                    context=f"format({_format_string}, {spec})",
+                    explanation="Dynamo cannot produce the formatted string of a "
+                    "tensor or symbolic value while tracing.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             result = _format_string.call_method(tx, "__format__", [spec], {})
             if not issubclass(maybe_get_python_type(result), str):
                 raise_type_error(

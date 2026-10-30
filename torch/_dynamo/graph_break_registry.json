@@ -6040,6 +6040,16 @@
       ]
     }
   ],
+  "GB2719": [
+    {
+      "Gb_type": "format() of a tensor or symbolic value",
+      "Context": "format({_format_string}, {spec})",
+      "Explanation": "Dynamo cannot produce the formatted string of a tensor or symbolic value while tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",
