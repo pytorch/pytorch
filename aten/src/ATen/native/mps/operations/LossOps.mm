@@ -47,11 +47,12 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
                                   const std::optional<Tensor>& weight_opt,
                                   int64_t reduction,
                                   Tensor& loss) {
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
+                              "binary_cross_entropy is not implemented for ",
+                              input_arg.scalar_type(),
+                              " on MPS");
   TORCH_CHECK(target_arg.is_same_size(input_arg),
               "binary_cross_entropy: target and input tensors must have identical shapes");
-
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
 
   loss.resize_(reduction == Reduction::None ? target_arg.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
@@ -66,11 +67,8 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
     return;
   }
 
-  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
-                              "binary_cross_entropy is not implemented for ",
-                              input_arg.scalar_type(),
-                              " on MPS");
-
+  const auto weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const auto& weight = *weight_maybe_owned;
   const Tensor input = input_arg.contiguous();
   const Tensor target = target_arg.to(input.scalar_type()).contiguous();
   const int64_t numel = input.numel();
