@@ -79,6 +79,10 @@ struct static_cast_with_inter_type {
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
     } else {
+      // TODO: double -> Half/BFloat16/Float8 rounds twice, through the types'
+      // float constructors. The copy kernels special-case it to round once
+      // (c10::convert_with_rounding), but other casts (e.g., Scalar and
+      // TensorIterator dynamic casts) still go through here.
       return static_cast<dest_t>(r);
     }
   }
