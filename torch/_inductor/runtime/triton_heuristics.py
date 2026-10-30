@@ -3797,7 +3797,9 @@ class DebugAutotuner(CachingAutotuner):
                     ),
                 )
             else:
-                # in AOTI, we will call the kernel and its timing info has been cached already
+                # Timed on an earlier call, such as the compile-time autotune block's;
+                # bench produced that call's outputs, so launch to produce this one's.
+                launcher(*args, **kwargs, stream=stream)
                 collected_calls.append(self.cached)
 
 
