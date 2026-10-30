@@ -2518,15 +2518,6 @@ void _initCrashHandler() {
   *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
-// One guard per open _push_cpp_fake_tensor_mode scope on this thread.
-std::vector<std::unique_ptr<c10::impl::FakeTensorModeGuard>>&
-cpp_fake_mode_guard_stack() {
-  static thread_local std::vector<
-      std::unique_ptr<c10::impl::FakeTensorModeGuard>>
-      stack;
-  return stack;
-}
-
 } // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
@@ -2973,30 +2964,6 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readwrite(
           "allow_unsafe_data_ptr_access",
           &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
-
-  // Install mode (or no mode, for None) in TLS for the duration of a
-  // `with cpp_mode:` scope; the matching _pop must exit the same mode.
-  py_module.def(
-      "_push_cpp_fake_tensor_mode",
-      [](const std::shared_ptr<c10::FakeTensorMode>& mode) {
-        cpp_fake_mode_guard_stack().push_back(
-            std::make_unique<c10::impl::FakeTensorModeGuard>(mode));
-      },
-      py::arg("mode"));
-
-  py_module.def(
-      "_pop_cpp_fake_tensor_mode",
-      [](const std::shared_ptr<c10::FakeTensorMode>& mode) {
-        auto& stack = cpp_fake_mode_guard_stack();
-        TORCH_CHECK(
-            !stack.empty(),
-            "_pop_cpp_fake_tensor_mode without a matching _push_cpp_fake_tensor_mode");
-        TORCH_CHECK(
-            c10::impl::FakeTensorModeTLS::get_state() == mode,
-            "_pop_cpp_fake_tensor_mode exited a mode that is not the innermost one");
-        stack.pop_back();
-      },
-      py::arg("mode"));
 
   // The Python wrapper of the C++ mode installed in TLS, or None.
   py_module.def("_current_cpp_fake_tensor_mode", []() {

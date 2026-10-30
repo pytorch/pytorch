@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Export.h>
 
 #include <memory>
@@ -47,28 +46,6 @@ struct C10_API FakeInKernelInvocationGuard {
 
  private:
   bool prev_;
-};
-
-// Installs mode (or no mode, for nullptr) in TLS with the Fake key to match;
-// the destructor restores the previous mode and Fake key state exactly.
-struct C10_API FakeTensorModeGuard {
-  explicit FakeTensorModeGuard(std::shared_ptr<FakeTensorMode> mode)
-      : prev_mode_(FakeTensorModeTLS::get_state()),
-        prev_fake_included_(tls_is_dispatch_key_included(DispatchKey::Fake)) {
-    FakeTensorModeTLS::set_state(std::move(mode));
-  }
-  ~FakeTensorModeGuard() {
-    FakeTensorModeTLS::create_state(std::move(prev_mode_));
-    tls_set_dispatch_key_included(DispatchKey::Fake, prev_fake_included_);
-  }
-  FakeTensorModeGuard(const FakeTensorModeGuard&) = delete;
-  FakeTensorModeGuard& operator=(const FakeTensorModeGuard&) = delete;
-  FakeTensorModeGuard(FakeTensorModeGuard&&) = delete;
-  FakeTensorModeGuard& operator=(FakeTensorModeGuard&&) = delete;
-
- private:
-  std::shared_ptr<FakeTensorMode> prev_mode_;
-  bool prev_fake_included_;
 };
 
 } // namespace c10::impl

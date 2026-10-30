@@ -5192,7 +5192,14 @@ class CppFakeTensorModeBindingsTest(TestCase):
     def _make_mode(self, shape_env=None):
         wrapper = self.Wrapper()
         mode = torch._C._CppFakeTensorMode(FakeTensorConverter(), shape_env, wrapper)
+        wrapper._cpp_mode = mode
         return mode, wrapper
+
+    def _installed(self):
+        return (
+            torch._C._current_cpp_fake_tensor_mode(),
+            torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.Fake),
+        )
 
     def test_mode_state(self):
         mode, _ = self._make_mode()
@@ -5216,33 +5223,28 @@ class CppFakeTensorModeBindingsTest(TestCase):
         symbolic_mode, _ = self._make_mode(ShapeEnv())
         self.assertFalse(symbolic_mode.static_shapes)
 
-    def test_push_pop(self):
-        mode, wrapper = self._make_mode()
-        fake_key = torch._C.DispatchKey.Fake
+    def test_fake_dispatch_mode_slot(self):
+        _, wrapper = self._make_mode()
+        fake = torch._C._TorchDispatchModeKey.FAKE
 
-        def state():
-            return (
-                torch._C._current_cpp_fake_tensor_mode(),
-                torch._C._dispatch_tls_is_dispatch_key_included(fake_key),
-            )
-
-        self.assertEqual(state(), (None, False))
-        torch._C._push_cpp_fake_tensor_mode(mode)
+        self.assertEqual(self._installed(), (None, False))
+        torch._C._set_dispatch_mode(wrapper)
         try:
-            self.assertEqual(state(), (wrapper, True))
-            torch._C._push_cpp_fake_tensor_mode(mode)
-            torch._C._pop_cpp_fake_tensor_mode(mode)
-            self.assertEqual(state(), (wrapper, True))
-            # Pushing None suspends the mode until the matching pop.
-            torch._C._push_cpp_fake_tensor_mode(None)
-            self.assertEqual(state(), (None, False))
-            torch._C._pop_cpp_fake_tensor_mode(None)
-            self.assertEqual(state(), (wrapper, True))
+            self.assertEqual(self._installed(), (wrapper, True))
+            self.assertIs(torch._C._get_dispatch_mode(fake), wrapper)
+            self.assertIs(torch._C._unset_dispatch_mode(fake), wrapper)
+            self.assertEqual(self._installed(), (None, False))
+            self.assertIsNone(torch._C._get_dispatch_mode(fake))
+            self.assertIsNone(torch._C._unset_dispatch_mode(fake))
+            torch._C._set_dispatch_mode(wrapper)
+            # Entering a Python FakeTensorMode suspends the C++ mode, and
+            # exiting it restores the C++ mode, like nested Python modes.
+            with FakeTensorMode():
+                self.assertEqual(self._installed(), (None, False))
+            self.assertEqual(self._installed(), (wrapper, True))
         finally:
-            torch._C._pop_cpp_fake_tensor_mode(mode)
-        self.assertEqual(state(), (None, False))
-        with self.assertRaisesRegex(RuntimeError, "without a matching"):
-            torch._C._pop_cpp_fake_tensor_mode(mode)
+            torch._C._unset_dispatch_mode(fake)
+        self.assertEqual(self._installed(), (None, False))
 
     def test_from_meta_and_device(self):
         mode, wrapper = self._make_mode()
