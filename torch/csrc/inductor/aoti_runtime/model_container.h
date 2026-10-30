@@ -570,10 +570,10 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AtenTensorHandle tensor;
+        AtenTensorHandle tensor = nullptr;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
@@ -937,9 +937,14 @@ class AOTInductorModelContainer {
     return buffers_[1 - active_idx_];
   }
 
-  // Folds the constants on the first call, then runs fn on a model instance
-  // checked out of the pool and leaves the instance in flight until its work
-  // finishes.
+  // Folds the active constants if their state is INITIALIZED (after the .so
+  // constants load, an update of the active buffer, or a swap to an updated
+  // buffer that wasn't folded), throws unless they are then FOLDED, and runs
+  // fn on a model instance checked out of the pool, holding model_exec_mutex_
+  // shared and the stream lock. fn must record the instance's run_finished_
+  // event after the work it enqueues, as AOTInductorModel::run() does: the
+  // pool reclaims an in-flight instance only through that event. If fn throws,
+  // the instance goes back to the pool without waiting for that work.
   template <typename Fn>
   void run_on_available_model(
       DeviceStreamType stream,
@@ -1002,9 +1007,9 @@ class AOTInductorModelContainer {
   // thread holding this mutex shared must not lock it again, and must not
   // block on work that needs another thread to take it: either deadlocks as
   // soon as a swap or fold is waiting. Waiting for threads that already hold
-  // it is fine. run() and the inactive-buffer branch of run_const_fold() rely
-  // on this when they block in pool_.get_available_model() for a model another
-  // holder has checked out.
+  // it is fine. run_on_available_model() and the inactive-buffer branch of
+  // run_const_fold() rely on this when they block in
+  // pool_.get_available_model() for a model another holder has checked out.
   WritePrioritySharedMutex model_exec_mutex_;
 };
 

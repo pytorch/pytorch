@@ -186,6 +186,7 @@
 - name: MPS
   patterns:
   - test/**
+  - torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h
   - torch/testing/_internal/common_mps.py
   - torch/testing/_internal/common_methods_invocations.py
   - torch/testing/_internal/opinfo/**
